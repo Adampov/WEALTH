@@ -123,7 +123,16 @@ For every change:
 
 Validation depth must increase with financial, security, data, operational, or deployment risk.
 
-The repository does not yet define build, lint, type-check, or test commands. Do not invent them. Add exact commands to this file after the technology foundation is approved and implemented.
+Use these repository commands after running `uv sync --all-groups`:
+
+- Lockfile check: `uv lock --check`
+- Format check: `uv run ruff format --check .`
+- Lint: `uv run ruff check .`
+- Type check: `uv run mypy`
+- Tests: `uv run pytest`
+- Local foundation health slice: `uv run wealth-health`
+
+Do not substitute or skip a command silently. If a command is unavailable, report it as not run.
 
 ## Definition of Done
 

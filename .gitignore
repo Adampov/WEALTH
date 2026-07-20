@@ -1,0 +1,36 @@
+# Python environments and bootstrap tools
+.venv/
+.uv-bootstrap/
+.uv-cache/
+
+# Python caches and build output
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+build/
+dist/
+
+# Coverage and test artifacts
+.coverage
+coverage.xml
+htmlcov/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Runtime artifacts and data
+logs/
+storage/
+artifacts/
+
+# IDE and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
