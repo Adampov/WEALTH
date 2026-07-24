@@ -31,3 +31,4 @@ Each ADR records the context, decision, consequences, alternatives, and follow-u
 - `0016-canonical-order-flow-contracts.md`
 - `0017-order-flow-quality-and-idempotency.md`
 - `0018-sqlite-order-flow-storage.md`
+- `0019-fail-closed-order-flow-ingestion.md`
