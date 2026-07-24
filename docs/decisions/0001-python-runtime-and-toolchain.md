@@ -1,6 +1,6 @@
 # ADR 0001: Python Runtime and Toolchain
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-20
 - **Decision owners:** Engineering Department and project owner
 

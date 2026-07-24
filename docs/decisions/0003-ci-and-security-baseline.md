@@ -1,6 +1,6 @@
 # ADR 0003: CI and Dependency Security Baseline
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-24
 - **Decision owners:** Engineering Department and project owner
 

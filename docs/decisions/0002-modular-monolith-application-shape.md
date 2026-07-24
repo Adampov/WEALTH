@@ -1,6 +1,6 @@
 # ADR 0002: Modular Monolith Application Shape
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-20
 - **Decision owners:** Engineering Department and project owner
 
