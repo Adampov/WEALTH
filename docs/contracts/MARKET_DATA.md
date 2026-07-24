@@ -18,7 +18,8 @@ Event time cannot follow observation, and observation cannot follow processing.
 
 Canonical trades require provider identity, positive price and quantity, and an explicit aggressor
 side of buy, sell, or unknown. Optional provider quote quantity remains separate from the exact
-locally calculated notional.
+locally calculated notional. A provider-defined aggregate must retain both its first and last
+underlying provider trade identities; an individual observation cannot declare that range.
 
 Canonical tickers always contain a positive last price. Optional rolling-window statistics are
 accepted only with an explicit valid window; supplied high and low must contain last price and any
@@ -28,8 +29,9 @@ Canonical best-bid-ask snapshots require positive displayed quantities and a bes
 below best ask. Exact spread, midpoint, and spread basis points are derived from the accepted
 decimal prices.
 
-These contracts do not yet have provider adapters, durable storage, replay, or live-stream
-orchestration.
+Trade records have one bounded Binance public REST adapter and durable storage. Ticker and
+best-bid-ask records still have no provider adapters. No order-flow record has point-in-time replay
+or live-stream orchestration.
 
 ## Order-Flow Quality Gate
 
@@ -50,7 +52,8 @@ reports changed values for one identity as conflicts. A duplicate or conflict ne
 accepted record. Exact-stream queries are returned in deterministic market-time order.
 
 `OrderFlowFetchBatch` binds one exact raw response to one record family. Source, venue, timestamps,
-and raw lineage must agree across the batch, and one batch is capped at 100,000 records.
+and raw lineage must agree across the batch, and one batch is capped at 100,000 records. A valid
+empty provider window may contain zero canonical records while preserving its exact raw response.
 
 `SQLiteOrderFlowStore` adds a dedicated versioned file-backed implementation. Raw bytes and
 canonical records are written atomically, equivalent new captures add lineage to the first record,
@@ -62,6 +65,29 @@ schemas, natural keys, record types, and stream indexes are revalidated when evi
 before storage. A quality failure causes no raw or canonical write. A passing report permits the
 atomic batch write, but a raw or canonical storage conflict keeps the overall result unaccepted.
 Exact repeats remain accepted idempotent outcomes.
+
+## Public Binance Aggregate-Trade Adapter
+
+`BinancePublicAggregateTradeSource` reads one bounded event-time window from Binance's
+unauthenticated aggregate-trade REST endpoints:
+
+- Spot through the market-data-only host.
+- USD-M perpetual and dated futures through the public futures host.
+
+The provider symbol is explicit and separate from the canonical instrument. Requests must be
+millisecond-aligned, already closed, and shorter than one hour; USD-M requests must remain within
+the latest 24 hours. The canonical half-open end is converted to Binance's inclusive final
+millisecond.
+
+Each row retains the aggregate trade ID, first and last underlying trade IDs, exact price and base
+quantity, exchange event time, and maker evidence. Binance's buyer-maker flag maps to the opposite
+aggressor side. The source declares only a monotonic aggregate-ID promise, not a contiguous one.
+
+A response at the 1,000-row provider cap is rejected as possibly truncated. Callers must shrink
+the window rather than treating potentially partial data as complete. Empty arrays remain valid
+raw evidence. Invalid field sets, values, ordering, timing, transport, and provider responses fail
+with machine-readable errors before storage. The adapter does not paginate, retry, poll, use an API
+key, or expose any account or order capability.
 
 ## Canonical Candle
 
@@ -193,9 +219,13 @@ automatically.
 
 ## Current Limitations
 
-- Final candles are implemented end to end. Trade, ticker, and best-bid-ask records now have strict
+- Final candles are implemented end to end. Trade, ticker, and best-bid-ask records have strict
   contracts, bounded quality auditing, fail-closed ingestion, and idempotent raw/canonical SQLite
-  storage, but no provider adapter, live collection, or replay path.
+  storage. Aggregate trades have one bounded Binance provider adapter; ticker and best-bid-ask
+  records do not. No order-flow record has live collection or replay.
+- Binance aggregate-trade requests are single windows shorter than one hour. A response at the
+  1,000-row cap fails closed and USD-M history is limited to the latest 24 hours; adaptive window
+  splitting and range ingestion are not implemented.
 - Each Binance provider request remains bounded to one already-closed window of at most 1,000
   candles; the application composes multiple requests into a bounded range.
 - No operating-system-managed scheduling, deployment, adaptive pacing, retry jitter, or live

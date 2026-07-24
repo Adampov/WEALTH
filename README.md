@@ -160,8 +160,14 @@ revalidates raw hashes and canonical records on reads.
 
 The application admission path sends the complete bounded batch through the deterministic quality
 gate before storage. Quality failure leaves raw and canonical storage untouched; raw or canonical
-storage conflict makes the result explicitly unaccepted. No live order-flow adapter, replay path,
-trading signal, or trading action is present.
+storage conflict makes the result explicitly unaccepted.
+
+A bounded public Binance REST adapter now normalizes Spot and USD-M aggregate trades through that
+path without an API key. It preserves the provider's aggregate ID and underlying first/last trade
+IDs, maps maker evidence to aggressor side, retains exact raw bytes, and admits valid empty
+windows. A response at Binance's 1,000-row cap fails as possibly truncated so partial evidence
+cannot be stored as a complete window. No live order-flow collection, replay path, trading signal,
+or trading action is present.
 
 Operators and monitoring tools can read that state through a dedicated JSON command:
 
@@ -206,12 +212,14 @@ Included:
 - Bounded order-flow quality auditing and idempotent temporary storage without silent overwrite.
 - Durable raw and canonical SQLite order-flow evidence with conflict quarantine.
 - Fail-closed order-flow admission through the quality gate before durable storage.
+- A bounded, public Binance REST adapter for Spot and USD-M aggregate trades with no credentials.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:
 
 - Private exchange or account access.
 - An automatically started operating-system service, deployment, or live WebSocket ingestion.
+- Automatic aggregate-trade window splitting, range collection, or provider gap recovery.
 - Automatic historical collection scheduling.
 - Multi-host request-budget coordination.
 - Automatic source ranking, price blending, or cross-quote conversion.

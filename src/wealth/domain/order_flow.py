@@ -19,6 +19,13 @@ class AggressorSide(StrEnum):
     UNKNOWN = "unknown"
 
 
+class TradeAggregationKind(StrEnum):
+    """Whether one canonical observation combines provider market trades."""
+
+    NONE = "none"
+    PROVIDER_DEFINED = "provider_defined"
+
+
 class _CanonicalTimedMarketRecord(BaseModel):
     """Shared strict identity, timing, sequence, and lineage evidence."""
 
@@ -77,22 +84,45 @@ class _CanonicalTimedMarketRecord(BaseModel):
 
 
 class CanonicalTrade(_CanonicalTimedMarketRecord):
-    """One immutable public market trade with explicit aggressor evidence."""
+    """One immutable public trade observation with explicit aggregation evidence."""
 
     provider_trade_id: str = Field(min_length=1, max_length=128)
     price: PositiveDecimal
     base_quantity: PositiveDecimal
     quote_quantity: PositiveDecimal | None = None
     aggressor_side: AggressorSide
+    aggregation_kind: TradeAggregationKind = TradeAggregationKind.NONE
+    provider_first_trade_id: str | None = Field(default=None, min_length=1, max_length=128)
+    provider_last_trade_id: str | None = Field(default=None, min_length=1, max_length=128)
 
-    @field_validator("provider_trade_id")
+    @field_validator(
+        "provider_trade_id",
+        "provider_first_trade_id",
+        "provider_last_trade_id",
+    )
     @classmethod
-    def provider_trade_id_is_canonical(cls, value: str) -> str:
+    def provider_trade_id_is_canonical(cls, value: str | None) -> str | None:
         """Keep provider identity suitable for deterministic natural keys."""
 
+        if value is None:
+            return None
         if value != value.strip() or any(character.isspace() for character in value):
             raise ValueError("provider_trade_id must not contain whitespace")
         return value
+
+    @model_validator(mode="after")
+    def aggregation_evidence_is_complete(self) -> Self:
+        """Keep individual trades distinct from provider-defined aggregates."""
+
+        has_first = self.provider_first_trade_id is not None
+        has_last = self.provider_last_trade_id is not None
+        if has_first != has_last:
+            raise ValueError("aggregate first and last trade identities must be set together")
+        if self.aggregation_kind is TradeAggregationKind.NONE and has_first:
+            raise ValueError("individual trade observations must not declare an aggregate range")
+        if self.aggregation_kind is TradeAggregationKind.PROVIDER_DEFINED and not has_first:
+            raise ValueError("provider-defined aggregates require first and last trade identities")
+        return self
 
     @property
     def natural_key(
@@ -118,6 +148,9 @@ class CanonicalTrade(_CanonicalTimedMarketRecord):
             self.base_quantity,
             self.quote_quantity,
             self.aggressor_side,
+            self.aggregation_kind,
+            self.provider_first_trade_id,
+            self.provider_last_trade_id,
             self.provider_sequence,
         )
 
