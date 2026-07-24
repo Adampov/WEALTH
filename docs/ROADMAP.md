@@ -67,6 +67,10 @@ Completed Phase 2 slices include:
 - Missing-path, invalid-input, stale, paused, and read-only enforcement tests for operator queries.
 - Canonical trade, ticker, and best-bid-ask contracts with exact decimal values and lineage.
 - Point-in-time, aggressor-side, ticker-window, and uncrossed top-of-book invariant tests.
+- Bounded trade, ticker, and best-bid-ask stream-quality audits with explicit provider sequence
+  policies.
+- Idempotent in-memory order-flow storage with deterministic queries and no silent conflict
+  replacement.
 
 Phase 2 is not complete. Operating-system service deployment, live streaming, multi-host
 rate-budget coordination, durable raw and canonical storage beyond the local SQLite baseline,

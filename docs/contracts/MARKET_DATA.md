@@ -28,8 +28,29 @@ Canonical best-bid-ask snapshots require positive displayed quantities and a bes
 below best ask. Exact spread, midpoint, and spread basis points are derived from the accepted
 decimal prices.
 
-These contracts do not yet have provider adapters, durable storage, quality auditing, replay, or
-live-stream orchestration.
+These contracts do not yet have provider adapters, durable storage, replay, or live-stream
+orchestration.
+
+## Order-Flow Quality Gate
+
+`OrderFlowSequenceAuditor` evaluates one exact trade, ticker, or best-bid-ask stream inside a
+timezone-aware, half-open event-time window. One audit is capped at 100,000 input records and
+detects mixed streams, out-of-window records, event-time regressions, equivalent duplicates, and
+conflicting values for one natural key.
+
+Provider-sequence guarantees are explicit rather than guessed. The default policy makes no
+sequence claim. A documented monotonic policy requires sequences to be present and increasing. A
+documented contiguous policy additionally reports exact absent integer ranges. Missing ranges are
+therefore evidence-backed; the auditor never manufactures missing market values or assumes every
+provider counter is contiguous.
+
+`InMemoryOrderFlowStore` proves the replaceable persistence port. It namespaces identities by
+record family, inserts the first canonical record, reports equivalent repeats as duplicates, and
+reports changed values for one identity as conflicts. A duplicate or conflict never overwrites the
+accepted record. Exact-stream queries are returned in deterministic market-time order.
+
+This temporary adapter is not durable. Future ingestion must quality-gate a bounded provider batch
+before it is admitted to storage.
 
 ## Canonical Candle
 
@@ -161,8 +182,9 @@ automatically.
 
 ## Current Limitations
 
-- Final candles are implemented end to end. Trade, ticker, and best-bid-ask records currently have
-  strict contracts and tests but no provider adapter, storage, quality gate, or replay path.
+- Final candles are implemented end to end. Trade, ticker, and best-bid-ask records now have strict
+  contracts, bounded quality auditing, and idempotent temporary storage, but no provider adapter,
+  durable raw/canonical storage, or replay path.
 - Each Binance provider request remains bounded to one already-closed window of at most 1,000
   candles; the application composes multiple requests into a bounded range.
 - No operating-system-managed scheduling, deployment, adaptive pacing, retry jitter, or live

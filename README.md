@@ -145,7 +145,14 @@ The next market-structure boundary defines strict canonical trades, last-price t
 best-bid-ask snapshots. It preserves provider identity, event/observation/processing time, exact
 decimal values, sequences, and lineage. Aggressor side can remain explicitly unknown, optional
 ticker statistics require a declared window, and locked or crossed top-of-book snapshots fail
-closed. These are contracts only; no live order-flow adapter or trading action is present.
+closed.
+
+A bounded quality gate now checks one exact record family for mixed streams, event-time ordering,
+window membership, duplicate identities, conflicting values, and documented provider-sequence
+promises. Sequence gaps are reported only when an adapter explicitly declares a contiguous
+provider contract. An idempotent in-memory store proves that equivalent repeats and conflicting
+revisions never overwrite the first accepted record. No live order-flow adapter, durable
+order-flow database, trading signal, or trading action is present.
 
 Operators and monitoring tools can read that state through a dedicated JSON command:
 
@@ -187,6 +194,7 @@ Included:
 - Queryable collector health reports with stale-run detection and structured internal alerts.
 - A read-only JSON collector-health command with monitoring-compatible exit codes.
 - Strict canonical trade, ticker, and best-bid-ask contracts with point-in-time lineage.
+- Bounded order-flow quality auditing and idempotent temporary storage without silent overwrite.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:
