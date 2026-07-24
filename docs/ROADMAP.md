@@ -57,9 +57,11 @@ Completed Phase 2 slices include:
   optional volume tolerances.
 - Append-only local reconciliation history with idempotent writes and read-time validation.
 - Bounded per-series reconciliation, source-quality, compared-interval, and issue-code metrics.
+- Supervised continuous closed-candle polling with a durable per-stream cursor.
+- Planned disconnect, bounded reconnect, operator pause, and restart-recovery fault tests.
 
-Phase 2 is not complete. Continuous collection, live streaming, multi-host rate-budget
-coordination, durable raw and canonical storage beyond the local SQLite baseline, reconnect policy,
+Phase 2 is not complete. An automatically managed collection service, live streaming, multi-host
+rate-budget coordination, durable raw and canonical storage beyond the local SQLite baseline,
 additional market-data schemas, and operational dashboards and alerts remain future tasks.
 
 ## Phase 1 — Architecture and Engineering Foundation

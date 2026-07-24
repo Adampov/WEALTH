@@ -2,7 +2,8 @@
 
 WEALTH is a governed multi-agent cryptocurrency research and trading platform. The project is
 currently building its reliable market-data platform. It can read bounded historical candle ranges
-from Binance and Coinbase public endpoints, but it has no account access and cannot execute trades.
+from Binance and Coinbase public endpoints and supervise restart-safe polling of closed candles,
+but it has no account access and cannot execute trades.
 
 ## Read First
 
@@ -118,10 +119,19 @@ Operator-invoked collection jobs can persist their cursor in a dedicated SQLite 
 Versioned worker leases prevent duplicate advancement, accepted pages checkpoint independently,
 and page attempts produce append-only source-health evidence. Recovery deliberately refetches a
 page when a process stops after storing market evidence but before advancing its checkpoint; the
-market store handles that repeat idempotently. This is not a continuous collector. Shared
-request-budget coordination can now prevent cooperating processes on one host from exceeding an
-explicit combined budget before network access. Multi-host coordination, automatic scheduling,
-and live WebSocket ingestion remain future tasks.
+market store handles that repeat idempotently.
+
+A supervised polling layer can now maintain a separate durable cursor for one continuous candle
+stream. It requests only timeframe boundaries that are closed beyond an explicit settlement delay,
+limits every catch-up window and invocation, and attaches one exact bounded collection job before
+network work begins. Restart resumes that same job. A disconnect uses bounded reconnect backoff;
+unsupported failures or a configured consecutive-failure limit pause the stream until operator
+review. Manual pause also blocks new network work until explicit resume. This is an application
+workflow, not an automatically started daemon.
+
+Shared request-budget coordination can prevent cooperating processes on one host from exceeding an
+explicit combined budget before network access. Multi-host coordination, automatic scheduling, and
+live WebSocket ingestion remain future tasks.
 
 ## Current Scope
 
@@ -143,12 +153,13 @@ Included:
 - Weighted shared request budgets with idempotent reservations and observable local backpressure.
 - Deterministic cross-source candle reconciliation with explicit tolerances and missing evidence.
 - Append-only reconciliation history with bounded source-quality and issue-code summaries.
+- Supervised closed-candle polling with durable cursors, bounded reconnects, and restart recovery.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:
 
 - Private exchange or account access.
-- Continuous or live-streaming market-data collection.
+- An automatically started collection daemon or live WebSocket ingestion.
 - Automatic historical collection scheduling.
 - Multi-host request-budget coordination.
 - Automatic source ranking, price blending, or cross-quote conversion.
