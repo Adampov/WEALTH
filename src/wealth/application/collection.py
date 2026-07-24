@@ -80,13 +80,19 @@ class RecoverableHistoricalCandleCollector:
         if not timedelta(0) < self.lease_duration <= MAX_COLLECTION_LEASE:
             raise ValueError("lease_duration must be positive and at most one hour")
 
-    def create_job(self, request: HistoricalCandleRequest) -> HistoricalCollectionJob:
+    def create_job(
+        self,
+        request: HistoricalCandleRequest,
+        *,
+        job_id: UUID | None = None,
+        created_at: datetime | None = None,
+    ) -> HistoricalCollectionJob:
         """Create a durable pending job after validating the complete work bound."""
 
         HistoricalCandlePagePlanner(self.pagination_policy).page_count(request)
-        now = self.clock.now()
+        now = self.clock.now() if created_at is None else created_at
         job = HistoricalCollectionJob(
-            job_id=self.id_generator.new(),
+            job_id=self.id_generator.new() if job_id is None else job_id,
             source=self.source_name,
             venue=self.venue,
             instrument=request.instrument,

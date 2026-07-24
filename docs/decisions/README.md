@@ -24,3 +24,4 @@ Each ADR records the context, decision, consequences, alternatives, and follow-u
 - `0009-coinbase-exchange-public-candles.md`
 - `0010-deterministic-cross-source-candle-reconciliation.md`
 - `0011-durable-reconciliation-history-and-metrics.md`
+- `0012-supervised-continuous-candle-polling.md`
