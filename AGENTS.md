@@ -8,8 +8,9 @@ The system is intended to support cryptocurrency spot and futures markets, multi
 
 The current project phase is **Phase 2 — Reliable Market Data Platform**. The repository contains
 an approved, tested engineering foundation, provider-independent candle and replay contracts, a
-bounded public Binance candle adapter, and local durable market-data storage. It has no private
-exchange or account access and does not support trading decisions or orders.
+bounded public Binance candle adapter, application-level historical pagination and retry policy,
+and local durable market-data storage. It has no private exchange or account access and does not
+support trading decisions or orders.
 
 ## Source of Truth
 

@@ -22,6 +22,27 @@ from wealth.domain.quality import (
 UTC_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
+class HistoricalCandleSourceError(RuntimeError):
+    """Expose a safe, provider-independent retry classification."""
+
+    def __init__(
+        self,
+        machine_code: str,
+        detail: str,
+        *,
+        retryable: bool,
+        retry_after_seconds: int | None = None,
+    ) -> None:
+        if not machine_code or machine_code != machine_code.strip():
+            raise ValueError("machine_code must be non-empty and canonical")
+        if retry_after_seconds is not None and retry_after_seconds < 0:
+            raise ValueError("retry_after_seconds must be non-negative")
+        self.machine_code = machine_code
+        self.retryable = retryable
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__(f"{machine_code}: {detail}")
+
+
 class HistoricalCandleRequest(BaseModel):
     """One bounded, provider-independent request for closed candles."""
 

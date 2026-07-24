@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from math import isfinite
+from time import sleep
 from uuid import UUID, uuid4
 
 from wealth.domain.events import DomainEvent
@@ -32,6 +34,18 @@ class SystemClock:
         """Return the current timezone-aware UTC timestamp."""
 
         return datetime.now(UTC)
+
+
+@dataclass(frozen=True, slots=True)
+class SystemSleeper:
+    """Apply bounded application delays without hiding them in provider adapters."""
+
+    def sleep(self, seconds: float) -> None:
+        """Sleep for a validated non-negative duration."""
+
+        if not isfinite(seconds) or seconds < 0:
+            raise ValueError("sleep duration must be finite and non-negative")
+        sleep(seconds)
 
 
 @dataclass(frozen=True, slots=True)

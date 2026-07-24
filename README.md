@@ -1,8 +1,8 @@
 # WEALTH
 
 WEALTH is a governed multi-agent cryptocurrency research and trading platform. The project is
-currently building its reliable market-data platform. It can read bounded public candle windows
-from Binance, but it has no account access and cannot execute trades.
+currently building its reliable market-data platform. It can read bounded historical candle ranges
+from Binance's public endpoints, but it has no account access and cannot execute trades.
 
 ## Read First
 
@@ -82,8 +82,14 @@ provider bytes separately from canonical candles, verifies them again when readi
 restart, treats repeats idempotently, and quarantines conflicting revisions without overwriting the
 accepted record.
 
-The current adapter is deliberately bounded to one window of at most 1,000 candles. Pagination,
-continuous scheduling, retry policy, and live WebSocket ingestion remain separate future tasks.
+The provider adapter remains bounded to one window of at most 1,000 candles. An explicit
+application flow can split a larger range into contiguous pages, pace requests, retry only
+classified transient failures, honor a bounded `Retry-After`, and stop at the first failed page
+with an exact resume boundary. One invocation is capped at 100,000 candles.
+
+This is an operator-invoked historical flow, not a continuous collector. Shared IP-rate-budget
+tracking, durable job checkpoints, automatic scheduling, and live WebSocket ingestion remain
+future tasks.
 
 ## Current Scope
 
@@ -98,6 +104,7 @@ Included:
 - Deterministic candle-sequence quality reports and idempotent in-memory storage.
 - A bounded, public Binance REST adapter for closed Spot and USD-M Futures candles.
 - Fail-closed historical ingestion from provider response through the quality gate.
+- Bounded historical pagination, pacing, retry evidence, and safe resume boundaries.
 - Durable local SQLite storage for raw evidence, canonical candles, and conflict quarantine.
 - Continuous integration and dependency vulnerability auditing.
 
@@ -105,7 +112,8 @@ Not included:
 
 - Private exchange or account access.
 - Continuous or live-streaming market-data collection.
-- Historical pagination and automatic retry scheduling.
+- Automatic historical collection scheduling and durable job checkpoints.
+- Shared IP-rate-budget coordination across processes.
 - Trading strategies.
 - AI model integration.
 - Portfolio, risk, or order execution.
