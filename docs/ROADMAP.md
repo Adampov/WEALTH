@@ -74,6 +74,8 @@ Completed Phase 2 slices include:
 - Dedicated SQLite order-flow storage with atomic raw lineage, restart-safe idempotency,
   database-type validation, read-time revalidation, and conflict quarantine.
 - Fail-closed order-flow batch admission through quality auditing before any storage mutation.
+- A bounded public Binance Spot and USD-M aggregate-trade adapter with explicit provider
+  aggregation evidence, empty-window evidence, and fail-closed response-cap handling.
 
 Phase 2 is not complete. Operating-system service deployment, live streaming, multi-host
 rate-budget coordination, durable raw and canonical storage beyond the local SQLite baseline,

@@ -13,6 +13,7 @@ from wealth.domain.order_flow import (
     CanonicalBestBidAsk,
     CanonicalTicker,
     CanonicalTrade,
+    TradeAggregationKind,
 )
 
 EVENT_TIME = datetime(2026, 7, 24, 17, 0, tzinfo=UTC)
@@ -85,6 +86,9 @@ def test_trade_is_strict_immutable_versioned_and_idempotency_addressable() -> No
     trade = build_trade()
 
     assert trade.schema_version == "1.0"
+    assert trade.aggregation_kind is TradeAggregationKind.NONE
+    assert trade.provider_first_trade_id is None
+    assert trade.provider_last_trade_id is None
     assert trade.natural_key == (
         "synthetic.test",
         "TEST",
@@ -131,6 +135,46 @@ def test_trade_preserves_unknown_aggressor_instead_of_inventing_a_side() -> None
 
     assert trade.aggressor_side is AggressorSide.UNKNOWN
     assert trade.quote_quantity is None
+
+
+def test_trade_preserves_explicit_provider_aggregation_range() -> None:
+    trade = build_trade(
+        aggregation_kind=TradeAggregationKind.PROVIDER_DEFINED,
+        provider_first_trade_id="1000",
+        provider_last_trade_id="1004",
+    )
+
+    assert trade.aggregation_kind is TradeAggregationKind.PROVIDER_DEFINED
+    assert trade.provider_first_trade_id == "1000"
+    assert trade.provider_last_trade_id == "1004"
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {
+            "aggregation_kind": TradeAggregationKind.PROVIDER_DEFINED,
+        },
+        {
+            "provider_first_trade_id": "1000",
+            "provider_last_trade_id": "1004",
+        },
+        {
+            "aggregation_kind": TradeAggregationKind.PROVIDER_DEFINED,
+            "provider_first_trade_id": "1000",
+        },
+        {
+            "aggregation_kind": TradeAggregationKind.PROVIDER_DEFINED,
+            "provider_first_trade_id": "trade 1000",
+            "provider_last_trade_id": "1004",
+        },
+    ],
+)
+def test_trade_rejects_ambiguous_aggregation_evidence(
+    override: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        build_trade(**override)
 
 
 def test_ticker_can_represent_last_price_without_window_statistics() -> None:

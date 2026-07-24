@@ -28,7 +28,8 @@ requires:
 - Matching batch, raw observation, and processing timestamps.
 - Every canonical record to use the batch timestamps.
 - Every canonical record to reference the raw payload identity in lineage.
-- At least one and at most 100,000 canonical records.
+- Zero to at most 100,000 canonical records. ADR 0020 permits an empty provider window so its exact
+  raw response remains durable evidence that no trade was returned.
 
 The batch contract does not claim that quality passed. A future ingestion application must audit
 the bounded records before calling storage.
