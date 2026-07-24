@@ -140,10 +140,12 @@ automatically.
 - Only final candles are modeled.
 - Each Binance provider request remains bounded to one already-closed window of at most 1,000
   candles; the application composes multiple requests into a bounded range.
-- No automatic scheduling, durable collection-job checkpoint, shared IP-rate-budget coordinator,
-  adaptive pacing, retry jitter, or live WebSocket stream exists.
+- No operating-system-managed scheduling, deployment, adaptive pacing, retry jitter, or live
+  WebSocket stream exists. Durable bounded and continuous checkpoints, a local interruptible
+  service lifecycle, and shared single-host request-budget coordination are available.
 - No instrument catalog or governed provider-symbol mapping exists yet.
-- No governed correction stream or cross-source reconciliation exists yet.
+- Selected-window cross-source reconciliation and durable audit history exist, but no governed
+  correction stream, automatic source ranking, or remediation workflow exists yet.
 - Durable storage is local SQLite only; backup, retention, compaction, distributed operation, and
   large-scale analytical storage remain future work.
 - Malformed or rejected provider responses are not yet retained under a governed failure-evidence

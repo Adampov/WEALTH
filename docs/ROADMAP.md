@@ -59,8 +59,10 @@ Completed Phase 2 slices include:
 - Bounded per-series reconciliation, source-quality, compared-interval, and issue-code metrics.
 - Supervised continuous closed-candle polling with a durable per-stream cursor.
 - Planned disconnect, bounded reconnect, operator pause, and restart-recovery fault tests.
+- Interruptible local collector service runs with bounded cycles and durable lifecycle heartbeats.
+- Explicit clean-stop, run-limit, pause, competing-worker, restart, and corrupt-heartbeat tests.
 
-Phase 2 is not complete. An automatically managed collection service, live streaming, multi-host
+Phase 2 is not complete. Operating-system service deployment, live streaming, multi-host
 rate-budget coordination, durable raw and canonical storage beyond the local SQLite baseline,
 additional market-data schemas, and operational dashboards and alerts remain future tasks.
 
