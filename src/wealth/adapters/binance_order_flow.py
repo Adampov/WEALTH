@@ -76,6 +76,7 @@ class BinanceAggregateTradeError(PublicTradeSourceError):
             detail,
             retryable=default_retryable if retryable is None else retryable,
             retry_after_seconds=retry_after_seconds,
+            requires_smaller_window=(code is BinanceAggregateTradeErrorCode.POSSIBLY_TRUNCATED),
         )
 
 

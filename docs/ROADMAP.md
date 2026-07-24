@@ -76,6 +76,8 @@ Completed Phase 2 slices include:
 - Fail-closed order-flow batch admission through quality auditing before any storage mutation.
 - A bounded public Binance Spot and USD-M aggregate-trade adapter with explicit provider
   aggregation evidence, empty-window evidence, and fail-closed response-cap handling.
+- Bounded public-trade range ingestion with chronological initial pages, adaptive dense-window
+  splitting, finite retries and pacing, typed progress traces, and an exact resume boundary.
 
 Phase 2 is not complete. Operating-system service deployment, live streaming, multi-host
 rate-budget coordination, durable raw and canonical storage beyond the local SQLite baseline,
