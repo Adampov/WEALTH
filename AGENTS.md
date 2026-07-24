@@ -6,7 +6,9 @@ WEALTH is an AI-assisted cryptocurrency research and trading platform designed a
 
 The system is intended to support cryptocurrency spot and futures markets, multiple assets, multiple exchanges, continuous operation, progressive autonomy, and controlled self-improvement.
 
-The current project phase is **Phase 1 — Architecture and Engineering Foundation**. The repository contains approved foundation documentation but no runtime application yet.
+The current project phase is **Phase 2 — Reliable Market Data Platform**. The repository contains
+an approved, tested engineering foundation and the first provider-independent candle and replay
+contracts. It does not yet connect to an exchange or support trading decisions.
 
 ## Source of Truth
 

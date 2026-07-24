@@ -41,10 +41,32 @@ closed with machine-readable reason codes.
 This boundary is mandatory for future features, signals, strategies, backtests, evaluation, and
 learning. No analytical component may receive the replay object's complete future record set.
 
+## Candle Quality Gate
+
+`CandleSequenceAuditor` evaluates one explicit stream and expected time window. It:
+
+- Requires the window and every candle to align to the timeframe's UTC grid.
+- Detects input that regresses in market time.
+- Detects records from another source, venue, instrument, instrument type, or timeframe.
+- Detects records outside the expected window.
+- Distinguishes identical duplicates from conflicting values.
+- Collapses absent or unusable intervals into explicit contiguous missing ranges.
+- Caps audit-window size to prevent accidental unbounded memory use.
+
+A conflict is not selected arbitrarily. Its interval remains unusable and is represented as
+missing until a future governed correction mechanism resolves it.
+
+## Idempotent Temporary Storage
+
+`InMemoryCandleStore` proves the persistence contract before a durable storage technology is
+selected. The first record for a natural key is inserted. A repeated equivalent record returns
+`DUPLICATE`; a different record for the same key returns `CONFLICT`. Neither outcome overwrites the
+stored record.
+
 ## Current Limitations
 
 - Only final candles are modeled.
 - No exchange adapter or historical downloader exists.
-- No gap detector, correction stream, or cross-source reconciliation exists yet.
-- The in-memory replay slice is for contract validation, not large-scale storage.
+- No governed correction stream or cross-source reconciliation exists yet.
+- Storage and replay are in-memory contract implementations, not durable large-scale storage.
 - Trades, ticker, order book, funding, open interest, and liquidation schemas remain future work.

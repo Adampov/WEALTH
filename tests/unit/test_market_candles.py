@@ -80,6 +80,18 @@ def test_candle_rejects_invalid_market_or_time_state(
         build_candle(**override)
 
 
+def test_candle_rejects_open_time_off_the_utc_timeframe_grid() -> None:
+    open_time = OPEN_TIME + timedelta(seconds=30)
+
+    with pytest.raises(ValidationError, match="must align to the timeframe UTC grid"):
+        build_candle(
+            open_time=open_time,
+            close_time=open_time + timedelta(minutes=1),
+            observed_at=open_time + timedelta(minutes=1, seconds=1),
+            processed_at=open_time + timedelta(minutes=1, seconds=2),
+        )
+
+
 @given(
     low=st.integers(min_value=1, max_value=99),
     open_price=st.integers(min_value=100, max_value=110),

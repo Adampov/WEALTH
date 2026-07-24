@@ -1,6 +1,6 @@
 """Canonical, provider-independent market-data contracts."""
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from typing import Annotated, Literal, Self
@@ -10,6 +10,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validato
 
 PositiveDecimal = Annotated[Decimal, Field(gt=Decimal("0"))]
 NonNegativeDecimal = Annotated[Decimal, Field(ge=Decimal("0"))]
+UTC_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 class InstrumentType(StrEnum):
@@ -98,6 +99,8 @@ class CanonicalCandle(BaseModel):
 
         if self.close_time - self.open_time != self.timeframe.duration:
             raise ValueError("candle duration must match timeframe")
+        if (self.open_time.astimezone(UTC) - UTC_EPOCH) % self.timeframe.duration:
+            raise ValueError("candle open_time must align to the timeframe UTC grid")
         if self.high < max(self.open, self.close):
             raise ValueError("high must be at least open and close")
         if self.low > min(self.open, self.close):
@@ -123,6 +126,20 @@ class CanonicalCandle(BaseModel):
             self.instrument_type,
             self.timeframe,
             self.open_time,
+        )
+
+    @property
+    def stream_key(
+        self,
+    ) -> tuple[str, str, str, InstrumentType, CandleTimeframe]:
+        """Return the identity shared by records in one candle stream."""
+
+        return (
+            self.source,
+            self.venue,
+            self.instrument,
+            self.instrument_type,
+            self.timeframe,
         )
 
     @property

@@ -76,6 +76,7 @@ Included:
 - A minimal deterministic event pipeline used to prove validation, storage, logging, and testing boundaries.
 - Safe runtime identity with explicit environment and operating mode.
 - A first canonical candle contract and point-in-time replay boundary.
+- Deterministic candle-sequence quality reports and idempotent in-memory storage.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:
