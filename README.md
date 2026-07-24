@@ -2,7 +2,7 @@
 
 WEALTH is a governed multi-agent cryptocurrency research and trading platform. The project is
 currently building its reliable market-data platform. It can read bounded historical candle ranges
-from Binance's public endpoints, but it has no account access and cannot execute trades.
+from Binance and Coinbase public endpoints, but it has no account access and cannot execute trades.
 
 ## Read First
 
@@ -81,6 +81,18 @@ timeframes with at most 300 candles per provider request. Documented pre-window 
 from the requested canonical batch, while missing in-window buckets remain explicit quality
 failures rather than invented candles.
 
+## Cross-Source Candle Reconciliation
+
+Selected candle windows from two distinct sources can be compared after each source passes the
+existing sequence-quality gate. The report retains both record identifiers, missing-source
+findings, and symmetric basis-point differences for OHLC and base volume. Price tolerance is
+explicit and versioned; a volume limit is optional because volume is venue-specific.
+
+Reconciliation requires the same exact canonical instrument, instrument type, and timeframe.
+`BTC-USD` is therefore not compared with `BTC-USDT` through an implicit conversion. Outcomes are
+`pass`, `divergent`, or `blocked`; the report does not choose a true provider, blend prices, repair
+records, or authorize a trade.
+
 Every response is normalized into the provider-independent candle contract and sent through the
 deterministic sequence-quality gate. Incomplete, conflicting, malformed, or time-inconsistent
 batches are reported and are not written to storage.
@@ -90,10 +102,10 @@ provider bytes separately from canonical candles, verifies them again when readi
 restart, treats repeats idempotently, and quarantines conflicting revisions without overwriting the
 accepted record.
 
-The provider adapter remains bounded to one window of at most 1,000 candles. An explicit
-application flow can split a larger range into contiguous pages, pace requests, retry only
-classified transient failures, honor a bounded `Retry-After`, and stop at the first failed page
-with an exact resume boundary. One invocation is capped at 100,000 candles.
+Provider adapters remain bounded to one window: at most 1,000 Binance candles or 300 Coinbase
+candles. An explicit application flow can split a larger range into contiguous pages, pace
+requests, retry only classified transient failures, honor a bounded `Retry-After`, and stop at the
+first failed page with an exact resume boundary. One invocation is capped at 100,000 candles.
 
 Operator-invoked collection jobs can persist their cursor in a dedicated SQLite control database.
 Versioned worker leases prevent duplicate advancement, accepted pages checkpoint independently,
@@ -122,6 +134,7 @@ Included:
 - Durable local SQLite storage for raw evidence, canonical candles, and conflict quarantine.
 - Durable collection checkpoints, worker leases, crash recovery, and source-health summaries.
 - Weighted shared request budgets with idempotent reservations and observable local backpressure.
+- Deterministic cross-source candle reconciliation with explicit tolerances and missing evidence.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:
@@ -130,6 +143,7 @@ Not included:
 - Continuous or live-streaming market-data collection.
 - Automatic historical collection scheduling.
 - Multi-host request-budget coordination.
+- Automatic source ranking, price blending, or cross-quote conversion.
 - Trading strategies.
 - AI model integration.
 - Portfolio, risk, or order execution.
