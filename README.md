@@ -100,7 +100,9 @@ Versioned worker leases prevent duplicate advancement, accepted pages checkpoint
 and page attempts produce append-only source-health evidence. Recovery deliberately refetches a
 page when a process stops after storing market evidence but before advancing its checkpoint; the
 market store handles that repeat idempotently. This is not a continuous collector. Shared
-IP-rate-budget tracking, automatic scheduling, and live WebSocket ingestion remain future tasks.
+request-budget coordination can now prevent cooperating processes on one host from exceeding an
+explicit combined budget before network access. Multi-host coordination, automatic scheduling,
+and live WebSocket ingestion remain future tasks.
 
 ## Current Scope
 
@@ -119,6 +121,7 @@ Included:
 - Bounded historical pagination, pacing, retry evidence, and safe resume boundaries.
 - Durable local SQLite storage for raw evidence, canonical candles, and conflict quarantine.
 - Durable collection checkpoints, worker leases, crash recovery, and source-health summaries.
+- Weighted shared request budgets with idempotent reservations and observable local backpressure.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:
@@ -126,7 +129,7 @@ Not included:
 - Private exchange or account access.
 - Continuous or live-streaming market-data collection.
 - Automatic historical collection scheduling.
-- Shared IP-rate-budget coordination across processes.
+- Multi-host request-budget coordination.
 - Trading strategies.
 - AI model integration.
 - Portfolio, risk, or order execution.

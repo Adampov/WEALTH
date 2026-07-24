@@ -47,13 +47,15 @@ Completed Phase 2 slices include:
 - Durable collection checkpoints with versioned worker leases and restart recovery.
 - Append-only page-level source-health evidence with query-efficient job summaries.
 - Streaming page planning that avoids materializing large bounded ranges.
+- Durable shared request-budget coordination with weighted, idempotent reservations.
+- Pre-network budget gating and observable denial, retry, and wait metrics.
 - A second public provider adapter for bounded Coinbase Exchange Spot candles.
 - Provider-specific range, timeframe, ordering, precision, and sparse-interval handling behind the
   shared canonical candle boundary.
 
-Phase 2 is not complete. Continuous collection, live streaming, shared rate-budget coordination,
-durable raw and canonical storage beyond the local SQLite baseline, reconnect policy, additional
-market-data schemas, and cross-provider operational comparison remain future tasks.
+Phase 2 is not complete. Continuous collection, live streaming, multi-host rate-budget
+coordination, durable raw and canonical storage beyond the local SQLite baseline, reconnect policy,
+additional market-data schemas, and cross-provider operational comparison remain future tasks.
 
 ## Phase 1 — Architecture and Engineering Foundation
 

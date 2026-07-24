@@ -20,4 +20,5 @@ Each ADR records the context, decision, consequences, alternatives, and follow-u
 - `0005-sqlite-market-data-storage.md`
 - `0006-historical-candle-pagination-and-retry.md`
 - `0007-durable-collection-checkpoints-and-health.md`
+- `0008-shared-provider-rate-budget.md`
 - `0009-coinbase-exchange-public-candles.md`
