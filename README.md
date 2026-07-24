@@ -151,8 +151,13 @@ A bounded quality gate now checks one exact record family for mixed streams, eve
 window membership, duplicate identities, conflicting values, and documented provider-sequence
 promises. Sequence gaps are reported only when an adapter explicitly declares a contiguous
 provider contract. An idempotent in-memory store proves that equivalent repeats and conflicting
-revisions never overwrite the first accepted record. No live order-flow adapter, durable
-order-flow database, trading signal, or trading action is present.
+revisions never overwrite the first accepted record.
+
+A dedicated SQLite adapter now persists exact raw captures and all three canonical order-flow
+families atomically. It survives restart, retains every equivalent raw lineage link, quarantines
+conflicting revisions, rejects a reused canonical identity, validates its database type, and
+revalidates raw hashes and canonical records on reads. No live order-flow adapter, replay path,
+trading signal, or trading action is present.
 
 Operators and monitoring tools can read that state through a dedicated JSON command:
 
@@ -195,6 +200,7 @@ Included:
 - A read-only JSON collector-health command with monitoring-compatible exit codes.
 - Strict canonical trade, ticker, and best-bid-ask contracts with point-in-time lineage.
 - Bounded order-flow quality auditing and idempotent temporary storage without silent overwrite.
+- Durable raw and canonical SQLite order-flow evidence with conflict quarantine.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:

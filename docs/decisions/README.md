@@ -30,3 +30,4 @@ Each ADR records the context, decision, consequences, alternatives, and follow-u
 - `0015-read-only-collector-health-cli.md`
 - `0016-canonical-order-flow-contracts.md`
 - `0017-order-flow-quality-and-idempotency.md`
+- `0018-sqlite-order-flow-storage.md`

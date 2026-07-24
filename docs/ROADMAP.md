@@ -71,6 +71,8 @@ Completed Phase 2 slices include:
   policies.
 - Idempotent in-memory order-flow storage with deterministic queries and no silent conflict
   replacement.
+- Dedicated SQLite order-flow storage with atomic raw lineage, restart-safe idempotency,
+  database-type validation, read-time revalidation, and conflict quarantine.
 
 Phase 2 is not complete. Operating-system service deployment, live streaming, multi-host
 rate-budget coordination, durable raw and canonical storage beyond the local SQLite baseline,

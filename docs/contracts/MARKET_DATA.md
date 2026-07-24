@@ -49,8 +49,16 @@ record family, inserts the first canonical record, reports equivalent repeats as
 reports changed values for one identity as conflicts. A duplicate or conflict never overwrites the
 accepted record. Exact-stream queries are returned in deterministic market-time order.
 
-This temporary adapter is not durable. Future ingestion must quality-gate a bounded provider batch
-before it is admitted to storage.
+`OrderFlowFetchBatch` binds one exact raw response to one record family. Source, venue, timestamps,
+and raw lineage must agree across the batch, and one batch is capped at 100,000 records.
+
+`SQLiteOrderFlowStore` adds a dedicated versioned file-backed implementation. Raw bytes and
+canonical records are written atomically, equivalent new captures add lineage to the first record,
+and changed values are quarantined without replacement. A database-type marker prevents another
+SQLite store with the same integer version from being opened accidentally. Raw hashes, canonical
+schemas, natural keys, record types, and stream indexes are revalidated when evidence is read.
+
+Future ingestion must quality-gate a bounded provider batch before it is admitted to either store.
 
 ## Canonical Candle
 
@@ -183,8 +191,8 @@ automatically.
 ## Current Limitations
 
 - Final candles are implemented end to end. Trade, ticker, and best-bid-ask records now have strict
-  contracts, bounded quality auditing, and idempotent temporary storage, but no provider adapter,
-  durable raw/canonical storage, or replay path.
+  contracts, bounded quality auditing, and idempotent raw/canonical SQLite storage, but no provider
+  adapter, live ingestion, or replay path.
 - Each Binance provider request remains bounded to one already-closed window of at most 1,000
   candles; the application composes multiple requests into a bounded range.
 - No operating-system-managed scheduling, deployment, adaptive pacing, retry jitter, or live
