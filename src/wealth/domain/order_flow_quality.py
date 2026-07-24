@@ -9,7 +9,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validato
 
 from wealth.domain.market import InstrumentType
 from wealth.domain.order_flow import CanonicalBestBidAsk, CanonicalTicker, CanonicalTrade
-from wealth.domain.quality import DataQualityStatus
+from wealth.domain.quality import DataQualityStatus, RawPayloadWriteResult
 
 type OrderFlowRecord = CanonicalTrade | CanonicalTicker | CanonicalBestBidAsk
 
@@ -199,6 +199,41 @@ class OrderFlowWriteResult(BaseModel):
                 raise ValueError("inserted writes must not identify an existing record")
         elif self.existing_record_id is None:
             raise ValueError("duplicate and conflict writes must identify the existing record")
+        return self
+
+
+class OrderFlowBatchWriteResult(BaseModel):
+    """Persistence outcomes for one raw response and its canonical records."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    raw_payload: RawPayloadWriteResult
+    records: tuple[OrderFlowWriteResult, ...]
+
+
+class OrderFlowConflictRecord(BaseModel):
+    """A quarantined revision that was never promoted to canonical evidence."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    stream: OrderFlowStream
+    existing_record_id: UUID
+    incoming_record: OrderFlowRecord
+    raw_payload_id: UUID | None = None
+    detected_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def conflict_is_self_consistent(self) -> Self:
+        """Require the revision, stream, timing, and optional raw lineage to agree."""
+
+        if not self.stream.contains(self.incoming_record):
+            raise ValueError("incoming record must belong to the conflict stream")
+        if self.detected_at < self.incoming_record.observed_at:
+            raise ValueError("conflict cannot be detected before observation")
+        if self.raw_payload_id is not None:
+            expected_lineage = f"raw-market-payload:{self.raw_payload_id}"
+            if expected_lineage not in self.incoming_record.lineage:
+                raise ValueError("incoming record must reference the raw payload")
         return self
 
 
