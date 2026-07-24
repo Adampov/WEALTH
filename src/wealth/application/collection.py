@@ -323,12 +323,16 @@ class RecoverableHistoricalCandleCollector:
         result: HistoricalCandlePageIngestionResult,
     ) -> tuple[str, str, SourceHealthStatus] | None:
         if result.failure is not None:
+            unavailable_codes = {
+                "provider_unavailable",
+                "transport_failure",
+            }
             return (
                 result.failure.machine_code,
                 result.failure.stop_reason.value,
                 (
                     SourceHealthStatus.UNAVAILABLE
-                    if result.failure.retryable
+                    if result.failure.machine_code in unavailable_codes
                     else SourceHealthStatus.DEGRADED
                 ),
             )
