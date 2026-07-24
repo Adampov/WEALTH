@@ -6,11 +6,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
+from hashlib import sha256
 from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import ValidationError
 
-from wealth.domain.market import CanonicalCandle, InstrumentType
+from wealth.domain.market import CanonicalCandle, InstrumentType, RawMarketPayload
 from wealth.ports.foundation import Clock
 from wealth.ports.http import HttpResponse, HttpTransportError, PublicHttpClient
 from wealth.ports.market import CandleFetchBatch, HistoricalCandleRequest
@@ -138,6 +139,14 @@ class BinancePublicCandleSource:
                 BinanceCandleErrorCode.INVALID_REQUEST,
                 "clock regressed while processing the provider response",
             )
+        raw_payload = self._raw_payload(
+            body=response.body,
+            request=request,
+            query=query,
+            url=url,
+            observed_at=observed_at,
+            processed_at=processed_at,
+        )
         records = tuple(
             self._canonicalize(
                 row=row,
@@ -146,6 +155,7 @@ class BinancePublicCandleSource:
                 url=url,
                 observed_at=observed_at,
                 processed_at=processed_at,
+                raw_payload_reference=raw_payload.lineage_reference,
             )
             for row_number, row in enumerate(rows)
         )
@@ -155,6 +165,7 @@ class BinancePublicCandleSource:
             venue=BINANCE_VENUE,
             observed_at=observed_at,
             processed_at=processed_at,
+            raw_payload=raw_payload,
             records=records,
         )
 
@@ -269,6 +280,44 @@ class BinancePublicCandleSource:
         return tuple(rows)
 
     @staticmethod
+    def _raw_payload(
+        *,
+        body: bytes,
+        request: HistoricalCandleRequest,
+        query: dict[str, str],
+        url: str,
+        observed_at: datetime,
+        processed_at: datetime,
+    ) -> RawMarketPayload:
+        payload_digest = sha256(body).hexdigest()
+        endpoint_path = url.removeprefix("https://").split("/", maxsplit=1)[-1]
+        request_identity = json.dumps(
+            (
+                BINANCE_SOURCE,
+                BINANCE_VENUE,
+                endpoint_path,
+                tuple(sorted(query.items())),
+                payload_digest,
+            ),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+        return RawMarketPayload(
+            record_id=uuid5(NAMESPACE_URL, request_identity),
+            source=BINANCE_SOURCE,
+            venue=BINANCE_VENUE,
+            observed_at=observed_at,
+            processed_at=processed_at,
+            payload_sha256=payload_digest,
+            payload=body,
+            lineage=(
+                f"binance-public-rest:{endpoint_path}:{request.provider_symbol}:"
+                f"{request.timeframe.value}:{_to_epoch_milliseconds(request.window_start)}:"
+                f"{_to_epoch_milliseconds(request.window_end_exclusive)}",
+            ),
+        )
+
+    @staticmethod
     def _canonicalize(
         *,
         row: _BinanceKline,
@@ -277,6 +326,7 @@ class BinancePublicCandleSource:
         url: str,
         observed_at: datetime,
         processed_at: datetime,
+        raw_payload_reference: str,
     ) -> CanonicalCandle:
         open_time = _from_epoch_milliseconds(row.open_time_ms)
         close_time = open_time + request.timeframe.duration
@@ -327,6 +377,7 @@ class BinancePublicCandleSource:
                 trade_count=row.trade_count,
                 provider_sequence=row.open_time_ms,
                 lineage=(
+                    raw_payload_reference,
                     f"binance-public-rest:{endpoint_path}:"
                     f"{request.provider_symbol}:{request.timeframe.value}:{row.open_time_ms}",
                 ),

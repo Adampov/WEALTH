@@ -3,6 +3,7 @@
 import json
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 
 import pytest
 
@@ -134,9 +135,8 @@ def source(http: StubHttpClient) -> BinancePublicCandleSource:
 
 
 def test_spot_rows_are_requested_in_utc_and_normalized_exactly() -> None:
-    http = StubHttpClient(
-        response([kline(WINDOW_START), kline(WINDOW_START + timedelta(minutes=1))])
-    )
+    provider_response = response([kline(WINDOW_START), kline(WINDOW_START + timedelta(minutes=1))])
+    http = StubHttpClient(provider_response)
 
     batch = source(http).fetch(request())
 
@@ -165,7 +165,10 @@ def test_spot_rows_are_requested_in_utc_and_normalized_exactly() -> None:
     assert first.trade_count == 42
     assert first.observed_at == OBSERVED_AT
     assert first.processed_at == PROCESSED_AT
-    assert first.lineage[0].startswith("binance-public-rest:api/v3/klines:BTCUSDT:1m:")
+    assert batch.raw_payload.payload == provider_response.body
+    assert batch.raw_payload.payload_sha256 == sha256(provider_response.body).hexdigest()
+    assert batch.raw_payload.lineage_reference in first.lineage
+    assert first.lineage[1].startswith("binance-public-rest:api/v3/klines:BTCUSDT:1m:")
 
 
 @pytest.mark.parametrize(

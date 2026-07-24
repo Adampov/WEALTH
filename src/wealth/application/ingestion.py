@@ -7,7 +7,10 @@ from wealth.domain.quality import (
     CandleSequenceReport,
     CandleStream,
     CandleWriteResult,
+    CandleWriteStatus,
     DataQualityStatus,
+    RawPayloadWriteResult,
+    RawPayloadWriteStatus,
 )
 from wealth.ports.market import (
     CandleFetchBatch,
@@ -23,13 +26,19 @@ class HistoricalCandleIngestionResult:
 
     batch: CandleFetchBatch
     quality: CandleSequenceReport
+    raw_write: RawPayloadWriteResult | None
     writes: tuple[CandleWriteResult, ...]
 
     @property
     def accepted(self) -> bool:
         """Return whether the complete requested batch passed the gate."""
 
-        return self.quality.status is DataQualityStatus.PASS
+        return (
+            self.quality.status is DataQualityStatus.PASS
+            and self.raw_write is not None
+            and self.raw_write.status is not RawPayloadWriteStatus.CONFLICT
+            and all(write.status is not CandleWriteStatus.CONFLICT for write in self.writes)
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,13 +66,12 @@ class HistoricalCandleIngestor:
             window_end_exclusive=request.window_end_exclusive,
             records=batch.records,
         )
-        writes = (
-            tuple(self.store.append(record) for record in batch.records)
-            if quality.status is DataQualityStatus.PASS
-            else ()
+        persistence = (
+            self.store.append_batch(batch) if quality.status is DataQualityStatus.PASS else None
         )
         return HistoricalCandleIngestionResult(
             batch=batch,
             quality=quality,
-            writes=writes,
+            raw_write=persistence.raw_payload if persistence is not None else None,
+            writes=persistence.candles if persistence is not None else (),
         )

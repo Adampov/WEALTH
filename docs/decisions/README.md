@@ -17,3 +17,4 @@ Each ADR records the context, decision, consequences, alternatives, and follow-u
 - `0002-modular-monolith-application-shape.md`
 - `0003-ci-and-security-baseline.md`
 - `0004-binance-public-candle-adapter.md`
+- `0005-sqlite-market-data-storage.md`
