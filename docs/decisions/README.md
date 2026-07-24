@@ -15,3 +15,4 @@ Each ADR records the context, decision, consequences, alternatives, and follow-u
 
 - `0001-python-runtime-and-toolchain.md`
 - `0002-modular-monolith-application-shape.md`
+- `0003-ci-and-security-baseline.md`

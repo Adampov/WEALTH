@@ -41,9 +41,30 @@ uv run ruff format --check .
 uv run ruff check .
 uv run mypy
 uv run pytest
+uv --preview-features audit-command audit --locked
 ```
 
 Run all checks before requesting review. Report any unavailable or failed check explicitly.
+
+## Safe Runtime Defaults
+
+Runtime identity is loaded from environment variables and fails closed to:
+
+```text
+WEALTH_ENVIRONMENT=development
+WEALTH_OPERATING_MODE=research
+WEALTH_LOG_LEVEL=INFO
+```
+
+These values identify the environment and operating mode. They do not grant execution
+authority. No current code path can submit an order.
+
+## Professional Algorithm Foundation
+
+The first algorithmic capability is deterministic market-data replay, not a trading signal.
+Canonical candles preserve source lineage and event, observation, and processing times. A replay
+slice exposes only records observed by its evaluation time, preventing a strategy from seeing
+late-arriving or future data.
 
 ## Current Scope
 
@@ -53,6 +74,9 @@ Included:
 - Architecture Decision Records.
 - Python package and quality-tool configuration.
 - A minimal deterministic event pipeline used to prove validation, storage, logging, and testing boundaries.
+- Safe runtime identity with explicit environment and operating mode.
+- A first canonical candle contract and point-in-time replay boundary.
+- Continuous integration and dependency vulnerability auditing.
 
 Not included:
 

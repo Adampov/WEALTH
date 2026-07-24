@@ -130,6 +130,7 @@ Use these repository commands after running `uv sync --all-groups`:
 - Lint: `uv run ruff check .`
 - Type check: `uv run mypy`
 - Tests: `uv run pytest`
+- Dependency vulnerability audit: `uv --preview-features audit-command audit --locked`
 - Local foundation health slice: `uv run wealth-health`
 
 Do not substitute or skip a command silently. If a command is unavailable, report it as not run.
