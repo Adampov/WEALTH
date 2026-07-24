@@ -3,6 +3,7 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
+from hashlib import sha256
 from typing import Annotated, Literal, Self
 from uuid import UUID
 
@@ -11,6 +12,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validato
 PositiveDecimal = Annotated[Decimal, Field(gt=Decimal("0"))]
 NonNegativeDecimal = Annotated[Decimal, Field(ge=Decimal("0"))]
 UTC_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+MAX_RAW_MARKET_PAYLOAD_BYTES = 8 * 1024 * 1024
 
 
 class InstrumentType(StrEnum):
@@ -44,6 +46,70 @@ class CandleTimeframe(StrEnum):
             CandleTimeframe.ONE_DAY: 24 * 60 * 60,
         }
         return timedelta(seconds=seconds[self])
+
+
+class RawMarketPayload(BaseModel):
+    """Exact bounded provider evidence retained before canonicalization."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    schema_version: Literal["1.0"] = "1.0"
+    record_id: UUID
+    source: str = Field(min_length=1, max_length=128)
+    venue: str = Field(min_length=1, max_length=64)
+    media_type: Literal["application/json"] = "application/json"
+    observed_at: AwareDatetime
+    processed_at: AwareDatetime
+    payload_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    payload: bytes = Field(min_length=1, max_length=MAX_RAW_MARKET_PAYLOAD_BYTES)
+    lineage: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("source", "venue")
+    @classmethod
+    def identifiers_are_canonical(cls, value: str) -> str:
+        """Reject invisible normalization and ambiguous identifiers."""
+
+        if value != value.strip() or any(character.isspace() for character in value):
+            raise ValueError("identifier must not contain whitespace")
+        return value
+
+    @field_validator("lineage")
+    @classmethod
+    def lineage_entries_are_nonempty(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        """Require explicit provenance for the captured response."""
+
+        if any(not reference.strip() for reference in value):
+            raise ValueError("lineage references must be non-empty")
+        return value
+
+    @model_validator(mode="after")
+    def evidence_invariants_hold(self) -> Self:
+        """Reject time regressions and content whose digest is inconsistent."""
+
+        if self.observed_at > self.processed_at:
+            raise ValueError("observed_at must not be after processed_at")
+        if sha256(self.payload).hexdigest() != self.payload_sha256:
+            raise ValueError("payload_sha256 must match the exact payload bytes")
+        return self
+
+    @property
+    def lineage_reference(self) -> str:
+        """Return the canonical reference used by derived records."""
+
+        return f"raw-market-payload:{self.record_id}"
+
+    @property
+    def content_identity(self) -> tuple[object, ...]:
+        """Return immutable evidence content used for idempotency checks."""
+
+        return (
+            self.source,
+            self.venue,
+            self.media_type,
+            self.payload_sha256,
+            self.payload,
+            self.lineage,
+        )
 
 
 class CanonicalCandle(BaseModel):
@@ -157,6 +223,5 @@ class CanonicalCandle(BaseModel):
             self.quote_volume,
             self.trade_count,
             self.provider_sequence,
-            self.lineage,
             self.is_final,
         )

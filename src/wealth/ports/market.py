@@ -2,11 +2,22 @@
 
 from datetime import UTC, datetime
 from typing import Protocol
+from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from wealth.domain.market import CandleTimeframe, CanonicalCandle, InstrumentType
-from wealth.domain.quality import CandleStream, CandleWriteResult
+from wealth.domain.market import (
+    CandleTimeframe,
+    CanonicalCandle,
+    InstrumentType,
+    RawMarketPayload,
+)
+from wealth.domain.quality import (
+    CandleConflictRecord,
+    CandleStream,
+    CandleWriteResult,
+    MarketDataBatchWriteResult,
+)
 
 UTC_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
@@ -61,6 +72,7 @@ class CandleFetchBatch(BaseModel):
     venue: str = Field(min_length=1, max_length=64)
     observed_at: AwareDatetime
     processed_at: AwareDatetime
+    raw_payload: RawMarketPayload
     records: tuple[CanonicalCandle, ...]
 
     @field_validator("source", "venue")
@@ -78,6 +90,13 @@ class CandleFetchBatch(BaseModel):
 
         if self.observed_at > self.processed_at:
             raise ValueError("batch observed_at must not be after processed_at")
+        if (
+            self.raw_payload.source != self.source
+            or self.raw_payload.venue != self.venue
+            or self.raw_payload.observed_at != self.observed_at
+            or self.raw_payload.processed_at != self.processed_at
+        ):
+            raise ValueError("raw payload identity and timestamps must match the batch")
         expected_stream = (
             self.source,
             self.venue,
@@ -92,17 +111,31 @@ class CandleFetchBatch(BaseModel):
             for record in self.records
         ):
             raise ValueError("batch timestamps must match every canonical record")
+        if any(self.raw_payload.lineage_reference not in record.lineage for record in self.records):
+            raise ValueError("every canonical record must reference the batch raw payload")
         return self
 
 
 class CandleStore(Protocol):
-    """Append canonical candles without silently overwriting conflicts."""
+    """Persist raw and canonical market data without silent replacement."""
 
     def append(self, candle: CanonicalCandle) -> CandleWriteResult:
         """Insert once or return an explicit idempotency outcome."""
 
+    def append_batch(self, batch: CandleFetchBatch) -> MarketDataBatchWriteResult:
+        """Persist exact provider evidence and its canonical records."""
+
     def records_for_stream(self, stream: CandleStream) -> tuple[CanonicalCandle, ...]:
         """Return an immutable, market-time-ordered stream snapshot."""
+
+    def raw_payload(self, record_id: UUID) -> RawMarketPayload | None:
+        """Return exact provider evidence by ID when present."""
+
+    def raw_payload_ids_for_candle(self, record_id: UUID) -> tuple[UUID, ...]:
+        """Return every raw capture linked to one accepted canonical record."""
+
+    def conflicts_for_stream(self, stream: CandleStream) -> tuple[CandleConflictRecord, ...]:
+        """Return quarantined revisions without promoting them to canonical data."""
 
 
 class HistoricalCandleSource(Protocol):

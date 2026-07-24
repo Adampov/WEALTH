@@ -40,10 +40,12 @@ Completed Phase 2 slices include:
 - Idempotent in-memory candle storage that never overwrites conflicts.
 - A bounded public Binance REST adapter for closed Spot and USD-M Futures candles.
 - Fail-closed historical ingestion through the quality gate before storage.
+- File-backed SQLite storage for exact raw provider evidence and canonical candles.
+- Restart-safe idempotency, read-time revalidation, and canonical conflict quarantine.
 
 Phase 2 is not complete. Pagination, continuous collection, live streaming, durable raw and
-canonical storage, source-health observability, reconnect/backoff policy, additional market-data
-schemas, and a second provider remain future tasks.
+canonical storage beyond the local SQLite baseline, source-health observability, reconnect/backoff
+policy, additional market-data schemas, and a second provider remain future tasks.
 
 ## Phase 1 — Architecture and Engineering Foundation
 

@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from hashlib import sha256
 from uuid import UUID
 
 import pytest
@@ -9,7 +10,12 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from wealth.domain.market import CandleTimeframe, CanonicalCandle, InstrumentType
+from wealth.domain.market import (
+    CandleTimeframe,
+    CanonicalCandle,
+    InstrumentType,
+    RawMarketPayload,
+)
 
 RECORD_ID = UUID("00000000-0000-0000-0000-000000000101")
 OPEN_TIME = datetime(2026, 7, 24, 12, 0, tzinfo=UTC)
@@ -41,6 +47,40 @@ def build_candle(**overrides: object) -> CanonicalCandle:
     }
     values.update(overrides)
     return CanonicalCandle.model_validate(values)
+
+
+def build_raw_payload(**overrides: object) -> RawMarketPayload:
+    """Build one exact raw provider-evidence record."""
+
+    body = b'{"provider":"evidence"}'
+    values: dict[str, object] = {
+        "record_id": UUID(int=202),
+        "source": "synthetic.test",
+        "venue": "TEST",
+        "observed_at": OPEN_TIME,
+        "processed_at": OPEN_TIME + timedelta(seconds=1),
+        "payload_sha256": sha256(body).hexdigest(),
+        "payload": body,
+        "lineage": ("fixture:public-response",),
+    }
+    values.update(overrides)
+    return RawMarketPayload.model_validate(values)
+
+
+def test_raw_payload_is_immutable_hashed_and_lineage_addressable() -> None:
+    payload = build_raw_payload()
+
+    assert payload.payload_sha256 == sha256(payload.payload).hexdigest()
+    assert payload.lineage_reference == f"raw-market-payload:{payload.record_id}"
+    with pytest.raises(ValidationError):
+        payload.payload = b"changed"
+
+
+def test_raw_payload_rejects_digest_mismatch_and_time_regression() -> None:
+    with pytest.raises(ValidationError, match="must match the exact payload bytes"):
+        build_raw_payload(payload_sha256="0" * 64)
+    with pytest.raises(ValidationError, match="observed_at must not be after processed_at"):
+        build_raw_payload(processed_at=OPEN_TIME - timedelta(seconds=1))
 
 
 def test_candle_is_strict_immutable_and_versioned() -> None:

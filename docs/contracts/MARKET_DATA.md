@@ -63,6 +63,27 @@ selected. The first record for a natural key is inserted. A repeated equivalent 
 `DUPLICATE`; a different record for the same key returns `CONFLICT`. Neither outcome overwrites the
 stored record.
 
+## Raw Evidence and Durable Storage
+
+Every successful `CandleFetchBatch` includes one `RawMarketPayload` containing the exact bounded
+provider-response bytes, a SHA-256 digest, observation and processing times, source identity, and
+provenance. Every canonical candle in the batch must reference that raw payload ID in its lineage.
+
+`SQLiteCandleStore` is the first durable implementation of the storage port. It:
+
+- Stores raw response bytes separately from canonical candles.
+- Commits one accepted batch transactionally.
+- Revalidates raw content hashes and canonical schemas when records are read.
+- Preserves exact decimal values through the canonical serialized record.
+- Enforces one canonical record per provider-scoped natural key.
+- Treats equivalent canonical values as idempotent duplicates while retaining each raw capture.
+- Links every equivalent raw capture to the accepted canonical record.
+- Keeps the original canonical record and quarantines a conflicting incoming revision.
+- Versions its local schema and rejects unknown versions without an implicit migration.
+
+The SQLite adapter is a replaceable Phase 2 local durability baseline. It is not yet the final
+high-volume operational or analytical storage design.
+
 ## Public Binance Historical Adapter
 
 `BinancePublicCandleSource` is the first real provider implementation of the historical-candle
@@ -87,7 +108,9 @@ text is not copied into application errors.
 
 `HistoricalCandleIngestor` sends the complete fetched batch through `CandleSequenceAuditor`. A
 batch with a gap, duplicate, conflict, mixed stream, out-of-order record, or out-of-window record is
-reported and not written to storage.
+reported and not written to storage. A passing batch persists its exact raw response and canonical
+records together. A storage conflict makes the ingestion result unaccepted and remains explicit in
+the write outcomes and conflict quarantine.
 
 ## Current Limitations
 
@@ -96,5 +119,8 @@ reported and not written to storage.
 - No pagination, automatic retry/backoff, scheduled collection, or live WebSocket stream exists.
 - No instrument catalog or governed provider-symbol mapping exists yet.
 - No governed correction stream or cross-source reconciliation exists yet.
-- Storage and replay are in-memory contract implementations, not durable large-scale storage.
+- Durable storage is local SQLite only; backup, retention, compaction, distributed operation, and
+  large-scale analytical storage remain future work.
+- Malformed or rejected provider responses are not yet retained under a governed failure-evidence
+  policy.
 - Trades, ticker, order book, funding, open interest, and liquidation schemas remain future work.

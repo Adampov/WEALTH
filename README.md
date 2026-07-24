@@ -77,6 +77,11 @@ Every response is normalized into the provider-independent candle contract and s
 deterministic sequence-quality gate. Incomplete, conflicting, malformed, or time-inconsistent
 batches are reported and are not written to storage.
 
+Accepted batches can now be stored in a file-backed SQLite adapter. The adapter keeps exact raw
+provider bytes separately from canonical candles, verifies them again when reading, survives
+restart, treats repeats idempotently, and quarantines conflicting revisions without overwriting the
+accepted record.
+
 The current adapter is deliberately bounded to one window of at most 1,000 candles. Pagination,
 continuous scheduling, retry policy, and live WebSocket ingestion remain separate future tasks.
 
@@ -93,6 +98,7 @@ Included:
 - Deterministic candle-sequence quality reports and idempotent in-memory storage.
 - A bounded, public Binance REST adapter for closed Spot and USD-M Futures candles.
 - Fail-closed historical ingestion from provider response through the quality gate.
+- Durable local SQLite storage for raw evidence, canonical candles, and conflict quarantine.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:

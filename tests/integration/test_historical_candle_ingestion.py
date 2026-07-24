@@ -3,12 +3,19 @@
 import json
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from wealth.adapters.binance import BinancePublicCandleSource
 from wealth.adapters.market import InMemoryCandleStore
+from wealth.adapters.sqlite_market import SQLiteCandleStore
 from wealth.application.ingestion import HistoricalCandleIngestor
 from wealth.domain.market import CandleTimeframe, InstrumentType
-from wealth.domain.quality import CandleStream, CandleWriteStatus, DataQualityStatus
+from wealth.domain.quality import (
+    CandleStream,
+    CandleWriteStatus,
+    DataQualityStatus,
+    RawPayloadWriteStatus,
+)
 from wealth.ports.http import HttpResponse
 from wealth.ports.market import HistoricalCandleRequest
 
@@ -48,7 +55,7 @@ def epoch_milliseconds(value: datetime) -> int:
     return delta.days * 86_400_000 + delta.seconds * 1_000
 
 
-def kline(open_time: datetime) -> list[int | str]:
+def kline(open_time: datetime, *, close: str = "102") -> list[int | str]:
     """Build one complete one-minute public kline."""
 
     open_time_ms = epoch_milliseconds(open_time)
@@ -57,7 +64,7 @@ def kline(open_time: datetime) -> list[int | str]:
         "100",
         "105",
         "95",
-        "102",
+        close,
         "12.5",
         open_time_ms + 59_999,
         "1275",
@@ -106,10 +113,14 @@ def test_complete_provider_batch_passes_quality_gate_and_is_stored() -> None:
 
     assert first.accepted is True
     assert first.quality.status is DataQualityStatus.PASS
+    assert first.raw_write is not None
+    assert first.raw_write.status is RawPayloadWriteStatus.INSERTED
     assert [write.status for write in first.writes] == [
         CandleWriteStatus.INSERTED,
         CandleWriteStatus.INSERTED,
     ]
+    assert repeated.raw_write is not None
+    assert repeated.raw_write.status is RawPayloadWriteStatus.DUPLICATE
     assert [write.status for write in repeated.writes] == [
         CandleWriteStatus.DUPLICATE,
         CandleWriteStatus.DUPLICATE,
@@ -129,5 +140,57 @@ def test_incomplete_provider_batch_is_reported_and_not_stored() -> None:
     assert result.accepted is False
     assert result.quality.status is DataQualityStatus.FAIL
     assert result.quality.missing_ranges[0].missing_count == 1
+    assert result.raw_write is None
     assert result.writes == ()
     assert store.records_for_stream(stream()) == ()
+
+
+def test_accepted_provider_batch_survives_sqlite_store_restart(tmp_path: Path) -> None:
+    database_path = tmp_path / "market-data.sqlite3"
+    source = BinancePublicCandleSource(
+        http=StaticHttpClient([kline(WINDOW_START), kline(WINDOW_START + timedelta(minutes=1))]),
+        clock=FixedClock(),
+    )
+
+    result = HistoricalCandleIngestor(
+        source=source,
+        store=SQLiteCandleStore(database_path),
+    ).ingest(request())
+    restarted_store = SQLiteCandleStore(database_path)
+
+    assert result.accepted is True
+    assert result.raw_write is not None
+    assert result.raw_write.status is RawPayloadWriteStatus.INSERTED
+    assert restarted_store.raw_payload(result.batch.raw_payload.record_id) is not None
+    assert len(restarted_store.records_for_stream(stream())) == 2
+
+
+def test_storage_conflict_makes_ingestion_unaccepted_and_is_quarantined(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteCandleStore(tmp_path / "market-data.sqlite3")
+    original_source = BinancePublicCandleSource(
+        http=StaticHttpClient([kline(WINDOW_START), kline(WINDOW_START + timedelta(minutes=1))]),
+        clock=FixedClock(),
+    )
+    changed_source = BinancePublicCandleSource(
+        http=StaticHttpClient(
+            [
+                kline(WINDOW_START, close="103"),
+                kline(WINDOW_START + timedelta(minutes=1)),
+            ]
+        ),
+        clock=FixedClock(),
+    )
+    HistoricalCandleIngestor(source=original_source, store=store).ingest(request())
+
+    result = HistoricalCandleIngestor(source=changed_source, store=store).ingest(request())
+
+    assert result.quality.status is DataQualityStatus.PASS
+    assert result.accepted is False
+    assert [write.status for write in result.writes] == [
+        CandleWriteStatus.CONFLICT,
+        CandleWriteStatus.DUPLICATE,
+    ]
+    assert len(store.records_for_stream(stream())) == 2
+    assert len(store.conflicts_for_stream(stream())) == 1

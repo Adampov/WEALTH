@@ -13,7 +13,11 @@ from pydantic import (
     model_validator,
 )
 
-from wealth.domain.market import CandleTimeframe, CanonicalCandle, InstrumentType
+from wealth.domain.market import (
+    CandleTimeframe,
+    CanonicalCandle,
+    InstrumentType,
+)
 
 
 class CandleQualityCode(StrEnum):
@@ -35,6 +39,14 @@ class DataQualityStatus(StrEnum):
 
 class CandleWriteStatus(StrEnum):
     """Idempotent outcomes for canonical candle persistence."""
+
+    INSERTED = "inserted"
+    DUPLICATE = "duplicate"
+    CONFLICT = "conflict"
+
+
+class RawPayloadWriteStatus(StrEnum):
+    """Idempotent outcomes for exact provider-evidence persistence."""
 
     INSERTED = "inserted"
     DUPLICATE = "duplicate"
@@ -137,3 +149,50 @@ class CandleWriteResult(BaseModel):
     status: CandleWriteStatus
     incoming_record_id: UUID
     existing_record_id: UUID | None = None
+
+
+class RawPayloadWriteResult(BaseModel):
+    """Outcome of a raw-evidence write that never replaces prior bytes."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    status: RawPayloadWriteStatus
+    incoming_record_id: UUID
+    existing_record_id: UUID | None = None
+
+
+class MarketDataBatchWriteResult(BaseModel):
+    """Persistence outcomes for one raw response and its canonical records."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    raw_payload: RawPayloadWriteResult
+    candles: tuple[CandleWriteResult, ...]
+
+
+class CandleConflictRecord(BaseModel):
+    """A quarantined canonical revision that was not allowed to overwrite."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    stream: CandleStream
+    open_time: AwareDatetime
+    existing_record_id: UUID
+    incoming_candle: CanonicalCandle
+    raw_payload_id: UUID
+    detected_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def conflict_is_self_consistent(self) -> Self:
+        """Require the quarantined record to match its declared identity."""
+
+        if not self.stream.contains(self.incoming_candle):
+            raise ValueError("incoming candle must belong to the conflict stream")
+        if self.open_time != self.incoming_candle.open_time:
+            raise ValueError("conflict open_time must match the incoming candle")
+        expected_lineage = f"raw-market-payload:{self.raw_payload_id}"
+        if expected_lineage not in self.incoming_candle.lineage:
+            raise ValueError("incoming candle must reference the raw payload")
+        if self.detected_at < self.incoming_candle.observed_at:
+            raise ValueError("conflict cannot be detected before observation")
+        return self
