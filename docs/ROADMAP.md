@@ -21,16 +21,29 @@ The roadmap is capability-based rather than date-based. A phase is complete only
 
 ## Current Status
 
-The project is in **Phase 1 — Architecture and Engineering Foundation**.
+The project is in **Phase 2 — Reliable Market Data Platform**.
 
-Completed foundation documents:
+Phase 1 is complete. Its accepted evidence includes:
 
 - `docs/PROJECT_CHARTER.md`
 - `docs/AI_DEPARTMENTS.md`
-- `docs/ARCHITECTURE.md`
-- `docs/ROADMAP.md` when this task is approved
+- `docs/ARCHITECTURE.md` and this roadmap
+- Repository guidance and accepted technology, application-shape, CI, and security decisions
+- A reproducible Python package with environment separation, structured health events, and
+  automated format, lint, type, test, lockfile, and dependency-audit checks
 
-No runtime code, trading strategy, AI model, exchange integration, or infrastructure has been selected or implemented yet.
+Completed Phase 2 slices include:
+
+- A canonical final-candle contract with source lineage and point-in-time timestamps.
+- Deterministic market replay that prevents future-data leakage.
+- Candle gap, duplicate, conflict, sequence, stream, and window-quality checks.
+- Idempotent in-memory candle storage that never overwrites conflicts.
+- A bounded public Binance REST adapter for closed Spot and USD-M Futures candles.
+- Fail-closed historical ingestion through the quality gate before storage.
+
+Phase 2 is not complete. Pagination, continuous collection, live streaming, durable raw and
+canonical storage, source-health observability, reconnect/backoff policy, additional market-data
+schemas, and a second provider remain future tasks.
 
 ## Phase 1 — Architecture and Engineering Foundation
 

@@ -63,10 +63,38 @@ selected. The first record for a natural key is inserted. A repeated equivalent 
 `DUPLICATE`; a different record for the same key returns `CONFLICT`. Neither outcome overwrites the
 stored record.
 
+## Public Binance Historical Adapter
+
+`BinancePublicCandleSource` is the first real provider implementation of the historical-candle
+source port. It reads bounded, already-closed windows from unauthenticated Binance public REST
+endpoints:
+
+- Spot through Binance's market-data-only host.
+- USD-M perpetual and dated futures through the public futures host.
+
+The adapter accepts separate canonical and provider symbols, forces Spot intervals onto the UTC
+grid, uses a finite timeout and response-size limit, and validates every positional response field.
+It converts Binance's inclusive final-millisecond close timestamp to the canonical exclusive
+interval boundary.
+
+Provider rows receive deterministic content-derived record IDs and explicit lineage. Exact repeated
+content is therefore idempotent, while a changed row for the same natural key remains a visible
+conflict.
+
+Rate limits, provider rejection, provider unavailability, transport failure, malformed JSON, and
+canonical-contract violations fail with machine-readable reason codes. Untrusted provider error
+text is not copied into application errors.
+
+`HistoricalCandleIngestor` sends the complete fetched batch through `CandleSequenceAuditor`. A
+batch with a gap, duplicate, conflict, mixed stream, out-of-order record, or out-of-window record is
+reported and not written to storage.
+
 ## Current Limitations
 
 - Only final candles are modeled.
-- No exchange adapter or historical downloader exists.
+- Binance reads are bounded to one already-closed window of at most 1,000 candles.
+- No pagination, automatic retry/backoff, scheduled collection, or live WebSocket stream exists.
+- No instrument catalog or governed provider-symbol mapping exists yet.
 - No governed correction stream or cross-source reconciliation exists yet.
 - Storage and replay are in-memory contract implementations, not durable large-scale storage.
 - Trades, ticker, order book, funding, open interest, and liquidation schemas remain future work.

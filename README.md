@@ -1,6 +1,8 @@
 # WEALTH
 
-WEALTH is a governed multi-agent cryptocurrency research and trading platform. The project is currently building its engineering foundation; it does not connect to an exchange or execute trades.
+WEALTH is a governed multi-agent cryptocurrency research and trading platform. The project is
+currently building its reliable market-data platform. It can read bounded public candle windows
+from Binance, but it has no account access and cannot execute trades.
 
 ## Read First
 
@@ -66,6 +68,18 @@ Canonical candles preserve source lineage and event, observation, and processing
 slice exposes only records observed by its evaluation time, preventing a strategy from seeing
 late-arriving or future data.
 
+## Public Binance Candle Slice
+
+The first real provider adapter can read already-closed Spot and USD-M Futures candles from
+Binance's public REST endpoints. It requires no API key and exposes no account or order capability.
+
+Every response is normalized into the provider-independent candle contract and sent through the
+deterministic sequence-quality gate. Incomplete, conflicting, malformed, or time-inconsistent
+batches are reported and are not written to storage.
+
+The current adapter is deliberately bounded to one window of at most 1,000 candles. Pagination,
+continuous scheduling, retry policy, and live WebSocket ingestion remain separate future tasks.
+
 ## Current Scope
 
 Included:
@@ -77,12 +91,15 @@ Included:
 - Safe runtime identity with explicit environment and operating mode.
 - A first canonical candle contract and point-in-time replay boundary.
 - Deterministic candle-sequence quality reports and idempotent in-memory storage.
+- A bounded, public Binance REST adapter for closed Spot and USD-M Futures candles.
+- Fail-closed historical ingestion from provider response through the quality gate.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:
 
-- Exchange adapters.
-- Live market data.
+- Private exchange or account access.
+- Continuous or live-streaming market-data collection.
+- Historical pagination and automatic retry scheduling.
 - Trading strategies.
 - AI model integration.
 - Portfolio, risk, or order execution.
