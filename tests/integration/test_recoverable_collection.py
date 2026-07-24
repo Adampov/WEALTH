@@ -16,6 +16,7 @@ from wealth.adapters.sqlite_collection import (
     SQLiteCollectionStorageErrorCode,
 )
 from wealth.adapters.sqlite_market import SQLiteCandleStore
+from wealth.adapters.sqlite_rate_budget import SQLiteRateBudgetCoordinator
 from wealth.application.collection import (
     CollectionRunStatus,
     RecoverableHistoricalCandleCollector,
@@ -24,6 +25,7 @@ from wealth.application.pagination import (
     HistoricalCandlePaginationPolicy,
     HistoricalCandleRetryPolicy,
 )
+from wealth.application.rate_budget import RateBudgetedHistoricalCandleSource
 from wealth.domain.collection import (
     CollectionHealthSummary,
     CollectionJobStatus,
@@ -33,13 +35,14 @@ from wealth.domain.collection import (
 )
 from wealth.domain.market import CandleTimeframe, InstrumentType
 from wealth.domain.quality import CandleStream
+from wealth.domain.rate_budget import RateBudgetPolicy, RateBudgetRequest
 from wealth.ports.collection import (
     CollectionCheckpointStore,
     CollectionCheckpointWriteResult,
     CollectionCheckpointWriteStatus,
 )
 from wealth.ports.http import HttpResponse
-from wealth.ports.market import HistoricalCandleRequest
+from wealth.ports.market import HistoricalCandleRequest, HistoricalCandleSource
 
 WINDOW_START = datetime(2026, 7, 24, 10, 0, tzinfo=UTC)
 INITIAL_NOW = WINDOW_START + timedelta(days=1)
@@ -78,6 +81,18 @@ class RecordingSleeper:
 
     def sleep(self, seconds: float) -> None:
         self.delays.append(seconds)
+
+
+class AdvancingSleeper(RecordingSleeper):
+    """Record waits and advance the deterministic wall clock."""
+
+    def __init__(self, clock: MutableClock) -> None:
+        super().__init__()
+        self.clock = clock
+
+    def sleep(self, seconds: float) -> None:
+        super().sleep(seconds)
+        self.clock.advance(timedelta(seconds=seconds))
 
 
 class ScenarioHttpClient:
@@ -212,9 +227,14 @@ def collector(
     ids: SequentialIds,
     sleeper: RecordingSleeper,
     worker_id: str,
+    market_source: HistoricalCandleSource | None = None,
 ) -> RecoverableHistoricalCandleCollector:
     return RecoverableHistoricalCandleCollector(
-        source=BinancePublicCandleSource(http=http, clock=clock),
+        source=(
+            BinancePublicCandleSource(http=http, clock=clock)
+            if market_source is None
+            else market_source
+        ),
         market_store=market_store,
         checkpoint_store=checkpoint_store,
         clock=clock,
@@ -448,3 +468,62 @@ def test_checkpoint_read_rejects_tampered_sqlite_index(tmp_path: Path) -> None:
         state_store.get(job.job_id)
 
     assert error.value.code is SQLiteCollectionStorageErrorCode.CORRUPT_RECORD
+
+
+def test_shared_budget_wait_is_retried_and_visible_in_collection_health(
+    tmp_path: Path,
+) -> None:
+    clock = MutableClock()
+    ids = SequentialIds()
+    http = ScenarioHttpClient()
+    sleeper = AdvancingSleeper(clock)
+    budget_store = SQLiteRateBudgetCoordinator(tmp_path / "rate-budget.sqlite3")
+    budget_policy = RateBudgetPolicy(
+        budget_key="binance.public-rest.shared-ip",
+        capacity=1,
+        period_seconds=10,
+    )
+    budget_store.reserve(
+        policy=budget_policy,
+        request=RateBudgetRequest(
+            reservation_id=UUID(int=999),
+            budget_key=budget_policy.budget_key,
+            requested_at=clock.now(),
+            cost=1,
+        ),
+    )
+    budgeted_source = RateBudgetedHistoricalCandleSource(
+        source=BinancePublicCandleSource(http=http, clock=clock),
+        coordinator=budget_store,
+        policy=budget_policy,
+        clock=clock,
+        id_generator=ids,
+    )
+    state_store = SQLiteCollectionCheckpointStore(tmp_path / "collection.sqlite3")
+    service = collector(
+        http=http,
+        market_store=SQLiteCandleStore(tmp_path / "market.sqlite3"),
+        checkpoint_store=state_store,
+        clock=clock,
+        ids=ids,
+        sleeper=sleeper,
+        worker_id="worker-a",
+        market_source=budgeted_source,
+    )
+    job = service.create_job(request(2))
+
+    result = service.run(job.job_id)
+    health = state_store.health_for_job(job.job_id)
+    budget_summary = budget_store.summary(budget_policy.budget_key)
+
+    assert result.status is CollectionRunStatus.COMPLETED
+    assert result.checkpoint.total_attempts == 2
+    assert sleeper.delays == [10]
+    assert len(http.calls) == 1
+    assert len(health) == 1
+    assert health[0].status is SourceHealthStatus.DEGRADED
+    assert health[0].attempts == 2
+    assert health[0].retry_delays_seconds == (10.0,)
+    assert budget_summary.reservation_count == 3
+    assert budget_summary.granted_count == 2
+    assert budget_summary.denied_count == 1
