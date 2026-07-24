@@ -73,6 +73,7 @@ Completed Phase 2 slices include:
   replacement.
 - Dedicated SQLite order-flow storage with atomic raw lineage, restart-safe idempotency,
   database-type validation, read-time revalidation, and conflict quarantine.
+- Fail-closed order-flow batch admission through quality auditing before any storage mutation.
 
 Phase 2 is not complete. Operating-system service deployment, live streaming, multi-host
 rate-budget coordination, durable raw and canonical storage beyond the local SQLite baseline,

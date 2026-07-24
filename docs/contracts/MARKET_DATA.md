@@ -58,7 +58,10 @@ and changed values are quarantined without replacement. A database-type marker p
 SQLite store with the same integer version from being opened accidentally. Raw hashes, canonical
 schemas, natural keys, record types, and stream indexes are revalidated when evidence is read.
 
-Future ingestion must quality-gate a bounded provider batch before it is admitted to either store.
+`OrderFlowBatchIngestor` is the fail-closed admission path. It audits the complete bounded batch
+before storage. A quality failure causes no raw or canonical write. A passing report permits the
+atomic batch write, but a raw or canonical storage conflict keeps the overall result unaccepted.
+Exact repeats remain accepted idempotent outcomes.
 
 ## Canonical Candle
 
@@ -191,8 +194,8 @@ automatically.
 ## Current Limitations
 
 - Final candles are implemented end to end. Trade, ticker, and best-bid-ask records now have strict
-  contracts, bounded quality auditing, and idempotent raw/canonical SQLite storage, but no provider
-  adapter, live ingestion, or replay path.
+  contracts, bounded quality auditing, fail-closed ingestion, and idempotent raw/canonical SQLite
+  storage, but no provider adapter, live collection, or replay path.
 - Each Binance provider request remains bounded to one already-closed window of at most 1,000
   candles; the application composes multiple requests into a bounded range.
 - No operating-system-managed scheduling, deployment, adaptive pacing, retry jitter, or live

@@ -156,7 +156,11 @@ revisions never overwrite the first accepted record.
 A dedicated SQLite adapter now persists exact raw captures and all three canonical order-flow
 families atomically. It survives restart, retains every equivalent raw lineage link, quarantines
 conflicting revisions, rejects a reused canonical identity, validates its database type, and
-revalidates raw hashes and canonical records on reads. No live order-flow adapter, replay path,
+revalidates raw hashes and canonical records on reads.
+
+The application admission path sends the complete bounded batch through the deterministic quality
+gate before storage. Quality failure leaves raw and canonical storage untouched; raw or canonical
+storage conflict makes the result explicitly unaccepted. No live order-flow adapter, replay path,
 trading signal, or trading action is present.
 
 Operators and monitoring tools can read that state through a dedicated JSON command:
@@ -201,6 +205,7 @@ Included:
 - Strict canonical trade, ticker, and best-bid-ask contracts with point-in-time lineage.
 - Bounded order-flow quality auditing and idempotent temporary storage without silent overwrite.
 - Durable raw and canonical SQLite order-flow evidence with conflict quarantine.
+- Fail-closed order-flow admission through the quality gate before durable storage.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:
