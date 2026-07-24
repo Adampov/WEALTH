@@ -141,6 +141,16 @@ structured critical alerts; paused runs produce a warning. The default ten-minut
 is longer than the collector's maximum bounded wait. These alerts remain internal data contracts:
 no message is sent and no process is restarted automatically.
 
+Operators and monitoring tools can read that state through a dedicated JSON command:
+
+```text
+uv run wealth-collector-health --database storage/collector-service.sqlite3 --collection-id 00000000-0000-0000-0000-000000000001 --pretty
+```
+
+The database must already exist and is opened read-only. The command returns `0` for OK, `1` for a
+warning, `2` for a confirmed critical alert, and `3` when the result is unknown or cannot be
+trusted. It never starts, stops, or repairs the collector.
+
 Shared request-budget coordination can prevent cooperating processes on one host from exceeding an
 explicit combined budget before network access. Multi-host coordination, automatic scheduling, and
 live WebSocket ingestion remain future tasks.
@@ -169,6 +179,7 @@ Included:
 - Interruptible local collector runs with durable lifecycle heartbeats and explicit terminal
   reasons.
 - Queryable collector health reports with stale-run detection and structured internal alerts.
+- A read-only JSON collector-health command with monitoring-compatible exit codes.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:

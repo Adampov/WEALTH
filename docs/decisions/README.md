@@ -27,3 +27,4 @@ Each ADR records the context, decision, consequences, alternatives, and follow-u
 - `0012-supervised-continuous-candle-polling.md`
 - `0013-durable-collector-service-lifecycle.md`
 - `0014-collector-service-health-monitoring.md`
+- `0015-read-only-collector-health-cli.md`

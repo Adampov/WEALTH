@@ -31,6 +31,7 @@ class SQLiteCollectorServiceStorageErrorCode(StrEnum):
     UNSUPPORTED_SCHEMA = "unsupported_schema"
     STORAGE_FAILURE = "storage_failure"
     CORRUPT_RECORD = "corrupt_record"
+    READ_ONLY = "read_only"
 
 
 class SQLiteCollectorServiceStorageError(RuntimeError):
@@ -48,15 +49,24 @@ class SQLiteCollectorServiceStorageError(RuntimeError):
 class SQLiteCollectorServiceHeartbeatStore:
     """Append lifecycle heartbeats while retaining one validated run projection."""
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, *, read_only: bool = False) -> None:
         self.path = Path(path)
+        self.read_only = read_only
         if str(path) == ":memory:" or (self.path.exists() and self.path.is_dir()):
             raise SQLiteCollectorServiceStorageError(
                 SQLiteCollectorServiceStorageErrorCode.INVALID_PATH,
                 "collector service storage requires a dedicated file path",
             )
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._initialize_schema()
+        if self.read_only:
+            if not self.path.is_file():
+                raise SQLiteCollectorServiceStorageError(
+                    SQLiteCollectorServiceStorageErrorCode.INVALID_PATH,
+                    "read-only collector service storage file does not exist",
+                )
+            self._validate_existing_schema()
+        else:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._initialize_schema()
 
     def append(
         self,
@@ -64,6 +74,11 @@ class SQLiteCollectorServiceHeartbeatStore:
     ) -> CollectorServiceHeartbeatWriteResult:
         """Append an exact next observation or expose duplicate/conflict."""
 
+        if self.read_only:
+            raise SQLiteCollectorServiceStorageError(
+                SQLiteCollectorServiceStorageErrorCode.READ_ONLY,
+                "collector service storage was opened read-only",
+            )
         try:
             with closing(self._connect()) as connection:
                 connection.execute("BEGIN IMMEDIATE")
@@ -327,13 +342,39 @@ class SQLiteCollectorServiceHeartbeatStore:
         except sqlite3.DatabaseError as error:
             raise self._storage_failure("collector service initialization failed") from error
 
+    def _validate_existing_schema(self) -> None:
+        try:
+            with closing(self._connect()) as connection:
+                version_row = connection.execute("PRAGMA user_version").fetchone()
+                version = int(version_row[0]) if version_row is not None else 0
+                if version != SQLITE_COLLECTOR_SERVICE_SCHEMA_VERSION:
+                    raise SQLiteCollectorServiceStorageError(
+                        SQLiteCollectorServiceStorageErrorCode.UNSUPPORTED_SCHEMA,
+                        f"database schema version {version} is not supported",
+                    )
+        except SQLiteCollectorServiceStorageError:
+            raise
+        except sqlite3.DatabaseError as error:
+            raise self._storage_failure(
+                "collector service read-only initialization failed"
+            ) from error
+
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=5.0)
+        if self.read_only:
+            database_uri = f"{self.path.resolve().as_uri()}?mode=ro"
+            connection = sqlite3.connect(
+                database_uri,
+                timeout=5.0,
+                uri=True,
+            )
+        else:
+            connection = sqlite3.connect(self.path, timeout=5.0)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA busy_timeout = 5000")
-        connection.execute("PRAGMA journal_mode = WAL")
-        connection.execute("PRAGMA synchronous = FULL")
+        if not self.read_only:
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute("PRAGMA synchronous = FULL")
         return connection
 
     @staticmethod

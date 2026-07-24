@@ -63,6 +63,8 @@ Completed Phase 2 slices include:
 - Explicit clean-stop, run-limit, pause, competing-worker, restart, and corrupt-heartbeat tests.
 - Queryable newest-first service health with configurable stale-heartbeat detection.
 - Structured internal warning and critical alerts for paused, failed, and stale collector runs.
+- A read-only JSON collector-health command with explicit OK, warning, critical, and unknown exits.
+- Missing-path, invalid-input, stale, paused, and read-only enforcement tests for operator queries.
 
 Phase 2 is not complete. Operating-system service deployment, live streaming, multi-host
 rate-budget coordination, durable raw and canonical storage beyond the local SQLite baseline,
