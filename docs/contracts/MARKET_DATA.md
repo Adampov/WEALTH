@@ -117,6 +117,64 @@ An empty complete window advances coverage and stores its raw response. A fetche
 exceed the total record limit is returned as in-memory evidence but is not admitted. A provider cap
 at the configured minimum one-millisecond window stops explicitly; it is never treated as complete.
 
+## Restart-Safe Bounded Public-Trade Control State
+
+`PublicTradeCollectionCheckpoint` records one immutable bounded source and event-time range in a
+dedicated control boundary. Its durable cursor is the first unadmitted event-time boundary. A
+paused or failed job also retains the exact exclusive end of the adaptive leaf that stopped, so
+recovery does not reconstruct a different request from a changed planner.
+
+The checkpoint's immutable `policy_fingerprint` identifies the effective versioned range, split,
+retry, pacing, and request-budget policy. Request, completed-window, record, and split totals are
+lifetime cumulative only for outcomes committed by checkpoint compare-and-swap. They are durable
+audit totals, not proof that a crashed process made no additional request: a request completed
+before an uncommitted transition can be repeated after recovery. The durable shared provider-rate
+budget is the current pre-request protection. Crash-durable per-job attempt reservations are
+deferred to the future recovery orchestrator.
+
+Committed health and checkpoint counters separately retain window traces and retries. The contract
+requires `source_requests = window_traces + retry_attempts`, so every committed provider attempt is
+accounted for exactly while still acknowledging that a pre-commit crash can lose control-state
+telemetry.
+
+`PublicTradeSourceHealthObservation` records append-only accepted or rejected invocation evidence,
+including the provider symbol, adaptive work, retry waits, the safe resume cursor, and exact
+pending leaf. Each observation identifies the exact checkpoint transition version that committed
+it. History reads use that causal version as an exclusive cursor and return at most 100 observations
+by default or 1,000 when explicitly requested.
+`PublicTradeCollectionHealthSummary` streams and validates the complete evidence ledger without
+materializing it in memory.
+
+Clean local stops at an invocation's outer request or record bound transition the job to `PAUSED`
+with the exact pending leaf retained. Their provider health remains `HEALTHY` when the admitted
+path needed neither retry nor split, or `DEGRADED` when it did; exhausting a local work bound does
+not invent source unavailability. A real terminal source or admission failure transitions to
+`FAILED`. The distinction is derived from the typed terminal trace and admission outcome, never
+from the stop-reason text alone. The future application mapper must translate a typed upstream
+failure into a canonical whitespace-free control code of at most 128 characters; arbitrary
+upstream machine-code strings are not copied directly into durable control state.
+
+A dedicated file-backed SQLite control store persists canonical checkpoints, append-only
+transitions, and health observations. It uses an explicit database marker, schema version,
+versioned worker leases with UUID fencing tokens, optimistic compare-and-swap, indexed-projection
+checks, and read-time contract validation. The fencing token is checked at the transition boundary
+and retained in append-only history. Lease TTL cannot exceed one hour. A per-job acquisition ledger
+rejects reuse of a previously claimed UUID, including after pause, failure, or lease expiry.
+Indexed timestamps are normalized to UTC, all persisted projections and computed summaries are
+validated against canonical records, health is ordered by checkpoint version rather than timestamp
+or observation ID, and the complete versioned DDL is checked before use. Schema installation is
+transactional. One checkpoint transition and its matching health observation commit atomically
+inside this control database. The transition history is durable, but a typed reader for that actor
+audit trail remains future tooling. The store enforces monotonic transition time and bounded TTL;
+the future orchestrator must source transition time from its injected trusted clock.
+
+This is control-state persistence only: it does not compose or start a collector, service,
+scheduler, or network request. A future orchestrator must write accepted order-flow evidence first
+and advance the checkpoint second. Because the evidence and control databases cannot commit
+atomically together, a crash may cause one retained leaf to be fetched again; the existing
+order-flow store must accept that replay idempotently. Advancing the checkpoint before evidence is
+durable is forbidden.
+
 ## Canonical Candle
 
 `CanonicalCandle` represents one final OHLCV interval. Every record includes:
@@ -255,9 +313,14 @@ automatically.
   1,000-row cap fails closed and USD-M history is limited to the latest 24 hours. Bounded range
   ingestion can split dense windows down to one millisecond, but it stops if that minimum still
   reaches the cap.
-- Public-trade range ingestion is invoked explicitly. It has no durable collection checkpoint,
-  automatic scheduling, continuous polling, or live gap recovery. Shared single-host request-budget
-  gating is available when explicitly composed and configured.
+- Public-trade range ingestion remains explicitly invoked. Durable bounded checkpoint and health
+  control state exists, but no application orchestration currently reads it to start or recover a
+  collector. Automatic scheduling, continuous polling, live WebSockets, and gap recovery remain
+  absent. Shared single-host request-budget gating is available when explicitly composed and
+  configured. Committed checkpoint counters do not durably reserve per-job attempts made before a
+  crash; that pre-request orchestration remains future work. Health history is available only
+  through bounded checkpoint-version pages; actor transition-history inspection does not yet have
+  a typed application port.
 - Each Binance provider request remains bounded to one already-closed window of at most 1,000
   candles; the application composes multiple requests into a bounded range.
 - No operating-system-managed scheduling, deployment, adaptive pacing, retry jitter, or live
