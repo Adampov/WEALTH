@@ -73,6 +73,14 @@ late-arriving or future data.
 The first real provider adapter can read already-closed Spot and USD-M Futures candles from
 Binance's public REST endpoints. It requires no API key and exposes no account or order capability.
 
+## Public Coinbase Candle Slice
+
+A second provider adapter can read already-closed Spot candles from Coinbase Exchange's public REST
+endpoint. It supports the canonical one-minute, five-minute, fifteen-minute, one-hour, and one-day
+timeframes with at most 300 candles per provider request. Documented pre-window rows are excluded
+from the requested canonical batch, while missing in-window buckets remain explicit quality
+failures rather than invented candles.
+
 Every response is normalized into the provider-independent candle contract and sent through the
 deterministic sequence-quality gate. Incomplete, conflicting, malformed, or time-inconsistent
 batches are reported and are not written to storage.
@@ -106,6 +114,7 @@ Included:
 - A first canonical candle contract and point-in-time replay boundary.
 - Deterministic candle-sequence quality reports and idempotent in-memory storage.
 - A bounded, public Binance REST adapter for closed Spot and USD-M Futures candles.
+- A bounded, public Coinbase Exchange adapter for closed Spot candles.
 - Fail-closed historical ingestion from provider response through the quality gate.
 - Bounded historical pagination, pacing, retry evidence, and safe resume boundaries.
 - Durable local SQLite storage for raw evidence, canonical candles, and conflict quarantine.
