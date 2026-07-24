@@ -44,11 +44,13 @@ Completed Phase 2 slices include:
 - Restart-safe idempotency, read-time revalidation, and canonical conflict quarantine.
 - Bounded historical pagination with contiguous pages and explicit request pacing.
 - Classified transient retries, bounded `Retry-After`, retry evidence, and safe resume boundaries.
+- Durable collection checkpoints with versioned worker leases and restart recovery.
+- Append-only page-level source-health evidence with query-efficient job summaries.
+- Streaming page planning that avoids materializing large bounded ranges.
 
-Phase 2 is not complete. Continuous collection, live streaming, durable collection checkpoints,
-shared rate-budget coordination, durable raw and canonical storage beyond the local SQLite
-baseline, source-health observability, reconnect policy, additional market-data schemas, and a
-second provider remain future tasks.
+Phase 2 is not complete. Continuous collection, live streaming, shared rate-budget coordination,
+durable raw and canonical storage beyond the local SQLite baseline, reconnect policy, additional
+market-data schemas, and a second provider remain future tasks.
 
 ## Phase 1 — Architecture and Engineering Foundation
 

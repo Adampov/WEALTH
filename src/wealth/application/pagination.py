@@ -1,5 +1,6 @@
 """Bounded historical candle pagination, pacing, and retries."""
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -156,33 +157,48 @@ class HistoricalCandlePagePlanner:
         self,
         request: HistoricalCandleRequest,
     ) -> tuple[HistoricalCandleRequest, ...]:
-        """Return deterministic pages without overlaps or gaps."""
+        """Return materialized pages for callers that need a stable snapshot."""
 
-        if request.expected_count > self.policy.max_total_candles:
-            raise HistoricalCandlePaginationError(
-                HistoricalCandlePaginationErrorCode.WINDOW_TOO_LARGE,
-                f"window exceeds {self.policy.max_total_candles} candles",
-            )
+        return tuple(self.iter_pages(request))
 
-        pages: list[HistoricalCandleRequest] = []
+    def page_count(self, request: HistoricalCandleRequest) -> int:
+        """Return the exact page count without allocating page requests."""
+
+        self._validate_request(request)
+        return (
+            request.expected_count + self.policy.page_size_candles - 1
+        ) // self.policy.page_size_candles
+
+    def iter_pages(
+        self,
+        request: HistoricalCandleRequest,
+    ) -> Iterator[HistoricalCandleRequest]:
+        """Yield deterministic pages without overlaps, gaps, or eager allocation."""
+
+        self._validate_request(request)
+
         page_start = request.window_start
         while page_start < request.window_end_exclusive:
             page_end = min(
                 page_start + self.policy.page_size_candles * request.timeframe.duration,
                 request.window_end_exclusive,
             )
-            pages.append(
-                HistoricalCandleRequest(
-                    instrument=request.instrument,
-                    provider_symbol=request.provider_symbol,
-                    instrument_type=request.instrument_type,
-                    timeframe=request.timeframe,
-                    window_start=page_start,
-                    window_end_exclusive=page_end,
-                )
+            yield HistoricalCandleRequest(
+                instrument=request.instrument,
+                provider_symbol=request.provider_symbol,
+                instrument_type=request.instrument_type,
+                timeframe=request.timeframe,
+                window_start=page_start,
+                window_end_exclusive=page_end,
             )
             page_start = page_end
-        return tuple(pages)
+
+    def _validate_request(self, request: HistoricalCandleRequest) -> None:
+        if request.expected_count > self.policy.max_total_candles:
+            raise HistoricalCandlePaginationError(
+                HistoricalCandlePaginationErrorCode.WINDOW_TOO_LARGE,
+                f"window exceeds {self.policy.max_total_candles} candles",
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,58 +267,25 @@ class HistoricalCandleRangeIngestionResult:
 
 
 @dataclass(frozen=True, slots=True)
-class PaginatedHistoricalCandleIngestor:
-    """Ingest a bounded range page-by-page with explicit retry policy."""
+class RetriedHistoricalCandlePageIngestor:
+    """Ingest exactly one page with bounded, observable retry behavior."""
 
-    source: HistoricalCandleSource
-    store: CandleStore
+    ingestor: HistoricalCandleIngestor
     sleeper: Sleeper
-    pagination_policy: HistoricalCandlePaginationPolicy = field(
-        default_factory=HistoricalCandlePaginationPolicy
-    )
     retry_policy: HistoricalCandleRetryPolicy = field(default_factory=HistoricalCandleRetryPolicy)
-    auditor: CandleSequenceAuditor = field(default_factory=CandleSequenceAuditor)
 
-    def ingest(self, request: HistoricalCandleRequest) -> HistoricalCandleRangeIngestionResult:
-        """Stop on the first failed page and retain an exact resume boundary."""
-
-        planned_pages = HistoricalCandlePagePlanner(self.pagination_policy).plan(request)
-        page_results: list[HistoricalCandlePageIngestionResult] = []
-        single_page_ingestor = HistoricalCandleIngestor(
-            source=self.source,
-            store=self.store,
-            auditor=self.auditor,
-        )
-
-        for page_index, page_request in enumerate(planned_pages):
-            page_result = self._ingest_page(
-                ingestor=single_page_ingestor,
-                request=page_request,
-            )
-            page_results.append(page_result)
-            if not page_result.accepted:
-                break
-            if page_index < len(planned_pages) - 1:
-                self.sleeper.sleep(self.pagination_policy.inter_page_delay_seconds)
-
-        return HistoricalCandleRangeIngestionResult(
-            request=request,
-            planned_page_count=len(planned_pages),
-            pages=tuple(page_results),
-        )
-
-    def _ingest_page(
+    def ingest(
         self,
-        *,
-        ingestor: HistoricalCandleIngestor,
         request: HistoricalCandleRequest,
     ) -> HistoricalCandlePageIngestionResult:
+        """Return one terminal page outcome and every applied retry delay."""
+
         attempts = 0
         retry_delays: list[float] = []
         while True:
             attempts += 1
             try:
-                ingestion = ingestor.ingest(request)
+                ingestion = self.ingestor.ingest(request)
             except HistoricalCandleSourceError as error:
                 delay = self.retry_policy.delay_after(
                     failed_attempt=attempts,
@@ -337,3 +320,47 @@ class PaginatedHistoricalCandleIngestor:
                 retry_delays_seconds=tuple(retry_delays),
                 ingestion=ingestion,
             )
+
+
+@dataclass(frozen=True, slots=True)
+class PaginatedHistoricalCandleIngestor:
+    """Ingest a bounded range page-by-page with explicit retry policy."""
+
+    source: HistoricalCandleSource
+    store: CandleStore
+    sleeper: Sleeper
+    pagination_policy: HistoricalCandlePaginationPolicy = field(
+        default_factory=HistoricalCandlePaginationPolicy
+    )
+    retry_policy: HistoricalCandleRetryPolicy = field(default_factory=HistoricalCandleRetryPolicy)
+    auditor: CandleSequenceAuditor = field(default_factory=CandleSequenceAuditor)
+
+    def ingest(self, request: HistoricalCandleRequest) -> HistoricalCandleRangeIngestionResult:
+        """Stop on the first failed page and retain an exact resume boundary."""
+
+        planner = HistoricalCandlePagePlanner(self.pagination_policy)
+        planned_page_count = planner.page_count(request)
+        page_results: list[HistoricalCandlePageIngestionResult] = []
+        page_ingestor = RetriedHistoricalCandlePageIngestor(
+            ingestor=HistoricalCandleIngestor(
+                source=self.source,
+                store=self.store,
+                auditor=self.auditor,
+            ),
+            sleeper=self.sleeper,
+            retry_policy=self.retry_policy,
+        )
+
+        for page_index, page_request in enumerate(planner.iter_pages(request)):
+            page_result = page_ingestor.ingest(page_request)
+            page_results.append(page_result)
+            if not page_result.accepted:
+                break
+            if page_index < planned_page_count - 1:
+                self.sleeper.sleep(self.pagination_policy.inter_page_delay_seconds)
+
+        return HistoricalCandleRangeIngestionResult(
+            request=request,
+            planned_page_count=planned_page_count,
+            pages=tuple(page_results),
+        )

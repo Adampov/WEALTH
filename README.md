@@ -87,9 +87,12 @@ application flow can split a larger range into contiguous pages, pace requests, 
 classified transient failures, honor a bounded `Retry-After`, and stop at the first failed page
 with an exact resume boundary. One invocation is capped at 100,000 candles.
 
-This is an operator-invoked historical flow, not a continuous collector. Shared IP-rate-budget
-tracking, durable job checkpoints, automatic scheduling, and live WebSocket ingestion remain
-future tasks.
+Operator-invoked collection jobs can persist their cursor in a dedicated SQLite control database.
+Versioned worker leases prevent duplicate advancement, accepted pages checkpoint independently,
+and page attempts produce append-only source-health evidence. Recovery deliberately refetches a
+page when a process stops after storing market evidence but before advancing its checkpoint; the
+market store handles that repeat idempotently. This is not a continuous collector. Shared
+IP-rate-budget tracking, automatic scheduling, and live WebSocket ingestion remain future tasks.
 
 ## Current Scope
 
@@ -106,13 +109,14 @@ Included:
 - Fail-closed historical ingestion from provider response through the quality gate.
 - Bounded historical pagination, pacing, retry evidence, and safe resume boundaries.
 - Durable local SQLite storage for raw evidence, canonical candles, and conflict quarantine.
+- Durable collection checkpoints, worker leases, crash recovery, and source-health summaries.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:
 
 - Private exchange or account access.
 - Continuous or live-streaming market-data collection.
-- Automatic historical collection scheduling and durable job checkpoints.
+- Automatic historical collection scheduling.
 - Shared IP-rate-budget coordination across processes.
 - Trading strategies.
 - AI model integration.

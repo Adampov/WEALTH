@@ -1,7 +1,7 @@
 """Tests for bounded historical candle planning and retry policy."""
 
 from datetime import UTC, datetime, timedelta
-from itertools import pairwise
+from itertools import islice, pairwise
 
 import pytest
 from hypothesis import given
@@ -94,6 +94,26 @@ def test_page_planner_rejects_unbounded_work_before_fetching() -> None:
         planner.plan(request(6))
 
     assert error.value.code is HistoricalCandlePaginationErrorCode.WINDOW_TOO_LARGE
+
+
+def test_large_page_plan_can_be_streamed_without_materializing_all_pages() -> None:
+    planner = HistoricalCandlePagePlanner(
+        HistoricalCandlePaginationPolicy(
+            page_size_candles=1,
+            max_total_candles=100_000,
+            inter_page_delay_seconds=0,
+        )
+    )
+    large_request = request(100_000)
+
+    first_three = tuple(islice(planner.iter_pages(large_request), 3))
+
+    assert planner.page_count(large_request) == 100_000
+    assert [page.window_start for page in first_three] == [
+        WINDOW_START,
+        WINDOW_START + timedelta(minutes=1),
+        WINDOW_START + timedelta(minutes=2),
+    ]
 
 
 @pytest.mark.parametrize(
