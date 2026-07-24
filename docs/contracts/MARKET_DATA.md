@@ -112,11 +112,36 @@ reported and not written to storage. A passing batch persists its exact raw resp
 records together. A storage conflict makes the ingestion result unaccepted and remains explicit in
 the write outcomes and conflict quarantine.
 
+## Bounded Historical Pagination and Retry
+
+`PaginatedHistoricalCandleIngestor` extends the single-window flow without changing the provider
+or canonical candle contracts. It:
+
+- Plans deterministic, contiguous pages with no overlap or gap.
+- Keeps every provider request at or below 1,000 candles.
+- Rejects one invocation above 100,000 candles before making a source request.
+- Applies an explicit delay between successful pages.
+- Retries only source failures classified as transient.
+- Uses bounded exponential delays when the provider does not supply `Retry-After`.
+- Honors `Retry-After` only when it is within the configured and hard safety bounds.
+- Stops when a rate-limit response omits a usable `Retry-After`, rather than guessing a wait.
+- Records attempts, retry delays, and the terminal retry stop reason in the page result.
+- Never retries malformed payloads, invalid requests, unsupported instruments, quality failures, or
+  storage conflicts.
+- Stops at the first unaccepted page and returns its start time as the exact resume boundary.
+
+Each passing page is quality-gated and stored transactionally before the next page begins. The
+whole range is intentionally not one database transaction: completed pages remain durable after a
+later source failure, and replaying them is idempotent. No current entry point starts this flow
+automatically.
+
 ## Current Limitations
 
 - Only final candles are modeled.
-- Binance reads are bounded to one already-closed window of at most 1,000 candles.
-- No pagination, automatic retry/backoff, scheduled collection, or live WebSocket stream exists.
+- Each Binance provider request remains bounded to one already-closed window of at most 1,000
+  candles; the application composes multiple requests into a bounded range.
+- No automatic scheduling, durable collection-job checkpoint, shared IP-rate-budget coordinator,
+  adaptive pacing, retry jitter, or live WebSocket stream exists.
 - No instrument catalog or governed provider-symbol mapping exists yet.
 - No governed correction stream or cross-source reconciliation exists yet.
 - Durable storage is local SQLite only; backup, retention, compaction, distributed operation, and

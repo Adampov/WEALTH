@@ -202,8 +202,30 @@ def test_rate_limit_preserves_retry_after_without_parsing_untrusted_body() -> No
         source(http).fetch(request())
 
     assert error.value.code is BinanceCandleErrorCode.RATE_LIMITED
+    assert error.value.retryable is True
     assert error.value.retry_after_seconds == 17
     assert "untrusted provider text" not in str(error.value)
+
+
+@pytest.mark.parametrize("retry_after", [None, "not-a-number", "9" * 100])
+def test_rate_limit_with_unusable_retry_after_fails_without_automatic_retry(
+    retry_after: str | None,
+) -> None:
+    headers = () if retry_after is None else (("Retry-After", retry_after),)
+    http = StubHttpClient(
+        HttpResponse(
+            status_code=429,
+            headers=headers,
+            body=b'{"code":-1003,"msg":"untrusted provider text"}',
+        )
+    )
+
+    with pytest.raises(BinanceCandleError) as error:
+        source(http).fetch(request())
+
+    assert error.value.code is BinanceCandleErrorCode.RATE_LIMITED
+    assert error.value.retryable is False
+    assert error.value.retry_after_seconds is None
 
 
 def test_transport_failure_is_classified_without_network_details() -> None:
@@ -213,6 +235,7 @@ def test_transport_failure_is_classified_without_network_details() -> None:
         source(http).fetch(request())
 
     assert error.value.code is BinanceCandleErrorCode.TRANSPORT_FAILURE
+    assert error.value.retryable is True
     assert "sensitive network detail" not in str(error.value)
 
 
@@ -231,6 +254,7 @@ def test_malformed_provider_payload_fails_closed(body: bytes) -> None:
         source(http).fetch(request())
 
     assert error.value.code is BinanceCandleErrorCode.INVALID_PAYLOAD
+    assert error.value.retryable is False
 
 
 def test_provider_interval_mismatch_fails_closed() -> None:

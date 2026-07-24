@@ -14,6 +14,13 @@ class Clock(Protocol):
         """Return the current timezone-aware timestamp."""
 
 
+class Sleeper(Protocol):
+    """Delay retryable work behind an injectable boundary."""
+
+    def sleep(self, seconds: float) -> None:
+        """Block for a finite, non-negative duration."""
+
+
 class IdGenerator(Protocol):
     """Create unique identifiers behind an injectable boundary."""
 

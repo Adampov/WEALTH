@@ -14,7 +14,11 @@ from pydantic import ValidationError
 from wealth.domain.market import CanonicalCandle, InstrumentType, RawMarketPayload
 from wealth.ports.foundation import Clock
 from wealth.ports.http import HttpResponse, HttpTransportError, PublicHttpClient
-from wealth.ports.market import CandleFetchBatch, HistoricalCandleRequest
+from wealth.ports.market import (
+    CandleFetchBatch,
+    HistoricalCandleRequest,
+    HistoricalCandleSourceError,
+)
 
 BINANCE_SOURCE = "binance.public-rest"
 BINANCE_VENUE = "BINANCE"
@@ -37,7 +41,7 @@ class BinanceCandleErrorCode(StrEnum):
     INVALID_PAYLOAD = "invalid_payload"
 
 
-class BinanceCandleError(RuntimeError):
+class BinanceCandleError(HistoricalCandleSourceError):
     """Fail explicitly when Binance data cannot become canonical records."""
 
     def __init__(
@@ -46,10 +50,20 @@ class BinanceCandleError(RuntimeError):
         detail: str,
         *,
         retry_after_seconds: int | None = None,
+        retryable: bool | None = None,
     ) -> None:
         self.code = code
-        self.retry_after_seconds = retry_after_seconds
-        super().__init__(f"{code.value}: {detail}")
+        default_retryable = code in {
+            BinanceCandleErrorCode.TRANSPORT_FAILURE,
+            BinanceCandleErrorCode.RATE_LIMITED,
+            BinanceCandleErrorCode.PROVIDER_UNAVAILABLE,
+        }
+        super().__init__(
+            code.value,
+            detail,
+            retryable=default_retryable if retryable is None else retryable,
+            retry_after_seconds=retry_after_seconds,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +242,7 @@ class BinancePublicCandleSource:
                 BinanceCandleErrorCode.RATE_LIMITED,
                 f"Binance returned HTTP {response.status_code}",
                 retry_after_seconds=retry_after,
+                retryable=retry_after is not None,
             )
         if 500 <= response.status_code <= 599:
             raise BinanceCandleError(
@@ -419,7 +434,7 @@ def _from_epoch_milliseconds(value: int) -> datetime:
 
 
 def _nonnegative_integer(value: str | None) -> int | None:
-    if value is None or not value.isdecimal():
+    if value is None or len(value) > 10 or not value.isascii() or not value.isdecimal():
         return None
     parsed = int(value)
     return parsed if parsed >= 0 else None

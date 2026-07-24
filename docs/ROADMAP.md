@@ -42,10 +42,13 @@ Completed Phase 2 slices include:
 - Fail-closed historical ingestion through the quality gate before storage.
 - File-backed SQLite storage for exact raw provider evidence and canonical candles.
 - Restart-safe idempotency, read-time revalidation, and canonical conflict quarantine.
+- Bounded historical pagination with contiguous pages and explicit request pacing.
+- Classified transient retries, bounded `Retry-After`, retry evidence, and safe resume boundaries.
 
-Phase 2 is not complete. Pagination, continuous collection, live streaming, durable raw and
-canonical storage beyond the local SQLite baseline, source-health observability, reconnect/backoff
-policy, additional market-data schemas, and a second provider remain future tasks.
+Phase 2 is not complete. Continuous collection, live streaming, durable collection checkpoints,
+shared rate-budget coordination, durable raw and canonical storage beyond the local SQLite
+baseline, source-health observability, reconnect policy, additional market-data schemas, and a
+second provider remain future tasks.
 
 ## Phase 1 — Architecture and Engineering Foundation
 

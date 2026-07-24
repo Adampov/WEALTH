@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-24
 - **Decision owners:** Project owner, Market Data Department, and Engineering Department
+- **Extended by:** `0006-historical-candle-pagination-and-retry.md`
 
 ## Context
 
