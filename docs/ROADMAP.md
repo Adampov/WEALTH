@@ -52,10 +52,14 @@ Completed Phase 2 slices include:
 - A second public provider adapter for bounded Coinbase Exchange Spot candles.
 - Provider-specific range, timeframe, ordering, precision, and sparse-interval handling behind the
   shared canonical candle boundary.
+- Deterministic selected-window reconciliation across two quality-audited candle streams.
+- Explicit missing-source evidence, symmetric basis-point differences, and versioned price and
+  optional volume tolerances.
 
 Phase 2 is not complete. Continuous collection, live streaming, multi-host rate-budget
 coordination, durable raw and canonical storage beyond the local SQLite baseline, reconnect policy,
-additional market-data schemas, and cross-provider operational comparison remain future tasks.
+additional market-data schemas, persisted reconciliation history, and operational dashboards and
+alerts remain future tasks.
 
 ## Phase 1 — Architecture and Engineering Foundation
 
