@@ -28,3 +28,4 @@ Each ADR records the context, decision, consequences, alternatives, and follow-u
 - `0013-durable-collector-service-lifecycle.md`
 - `0014-collector-service-health-monitoring.md`
 - `0015-read-only-collector-health-cli.md`
+- `0016-canonical-order-flow-contracts.md`

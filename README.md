@@ -141,6 +141,12 @@ structured critical alerts; paused runs produce a warning. The default ten-minut
 is longer than the collector's maximum bounded wait. These alerts remain internal data contracts:
 no message is sent and no process is restarted automatically.
 
+The next market-structure boundary defines strict canonical trades, last-price tickers, and
+best-bid-ask snapshots. It preserves provider identity, event/observation/processing time, exact
+decimal values, sequences, and lineage. Aggressor side can remain explicitly unknown, optional
+ticker statistics require a declared window, and locked or crossed top-of-book snapshots fail
+closed. These are contracts only; no live order-flow adapter or trading action is present.
+
 Operators and monitoring tools can read that state through a dedicated JSON command:
 
 ```text
@@ -180,6 +186,7 @@ Included:
   reasons.
 - Queryable collector health reports with stale-run detection and structured internal alerts.
 - A read-only JSON collector-health command with monitoring-compatible exit codes.
+- Strict canonical trade, ticker, and best-bid-ask contracts with point-in-time lineage.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:

@@ -65,6 +65,8 @@ Completed Phase 2 slices include:
 - Structured internal warning and critical alerts for paused, failed, and stale collector runs.
 - A read-only JSON collector-health command with explicit OK, warning, critical, and unknown exits.
 - Missing-path, invalid-input, stale, paused, and read-only enforcement tests for operator queries.
+- Canonical trade, ticker, and best-bid-ask contracts with exact decimal values and lineage.
+- Point-in-time, aggressor-side, ticker-window, and uncrossed top-of-book invariant tests.
 
 Phase 2 is not complete. Operating-system service deployment, live streaming, multi-host
 rate-budget coordination, durable raw and canonical storage beyond the local SQLite baseline,
