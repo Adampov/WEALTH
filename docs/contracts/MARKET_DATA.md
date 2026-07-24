@@ -1,11 +1,35 @@
-# Market Data Contract — First Slice
+# Market Data Contract — Phase 2 Foundation
 
 ## Purpose
 
-This contract establishes the first provider-independent market-data record and the point-in-time
-boundary required for honest research, replay, and backtesting.
+This contract establishes provider-independent market-data records and the point-in-time boundary
+required for honest research, replay, and backtesting.
 
 It does not define a trading strategy and does not connect to an exchange.
+
+## Canonical Order-Flow Foundation
+
+`CanonicalTrade`, `CanonicalTicker`, and `CanonicalBestBidAsk` establish the provider-independent
+target for future public trade and market-structure adapters.
+
+All three retain source, venue, canonical instrument, instrument type, exchange event time, local
+observation time, processing time, optional provider sequence, exact decimal values, and lineage.
+Event time cannot follow observation, and observation cannot follow processing.
+
+Canonical trades require provider identity, positive price and quantity, and an explicit aggressor
+side of buy, sell, or unknown. Optional provider quote quantity remains separate from the exact
+locally calculated notional.
+
+Canonical tickers always contain a positive last price. Optional rolling-window statistics are
+accepted only with an explicit valid window; supplied high and low must contain last price and any
+supplied window open.
+
+Canonical best-bid-ask snapshots require positive displayed quantities and a best bid strictly
+below best ask. Exact spread, midpoint, and spread basis points are derived from the accepted
+decimal prices.
+
+These contracts do not yet have provider adapters, durable storage, quality auditing, replay, or
+live-stream orchestration.
 
 ## Canonical Candle
 
@@ -137,7 +161,8 @@ automatically.
 
 ## Current Limitations
 
-- Only final candles are modeled.
+- Final candles are implemented end to end. Trade, ticker, and best-bid-ask records currently have
+  strict contracts and tests but no provider adapter, storage, quality gate, or replay path.
 - Each Binance provider request remains bounded to one already-closed window of at most 1,000
   candles; the application composes multiple requests into a bounded range.
 - No operating-system-managed scheduling, deployment, adaptive pacing, retry jitter, or live
@@ -154,4 +179,4 @@ automatically.
   large-scale analytical storage remain future work.
 - Malformed or rejected provider responses are not yet retained under a governed failure-evidence
   policy.
-- Trades, ticker, order book, funding, open interest, and liquidation schemas remain future work.
+- Full-depth order books, funding, open interest, and liquidation schemas remain future work.
