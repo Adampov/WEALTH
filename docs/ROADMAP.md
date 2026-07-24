@@ -61,10 +61,13 @@ Completed Phase 2 slices include:
 - Planned disconnect, bounded reconnect, operator pause, and restart-recovery fault tests.
 - Interruptible local collector service runs with bounded cycles and durable lifecycle heartbeats.
 - Explicit clean-stop, run-limit, pause, competing-worker, restart, and corrupt-heartbeat tests.
+- Queryable newest-first service health with configurable stale-heartbeat detection.
+- Structured internal warning and critical alerts for paused, failed, and stale collector runs.
 
 Phase 2 is not complete. Operating-system service deployment, live streaming, multi-host
 rate-budget coordination, durable raw and canonical storage beyond the local SQLite baseline,
-additional market-data schemas, and operational dashboards and alerts remain future tasks.
+additional market-data schemas, operational dashboards, and external alert delivery remain future
+tasks.
 
 ## Phase 1 — Architecture and Engineering Foundation
 

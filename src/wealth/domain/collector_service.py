@@ -1,6 +1,7 @@
 """Durable lifecycle evidence for the continuous collector service."""
 
 from enum import StrEnum
+from itertools import pairwise
 from typing import Literal, Self
 from uuid import UUID
 
@@ -131,6 +132,170 @@ class CollectorServiceHeartbeatQuery(BaseModel):
 
     run_id: UUID
     limit: int = Field(default=100, ge=1, le=1_000)
+
+
+class CollectorServiceRunQuery(BaseModel):
+    """Bounded newest-first current-run query for one collection."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    collection_id: UUID
+    limit: int = Field(default=100, ge=1, le=1_000)
+
+
+class CollectorServiceHealthStatus(StrEnum):
+    """Operational interpretation of one run's latest heartbeat."""
+
+    ACTIVE = "active"
+    STALE = "stale"
+    STOPPED = "stopped"
+    PAUSED = "paused"
+    FAILED = "failed"
+    COMPLETED = "completed"
+
+
+class CollectorServiceAlertSeverity(StrEnum):
+    """Machine-readable urgency for internal operational alerts."""
+
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+
+class CollectorServiceHealthAssessment(BaseModel):
+    """Freshness and alert interpretation for one latest run heartbeat."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    schema_version: Literal["1.0"] = "1.0"
+    heartbeat: CollectorServiceHeartbeat
+    evaluated_at: AwareDatetime
+    heartbeat_age_seconds: float = Field(ge=0)
+    health_status: CollectorServiceHealthStatus
+    alert_code: str | None = Field(default=None, min_length=1, max_length=128)
+    alert_severity: CollectorServiceAlertSeverity | None = None
+
+    @field_validator("alert_code")
+    @classmethod
+    def alert_code_is_canonical(cls, value: str | None) -> str | None:
+        """Keep alert routing keys safe for logs, metrics, and future adapters."""
+
+        if value is not None and (
+            value != value.strip() or any(character.isspace() for character in value)
+        ):
+            raise ValueError("collector service alert code must not contain whitespace")
+        return value
+
+    @model_validator(mode="after")
+    def assessment_matches_heartbeat(self) -> Self:
+        """Tie freshness, lifecycle meaning, and alert urgency together."""
+
+        if self.evaluated_at < self.heartbeat.observed_at:
+            raise ValueError("health evaluation cannot precede its heartbeat")
+        expected_age = (self.evaluated_at - self.heartbeat.observed_at).total_seconds()
+        if abs(self.heartbeat_age_seconds - expected_age) > 1e-9:
+            raise ValueError("heartbeat age must match its evaluation time")
+
+        active_statuses = {
+            CollectorServiceStatus.STARTING,
+            CollectorServiceStatus.RUNNING,
+        }
+        if self.heartbeat.status in active_statuses:
+            if self.health_status not in {
+                CollectorServiceHealthStatus.ACTIVE,
+                CollectorServiceHealthStatus.STALE,
+            }:
+                raise ValueError("nonterminal heartbeat must be active or stale")
+        else:
+            expected_health = {
+                CollectorServiceStatus.STOPPED: CollectorServiceHealthStatus.STOPPED,
+                CollectorServiceStatus.PAUSED: CollectorServiceHealthStatus.PAUSED,
+                CollectorServiceStatus.FAILED: CollectorServiceHealthStatus.FAILED,
+                CollectorServiceStatus.CYCLE_LIMIT: CollectorServiceHealthStatus.COMPLETED,
+            }[self.heartbeat.status]
+            if self.health_status is not expected_health:
+                raise ValueError("terminal heartbeat health status does not match lifecycle")
+
+        expected_alert = {
+            CollectorServiceHealthStatus.STALE: (
+                "heartbeat_stale",
+                CollectorServiceAlertSeverity.CRITICAL,
+            ),
+            CollectorServiceHealthStatus.PAUSED: (
+                "collector_paused",
+                CollectorServiceAlertSeverity.WARNING,
+            ),
+            CollectorServiceHealthStatus.FAILED: (
+                "collector_failed",
+                CollectorServiceAlertSeverity.CRITICAL,
+            ),
+        }.get(self.health_status)
+        if expected_alert is None:
+            if self.alert_code is not None or self.alert_severity is not None:
+                raise ValueError("healthy or expected terminal state cannot emit an alert")
+        elif (self.alert_code, self.alert_severity) != expected_alert:
+            raise ValueError("collector service alert does not match its health status")
+        return self
+
+
+class CollectorServiceHealthReportStatus(StrEnum):
+    """Overall state for a bounded collection run-health report."""
+
+    NOT_STARTED = "not_started"
+    HEALTHY = "healthy"
+    IDLE = "idle"
+    ATTENTION_REQUIRED = "attention_required"
+
+
+class CollectorServiceHealthReport(BaseModel):
+    """Newest-first health assessments and their aggregate operational state."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    schema_version: Literal["1.0"] = "1.0"
+    collection_id: UUID
+    evaluated_at: AwareDatetime
+    status: CollectorServiceHealthReportStatus
+    assessments: tuple[CollectorServiceHealthAssessment, ...]
+
+    @model_validator(mode="after")
+    def report_is_consistent(self) -> Self:
+        """Reject mixed collections, duplicate runs, or incorrect aggregate state."""
+
+        if any(
+            assessment.heartbeat.collection_id != self.collection_id
+            or assessment.evaluated_at != self.evaluated_at
+            for assessment in self.assessments
+        ):
+            raise ValueError("health report assessments must share collection and evaluation time")
+        run_ids = tuple(assessment.heartbeat.run_id for assessment in self.assessments)
+        if len(run_ids) != len(set(run_ids)):
+            raise ValueError("health report cannot contain duplicate service runs")
+        heartbeat_times = tuple(assessment.heartbeat.observed_at for assessment in self.assessments)
+        if any(current > previous for previous, current in pairwise(heartbeat_times)):
+            raise ValueError("health report assessments must be newest first")
+
+        if not self.assessments:
+            expected = CollectorServiceHealthReportStatus.NOT_STARTED
+        elif any(assessment.alert_code is not None for assessment in self.assessments):
+            expected = CollectorServiceHealthReportStatus.ATTENTION_REQUIRED
+        elif any(
+            assessment.health_status is CollectorServiceHealthStatus.ACTIVE
+            for assessment in self.assessments
+        ):
+            expected = CollectorServiceHealthReportStatus.HEALTHY
+        else:
+            expected = CollectorServiceHealthReportStatus.IDLE
+        if self.status is not expected:
+            raise ValueError("health report aggregate status does not match its assessments")
+        return self
+
+    @property
+    def alerts(self) -> tuple[CollectorServiceHealthAssessment, ...]:
+        """Return only assessments that require internal operational attention."""
+
+        return tuple(
+            assessment for assessment in self.assessments if assessment.alert_code is not None
+        )
 
 
 def validate_collector_service_transition(

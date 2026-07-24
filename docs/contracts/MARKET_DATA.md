@@ -143,6 +143,8 @@ automatically.
 - No operating-system-managed scheduling, deployment, adaptive pacing, retry jitter, or live
   WebSocket stream exists. Durable bounded and continuous checkpoints, a local interruptible
   service lifecycle, and shared single-host request-budget coordination are available.
+- Collector lifecycle health and internal alert codes are queryable, but external delivery,
+  acknowledgement, escalation, and automatic remediation are not implemented.
 - No instrument catalog or governed provider-symbol mapping exists yet.
 - Selected-window cross-source reconciliation and durable audit history exist, but no governed
   correction stream, automatic source ranking, or remediation workflow exists yet.

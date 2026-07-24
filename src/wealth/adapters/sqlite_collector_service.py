@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from wealth.domain.collector_service import (
     CollectorServiceHeartbeat,
     CollectorServiceHeartbeatQuery,
+    CollectorServiceRunQuery,
     CollectorServiceStatus,
     validate_collector_service_transition,
 )
@@ -235,6 +236,36 @@ class SQLiteCollectorServiceHeartbeatStore:
             raise
         except sqlite3.DatabaseError as error:
             raise self._storage_failure("collector service history read failed") from error
+
+    def recent_runs(
+        self,
+        query: CollectorServiceRunQuery,
+    ) -> tuple[CollectorServiceHeartbeat, ...]:
+        """Return validated newest-first current heartbeats for one collection."""
+
+        try:
+            with closing(self._connect()) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT run_id, collection_id, worker_id, sequence, status,
+                           observed_at, record_json
+                    FROM collector_service_runs
+                    WHERE collection_id = ?
+                    ORDER BY julianday(observed_at) DESC, rowid DESC
+                    LIMIT ?
+                    """,
+                    (str(query.collection_id), query.limit),
+                ).fetchall()
+            records = tuple(self._heartbeat_from_row(row) for row in rows)
+            if any(record.collection_id != query.collection_id for record in records):
+                raise self._corrupt_record(
+                    "collector service run query returned a different collection"
+                )
+            return records
+        except SQLiteCollectorServiceStorageError:
+            raise
+        except sqlite3.DatabaseError as error:
+            raise self._storage_failure("collector service run query failed") from error
 
     def _initialize_schema(self) -> None:
         try:
