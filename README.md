@@ -129,6 +129,12 @@ unsupported failures or a configured consecutive-failure limit pause the stream 
 review. Manual pause also blocks new network work until explicit resume. This is an application
 workflow, not an automatically started daemon.
 
+An interruptible local service runner can now invoke those cycles repeatedly under an explicit
+run limit. A stop request wakes polling waits immediately, and each invocation stores validated
+startup, cycle, pause, failure, stop, or run-limit evidence in append-only SQLite history. Restart
+creates a new service run audit trail while retaining the existing continuous market cursor. This
+is a process-lifecycle boundary, not an installed operating-system service or 24/7 deployment.
+
 Shared request-budget coordination can prevent cooperating processes on one host from exceeding an
 explicit combined budget before network access. Multi-host coordination, automatic scheduling, and
 live WebSocket ingestion remain future tasks.
@@ -154,12 +160,14 @@ Included:
 - Deterministic cross-source candle reconciliation with explicit tolerances and missing evidence.
 - Append-only reconciliation history with bounded source-quality and issue-code summaries.
 - Supervised closed-candle polling with durable cursors, bounded reconnects, and restart recovery.
+- Interruptible local collector runs with durable lifecycle heartbeats and explicit terminal
+  reasons.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:
 
 - Private exchange or account access.
-- An automatically started collection daemon or live WebSocket ingestion.
+- An automatically started operating-system service, deployment, or live WebSocket ingestion.
 - Automatic historical collection scheduling.
 - Multi-host request-budget coordination.
 - Automatic source ranking, price blending, or cross-quote conversion.

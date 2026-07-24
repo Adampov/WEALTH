@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from math import isfinite
+from threading import Event
 from time import sleep
 from uuid import UUID, uuid4
 
@@ -56,3 +57,27 @@ class Uuid4Generator:
         """Return a random UUID."""
 
         return uuid4()
+
+
+@dataclass(slots=True)
+class ThreadingShutdownSignal:
+    """Allow another thread or future OS-signal adapter to wake service waits."""
+
+    _event: Event = field(default_factory=Event)
+
+    def request(self) -> None:
+        """Request graceful shutdown idempotently."""
+
+        self._event.set()
+
+    def requested(self) -> bool:
+        """Return whether shutdown was requested."""
+
+        return self._event.is_set()
+
+    def wait(self, timeout_seconds: float) -> bool:
+        """Wait interruptibly for a finite non-negative timeout."""
+
+        if not isfinite(timeout_seconds) or timeout_seconds < 0:
+            raise ValueError("shutdown wait must be finite and non-negative")
+        return self._event.wait(timeout_seconds)

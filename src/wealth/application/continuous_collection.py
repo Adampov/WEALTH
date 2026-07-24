@@ -218,6 +218,11 @@ class SupervisedContinuousCandleCollector:
             raise RuntimeError("continuous collection identifier conflicted with durable state")
         return checkpoint
 
+    def checkpoint(self, collection_id: UUID) -> ContinuousCollectionCheckpoint:
+        """Return the current validated cursor for service orchestration."""
+
+        return self._get(collection_id)
+
     def run(
         self,
         collection_id: UUID,
