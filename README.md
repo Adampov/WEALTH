@@ -93,6 +93,13 @@ Reconciliation requires the same exact canonical instrument, instrument type, an
 `pass`, `divergent`, or `blocked`; the report does not choose a true provider, blend prices, repair
 records, or authorize a trade.
 
+Reconciliation reports can be wrapped as immutable observations and appended to a dedicated local
+SQLite history database. Exact repeats are idempotent, while reused observation identities or
+comparison keys with different source streams fail explicitly. Bounded queries reload and
+revalidate the original evidence. Indexed summaries expose pass, divergence, blocked,
+source-quality-failure, compared-interval, and issue-code counts for one comparison series and time
+window. This evidence layer does not rank providers, trigger alerts, or make trading decisions.
+
 Every response is normalized into the provider-independent candle contract and sent through the
 deterministic sequence-quality gate. Incomplete, conflicting, malformed, or time-inconsistent
 batches are reported and are not written to storage.
@@ -135,6 +142,7 @@ Included:
 - Durable collection checkpoints, worker leases, crash recovery, and source-health summaries.
 - Weighted shared request budgets with idempotent reservations and observable local backpressure.
 - Deterministic cross-source candle reconciliation with explicit tolerances and missing evidence.
+- Append-only reconciliation history with bounded source-quality and issue-code summaries.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:
@@ -144,6 +152,7 @@ Not included:
 - Automatic historical collection scheduling.
 - Multi-host request-budget coordination.
 - Automatic source ranking, price blending, or cross-quote conversion.
+- Reconciliation dashboards, alerting, or automatic remediation.
 - Trading strategies.
 - AI model integration.
 - Portfolio, risk, or order execution.

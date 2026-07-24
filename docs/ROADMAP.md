@@ -55,11 +55,12 @@ Completed Phase 2 slices include:
 - Deterministic selected-window reconciliation across two quality-audited candle streams.
 - Explicit missing-source evidence, symmetric basis-point differences, and versioned price and
   optional volume tolerances.
+- Append-only local reconciliation history with idempotent writes and read-time validation.
+- Bounded per-series reconciliation, source-quality, compared-interval, and issue-code metrics.
 
 Phase 2 is not complete. Continuous collection, live streaming, multi-host rate-budget
 coordination, durable raw and canonical storage beyond the local SQLite baseline, reconnect policy,
-additional market-data schemas, persisted reconciliation history, and operational dashboards and
-alerts remain future tasks.
+additional market-data schemas, and operational dashboards and alerts remain future tasks.
 
 ## Phase 1 — Architecture and Engineering Foundation
 
