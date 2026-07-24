@@ -102,6 +102,12 @@ delays, and accepted `Retry-After` values all have explicit finite policy bounds
 attempt consumes the request budget. Retry is limited to failures explicitly classified as
 transient and is never started after that budget is exhausted.
 
+`RateBudgetedPublicTradeSource` can additionally reserve durable weighted capacity before every
+delegated request. A local denial returns bounded retry evidence without network access and enters
+the same range retry and trace path. Binance Spot aggregate trades use documented request cost 4;
+USD-M aggregate trades use cost 20. Capacity, period, cost, database, and shared budget key remain
+explicit deployment configuration.
+
 Every complete window passes through the order-flow quality and storage gate before the next
 window. Successful earlier windows remain durable if a later source, density, record, quality, or
 storage boundary stops the run. The result retains typed traces for splits, retries, ingestion, and
@@ -250,7 +256,8 @@ automatically.
   ingestion can split dense windows down to one millisecond, but it stops if that minimum still
   reaches the cap.
 - Public-trade range ingestion is invoked explicitly. It has no durable collection checkpoint,
-  automatic scheduling, continuous polling, shared request budget, or live gap recovery.
+  automatic scheduling, continuous polling, or live gap recovery. Shared single-host request-budget
+  gating is available when explicitly composed and configured.
 - Each Binance provider request remains bounded to one already-closed window of at most 1,000
   candles; the application composes multiple requests into a bounded range.
 - No operating-system-managed scheduling, deployment, adaptive pacing, retry jitter, or live

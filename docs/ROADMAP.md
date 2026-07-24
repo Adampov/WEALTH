@@ -78,6 +78,8 @@ Completed Phase 2 slices include:
   aggregation evidence, empty-window evidence, and fail-closed response-cap handling.
 - Bounded public-trade range ingestion with chronological initial pages, adaptive dense-window
   splitting, finite retries and pacing, typed progress traces, and an exact resume boundary.
+- Shared durable weighted request-budget gating for public trade and candle sources, with explicit
+  Binance Spot and USD-M aggregate-trade costs.
 
 Phase 2 is not complete. Operating-system service deployment, live streaming, multi-host
 rate-budget coordination, durable raw and canonical storage beyond the local SQLite baseline,

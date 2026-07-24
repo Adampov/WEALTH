@@ -185,9 +185,11 @@ The database must already exist and is opened read-only. The command returns `0`
 warning, `2` for a confirmed critical alert, and `3` when the result is unknown or cannot be
 trusted. It never starts, stops, or repairs the collector.
 
-Shared request-budget coordination can prevent cooperating processes on one host from exceeding an
-explicit combined budget before network access. Multi-host coordination, automatic scheduling, and
-live WebSocket ingestion remain future tasks.
+Shared request-budget coordination can prevent cooperating candle and aggregate-trade processes on
+one host from exceeding an explicit combined weighted budget before network access. Binance Spot
+aggregate trades use documented cost 4 and USD-M aggregate trades cost 20; capacity, period, and
+shared key remain explicit configuration. Multi-host coordination, automatic scheduling, and live
+WebSocket ingestion remain future tasks.
 
 ## Current Scope
 
@@ -220,6 +222,7 @@ Included:
 - Fail-closed order-flow admission through the quality gate before durable storage.
 - A bounded, public Binance REST adapter for Spot and USD-M aggregate trades with no credentials.
 - Bounded adaptive public-trade range ingestion with retries, pacing, and safe resume evidence.
+- Shared durable weighted request-budget gating for candle and public-trade sources.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:

@@ -34,3 +34,4 @@ Each ADR records the context, decision, consequences, alternatives, and follow-u
 - `0019-fail-closed-order-flow-ingestion.md`
 - `0020-binance-public-aggregate-trades.md`
 - `0021-adaptive-public-trade-range-ingestion.md`
+- `0022-shared-budget-for-public-trades.md`
