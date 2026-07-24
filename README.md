@@ -135,6 +135,12 @@ startup, cycle, pause, failure, stop, or run-limit evidence in append-only SQLit
 creates a new service run audit trail while retaining the existing continuous market cursor. This
 is a process-lifecycle boundary, not an installed operating-system service or 24/7 deployment.
 
+Read-only operational health reports can classify the latest or a bounded set of recent service
+runs as active, stale, stopped, paused, failed, or completed. Stale and failed runs produce
+structured critical alerts; paused runs produce a warning. The default ten-minute stale threshold
+is longer than the collector's maximum bounded wait. These alerts remain internal data contracts:
+no message is sent and no process is restarted automatically.
+
 Shared request-budget coordination can prevent cooperating processes on one host from exceeding an
 explicit combined budget before network access. Multi-host coordination, automatic scheduling, and
 live WebSocket ingestion remain future tasks.
@@ -162,6 +168,7 @@ Included:
 - Supervised closed-candle polling with durable cursors, bounded reconnects, and restart recovery.
 - Interruptible local collector runs with durable lifecycle heartbeats and explicit terminal
   reasons.
+- Queryable collector health reports with stale-run detection and structured internal alerts.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:
@@ -171,7 +178,8 @@ Not included:
 - Automatic historical collection scheduling.
 - Multi-host request-budget coordination.
 - Automatic source ranking, price blending, or cross-quote conversion.
-- Reconciliation dashboards, alerting, or automatic remediation.
+- Reconciliation and operational dashboards or automatic remediation.
+- External alert delivery, acknowledgement, escalation, or automatic service restart.
 - Trading strategies.
 - AI model integration.
 - Portfolio, risk, or order execution.

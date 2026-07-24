@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict
 from wealth.domain.collector_service import (
     CollectorServiceHeartbeat,
     CollectorServiceHeartbeatQuery,
+    CollectorServiceRunQuery,
 )
 
 
@@ -48,6 +49,12 @@ class CollectorServiceHeartbeatStore(Protocol):
         query: CollectorServiceHeartbeatQuery,
     ) -> tuple[CollectorServiceHeartbeat, ...]:
         """Return bounded heartbeat history from sequence one."""
+
+    def recent_runs(
+        self,
+        query: CollectorServiceRunQuery,
+    ) -> tuple[CollectorServiceHeartbeat, ...]:
+        """Return validated latest run heartbeats newest first for one collection."""
 
 
 class ShutdownSignal(Protocol):

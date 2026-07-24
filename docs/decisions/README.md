@@ -26,3 +26,4 @@ Each ADR records the context, decision, consequences, alternatives, and follow-u
 - `0011-durable-reconciliation-history-and-metrics.md`
 - `0012-supervised-continuous-candle-polling.md`
 - `0013-durable-collector-service-lifecycle.md`
+- `0014-collector-service-health-monitoring.md`
