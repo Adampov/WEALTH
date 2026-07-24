@@ -166,8 +166,14 @@ A bounded public Binance REST adapter now normalizes Spot and USD-M aggregate tr
 path without an API key. It preserves the provider's aggregate ID and underlying first/last trade
 IDs, maps maker evidence to aggressor side, retains exact raw bytes, and admits valid empty
 windows. A response at Binance's 1,000-row cap fails as possibly truncated so partial evidence
-cannot be stored as a complete window. No live order-flow collection, replay path, trading signal,
-or trading action is present.
+cannot be stored as a complete window.
+
+A bounded application flow can collect a longer public-trade range using chronological initial
+windows. Dense windows split into exact left and right halves until each is complete or the
+one-millisecond minimum is reached. Request count, total records, pacing, attempts, exponential
+delay, and `Retry-After` are bounded; every adaptive decision is traced and every stop exposes the
+exact first unadmitted event-time boundary. No live order-flow collection, replay path, trading
+signal, or trading action is present.
 
 Operators and monitoring tools can read that state through a dedicated JSON command:
 
@@ -213,13 +219,14 @@ Included:
 - Durable raw and canonical SQLite order-flow evidence with conflict quarantine.
 - Fail-closed order-flow admission through the quality gate before durable storage.
 - A bounded, public Binance REST adapter for Spot and USD-M aggregate trades with no credentials.
+- Bounded adaptive public-trade range ingestion with retries, pacing, and safe resume evidence.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:
 
 - Private exchange or account access.
 - An automatically started operating-system service, deployment, or live WebSocket ingestion.
-- Automatic aggregate-trade window splitting, range collection, or provider gap recovery.
+- Automatic aggregate-trade scheduling, continuous collection, or provider gap recovery.
 - Automatic historical collection scheduling.
 - Multi-host request-budget coordination.
 - Automatic source ranking, price blending, or cross-quote conversion.

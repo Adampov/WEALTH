@@ -75,14 +75,18 @@ class PublicTradeSourceError(RuntimeError):
         *,
         retryable: bool,
         retry_after_seconds: int | None = None,
+        requires_smaller_window: bool = False,
     ) -> None:
         if not machine_code or machine_code != machine_code.strip():
             raise ValueError("machine_code must be non-empty and canonical")
         if retry_after_seconds is not None and retry_after_seconds < 0:
             raise ValueError("retry_after_seconds must be non-negative")
+        if requires_smaller_window and retryable:
+            raise ValueError("a smaller-window failure must not also be retryable unchanged")
         self.machine_code = machine_code
         self.retryable = retryable
         self.retry_after_seconds = retry_after_seconds
+        self.requires_smaller_window = requires_smaller_window
         super().__init__(f"{machine_code}: {detail}")
 
 

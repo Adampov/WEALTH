@@ -89,6 +89,28 @@ raw evidence. Invalid field sets, values, ordering, timing, transport, and provi
 with machine-readable errors before storage. The adapter does not paginate, retry, poll, use an API
 key, or expose any account or order capability.
 
+## Adaptive Public-Trade Range Ingestion
+
+`AdaptivePublicTradeRangeIngestor` composes the single-window source and fail-closed admission path
+without hiding network work inside the adapter. It plans contiguous chronological initial windows
+and bisects only a window whose source error explicitly requires a smaller request. Split children
+must exactly partition their parent on the millisecond grid and the left child is always processed
+first.
+
+The range, source requests, records, minimum window, inter-request pacing, attempts, exponential
+delays, and accepted `Retry-After` values all have explicit finite policy bounds. Every network
+attempt consumes the request budget. Retry is limited to failures explicitly classified as
+transient and is never started after that budget is exhausted.
+
+Every complete window passes through the order-flow quality and storage gate before the next
+window. Successful earlier windows remain durable if a later source, density, record, quality, or
+storage boundary stops the run. The result retains typed traces for splits, retries, ingestion, and
+failure, plus the exact first unadmitted event-time boundary for safe idempotent resumption.
+
+An empty complete window advances coverage and stores its raw response. A fetched window that would
+exceed the total record limit is returned as in-memory evidence but is not admitted. A provider cap
+at the configured minimum one-millisecond window stops explicitly; it is never treated as complete.
+
 ## Canonical Candle
 
 `CanonicalCandle` represents one final OHLCV interval. Every record includes:
@@ -224,8 +246,11 @@ automatically.
   storage. Aggregate trades have one bounded Binance provider adapter; ticker and best-bid-ask
   records do not. No order-flow record has live collection or replay.
 - Binance aggregate-trade requests are single windows shorter than one hour. A response at the
-  1,000-row cap fails closed and USD-M history is limited to the latest 24 hours; adaptive window
-  splitting and range ingestion are not implemented.
+  1,000-row cap fails closed and USD-M history is limited to the latest 24 hours. Bounded range
+  ingestion can split dense windows down to one millisecond, but it stops if that minimum still
+  reaches the cap.
+- Public-trade range ingestion is invoked explicitly. It has no durable collection checkpoint,
+  automatic scheduling, continuous polling, shared request budget, or live gap recovery.
 - Each Binance provider request remains bounded to one already-closed window of at most 1,000
   candles; the application composes multiple requests into a bounded range.
 - No operating-system-managed scheduling, deployment, adaptive pacing, retry jitter, or live
