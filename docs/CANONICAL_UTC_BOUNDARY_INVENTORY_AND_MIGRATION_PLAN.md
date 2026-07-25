@@ -309,6 +309,13 @@ install a schema, enable WAL, or otherwise mutate state, and never identifies a 
 encoding; application/storage marker; table, column, storage-class, index, and trigger inventory;
 normalized DDL; and expected version. Ambiguous or unknown layouts fail closed.
 
+TASK-030 completed only the synthetic prerequisite for this stage. Strict frozen version-1
+contracts and a direct `mode=ro&immutable=1` connection now identify all eight current generated
+fixture layouts from pinned logical fingerprints while preserving separate whole-file and
+directory evidence. The inspector rejects sidecars and mutations and reads only schema metadata
+plus the two approved storage-marker tables. It has not read a timestamp row or operator
+database, created a report or manifest, or satisfied any Stage 3 exit evidence.
+
 Every scan works from a writer-fenced, SQLite-safe immutable source snapshot. For every
 timestamp-bearing column it records SQLite `typeof`, database encoding, exact stored bytes using
 `CAST(column AS BLOB)`/hex rather than a decoded Python `str` alone, declared version, parse
@@ -479,9 +486,10 @@ forward version-2 path.
 ## Decisions and Approvals Required
 
 ADR 0027 accepts the target and staged plan, but not an incompatible cutover. TASK-027 through
-TASK-029 are complete. The canonical next action is the bounded RISK-1 TASK-030; it introduces
-only an unused, synthetic-fixture foundation for exact SQLite store fingerprints and immutable
-read-only access. Department and agent reviews are validation evidence, not human approval.
+TASK-030 are complete. The canonical next action is the bounded RISK-1 TASK-031; it may add only
+unused, deterministic timestamp storage-class and byte evidence from generated fixtures after an
+exact TASK-030 fingerprint match. Department and agent reviews are validation evidence, not human
+approval.
 
 Before Stage 3 accesses any operator database, the project owner must approve the exact read-only
 database/path list, snapshot method, report destination, and evidence retention/disposal boundary.
@@ -495,20 +503,24 @@ backup, validation, rollback, and affected control-owner review as required by
 
 Completed TASK-027 needed no migration approval because it enforced the existing internal UTC
 clock policy without changing a persisted model or representation. TASK-028 and TASK-029 likewise
-added only unused pure codec and projection primitives. Wiring any of those primitives into an
-existing contract or advancing Stages 3 through 7 requires the stage-specific authorization and
-applicable approvals described here.
+added only unused pure codec and projection primitives. TASK-030 added only unused synthetic
+fixture contracts and immutable schema/marker fingerprint evidence; it did not scan timestamp
+rows or operator data. Wiring any of these foundations into an existing runtime or advancing
+Stages 3 through 7 requires the stage-specific authorization and applicable approvals described
+here.
 
-## TASK-030 Handoff
+## TASK-031 Handoff
 
-The next bounded action is `phase2.canonical_utc_preflight_fingerprint_foundation`.
+The next bounded action is
+`phase2.canonical_utc_preflight_timestamp_evidence_foundation`.
 
-It is limited to unused strict contracts, deterministic schema/store fingerprints, and immutable
-read-only inspection of generated temporary SQLite fixture snapshots through
-`mode=ro&immutable=1`. It covers database encoding, application/storage markers, declared
-version, normalized DDL, tables, columns, indexes, and triggers without scanning timestamp rows.
-It may not inspect an operator, user-selected, deployment, or discovered database; write a
-report; invoke a schema-installing adapter; create a journal, WAL, or SHM file; wire into an
-active runtime; migrate or repair data; or claim Stage 3 completion. Before any later operator
-database scan, the project owner must still approve the exact path list, immutable snapshot
-method, report destination, and evidence retention/disposal boundary.
+It is limited to unused strict frozen versioned extraction plans and deterministic, bounded
+evidence for explicitly declared timestamp columns in generated temporary SQLite fixtures. Row
+access is allowed only after one exact TASK-030 family fingerprint matches. Evidence records the
+stable row key, SQLite `typeof`, exact `hex(CAST(column AS BLOB))`, byte length, deterministic
+order, and unchanged source identity. It may not parse or normalize a timestamp, analyze
+collisions, quarantine data, inspect an operator, user-selected, deployment, or discovered
+database, write a report or manifest, invoke a schema-installing adapter, create a journal, WAL,
+or SHM file, wire into an active runtime, migrate or repair data, or claim Stage 3 completion.
+Before any later operator database scan, the project owner must still approve the exact path
+list, immutable snapshot method, report destination, and evidence retention/disposal boundary.
