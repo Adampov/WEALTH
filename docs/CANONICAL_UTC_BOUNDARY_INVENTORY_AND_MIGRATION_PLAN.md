@@ -266,7 +266,7 @@ Unknown behavior is not treated as safe:
 ## Staged Implementation and Migration Plan
 
 Each stage has a separate acceptance gate. A later stage cannot use completion of TASK-026
-through TASK-032 as authorization for incompatible wiring or migration.
+through TASK-033 as authorization for incompatible wiring or migration.
 
 ### Stage 1 — Prevent new clock drift — COMPLETE
 
@@ -318,7 +318,7 @@ install a schema, enable WAL, or otherwise mutate state, and never identifies a 
 encoding; application/storage marker; table, column, storage-class, index, and trigger inventory;
 normalized DDL; and expected version. Ambiguous or unknown layouts fail closed.
 
-TASK-030 through TASK-032 completed only synthetic prerequisites for this stage. Strict frozen
+TASK-030 through TASK-033 completed only synthetic prerequisites for this stage. Strict frozen
 version-1 contracts and a direct `mode=ro&immutable=1` connection identify all eight current
 generated fixture layouts from pinned logical fingerprints while preserving separate whole-file
 and directory evidence. After one exact family match, the same connection and snapshot may read
@@ -328,8 +328,11 @@ row order, and snapshot linkage. A separate pure layer now classifies the exact 
 grammar, offset policy, nullability, storage class, and supported epoch range without I/O or
 normalization and retains every upstream evidence object. The foundations reject sidecars,
 mutations, excess rows, oversized cells, unstable keys, mismatch, wrong family, ambiguity, and
-forged parse linkage. They have not produced canonical replacement candidates, read an operator
-database, created a report or manifest, or satisfied any Stage 3 exit evidence.
+forged parse linkage. A second pure layer derives exact fixed-UTC, six-digit `Z`, and
+epoch-microsecond candidate triples only from successful parses; prior failures and calendar
+overflow remain nonprojectable, and equal instants remain separate ordered evidence. They have
+not selected replacement truth, summarized an operator population, read an operator database,
+created a report or manifest, or satisfied any Stage 3 exit evidence.
 
 Every scan works from a writer-fenced, SQLite-safe immutable source snapshot. For every
 timestamp-bearing column it records SQLite `typeof`, database encoding, exact stored bytes using
@@ -501,11 +504,11 @@ forward version-2 path.
 ## Decisions and Approvals Required
 
 ADR 0027 accepts the target and staged plan, but not an incompatible cutover. TASK-027 through
-TASK-032 are complete. The canonical next action is the bounded RISK-1 TASK-033; it may add only a
-pure canonical-instant candidate layer over valid TASK-032 generated-fixture parse evidence. It
-may not open SQLite or a filesystem path, inspect stored projections, group collisions,
-quarantine or replace bytes, or inspect operator data. Department and agent reviews are
-validation evidence, not human approval.
+TASK-033 are complete. The canonical next action is the bounded RISK-1 TASK-034; it may add only a
+pure per-column census over valid TASK-033 generated-fixture candidate evidence. It may not open
+SQLite or a filesystem path, inspect stored projections, group rows, instants, or collisions,
+serialize a report, quarantine or replace bytes, or inspect operator data. Department and agent
+reviews are validation evidence, not human approval.
 
 Before Stage 3 accesses any operator database, the project owner must approve the exact read-only
 database/path list, snapshot method, report destination, and evidence retention/disposal boundary.
@@ -525,25 +528,27 @@ rows or operator data. TASK-031 added only unused synthetic timestamp storage-cl
 evidence tied to those exact fingerprints and snapshots; it did not parse or normalize a value,
 scan operator data, or create a report. TASK-032 added only unused pure parse plans and typed
 interpretation evidence for those exact bytes; it retained offset spelling and every upstream
-identity, performed no I/O or normalization, and emitted no replacement value. Wiring any of
-these foundations into an existing runtime or advancing Stages 3 through 7 requires the
-stage-specific authorization and applicable approvals described here.
+identity, performed no I/O or normalization, and emitted no replacement value. TASK-033 added
+only unused pure canonical candidate evidence for successful parse outcomes; it preserved prior
+failures, typed calendar overflow, retained duplicate instants separately, and performed no I/O,
+grouping, report, replacement, or runtime action. Wiring any of these foundations into an existing
+runtime or advancing Stages 3 through 7 requires the stage-specific authorization and applicable
+approvals described here.
 
-## TASK-033 Handoff
+## TASK-034 Handoff
 
 The next bounded action is
-`phase2.canonical_utc_preflight_timestamp_canonical_candidate_evidence_foundation`.
+`phase2.canonical_utc_preflight_timestamp_candidate_census_evidence_foundation`.
 
-It is limited to unused strict frozen versioned candidate plans and one typed candidate outcome
-for every outcome in an already valid TASK-032 result. Successful aware-text and supported-epoch
-parses may project through the existing TASK-028/029 primitives to fixed `datetime.UTC`, exact
-six-fractional-digit `Z` text, and signed epoch microseconds. Prior parse failures and aware values
-whose offset normalization crosses year 1 or 9999 remain explicitly non-projectable. Original
-bytes, storage class, offset spelling, row key, TASK-030 fingerprint, TASK-031 plan, TASK-032
-outcome, and snapshot identity remain unchanged. It may not open SQLite or a filesystem path,
-parse standalone caller evidence, inspect JSON containers, compare stored-projection agreement,
-group collisions, deduplicate, quarantine or replace data, inspect operator or discovered data,
-write a report or manifest, invoke an adapter, wire into an active runtime, migrate or repair
-data, or claim Stage 3 completion. Before any later operator database scan, the project owner must
-still approve the exact path list, immutable snapshot method, report destination, and evidence
-retention/disposal boundary.
+It is limited to unused strict frozen versioned census plans and exactly one ordered in-memory
+summary for every declared timestamp column in an already valid TASK-033 result, including empty
+columns. Each summary may contain only exactly reconciled total, candidate-status,
+source-parse-status, bounded sorted source-offset and fractional-precision frequencies, and
+projectable canonical epoch minimum/maximum evidence. The complete TASK-033 result and all
+TASK-030/031/032 evidence remain nested unchanged. It may not open SQLite or a filesystem path,
+inspect JSON containers, compare stored-projection agreement, group rows, instants, or
+collisions, assign collision identities, deduplicate, merge, quarantine or replace data, inspect
+operator or discovered data, serialize or write a report or manifest, invoke an adapter, wire
+into an active runtime, migrate or repair data, or claim Stage 3 completion. Before any later
+operator database scan, the project owner must still approve the exact path list, immutable
+snapshot method, report destination, and evidence retention/disposal boundary.
