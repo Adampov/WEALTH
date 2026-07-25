@@ -109,6 +109,9 @@ Completed Phase 2 slices include:
 - Isolated canonical UTC codec primitives for strict fixed-zone validation, explicit aware-input
   normalization, exact six-fractional-digit RFC 3339 `Z` serialization, and strict parsing, with
   deterministic and property-style edge coverage and no existing runtime consumer.
+- Exact signed epoch-microsecond bounds, projection, and inverse decoding in the same isolated
+  module, using only integer and `timedelta` arithmetic with full calendar-range round trips,
+  one-microsecond distinction, monotonic ordering, and no existing runtime consumer.
 
 Phase 2 is not complete. Operating-system service deployment, live streaming, multi-host
 rate-budget coordination, durable raw and canonical storage beyond the local SQLite baseline,
@@ -122,16 +125,19 @@ now available through a bounded typed port that revalidates causal versions and 
 fencing authority without mutating control state. Operational recovery drills remain required
 before continuous public-trade collection. `RISK-005` remains open: the accepted plan selects
 Python datetimes in the fixed `datetime.UTC` zone, fixed microsecond RFC 3339 `Z` text, and derived
-epoch-microsecond SQL projections. New injected clock values are fixed-UTC and the exact canonical
-text codec now exists as an unused pure module, but current aware-only models, external text,
-sortable projections, and legacy stores have not been migrated.
+epoch-microsecond SQL projections. New injected clock values are fixed-UTC, and the isolated pure
+module now provides the complete unused Stage 2 primitive foundation: strict validation, explicit
+normalization, exact canonical text, and exact integer-only epoch-microsecond conversion across
+Python's full calendar range. Current aware-only models, external text, sortable runtime
+projections, queries, and legacy stores have not been migrated.
 
-The canonical next action is TASK-029,
-`phase2.canonical_utc_epoch_microsecond_primitives`. It adds pure, unused, integer-only conversion
-between fixed-UTC datetimes and signed epoch microseconds, with exact boundary, round-trip, and
-ordering tests. It does not wire those primitives into an existing runtime, model, output, digest,
-identity, schema, query, projection, migration, or stored record. Its exact scope and acceptance
-gates are in `BACKLOG.md` and its status is mirrored in `PROJECT_STATE.json`.
+The canonical next action is TASK-030,
+`phase2.canonical_utc_preflight_fingerprint_foundation`. It adds only unused strict contracts,
+deterministic SQLite store fingerprints, and immutable read-only inspection of generated
+temporary fixtures. It cannot inspect an operator or discovered database, scan timestamp rows,
+write a report, use a schema-installing adapter, or claim Stage 3 completion. Any operator-data
+preflight remains explicitly approval-gated. TASK-030's exact scope and acceptance gates are in
+`BACKLOG.md` and its status is mirrored in `PROJECT_STATE.json`.
 
 ## Phase 1 — Architecture and Engineering Foundation
 
