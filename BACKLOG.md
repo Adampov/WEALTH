@@ -5,46 +5,62 @@ This file records approved, bounded work. `PROJECT_STATE.json` identifies the on
 
 ## Next Action
 
-### TASK-032 — Synthetic SQLite timestamp parse-evidence foundation
+### TASK-033 — Synthetic canonical-instant candidate evidence foundation
 
-- **Key:** `phase2.canonical_utc_preflight_timestamp_parse_evidence_foundation`
+- **Key:** `phase2.canonical_utc_preflight_timestamp_canonical_candidate_evidence_foundation`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
-- **Goal:** Add an unused pure interpretation layer that converts exact TASK-031 timestamp-cell
-  byte evidence into deterministic typed parse outcomes while preserving the original bytes,
-  storage class, row key, fingerprint, and snapshot linkage unchanged.
-- **Scope:** Add strict frozen versioned parse-plan and parse-evidence contracts for the same 37
-  direct timestamp columns. Register legacy ISO-8601 text or signed epoch-microsecond
-  representation plus nullability per target. Consume only a valid TASK-031 extraction result and
-  produce one typed outcome per input cell for parsed aware text, declared absence, naive text,
-  malformed UTF-8 or timestamp text, out-of-range epoch values, and unexpected storage classes.
-  Preserve original offset and spelling; do not normalize or emit replacement bytes.
-- **Constraints:** Pure evidence consumption only: no SQLite connection, filesystem/path access,
-  adapter invocation, schema inspection, or row query. Do not parse JSON containers. Do not
-  normalize timestamps, compare projection agreement, analyze collisions, quarantine data, write
-  a report or manifest, inspect operator or discovered data, or add CLI, service, provider,
-  migration, repair, credential, signal, portfolio, Risk, order, financial, or active runtime
-  wiring. Do not claim Stage 3 completion.
+- **Goal:** Add an unused pure candidate layer that derives fixed-UTC datetime, exact canonical
+  six-fractional-digit `Z` text, and signed epoch-microseconds only from successful TASK-032 parse
+  outcomes while retaining every upstream evidence object unchanged.
+- **Scope:** Add strict frozen versioned candidate plans and one ordered typed candidate outcome
+  per TASK-032 outcome. Successful aware-text and supported epoch parses project through the
+  existing TASK-028/029 primitives. Prior parse failures remain explicitly non-projectable, and
+  aware timestamps whose offset conversion crosses Python's year bounds receive a typed
+  normalization-overflow outcome. Equal instants from different source spellings remain separate
+  ordered evidence.
+- **Constraints:** Consume only one exact TASK-032 result and perform no SQLite, filesystem,
+  adapter, JSON, report, manifest, operator-data, or runtime access. Do not compare stored
+  projections, group collisions, assign collision identities, deduplicate, quarantine, choose
+  replacement bytes, migrate, repair, alter a schema, or add CLI, service, provider, credential,
+  signal, portfolio, Risk, order, financial, or active runtime wiring. Do not claim Stage 3
+  completion.
 
 Acceptance gates:
 
-1. Strict frozen plans and evidence reject unknown, duplicate, missing, unsupported, altered, or
-   incorrectly linked declarations and input evidence.
-2. Parsing accepts only one exact successful TASK-031 result and performs no SQLite or filesystem
-   operation.
-3. Text uses strict UTF-8 plus a frozen writer-compatible grammar; epoch evidence requires SQLite
-   `INTEGER`, canonical decimal cast bytes, and an explicit supported range. Distinct malformed,
-   naive, absent, overflow, and unexpected-storage outcomes remain typed.
-4. Generated evidence covers all 37 columns plus fixed UTC, positive/negative offsets, legacy
-   precision variants, calendar limits, malformed UTF-8/text, NULL, INTEGER, REAL, TEXT, BLOB,
-   and epoch underflow/overflow.
-5. Every input cell yields exactly one result in unchanged deterministic order, with row-key,
-   storage-class, exact-byte, TASK-030, and TASK-031 evidence preserved.
-6. No existing runtime path imports or calls the foundation, and relevant unit, integration,
-   format, lint, type, lockfile, health-slice, dependency-audit, and CI gates pass.
+1. Strict frozen plans and evidence reject altered, missing, duplicate, reordered, unsupported,
+   or incorrectly linked TASK-032 declarations and outcomes.
+2. Projection accepts only one exact successful TASK-032 result and performs no I/O, adapter, or
+   runtime operation.
+3. Every successful parse deterministically yields fixed `datetime.UTC`, exact canonical
+   six-digit `Z` text, and exact epoch microseconds with round-trip agreement.
+4. Offset normalization across year 1 or 9999 fails as a typed non-projectable overflow rather
+   than raising, clipping, or changing the source evidence.
+5. All 37 columns, positive/negative/subminute offsets, distinct UTC spellings, epoch bounds,
+   same-instant/different-spelling pairs, and every prior parse-failure status are covered.
+6. One-to-one ordering and all TASK-030/031/032 evidence remain unchanged; no collision, merge,
+   quarantine, migration, or Stage 3 claim is introduced, and all repository gates pass.
 
 ## Recently Completed
+
+### TASK-032 — Synthetic SQLite timestamp parse-evidence foundation
+
+- **Key:** `phase2.canonical_utc_preflight_timestamp_parse_evidence_foundation`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Result:** One immutable pure registry now binds the exact TASK-031 plans for all eight store
+  families to 20 offset-preserving Python `isoformat` text columns, 15 fixed-UTC `isoformat` text
+  columns, two signed epoch-microsecond integer columns, and the exact five nullable declarations.
+  Manual component parsing plus exact writer round trips preserve offset spelling and subsecond
+  offsets without normalization. Every source cell receives one typed outcome for aware text,
+  fixed-UTC policy mismatch, naive text, declared absence, malformed UTF-8/text/epoch bytes,
+  calendar-range overflow, or unexpected SQLite storage. Deep validation rejects forged plans,
+  snapshots, rows, keys, cells, outcomes, and public-registry replacement before parsing.
+  Synthetic end-to-end tests cover all 37 columns and hostile TEXT, NULL, INTEGER, REAL, and BLOB
+  evidence while retaining exact bytes, row order, TASK-030 fingerprint, TASK-031 plan, and
+  snapshot identity. The module performs no I/O, has no runtime consumer, scans no operator data,
+  emits no replacement bytes, and does not complete Stage 3.
 
 ### TASK-031 — Synthetic SQLite timestamp-byte evidence foundation
 

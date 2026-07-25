@@ -34,6 +34,7 @@
     "canonical_utc_epoch_microsecond_primitives",
     "canonical_utc_preflight_fingerprint_foundation",
     "canonical_utc_preflight_timestamp_evidence_foundation",
+    "canonical_utc_preflight_timestamp_parse_evidence_foundation",
     "public_trade_checkpoint_orchestration",
     "public_trade_transition_history_reader",
     "sqlite_market_data_storage",
@@ -73,8 +74,8 @@
   "open_orders": [],
   "open_tasks": [
     {
-      "task_id": "TASK-032",
-      "action": "phase2.canonical_utc_preflight_timestamp_parse_evidence_foundation",
+      "task_id": "TASK-033",
+      "action": "phase2.canonical_utc_preflight_timestamp_canonical_candidate_evidence_foundation",
       "status": "ready",
       "risk_tier": 1,
       "requires_human_approval": false
@@ -107,8 +108,8 @@
     }
   ],
   "next_action": {
-    "task_id": "TASK-032",
-    "action": "phase2.canonical_utc_preflight_timestamp_parse_evidence_foundation"
+    "task_id": "TASK-033",
+    "action": "phase2.canonical_utc_preflight_timestamp_canonical_candidate_evidence_foundation"
   },
-  "last_updated_utc": "2026-07-25T20:43:56Z"
+  "last_updated_utc": "2026-07-25T21:24:16Z"
 }
