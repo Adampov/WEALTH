@@ -5,44 +5,60 @@ This file records approved, bounded work. `PROJECT_STATE.json` identifies the on
 
 ## Next Action
 
-### TASK-033 — Synthetic canonical-instant candidate evidence foundation
+### TASK-034 — Synthetic canonical-candidate census evidence foundation
 
-- **Key:** `phase2.canonical_utc_preflight_timestamp_canonical_candidate_evidence_foundation`
+- **Key:** `phase2.canonical_utc_preflight_timestamp_candidate_census_evidence_foundation`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
-- **Goal:** Add an unused pure candidate layer that derives fixed-UTC datetime, exact canonical
-  six-fractional-digit `Z` text, and signed epoch-microseconds only from successful TASK-032 parse
-  outcomes while retaining every upstream evidence object unchanged.
-- **Scope:** Add strict frozen versioned candidate plans and one ordered typed candidate outcome
-  per TASK-032 outcome. Successful aware-text and supported epoch parses project through the
-  existing TASK-028/029 primitives. Prior parse failures remain explicitly non-projectable, and
-  aware timestamps whose offset conversion crosses Python's year bounds receive a typed
-  normalization-overflow outcome. Equal instants from different source spellings remain separate
-  ordered evidence.
-- **Constraints:** Consume only one exact TASK-032 result and perform no SQLite, filesystem,
-  adapter, JSON, report, manifest, operator-data, or runtime access. Do not compare stored
-  projections, group collisions, assign collision identities, deduplicate, quarantine, choose
-  replacement bytes, migrate, repair, alter a schema, or add CLI, service, provider, credential,
-  signal, portfolio, Risk, order, financial, or active runtime wiring. Do not claim Stage 3
-  completion.
+- **Goal:** Add an unused pure in-memory census that summarizes one exact TASK-033 result per
+  declared timestamp column without losing or grouping any source evidence.
+- **Scope:** Add strict frozen versioned census plans and exactly 37 ordered per-column summaries,
+  including empty columns. Each summary reconciles total candidate count, exact candidate-status
+  and source-parse-status counts, bounded sorted source-offset and fractional-precision
+  frequencies, and canonical epoch minimum/maximum derived only from projectable candidates. The
+  complete TASK-033 result remains nested unchanged.
+- **Constraints:** Consume only one exact TASK-033 result and perform no SQLite, filesystem,
+  adapter, JSON-container, report, manifest, operator-data, or runtime access. Do not compare
+  stored projections, group rows or instants, assign collision identities, deduplicate, merge,
+  quarantine, choose replacement bytes, migrate, repair, alter a schema, or add CLI, service,
+  provider, credential, signal, portfolio, Risk, order, financial, or active runtime wiring. Do
+  not claim Stage 3 completion.
 
 Acceptance gates:
 
-1. Strict frozen plans and evidence reject altered, missing, duplicate, reordered, unsupported,
-   or incorrectly linked TASK-032 declarations and outcomes.
-2. Projection accepts only one exact successful TASK-032 result and performs no I/O, adapter, or
-   runtime operation.
-3. Every successful parse deterministically yields fixed `datetime.UTC`, exact canonical
-   six-digit `Z` text, and exact epoch microseconds with round-trip agreement.
-4. Offset normalization across year 1 or 9999 fails as a typed non-projectable overflow rather
-   than raising, clipping, or changing the source evidence.
-5. All 37 columns, positive/negative/subminute offsets, distinct UTC spellings, epoch bounds,
-   same-instant/different-spelling pairs, and every prior parse-failure status are covered.
-6. One-to-one ordering and all TASK-030/031/032 evidence remain unchanged; no collision, merge,
-   quarantine, migration, or Stage 3 claim is introduced, and all repository gates pass.
+1. Strict frozen plans and census evidence reject altered, missing, duplicate, reordered,
+   unsupported, or incorrectly linked TASK-033 input and summary declarations.
+2. Census construction accepts only one exact successful TASK-033 result and performs no I/O,
+   adapter, report, serialization, or runtime operation.
+3. Exactly one summary exists for each of the 37 declared columns in reviewed family/table/column
+   order, including columns with zero rows.
+4. Total, candidate-status, source-parse-status, offset, precision, and projectable epoch-range
+   evidence reconciles exactly to the unchanged ordered TASK-033 candidates.
+5. Empty, mixed-success, overflow, malformed, nullable, positive/negative/subminute offset,
+   precision, duplicate-instant, and epoch-bound cases remain deterministic and bounded.
+6. The complete TASK-030/031/032/033 evidence remains nested unchanged; no row/instant/collision
+   grouping, replacement, quarantine, migration, or Stage 3 claim is introduced, and all
+   repository gates pass.
 
 ## Recently Completed
+
+### TASK-033 — Synthetic canonical-instant candidate evidence foundation
+
+- **Key:** `phase2.canonical_utc_preflight_timestamp_canonical_candidate_evidence_foundation`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Result:** One immutable pure registry now wraps the exact eight TASK-032 plans and freezes the
+  complete two-success/eight-nonprojectable status partition. Every ordered parse outcome retains
+  its source evidence and receives either an exact built-in `datetime.UTC`, exact 27-character
+  six-fractional-digit `Z` text, and exact epoch-microsecond triple; a typed year-boundary
+  normalization overflow; or a source-not-projectable disposition. Epoch and text candidates
+  round-trip through the TASK-028/029 primitives. Tests cover all eight families and 37 columns,
+  positive, negative, and subminute offsets, exact calendar and epoch bounds, equal instants with
+  distinct spellings retained separately, every prior failure status, forged nested evidence,
+  registry replacement, ordering, and post-snapshot no-I/O behavior. No collision grouping,
+  report, operator scan, replacement byte, runtime consumer, migration, or Stage 3 completion was
+  added.
 
 ### TASK-032 — Synthetic SQLite timestamp parse-evidence foundation
 

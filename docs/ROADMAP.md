@@ -121,7 +121,9 @@ Completed Phase 2 slices include:
   bytes for all 37 direct timestamp columns. A third unused pure layer consumes only that exact
   evidence and classifies the current writer representations, nullability, fixed-UTC policy,
   malformed values, and supported epoch range without I/O, normalization, replacement bytes, or
-  runtime wiring.
+  runtime wiring. A fourth unused pure layer retains all outcomes and derives exact fixed-UTC,
+  canonical six-digit `Z`, and epoch-microsecond candidate triples only from successful parses,
+  with typed calendar overflow and no grouping or runtime wiring.
 
 Phase 2 is not complete. Operating-system service deployment, live streaming, multi-host
 rate-budget coordination, durable raw and canonical storage beyond the local SQLite baseline,
@@ -144,20 +146,22 @@ evidence for all 37 declared timestamp columns from generated fixtures only, and
 interprets those bytes through the exact 20 offset-preserving text, 15 fixed-UTC text, two epoch
 integer, and five nullable declarations. It preserves every source byte and types malformed,
 naive, absent, offset-policy, overflow, and storage-class outcomes without I/O or normalization.
-No operator database has been scanned, no replacement timestamp has been emitted, and current
-aware-only models, external text, sortable runtime projections, queries, and legacy stores have
-not been migrated.
+TASK-033 now derives exact fixed-UTC datetime, canonical six-digit `Z` text, and epoch-microsecond
+candidate triples from successful outcomes while leaving failures and year-boundary overflow
+nonprojectable. Equal instants retain their distinct ordered source evidence. No operator database
+has been scanned, no replacement timestamp has been selected or emitted, and current aware-only
+models, external text, sortable runtime projections, queries, and legacy stores have not been
+migrated.
 
-The canonical next action is TASK-033,
-`phase2.canonical_utc_preflight_timestamp_canonical_candidate_evidence_foundation`. It may consume
-only an exact TASK-032 result and use the existing pure primitives to derive fixed-UTC datetime,
-canonical six-digit `Z` text, and epoch-microsecond candidate evidence from successful parses.
-Prior failures and year-boundary normalization overflow remain typed and non-projectable. It
-cannot open SQLite or a filesystem path, compare stored projections, group collisions, inspect
-operator or discovered data, write a report or manifest, quarantine or replace bytes, use an
-adapter, wire a runtime, or claim Stage 3 completion. Any operator-data preflight remains
-explicitly approval-gated. TASK-033's exact scope and acceptance gates are in `BACKLOG.md` and its
-status is mirrored in `PROJECT_STATE.json`.
+The canonical next action is TASK-034,
+`phase2.canonical_utc_preflight_timestamp_candidate_census_evidence_foundation`. It may consume
+only an exact TASK-033 result and produce exactly 37 ordered in-memory per-column summaries of
+candidate and parse statuses, source offsets and precision, and projectable epoch minima/maxima.
+It cannot open SQLite or a filesystem path, compare stored projections, group rows, instants, or
+collisions, inspect operator or discovered data, serialize or write a report or manifest,
+quarantine or replace bytes, use an adapter, wire a runtime, or claim Stage 3 completion. Any
+operator-data preflight remains explicitly approval-gated. TASK-034's exact scope and acceptance
+gates are in `BACKLOG.md` and its status is mirrored in `PROJECT_STATE.json`.
 
 ## Phase 1 — Architecture and Engineering Foundation
 

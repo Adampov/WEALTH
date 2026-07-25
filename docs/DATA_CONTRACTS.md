@@ -27,7 +27,8 @@ model and its tests. The cross-boundary timestamp evidence and staged target are
 | Canonical UTC primitives | `wealth.domain.canonical_utc` | Pure and intentionally unused; strict fixed-UTC validation, explicit edge normalization, exact six-digit RFC 3339 `Z` serialization/parsing, and exact signed epoch-microsecond projection/decoding |
 | SQLite preflight fingerprint and timestamp-byte contracts | `wealth.domain.sqlite_preflight` and `wealth.adapters.sqlite_preflight` | Intentionally unused and generated-fixture-only; strict expected identity remains separate from the immutable fingerprint, exact snapshot, and bounded raw evidence for all 37 direct timestamp columns |
 | SQLite timestamp parse evidence | `wealth.domain.sqlite_timestamp_parse` | Pure and intentionally unused; consumes only an exact timestamp-byte result and classifies the reviewed writer grammar, offset policy, nullability, storage class, and epoch range while retaining all source evidence |
-| Canonical UTC target | ADR 0027 and the UTC boundary inventory | Clock enforcement plus the isolated codec, projection, synthetic fingerprint, raw timestamp-byte, and pure parse-evidence foundations are complete; canonical-candidate evidence, operator preflight, persisted-contract, query, schema, and migration work remain open under `RISK-005` |
+| SQLite canonical candidate evidence | `wealth.domain.sqlite_timestamp_candidate` | Pure and intentionally unused; consumes only an exact parse result and derives exact fixed-UTC datetime, canonical six-digit `Z` text, and epoch-microsecond triples for successful outcomes while retaining failures, overflow, ordering, and all source evidence |
+| Canonical UTC target | ADR 0027 and the UTC boundary inventory | Clock enforcement plus the isolated codec, projection, synthetic fingerprint, raw timestamp-byte, pure parse-evidence, and canonical-candidate foundations are complete; candidate census, operator preflight, persisted-contract, query, schema, and migration work remain open under `RISK-005` |
 
 ## Contract Rules
 
@@ -69,6 +70,15 @@ model and its tests. The cross-boundary timestamp evidence and staged target are
   storage class, cast bytes, row key, fingerprint, plan, and snapshot remain unchanged. The layer
   performs no I/O or normalization, emits no replacement bytes, has no runtime consumer, and does
   not inspect operator data or complete Stage 3.
+- The pure canonical candidate layer accepts only an exact deeply revalidated parse result and
+  freezes the complete TASK-032 status partition. Successful aware text normalizes through the
+  explicit canonical edge primitive; successful epoch evidence inverse-decodes exactly. Both
+  produce an exact built-in `datetime.UTC`, 27-character six-fractional-digit `Z` text, and
+  signed epoch-microsecond triple with inverse agreement. Prior failures remain explicitly
+  source-not-projectable and year-boundary offset overflow remains typed with no candidate
+  payload. Equal instants are not grouped, and every TASK-030/031/032 object and source spelling
+  remains linked in unchanged order. The layer performs no I/O, has no runtime consumer, selects
+  no replacement, and does not inspect operator data or complete Stage 3.
 - Source identity, event time, observation time, processing time, schema version, and lineage are
   retained whenever applicable.
 - Missing, stale, conflicting, truncated, or unverifiable evidence is represented explicitly and

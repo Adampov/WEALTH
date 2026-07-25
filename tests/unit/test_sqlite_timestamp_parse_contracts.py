@@ -31,6 +31,9 @@ from wealth.domain.sqlite_timestamp_parse import (
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 PARSE_MODULE_PATH = REPOSITORY_ROOT / "src" / "wealth" / "domain" / "sqlite_timestamp_parse.py"
+CANDIDATE_MODULE_PATH = (
+    REPOSITORY_ROOT / "src" / "wealth" / "domain" / "sqlite_timestamp_candidate.py"
+)
 
 EXPECTED_NULLABLE_COLUMNS = {
     ("continuous_collection_checkpoints", "active_window_end_exclusive"),
@@ -523,7 +526,7 @@ def test_parse_module_is_pure_and_has_no_normalization_or_runtime_consumer() -> 
 
     consumers = []
     for path in (REPOSITORY_ROOT / "src" / "wealth").rglob("*.py"):
-        if path == PARSE_MODULE_PATH:
+        if path in {PARSE_MODULE_PATH, CANDIDATE_MODULE_PATH}:
             continue
         text = path.read_text(encoding="utf-8")
         if "sqlite_timestamp_parse" in text:

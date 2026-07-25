@@ -1,4 +1,4 @@
-"""Synthetic-only integration coverage for pure TASK-032 timestamp parsing."""
+"""Synthetic-only integration coverage for pure TASK-032/033 timestamp evidence."""
 
 import sqlite3
 from collections.abc import Callable
@@ -26,6 +26,7 @@ from wealth.adapters.sqlite_preflight import (
 )
 from wealth.adapters.sqlite_rate_budget import SQLiteRateBudgetCoordinator
 from wealth.adapters.sqlite_reconciliation import SQLiteReconciliationHistoryStore
+from wealth.domain import sqlite_timestamp_candidate as timestamp_candidate
 from wealth.domain import sqlite_timestamp_parse as timestamp_parse
 from wealth.domain.sqlite_preflight import (
     SQLitePreflightRequest,
@@ -34,6 +35,14 @@ from wealth.domain.sqlite_preflight import (
     SQLiteTimestampExtractionPlan,
     SQLiteTimestampExtractionResult,
     SQLiteTimestampExtractionTarget,
+)
+from wealth.domain.sqlite_timestamp_candidate import (
+    SQLITE_TIMESTAMP_CANONICAL_CANDIDATE_PLANS,
+    SQLiteTimestampCanonicalCandidateError,
+    SQLiteTimestampCanonicalCandidateErrorCode,
+    SQLiteTimestampCanonicalCandidateResult,
+    SQLiteTimestampCanonicalCandidateStatus,
+    derive_synthetic_sqlite_timestamp_canonical_candidate_evidence,
 )
 from wealth.domain.sqlite_timestamp_parse import (
     SQLITE_TIMESTAMP_PARSE_PLANS,
@@ -194,7 +203,7 @@ def _source(
     FIXTURE_FACTORIES,
     ids=lambda value: value.value if isinstance(value, SQLiteStoreFamily) else None,
 )
-def test_all_37_declared_cells_parse_one_to_one_without_replacing_source_evidence(
+def test_all_37_declared_cells_parse_and_project_without_replacing_source_evidence(
     tmp_path: Path,
     family: SQLiteStoreFamily,
     factory: FixtureFactory,
@@ -203,6 +212,8 @@ def test_all_37_declared_cells_parse_one_to_one_without_replacing_source_evidenc
 
     first = parse_synthetic_sqlite_timestamp_evidence(source)
     second = parse_synthetic_sqlite_timestamp_evidence(source)
+    first_candidates = derive_synthetic_sqlite_timestamp_canonical_candidate_evidence(first)
+    second_candidates = derive_synthetic_sqlite_timestamp_canonical_candidate_evidence(second)
 
     assert first == second
     assert first.source == source
@@ -235,6 +246,24 @@ def test_all_37_declared_cells_parse_one_to_one_without_replacing_source_evidenc
         outcome.source_cell.storage_class in (SQLiteStorageClass.TEXT, SQLiteStorageClass.INTEGER)
         for outcome in outcomes
     )
+    assert first_candidates == second_candidates
+    assert first_candidates.source == first
+    candidates = tuple(
+        candidate
+        for table in first_candidates.tables
+        for row in table.rows
+        for candidate in row.candidates
+    )
+    assert tuple(candidate.source_outcome for candidate in candidates) == outcomes
+    assert len(candidates) == len(outcomes)
+    assert sum(
+        candidate.status is SQLiteTimestampCanonicalCandidateStatus.PROJECTED_AWARE_TEXT
+        for candidate in candidates
+    ) == len(candidates) - (2 if family is SQLiteStoreFamily.RATE_BUDGET else 0)
+    assert sum(
+        candidate.status is SQLiteTimestampCanonicalCandidateStatus.PROJECTED_EPOCH_MICROSECONDS
+        for candidate in candidates
+    ) == (2 if family is SQLiteStoreFamily.RATE_BUDGET else 0)
 
 
 def test_multiple_rows_keys_cells_and_ordinals_preserve_exact_source_order(
@@ -247,6 +276,7 @@ def test_multiple_rows_keys_cells_and_ordinals_preserve_exact_source_order(
         rows=2,
     )
     result = parse_synthetic_sqlite_timestamp_evidence(source)
+    candidates = derive_synthetic_sqlite_timestamp_canonical_candidate_evidence(result)
 
     for parse_table, source_table in zip(result.tables, source.tables, strict=True):
         assert tuple(row.row_ordinal for row in parse_table.rows) == tuple(
@@ -258,6 +288,26 @@ def test_multiple_rows_keys_cells_and_ordinals_preserve_exact_source_order(
         for parse_row, source_row in zip(parse_table.rows, source_table.rows, strict=True):
             assert tuple(outcome.source_cell for outcome in parse_row.outcomes) == (
                 source_row.timestamp_cells
+            )
+    for candidate_table, parse_table in zip(
+        candidates.tables,
+        result.tables,
+        strict=True,
+    ):
+        assert tuple(row.row_ordinal for row in candidate_table.rows) == tuple(
+            row.row_ordinal for row in parse_table.rows
+        )
+        assert tuple(row.stable_row_key for row in candidate_table.rows) == tuple(
+            row.stable_row_key for row in parse_table.rows
+        )
+        for candidate_row, parse_row in zip(
+            candidate_table.rows,
+            parse_table.rows,
+            strict=True,
+        ):
+            assert (
+                tuple(candidate.source_outcome for candidate in candidate_row.candidates)
+                == parse_row.outcomes
             )
 
 
@@ -363,14 +413,33 @@ def test_public_parser_classifies_hostile_generated_task_031_evidence(
     )
 
     result = parse_synthetic_sqlite_timestamp_evidence(source)
+    candidates = derive_synthetic_sqlite_timestamp_canonical_candidate_evidence(result)
     observed = {
         (table.table_name, outcome.source_cell.column_name): outcome.status
         for table in result.tables
         for row in table.rows
         for outcome in row.outcomes
     }
+    candidate_statuses = {
+        (table.table_name, candidate.source_outcome.source_cell.column_name): (candidate.status)
+        for table in candidates.tables
+        for row in table.rows
+        for candidate in row.candidates
+    }
 
     assert expected_statuses.items() <= observed.items()
+    for identity, parse_status in expected_statuses.items():
+        if parse_status is SQLiteTimestampParseStatus.PARSED_AWARE_TEXT:
+            expected_candidate_status = SQLiteTimestampCanonicalCandidateStatus.PROJECTED_AWARE_TEXT
+        elif parse_status is SQLiteTimestampParseStatus.PARSED_EPOCH_MICROSECONDS:
+            expected_candidate_status = (
+                SQLiteTimestampCanonicalCandidateStatus.PROJECTED_EPOCH_MICROSECONDS
+            )
+        else:
+            expected_candidate_status = (
+                SQLiteTimestampCanonicalCandidateStatus.SOURCE_NOT_PROJECTABLE
+            )
+        assert candidate_statuses[identity] is expected_candidate_status
     for parse_table, source_table in zip(result.tables, source.tables, strict=True):
         for parse_row, source_row in zip(parse_table.rows, source_table.rows, strict=True):
             assert parse_row.row_ordinal == source_row.row_ordinal
@@ -378,6 +447,68 @@ def test_public_parser_classifies_hostile_generated_task_031_evidence(
             assert tuple(outcome.source_cell for outcome in parse_row.outcomes) == (
                 source_row.timestamp_cells
             )
+
+
+def test_public_candidate_path_types_calendar_overflow_and_retains_equal_instants(
+    tmp_path: Path,
+) -> None:
+    source = _source(
+        tmp_path,
+        SQLiteStoreFamily.MARKET,
+        _create_market,
+        rows=2,
+        updates=(
+            (
+                "UPDATE candle_conflicts SET open_time="
+                "CASE rowid "
+                "WHEN 1 THEN '0001-01-01T00:00:00+00:00:00.000001' "
+                "ELSE '9999-12-31T23:59:59.999999-00:00:00.000001' END"
+            ),
+            (
+                "UPDATE raw_market_payloads "
+                "SET observed_at='2026-07-25T09:00:15.123456+00:00' "
+                "WHERE record_id='value-raw_market_payloads-record_id-0'"
+            ),
+            (
+                "UPDATE raw_market_payloads "
+                "SET observed_at='2026-07-25T14:30:15.123456+05:30' "
+                "WHERE record_id='value-raw_market_payloads-record_id-1'"
+            ),
+        ),
+    )
+    parsed = parse_synthetic_sqlite_timestamp_evidence(source)
+
+    result = derive_synthetic_sqlite_timestamp_canonical_candidate_evidence(parsed)
+    indexed = {
+        (
+            table.table_name,
+            row.row_ordinal,
+            candidate.source_outcome.source_cell.column_name,
+        ): candidate
+        for table in result.tables
+        for row in table.rows
+        for candidate in row.candidates
+    }
+
+    underflow = indexed[("candle_conflicts", 0, "open_time")]
+    overflow = indexed[("candle_conflicts", 1, "open_time")]
+    for candidate in (underflow, overflow):
+        assert candidate.status is (
+            SQLiteTimestampCanonicalCandidateStatus.UTC_NORMALIZATION_OVERFLOW
+        )
+        assert candidate.canonical_datetime is None
+        assert candidate.canonical_text is None
+        assert candidate.epoch_microseconds is None
+
+    first = indexed[("raw_market_payloads", 0, "observed_at")]
+    second = indexed[("raw_market_payloads", 1, "observed_at")]
+    assert first.source_outcome != second.source_outcome
+    assert first.status is (SQLiteTimestampCanonicalCandidateStatus.PROJECTED_AWARE_TEXT)
+    assert second.status is (SQLiteTimestampCanonicalCandidateStatus.PROJECTED_AWARE_TEXT)
+    assert first.canonical_text == second.canonical_text == ("2026-07-25T09:00:15.123456Z")
+    assert first.epoch_microseconds == second.epoch_microseconds == 1_784_970_015_123_456
+    assert first.canonical_datetime == second.canonical_datetime
+    assert result.source == parsed
 
 
 def test_parser_revalidates_forged_task_031_instances_and_exact_type(
@@ -506,11 +637,116 @@ def test_result_contract_rejects_reordered_missing_and_altered_evidence(
             SQLiteTimestampParseResult.model_validate({**payload, "tables": tables})
 
 
-def test_pure_parser_uses_no_file_sqlite_or_adapter_after_task_031(
+def test_candidate_revalidates_forged_task_032_before_any_projection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    extracted = _source(tmp_path, SQLiteStoreFamily.MARKET, _create_market)
+    parsed = parse_synthetic_sqlite_timestamp_evidence(extracted)
+    first_table = parsed.tables[0]
+    first_row = first_table.rows[0]
+    forged_outcome = first_row.outcomes[0].model_copy(
+        update={"status": SQLiteTimestampParseStatus.MALFORMED_TEXT}
+    )
+    forged_row = first_row.model_copy(
+        update={"outcomes": (forged_outcome, *first_row.outcomes[1:])}
+    )
+    forged_table = first_table.model_copy(update={"rows": (forged_row,)})
+    forged_nested = parsed.model_copy(update={"tables": (forged_table, *parsed.tables[1:])})
+    missing_fields = SQLiteTimestampParseResult.model_construct()
+    forged_plan = parsed.plan.model_copy(
+        update={
+            "targets": tuple(reversed(parsed.plan.targets)),
+        }
+    )
+    forged_plan_source = parsed.model_copy(update={"plan": forged_plan})
+
+    def unexpected_projection(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("invalid TASK-032 evidence reached candidate projection")
+
+    monkeypatch.setattr(
+        timestamp_candidate,
+        "_candidate_outcome",
+        unexpected_projection,
+    )
+    for invalid in (missing_fields, forged_nested, forged_plan_source):
+        with pytest.raises(SQLiteTimestampCanonicalCandidateError) as caught:
+            derive_synthetic_sqlite_timestamp_canonical_candidate_evidence(invalid)
+        assert caught.value.code is (
+            SQLiteTimestampCanonicalCandidateErrorCode.INVALID_SOURCE_EVIDENCE
+        )
+
+    class ParseResultSubclass(SQLiteTimestampParseResult):
+        pass
+
+    subclass = ParseResultSubclass.model_validate(parsed.model_dump(mode="python"))
+    with pytest.raises(SQLiteTimestampCanonicalCandidateError) as caught:
+        derive_synthetic_sqlite_timestamp_canonical_candidate_evidence(subclass)
+    assert caught.value.code is (SQLiteTimestampCanonicalCandidateErrorCode.INVALID_SOURCE_EVIDENCE)
+
+
+def test_public_candidate_registry_reassignment_cannot_change_reviewed_plan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    extracted = _source(tmp_path, SQLiteStoreFamily.MARKET, _create_market)
+    parsed = parse_synthetic_sqlite_timestamp_evidence(extracted)
+    original = next(
+        plan
+        for plan in SQLITE_TIMESTAMP_CANONICAL_CANDIDATE_PLANS
+        if plan.source_plan.extraction_plan.family is SQLiteStoreFamily.MARKET
+    )
+    altered = original.model_copy(
+        update={
+            "projection_kind": "collision_grouping",
+            "projectable_source_statuses": tuple(reversed(original.projectable_source_statuses)),
+        }
+    )
+    monkeypatch.setattr(
+        timestamp_candidate,
+        "SQLITE_TIMESTAMP_CANONICAL_CANDIDATE_PLANS",
+        (altered,),
+    )
+
+    result = derive_synthetic_sqlite_timestamp_canonical_candidate_evidence(parsed)
+
+    assert result.plan == original
+
+
+def test_candidate_result_rejects_reordered_missing_and_altered_evidence(
+    tmp_path: Path,
+) -> None:
+    extracted = _source(tmp_path, SQLiteStoreFamily.MARKET, _create_market)
+    parsed = parse_synthetic_sqlite_timestamp_evidence(extracted)
+    result = derive_synthetic_sqlite_timestamp_canonical_candidate_evidence(parsed)
+    payload = result.model_dump(mode="python")
+    first_table = result.tables[0]
+    first_row = first_table.rows[0]
+    altered_candidate = first_row.candidates[0].model_copy(
+        update={"status": (SQLiteTimestampCanonicalCandidateStatus.SOURCE_NOT_PROJECTABLE)}
+    )
+    altered_row = first_row.model_copy(
+        update={"candidates": (altered_candidate, *first_row.candidates[1:])}
+    )
+    altered_table = first_table.model_copy(update={"rows": (altered_row,)})
+
+    invalid_tables = (
+        tuple(reversed(result.tables)),
+        result.tables[:-1],
+        (result.tables[0], result.tables[0], *result.tables[2:]),
+        (altered_table, *result.tables[1:]),
+    )
+    for tables in invalid_tables:
+        with pytest.raises(ValidationError):
+            SQLiteTimestampCanonicalCandidateResult.model_validate({**payload, "tables": tables})
+
+
+def test_pure_parse_and_candidate_pipeline_uses_no_io_after_task_031(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source = _source(tmp_path, SQLiteStoreFamily.MARKET, _create_market)
+    parsed = parse_synthetic_sqlite_timestamp_evidence(source)
     source_path = source.preflight.observation.snapshot_path
     source_path.unlink()
 
@@ -525,7 +761,14 @@ def test_pure_parser_uses_no_file_sqlite_or_adapter_after_task_031(
     monkeypatch.setattr(Path, "read_bytes", unexpected_io)
     monkeypatch.setattr(Path, "stat", unexpected_io)
     monkeypatch.setattr(Path, "iterdir", unexpected_io)
+    monkeypatch.setattr(
+        timestamp_parse,
+        "parse_synthetic_sqlite_timestamp_evidence",
+        unexpected_io,
+    )
 
     result = parse_synthetic_sqlite_timestamp_evidence(source)
+    candidates = derive_synthetic_sqlite_timestamp_canonical_candidate_evidence(parsed)
 
     assert result.source == source
+    assert candidates.source == parsed
