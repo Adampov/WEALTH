@@ -24,6 +24,7 @@ from wealth.domain.sqlite_preflight import (
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 PREFLIGHT_ADAPTER_PATH = REPOSITORY_ROOT / "src" / "wealth" / "adapters" / "sqlite_preflight.py"
+TIMESTAMP_PARSE_PATH = REPOSITORY_ROOT / "src" / "wealth" / "domain" / "sqlite_timestamp_parse.py"
 
 
 def valid_request(tmp_path: Path) -> SQLitePreflightRequest:
@@ -228,6 +229,7 @@ def test_no_existing_runtime_module_imports_the_preflight_foundation() -> None:
         if path in {
             PREFLIGHT_ADAPTER_PATH,
             REPOSITORY_ROOT / "src" / "wealth" / "domain" / "sqlite_preflight.py",
+            TIMESTAMP_PARSE_PATH,
         }:
             continue
         source = path.read_text(encoding="utf-8")

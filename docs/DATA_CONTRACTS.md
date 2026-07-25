@@ -26,7 +26,8 @@ model and its tests. The cross-boundary timestamp evidence and staged target are
 | Repository operating state | `wealth.domain.project_state.ProjectState` | Active; validates `PROJECT_STATE.json` |
 | Canonical UTC primitives | `wealth.domain.canonical_utc` | Pure and intentionally unused; strict fixed-UTC validation, explicit edge normalization, exact six-digit RFC 3339 `Z` serialization/parsing, and exact signed epoch-microsecond projection/decoding |
 | SQLite preflight fingerprint and timestamp-byte contracts | `wealth.domain.sqlite_preflight` and `wealth.adapters.sqlite_preflight` | Intentionally unused and generated-fixture-only; strict expected identity remains separate from the immutable fingerprint, exact snapshot, and bounded raw evidence for all 37 direct timestamp columns |
-| Canonical UTC target | ADR 0027 and the UTC boundary inventory | Clock enforcement plus the isolated codec, projection, synthetic fingerprint, and synthetic raw timestamp-byte foundations are complete; parse evidence, operator preflight, persisted-contract, query, schema, and migration work remain open under `RISK-005` |
+| SQLite timestamp parse evidence | `wealth.domain.sqlite_timestamp_parse` | Pure and intentionally unused; consumes only an exact timestamp-byte result and classifies the reviewed writer grammar, offset policy, nullability, storage class, and epoch range while retaining all source evidence |
+| Canonical UTC target | ADR 0027 and the UTC boundary inventory | Clock enforcement plus the isolated codec, projection, synthetic fingerprint, raw timestamp-byte, and pure parse-evidence foundations are complete; canonical-candidate evidence, operator preflight, persisted-contract, query, schema, and migration work remain open under `RISK-005` |
 
 ## Contract Rules
 
@@ -58,8 +59,16 @@ model and its tests. The cross-boundary timestamp evidence and staged target are
   `typeof`, exact `hex(CAST(column AS BLOB))`, byte length, deterministic row order, and the
   unchanged snapshot identity without selecting a raw timestamp value. It rejects sidecars,
   mutations, excess rows, oversized cells, and unstable keys and never invokes a
-  schema-installing adapter. No parser, runtime consumer, operator path, report, repair, or
-  migration exists.
+  schema-installing adapter.
+- The pure timestamp parse layer accepts only the exact immutable result above. Its reviewed
+  registry declares 20 offset-preserving Python `isoformat` text columns, 15 fixed-UTC
+  `isoformat` text columns, two signed epoch-microsecond SQLite integers, and five nullable
+  columns. Strict UTF-8, manual component parsing, and exact writer round trips preserve spelling
+  and subsecond offsets; signed-64-bit and Python calendar bounds distinguish malformed integer
+  evidence from unsupported epochs. Each source cell has one ordered typed outcome, while its
+  storage class, cast bytes, row key, fingerprint, plan, and snapshot remain unchanged. The layer
+  performs no I/O or normalization, emits no replacement bytes, has no runtime consumer, and does
+  not inspect operator data or complete Stage 3.
 - Source identity, event time, observation time, processing time, schema version, and lineage are
   retained whenever applicable.
 - Missing, stale, conflicting, truncated, or unverifiable evidence is represented explicitly and
