@@ -25,8 +25,8 @@ model and its tests. The cross-boundary timestamp evidence and staged target are
 | Cross-source reconciliation | `wealth.domain.reconciliation` and `wealth.domain.reconciliation_history` | Active |
 | Repository operating state | `wealth.domain.project_state.ProjectState` | Active; validates `PROJECT_STATE.json` |
 | Canonical UTC primitives | `wealth.domain.canonical_utc` | Pure and intentionally unused; strict fixed-UTC validation, explicit edge normalization, exact six-digit RFC 3339 `Z` serialization/parsing, and exact signed epoch-microsecond projection/decoding |
-| SQLite preflight fingerprint contracts | `wealth.domain.sqlite_preflight` and `wealth.adapters.sqlite_preflight` | Intentionally unused and generated-fixture-only; strict expected identity remains separate from directly observed immutable fingerprint and source evidence |
-| Canonical UTC target | ADR 0027 and the UTC boundary inventory | Clock enforcement plus the isolated codec, projection, and synthetic fingerprint foundations are complete; timestamp-row evidence, operator preflight, persisted-contract, query, schema, and migration work remain open under `RISK-005` |
+| SQLite preflight fingerprint and timestamp-byte contracts | `wealth.domain.sqlite_preflight` and `wealth.adapters.sqlite_preflight` | Intentionally unused and generated-fixture-only; strict expected identity remains separate from the immutable fingerprint, exact snapshot, and bounded raw evidence for all 37 direct timestamp columns |
+| Canonical UTC target | ADR 0027 and the UTC boundary inventory | Clock enforcement plus the isolated codec, projection, synthetic fingerprint, and synthetic raw timestamp-byte foundations are complete; parse evidence, operator preflight, persisted-contract, query, schema, and migration work remain open under `RISK-005` |
 
 ## Contract Rules
 
@@ -53,8 +53,13 @@ model and its tests. The cross-boundary timestamp evidence and staged target are
   the trusted identity from a pinned registry rather than caller-supplied DDL or digests. Its
   direct `mode=ro&immutable=1` connection fingerprints exact typed marker bytes and the complete
   logical schema, while source-file and directory identity remain separate observed evidence.
-  It rejects sidecars and mutations and never invokes a schema-installing adapter. No runtime
-  consumer, operator path, timestamp-row scan, report, repair, or migration exists.
+  Only after one exact family match, the same connection may temporarily read the pinned stable
+  keys and 37 direct timestamp columns from generated fixtures. Strict bounded evidence records
+  `typeof`, exact `hex(CAST(column AS BLOB))`, byte length, deterministic row order, and the
+  unchanged snapshot identity without selecting a raw timestamp value. It rejects sidecars,
+  mutations, excess rows, oversized cells, and unstable keys and never invokes a
+  schema-installing adapter. No parser, runtime consumer, operator path, report, repair, or
+  migration exists.
 - Source identity, event time, observation time, processing time, schema version, and lineage are
   retained whenever applicable.
 - Missing, stale, conflicting, truncated, or unverifiable evidence is represented explicitly and

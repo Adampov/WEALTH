@@ -116,7 +116,9 @@ Completed Phase 2 slices include:
   with pinned logical fingerprints for all eight generated fixture layouts. Exact typed marker
   bytes, normalized DDL, schema objects, columns, foreign keys, explicit and implicit indexes,
   triggers, source identity, directory stability, sidecar rejection, and mutation denial are
-  verified without scanning timestamp rows or wiring a runtime consumer.
+  verified before any timestamp row is read. A second unused generated-fixture-only layer reuses
+  the same exact snapshot and connection to capture bounded deterministic storage-class and cast
+  bytes for all 37 direct timestamp columns, without parsing values or wiring a runtime consumer.
 
 Phase 2 is not complete. Operating-system service deployment, live streaming, multi-host
 rate-budget coordination, durable raw and canonical storage beyond the local SQLite baseline,
@@ -134,18 +136,19 @@ epoch-microsecond SQL projections. New injected clock values are fixed-UTC, and 
 module now provides the complete unused Stage 2 primitive foundation: strict validation, explicit
 normalization, exact canonical text, and exact integer-only epoch-microsecond conversion across
 Python's full calendar range. Exact fixture fingerprints and immutable inspection now establish
-the unused synthetic prerequisite for later row evidence, but no timestamp row or operator
-database has been scanned. Current aware-only models, external text, sortable runtime
-projections, queries, and legacy stores have not been migrated.
+the unused synthetic layout prerequisite, and TASK-031 captures raw storage-class and cast-byte
+evidence for all 37 declared timestamp columns from generated fixtures only. No operator database
+has been scanned, no timestamp has been parsed or normalized, and current aware-only models,
+external text, sortable runtime projections, queries, and legacy stores have not been migrated.
 
-The canonical next action is TASK-031,
-`phase2.canonical_utc_preflight_timestamp_evidence_foundation`. It may extract only bounded,
-deterministic raw SQLite storage-class and byte evidence from explicitly declared timestamp
-columns in generated temporary fixtures after one exact TASK-030 fingerprint match. It cannot
-parse or normalize timestamps, analyze collisions, inspect an operator or discovered database,
-write a report or manifest, use a schema-installing adapter, or claim Stage 3 completion. Any
-operator-data preflight remains explicitly approval-gated. TASK-031's exact scope and acceptance
-gates are in `BACKLOG.md` and its status is mirrored in `PROJECT_STATE.json`.
+The canonical next action is TASK-032,
+`phase2.canonical_utc_preflight_timestamp_parse_evidence_foundation`. It may only interpret an
+already valid TASK-031 result through pure strict contracts, producing typed parse outcomes while
+preserving original bytes, storage class, offset spelling, row keys, and snapshot linkage. It
+cannot open SQLite or a filesystem path, normalize timestamps, analyze collisions, inspect
+operator or discovered data, write a report or manifest, use an adapter, or claim Stage 3
+completion. Any operator-data preflight remains explicitly approval-gated. TASK-032's exact scope
+and acceptance gates are in `BACKLOG.md` and its status is mirrored in `PROJECT_STATE.json`.
 
 ## Phase 1 — Architecture and Engineering Foundation
 

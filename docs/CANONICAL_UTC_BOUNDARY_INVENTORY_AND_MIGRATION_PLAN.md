@@ -211,6 +211,14 @@ Current explicit UTC defenses are exercised by:
   subclasses, malformed inputs, property-style instant preservation, canonical text round trips,
   exact signed epoch bounds, invalid integer/range handling, full-calendar projection round trips,
   one-microsecond distinction, and monotonic ordering;
+- [`test_sqlite_preflight_contracts.py`](../tests/unit/test_sqlite_preflight_contracts.py),
+  [`test_sqlite_timestamp_evidence_contracts.py`](../tests/unit/test_sqlite_timestamp_evidence_contracts.py),
+  [`test_sqlite_preflight.py`](../tests/integration/test_sqlite_preflight.py), and
+  [`test_sqlite_timestamp_evidence.py`](../tests/integration/test_sqlite_timestamp_evidence.py),
+  which prove exact generated-layout fingerprints, same-snapshot gating, complete bounded raw
+  evidence for all 37 direct timestamp columns, hostile SQLite storage classes and bytes,
+  deterministic stable-key order, and fail-closed mismatch, ambiguity, mutation, and limit
+  handling;
 - [`test_public_trade_collection_orchestrator.py`](../tests/unit/test_public_trade_collection_orchestrator.py#L451-L508),
   which rejects non-UTC request, clock, and creation boundaries before storage;
 - [`test_order_flow_collection_contracts.py`](../tests/unit/test_order_flow_collection_contracts.py#L115-L123)
@@ -233,7 +241,8 @@ Missing coverage is material:
 - no mixed-offset SQL-order test covers the legacy market, order-flow, historical collection,
   collector-service, or rate-budget stores;
 - reconciliation tests do not version the digest when only timestamp representation changes; and
-- no preflight, quarantine, migration, restore, or rollback test suite exists.
+- no timestamp parse-evidence, operator preflight, quarantine, migration, restore, or rollback
+  test suite exists.
 
 The implementation program must add table-driven and property-based tests for every listed field:
 naive rejection, positive and negative offset handling, fixed-UTC acceptance, named/rule-based
@@ -256,8 +265,8 @@ Unknown behavior is not treated as safe:
 
 ## Staged Implementation and Migration Plan
 
-Each stage has a separate acceptance gate. A later stage cannot use completion of TASK-026,
-TASK-027, TASK-028, or TASK-029 as authorization for incompatible wiring or migration.
+Each stage has a separate acceptance gate. A later stage cannot use completion of TASK-026
+through TASK-031 as authorization for incompatible wiring or migration.
 
 ### Stage 1 — Prevent new clock drift — COMPLETE
 
@@ -309,12 +318,16 @@ install a schema, enable WAL, or otherwise mutate state, and never identifies a 
 encoding; application/storage marker; table, column, storage-class, index, and trigger inventory;
 normalized DDL; and expected version. Ambiguous or unknown layouts fail closed.
 
-TASK-030 completed only the synthetic prerequisite for this stage. Strict frozen version-1
-contracts and a direct `mode=ro&immutable=1` connection now identify all eight current generated
-fixture layouts from pinned logical fingerprints while preserving separate whole-file and
-directory evidence. The inspector rejects sidecars and mutations and reads only schema metadata
-plus the two approved storage-marker tables. It has not read a timestamp row or operator
-database, created a report or manifest, or satisfied any Stage 3 exit evidence.
+TASK-030 and TASK-031 completed only synthetic prerequisites for this stage. Strict frozen
+version-1 contracts and a direct `mode=ro&immutable=1` connection identify all eight current
+generated fixture layouts from pinned logical fingerprints while preserving separate whole-file
+and directory evidence. After one exact family match, the same connection and snapshot may read
+only the pinned stable keys and 37 direct timestamp columns from generated fixtures. Bounded
+deterministic evidence preserves SQLite `typeof`, exact `hex(CAST(column AS BLOB))`, byte length,
+row order, and snapshot linkage. The inspector rejects sidecars, mutations, excess rows,
+oversized cells, unstable keys, mismatch, wrong family, and ambiguity. It has not interpreted a
+timestamp, read an operator database, created a report or manifest, or satisfied any Stage 3 exit
+evidence.
 
 Every scan works from a writer-fenced, SQLite-safe immutable source snapshot. For every
 timestamp-bearing column it records SQLite `typeof`, database encoding, exact stored bytes using
@@ -486,10 +499,10 @@ forward version-2 path.
 ## Decisions and Approvals Required
 
 ADR 0027 accepts the target and staged plan, but not an incompatible cutover. TASK-027 through
-TASK-030 are complete. The canonical next action is the bounded RISK-1 TASK-031; it may add only
-unused, deterministic timestamp storage-class and byte evidence from generated fixtures after an
-exact TASK-030 fingerprint match. Department and agent reviews are validation evidence, not human
-approval.
+TASK-031 are complete. The canonical next action is the bounded RISK-1 TASK-032; it may add only a
+pure typed interpretation layer over valid TASK-031 generated-fixture evidence. It may not open
+SQLite or a filesystem path, normalize or replace bytes, or inspect operator data. Department and
+agent reviews are validation evidence, not human approval.
 
 Before Stage 3 accesses any operator database, the project owner must approve the exact read-only
 database/path list, snapshot method, report destination, and evidence retention/disposal boundary.
@@ -505,22 +518,26 @@ Completed TASK-027 needed no migration approval because it enforced the existing
 clock policy without changing a persisted model or representation. TASK-028 and TASK-029 likewise
 added only unused pure codec and projection primitives. TASK-030 added only unused synthetic
 fixture contracts and immutable schema/marker fingerprint evidence; it did not scan timestamp
-rows or operator data. Wiring any of these foundations into an existing runtime or advancing
-Stages 3 through 7 requires the stage-specific authorization and applicable approvals described
-here.
+rows or operator data. TASK-031 added only unused synthetic timestamp storage-class and cast-byte
+evidence tied to those exact fingerprints and snapshots; it did not parse or normalize a value,
+scan operator data, or create a report. Wiring any of these foundations into an existing runtime
+or advancing Stages 3 through 7 requires the stage-specific authorization and applicable
+approvals described here.
 
-## TASK-031 Handoff
+## TASK-032 Handoff
 
 The next bounded action is
-`phase2.canonical_utc_preflight_timestamp_evidence_foundation`.
+`phase2.canonical_utc_preflight_timestamp_parse_evidence_foundation`.
 
-It is limited to unused strict frozen versioned extraction plans and deterministic, bounded
-evidence for explicitly declared timestamp columns in generated temporary SQLite fixtures. Row
-access is allowed only after one exact TASK-030 family fingerprint matches. Evidence records the
-stable row key, SQLite `typeof`, exact `hex(CAST(column AS BLOB))`, byte length, deterministic
-order, and unchanged source identity. It may not parse or normalize a timestamp, analyze
-collisions, quarantine data, inspect an operator, user-selected, deployment, or discovered
-database, write a report or manifest, invoke a schema-installing adapter, create a journal, WAL,
-or SHM file, wire into an active runtime, migrate or repair data, or claim Stage 3 completion.
-Before any later operator database scan, the project owner must still approve the exact path
-list, immutable snapshot method, report destination, and evidence retention/disposal boundary.
+It is limited to unused strict frozen versioned parse plans and one typed outcome for every
+timestamp cell in an already valid TASK-031 result. Text decoding uses exact recorded bytes and
+strict UTF-8 plus a frozen writer-compatible grammar; epoch evidence accepts only the declared
+SQLite integer representation and explicit supported range. Original bytes, storage class,
+offset spelling, row key, TASK-030 fingerprint, TASK-031 plan, and snapshot identity remain
+unchanged. It may not open SQLite or a filesystem path, parse a standalone caller byte string,
+normalize or replace a timestamp, inspect JSON containers, compare projection agreement, analyze
+collisions, quarantine data, inspect operator or discovered data, write a report or manifest,
+invoke an adapter, wire into an active runtime, migrate or repair data, or claim Stage 3
+completion. Before any later operator database scan, the project owner must still approve the
+exact path list, immutable snapshot method, report destination, and evidence retention/disposal
+boundary.
