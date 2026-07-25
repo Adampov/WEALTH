@@ -39,3 +39,4 @@ Each ADR records the context, decision, consequences, alternatives, and follow-u
 - `0024-foundation-alignment-and-fail-closed-runtime.md`
 - `0025-bounded-public-trade-checkpoint-orchestration.md`
 - `0026-typed-public-trade-transition-history.md`
+- `0027-canonical-utc-boundary-and-migration-plan.md`

@@ -68,8 +68,8 @@
   "open_orders": [],
   "open_tasks": [
     {
-      "task_id": "TASK-026",
-      "action": "phase2.canonical_utc_boundary_inventory_and_migration_plan",
+      "task_id": "TASK-027",
+      "action": "phase2.canonical_utc_clock_boundary_enforcement",
       "status": "ready",
       "risk_tier": 1,
       "requires_human_approval": false
@@ -86,11 +86,6 @@
   "pending_approvals": [],
   "recent_decisions": [
     {
-      "decision_id": "ADR-0024",
-      "summary": "Align foundation state and runtime controls with fail-closed project governance.",
-      "artifact": "docs/decisions/0024-foundation-alignment-and-fail-closed-runtime.md"
-    },
-    {
       "decision_id": "ADR-0025",
       "summary": "Compose restart-safe bounded public-trade checkpoint orchestration.",
       "artifact": "docs/decisions/0025-bounded-public-trade-checkpoint-orchestration.md"
@@ -99,11 +94,16 @@
       "decision_id": "ADR-0026",
       "summary": "Expose bounded, typed, causally validated public-trade transition history.",
       "artifact": "docs/decisions/0026-typed-public-trade-transition-history.md"
+    },
+    {
+      "decision_id": "ADR-0027",
+      "summary": "Inventory timestamp boundaries and define the staged canonical UTC migration plan.",
+      "artifact": "docs/decisions/0027-canonical-utc-boundary-and-migration-plan.md"
     }
   ],
   "next_action": {
-    "task_id": "TASK-026",
-    "action": "phase2.canonical_utc_boundary_inventory_and_migration_plan"
+    "task_id": "TASK-027",
+    "action": "phase2.canonical_utc_clock_boundary_enforcement"
   },
-  "last_updated_utc": "2026-07-25T13:03:09Z"
+  "last_updated_utc": "2026-07-25T14:17:12Z"
 }

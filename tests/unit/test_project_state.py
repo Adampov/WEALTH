@@ -42,8 +42,12 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert state.pending_approvals == ()
     assert "public_trade_checkpoint_orchestration" in state.active_components
     assert "public_trade_transition_history_reader" in state.active_components
-    assert state.next_action.task_id == "TASK-026"
-    assert state.next_action.action == "phase2.canonical_utc_boundary_inventory_and_migration_plan"
+    assert len(state.open_tasks) == 1
+    assert state.open_tasks[0].task_id == "TASK-027"
+    assert state.open_tasks[0].status == "ready"
+    assert state.next_action.task_id == "TASK-027"
+    assert state.next_action.action == "phase2.canonical_utc_clock_boundary_enforcement"
+    assert any(decision.decision_id == "ADR-0027" for decision in state.recent_decisions)
 
 
 def test_project_state_references_existing_governance_artifacts() -> None:
@@ -55,8 +59,25 @@ def test_project_state_references_existing_governance_artifacts() -> None:
         assert (REPOSITORY_ROOT / decision.artifact).is_file()
     for risk_id in state.known_risks:
         assert f"| {risk_id} |" in risk_register
-    assert state.next_action.task_id in backlog
-    assert f"`{state.next_action.action}`" in backlog
+
+    next_action_section = backlog.split("## Next Action", maxsplit=1)[1].split(
+        "## Recently Completed", maxsplit=1
+    )[0]
+    completed_section = backlog.split("## Recently Completed", maxsplit=1)[1].split(
+        "## Queued, Not Yet Approved", maxsplit=1
+    )[0]
+    task_026_section = completed_section.split("### TASK-026 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
+    assert next_action_section.count("### TASK-") == 1
+    assert f"### {state.next_action.task_id} " in next_action_section
+    assert f"`{state.next_action.action}`" in next_action_section
+    assert "- **Status:** READY" in next_action_section
+    assert "- **Status:** COMPLETE" in task_026_section
+    assert (
+        "- **Decision:** `docs/decisions/0027-canonical-utc-boundary-and-migration-plan.md`"
+        in task_026_section
+    )
 
 
 def test_project_state_forbids_unknown_fields() -> None:
