@@ -80,11 +80,20 @@ Completed Phase 2 slices include:
   splitting, finite retries and pacing, typed progress traces, and an exact resume boundary.
 - Shared durable weighted request-budget gating for public trade and candle sources, with explicit
   Binance Spot and USD-M aggregate-trade costs.
+- Dedicated restart-safe public-trade checkpoint and source-health contracts with an immutable
+  policy fingerprint, exact pending-leaf recovery boundary, committed-outcome lifetime work
+  counters, non-reusable UUID-fenced leases, checkpoint-versioned and bounded-paginated
+  provider-symbol-aware health evidence, and a local SQLite control-state store with transactional
+  schema installation and validated UTC projections.
 
 Phase 2 is not complete. Operating-system service deployment, live streaming, multi-host
 rate-budget coordination, durable raw and canonical storage beyond the local SQLite baseline,
 additional market-data schemas, operational dashboards, and external alert delivery remain future
-tasks.
+tasks. The checkpoint contracts define typed `PAUSED` versus `FAILED` outcomes, but the application
+orchestration that maps terminal range traces to those outcomes is still future work, as are
+crash-durable per-job pre-request attempt reservations. The existing shared durable provider-rate
+budget is the current pre-request capacity boundary. A typed reader over append-only transition
+audit history is also deferred; the underlying actor fencing tokens are already retained.
 
 ## Phase 1 — Architecture and Engineering Foundation
 

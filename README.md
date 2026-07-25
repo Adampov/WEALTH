@@ -175,7 +175,35 @@ delay, and `Retry-After` are bounded; every adaptive decision is traced and ever
 exact first unadmitted event-time boundary. No live order-flow collection, replay path, trading
 signal, or trading action is present.
 
-Operators and monitoring tools can read that state through a dedicated JSON command:
+Dedicated public-trade control contracts can now retain that bounded progress across process
+restart. A checkpoint stores the durable cursor, exact end of a pending adaptive leaf, immutable
+policy fingerprint, committed-outcome lifetime work counters, and a UUID-fenced worker lease.
+Health evidence retains the provider symbol. A separate SQLite control store installs its schema
+transactionally, normalizes indexed time to UTC, validates complete projections and summaries,
+and atomically persists compare-and-swap transitions with matching source-health evidence. The
+lease token is checked at the transition boundary, lease TTL is capped at one hour, every new
+claim must use a UUID not previously acquired by that job, and acquisitions are retained in a
+durable fencing ledger. Health evidence identifies the exact checkpoint version that committed it
+and is read in bounded, causally ordered pages (100 rows by default, 1,000 maximum).
+
+These counters do not claim to be crash-durable hard job limits. A request made before an
+uncommitted checkpoint transition can be repeated after restart; the shared durable provider-rate
+budget remains the pre-request capacity protection. Per-job attempt reservation before network
+access is future orchestration work. That orchestrator must also classify clean outer request- or
+record-limit stops as resumable `PAUSED` outcomes with truthful `HEALTHY` or `DEGRADED` source
+health, while typed terminal source or admission failures become `FAILED`. Stop-reason text alone
+is not a sufficient classifier. The future mapper must emit a bounded canonical control failure
+code; it must not copy an arbitrary upstream machine-code string into persisted state.
+
+This slice does not start or recover a collector. Future orchestration must store market evidence
+before advancing control state and tolerate an idempotent refetch after a crash because the
+evidence and control databases cannot commit atomically together. Append-only transitions retain
+the responsible actor token, but a typed transition-history reader remains future audit tooling.
+The control store enforces monotonic timestamps and bounded TTL; the future orchestrator remains
+responsible for supplying timestamps from its injected trusted clock.
+
+Operators and monitoring tools can read the separate candle collector-service state through a
+dedicated JSON command:
 
 ```text
 uv run wealth-collector-health --database storage/collector-service.sqlite3 --collection-id 00000000-0000-0000-0000-000000000001 --pretty
@@ -223,13 +251,17 @@ Included:
 - A bounded, public Binance REST adapter for Spot and USD-M aggregate trades with no credentials.
 - Bounded adaptive public-trade range ingestion with retries, pacing, and safe resume evidence.
 - Shared durable weighted request-budget gating for candle and public-trade sources.
+- Restart-safe bounded public-trade checkpoint and health contracts with a dedicated local SQLite
+  control store, UUID fencing, provider-symbol identity, and validated UTC projections.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:
 
 - Private exchange or account access.
 - An automatically started operating-system service, deployment, or live WebSocket ingestion.
-- Automatic aggregate-trade scheduling, continuous collection, or provider gap recovery.
+- Public-trade checkpoint orchestration, automatic aggregate-trade scheduling, continuous
+  collection, live WebSockets, or provider gap recovery, including typed terminal classification
+  and crash-durable per-job pre-request attempt reservations.
 - Automatic historical collection scheduling.
 - Multi-host request-budget coordination.
 - Automatic source ranking, price blending, or cross-quote conversion.
