@@ -14,6 +14,7 @@ from wealth.domain.order_flow_collection import (
     MAX_DURABLE_COUNTER,
     PublicTradeCollectionCheckpoint,
     PublicTradeCollectionHealthSummary,
+    PublicTradeCollectionTransition,
     PublicTradeSourceHealthObservation,
     validate_public_trade_collection_transition,
 )
@@ -23,7 +24,9 @@ from wealth.ports.collection import (
 )
 from wealth.ports.order_flow_collection import (
     DEFAULT_PUBLIC_TRADE_HEALTH_PAGE_SIZE,
+    DEFAULT_PUBLIC_TRADE_TRANSITION_PAGE_SIZE,
     MAX_PUBLIC_TRADE_HEALTH_PAGE_SIZE,
+    MAX_PUBLIC_TRADE_TRANSITION_PAGE_SIZE,
 )
 
 SQLITE_PUBLIC_TRADE_COLLECTION_SCHEMA_VERSION = 1
@@ -56,6 +59,15 @@ _CHECKPOINT_COLUMNS = (
     "splits_completed",
     "last_failure_code",
     "last_stop_reason",
+    "record_json",
+)
+
+_TRANSITION_COLUMNS = (
+    "job_id",
+    "version",
+    "status",
+    "recorded_at",
+    "actor_lease_token",
     "record_json",
 )
 
@@ -268,6 +280,195 @@ class SQLitePublicTradeCollectionCheckpointStore:
             raise
         except sqlite3.DatabaseError as error:
             raise self._storage_failure("public-trade checkpoint transition failed") from error
+
+    def transitions_for_job(
+        self,
+        job_id: UUID,
+        *,
+        after_checkpoint_version: int | None = None,
+        limit: int = DEFAULT_PUBLIC_TRADE_TRANSITION_PAGE_SIZE,
+    ) -> tuple[PublicTradeCollectionTransition, ...]:
+        """Return one bounded page after validating causal order and actor authority."""
+
+        if type(job_id) is not UUID:
+            raise ValueError("public-trade transition job id must be a UUID")
+        if type(limit) is not int or not 1 <= limit <= MAX_PUBLIC_TRADE_TRANSITION_PAGE_SIZE:
+            raise ValueError(
+                "public-trade transition page limit must be an integer between 1 and "
+                f"{MAX_PUBLIC_TRADE_TRANSITION_PAGE_SIZE}"
+            )
+        if after_checkpoint_version is not None and (
+            type(after_checkpoint_version) is not int
+            or not 1 <= after_checkpoint_version <= MAX_DURABLE_COUNTER
+        ):
+            raise ValueError("public-trade transition cursor must be a returned checkpoint version")
+
+        try:
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN")
+                checkpoint_row = connection.execute(
+                    "SELECT * FROM public_trade_collection_jobs WHERE job_id = ?",
+                    (str(job_id),),
+                ).fetchone()
+                first_transition_row = connection.execute(
+                    """
+                    SELECT version
+                    FROM public_trade_collection_transitions
+                    WHERE job_id = ?
+                    ORDER BY version
+                    LIMIT 1
+                    """,
+                    (str(job_id),),
+                ).fetchone()
+                if checkpoint_row is None:
+                    if first_transition_row is not None:
+                        raise self._corrupt_record(
+                            "public-trade transitions exist without their checkpoint"
+                        )
+                    if after_checkpoint_version is not None:
+                        raise ValueError(
+                            "public-trade transition cursor does not identify stored history"
+                        )
+                    return ()
+
+                checkpoint = self._checkpoint_from_row(checkpoint_row)
+                if first_transition_row is None:
+                    raise self._corrupt_record("public-trade checkpoint has no transition history")
+                try:
+                    first_version = self._stored_integer(first_transition_row["version"])
+                except TypeError as error:
+                    raise self._corrupt_record(
+                        "public-trade transition history begins with an invalid version"
+                    ) from error
+                if first_version != 1:
+                    raise self._corrupt_record(
+                        "public-trade transition history does not begin at version one"
+                    )
+                self._validate_current_checkpoint_for_transition_history(checkpoint)
+                previous: PublicTradeCollectionTransition | None = None
+                if after_checkpoint_version is not None:
+                    cursor_row = connection.execute(
+                        """
+                        SELECT *
+                        FROM public_trade_collection_transitions
+                        WHERE job_id = ? AND version = ?
+                        """,
+                        (str(job_id), after_checkpoint_version),
+                    ).fetchone()
+                    if cursor_row is None:
+                        if after_checkpoint_version <= checkpoint.version:
+                            raise self._corrupt_record(
+                                "public-trade transition history is missing its cursor version"
+                            )
+                        raise ValueError(
+                            "public-trade transition cursor does not identify stored history"
+                        )
+                    previous = self._transition_from_row(cursor_row)
+                    self._validate_persisted_transition_identity(checkpoint, previous)
+                    self._validate_transition_lease_ledger(connection, previous)
+                    if after_checkpoint_version == 1:
+                        self._validate_initial_transition(previous)
+                    else:
+                        predecessor_row = connection.execute(
+                            """
+                            SELECT *
+                            FROM public_trade_collection_transitions
+                            WHERE job_id = ? AND version = ?
+                            """,
+                            (str(job_id), after_checkpoint_version - 1),
+                        ).fetchone()
+                        if predecessor_row is None:
+                            raise self._corrupt_record(
+                                "public-trade transition history has a cursor-boundary gap"
+                            )
+                        predecessor = self._transition_from_row(predecessor_row)
+                        self._validate_persisted_transition_identity(checkpoint, predecessor)
+                        self._validate_transition_lease_ledger(connection, predecessor)
+                        if predecessor.checkpoint.version == 1:
+                            self._validate_initial_transition(predecessor)
+                        self._validate_transition_sequence_step(
+                            previous=predecessor,
+                            current=previous,
+                        )
+
+                rows = connection.execute(
+                    """
+                    SELECT *
+                    FROM public_trade_collection_transitions
+                    WHERE job_id = ? AND version > ?
+                    ORDER BY version
+                    LIMIT ?
+                    """,
+                    (
+                        str(job_id),
+                        (0 if after_checkpoint_version is None else after_checkpoint_version),
+                        limit,
+                    ),
+                ).fetchall()
+                transitions = tuple(self._transition_from_row(row) for row in rows)
+                if previous is None and not transitions:
+                    raise self._corrupt_record("public-trade checkpoint has no transition history")
+
+                for transition in transitions:
+                    self._validate_persisted_transition_identity(checkpoint, transition)
+                    self._validate_transition_lease_ledger(connection, transition)
+                    if previous is None:
+                        self._validate_initial_transition(transition)
+                    else:
+                        self._validate_transition_sequence_step(
+                            previous=previous,
+                            current=transition,
+                        )
+                    previous = transition
+
+                if previous is None:
+                    raise self._corrupt_record(
+                        "public-trade transition history has no validated boundary"
+                    )
+                last_version = previous.checkpoint.version
+                next_version: int | None = None
+                if len(transitions) == limit:
+                    next_version_row = connection.execute(
+                        """
+                        SELECT version
+                        FROM public_trade_collection_transitions
+                        WHERE job_id = ? AND version > ?
+                        ORDER BY version
+                        LIMIT 1
+                        """,
+                        (str(job_id), last_version),
+                    ).fetchone()
+                    try:
+                        next_version = (
+                            None
+                            if next_version_row is None
+                            else self._stored_integer(next_version_row["version"])
+                        )
+                    except TypeError as error:
+                        raise self._corrupt_record(
+                            "public-trade transition lookahead version is invalid"
+                        ) from error
+
+                if last_version == checkpoint.version:
+                    if previous.checkpoint != checkpoint:
+                        raise self._corrupt_record(
+                            "latest public-trade transition differs from current checkpoint"
+                        )
+                    if next_version is not None:
+                        raise self._corrupt_record(
+                            "public-trade transition history extends beyond current checkpoint"
+                        )
+                elif len(transitions) < limit:
+                    raise self._corrupt_record("public-trade transition history has a missing tail")
+                elif next_version != last_version + 1:
+                    raise self._corrupt_record(
+                        "public-trade transition history has a page-boundary gap"
+                    )
+                return transitions
+        except SQLitePublicTradeCollectionStorageError:
+            raise
+        except sqlite3.DatabaseError as error:
+            raise self._storage_failure("public-trade transition history read failed") from error
 
     def health_for_job(
         self,
@@ -696,20 +897,16 @@ class SQLitePublicTradeCollectionCheckpointStore:
         *,
         actor_lease_token: UUID | None,
     ) -> None:
+        columns = ", ".join(_TRANSITION_COLUMNS)
+        placeholders = ", ".join("?" for _ in _TRANSITION_COLUMNS)
         connection.execute(
-            """
-            INSERT INTO public_trade_collection_transitions (
-                job_id, version, status, recorded_at,
-                actor_lease_token, record_json
-            ) VALUES (?, ?, ?, ?, ?, ?)
+            f"""
+            INSERT INTO public_trade_collection_transitions ({columns})
+            VALUES ({placeholders})
             """,
-            (
-                str(checkpoint.job_id),
-                checkpoint.version,
-                checkpoint.status.value,
-                cls._timestamp(checkpoint.updated_at),
-                cls._uuid_or_none(actor_lease_token),
-                checkpoint.model_dump_json(),
+            cls._transition_projection(
+                checkpoint,
+                actor_lease_token=actor_lease_token,
             ),
         )
 
@@ -765,6 +962,22 @@ class SQLitePublicTradeCollectionCheckpointStore:
         )
 
     @classmethod
+    def _transition_projection(
+        cls,
+        checkpoint: PublicTradeCollectionCheckpoint,
+        *,
+        actor_lease_token: UUID | None,
+    ) -> tuple[object, ...]:
+        return (
+            str(checkpoint.job_id),
+            checkpoint.version,
+            checkpoint.status.value,
+            cls._timestamp(checkpoint.updated_at),
+            cls._uuid_or_none(actor_lease_token),
+            checkpoint.model_dump_json(),
+        )
+
+    @classmethod
     def _health_projection(
         cls,
         health: PublicTradeSourceHealthObservation,
@@ -802,37 +1015,43 @@ class SQLitePublicTradeCollectionCheckpointStore:
         cls,
         row: sqlite3.Row,
     ) -> PublicTradeCollectionCheckpoint:
-        checkpoint = cls._checkpoint_from_json(str(row["record_json"]))
-        expected = cls._checkpoint_projection(checkpoint)
         try:
+            record_json = cls._stored_text(row["record_json"])
+        except TypeError as error:
+            raise cls._corrupt_record(
+                "public-trade checkpoint projection contains invalid values"
+            ) from error
+        checkpoint = cls._checkpoint_from_json(record_json)
+        try:
+            expected = cls._checkpoint_projection(checkpoint)
             stored: tuple[object, ...] = (
-                str(row["job_id"]),
-                int(row["version"]),
-                str(row["status"]),
-                str(row["source"]),
-                str(row["venue"]),
-                str(row["instrument"]),
-                str(row["provider_symbol"]),
-                str(row["instrument_type"]),
-                str(row["policy_fingerprint"]),
-                str(row["window_start"]),
-                str(row["window_end_exclusive"]),
-                str(row["next_window_start"]),
+                cls._stored_text(row["job_id"]),
+                cls._stored_integer(row["version"]),
+                cls._stored_text(row["status"]),
+                cls._stored_text(row["source"]),
+                cls._stored_text(row["venue"]),
+                cls._stored_text(row["instrument"]),
+                cls._stored_text(row["provider_symbol"]),
+                cls._stored_text(row["instrument_type"]),
+                cls._stored_text(row["policy_fingerprint"]),
+                cls._stored_text(row["window_start"]),
+                cls._stored_text(row["window_end_exclusive"]),
+                cls._stored_text(row["next_window_start"]),
                 cls._stored_optional_text(row["pending_window_end_exclusive"]),
-                str(row["created_at"]),
-                str(row["updated_at"]),
+                cls._stored_text(row["created_at"]),
+                cls._stored_text(row["updated_at"]),
                 cls._stored_optional_text(row["lease_owner"]),
                 cls._stored_optional_text(row["lease_token"]),
                 cls._stored_optional_text(row["lease_expires_at"]),
-                int(row["windows_completed"]),
-                int(row["records_completed"]),
-                int(row["source_requests"]),
-                int(row["window_traces"]),
-                int(row["retry_attempts"]),
-                int(row["splits_completed"]),
+                cls._stored_integer(row["windows_completed"]),
+                cls._stored_integer(row["records_completed"]),
+                cls._stored_integer(row["source_requests"]),
+                cls._stored_integer(row["window_traces"]),
+                cls._stored_integer(row["retry_attempts"]),
+                cls._stored_integer(row["splits_completed"]),
                 cls._stored_optional_text(row["last_failure_code"]),
                 cls._stored_optional_text(row["last_stop_reason"]),
-                str(row["record_json"]),
+                record_json,
             )
         except (TypeError, ValueError, OverflowError) as error:
             raise SQLitePublicTradeCollectionStorageError(
@@ -847,13 +1066,137 @@ class SQLitePublicTradeCollectionCheckpointStore:
         return checkpoint
 
     @classmethod
+    def _transition_from_row(
+        cls,
+        row: sqlite3.Row,
+    ) -> PublicTradeCollectionTransition:
+        try:
+            record_json = cls._stored_text(row["record_json"])
+            checkpoint = cls._checkpoint_from_json(record_json)
+            stored_actor = cls._stored_optional_text(row["actor_lease_token"])
+            actor_lease_token = None if stored_actor is None else UUID(stored_actor)
+            transition = PublicTradeCollectionTransition(
+                checkpoint=checkpoint,
+                actor_lease_token=actor_lease_token,
+            )
+            expected = cls._transition_projection(
+                checkpoint,
+                actor_lease_token=actor_lease_token,
+            )
+            stored: tuple[object, ...] = (
+                cls._stored_text(row["job_id"]),
+                cls._stored_integer(row["version"]),
+                cls._stored_text(row["status"]),
+                cls._stored_text(row["recorded_at"]),
+                stored_actor,
+                record_json,
+            )
+        except (
+            TypeError,
+            ValueError,
+            OverflowError,
+            ValidationError,
+            SQLitePublicTradeCollectionStorageError,
+        ) as error:
+            raise cls._corrupt_record(
+                "public-trade transition projection contains invalid values"
+            ) from error
+        if expected != stored:
+            raise cls._corrupt_record(
+                "public-trade transition projection does not match canonical content"
+            )
+        return transition
+
+    @classmethod
+    def _validate_transition_lease_ledger(
+        cls,
+        connection: sqlite3.Connection,
+        transition: PublicTradeCollectionTransition,
+    ) -> None:
+        """Bind persisted transition authority to one durable lease acquisition."""
+
+        checkpoint = transition.checkpoint
+        running = checkpoint.status is CollectionJobStatus.RUNNING
+        authority_token = checkpoint.lease_token if running else transition.actor_lease_token
+        if authority_token is None:
+            return
+
+        row = connection.execute(
+            """
+            SELECT job_id, lease_token, lease_owner, acquired_version, acquired_at
+            FROM public_trade_collection_leases
+            WHERE job_id = ? AND lease_token = ?
+            """,
+            (str(checkpoint.job_id), str(authority_token)),
+        ).fetchone()
+        if row is None:
+            raise cls._corrupt_record("public-trade transition authority has no lease acquisition")
+
+        try:
+            stored_job_id = cls._stored_text(row["job_id"])
+            stored_token = cls._stored_text(row["lease_token"])
+            stored_owner = cls._stored_text(row["lease_owner"])
+            acquired_version = cls._stored_integer(row["acquired_version"])
+            acquired_at = cls._stored_text(row["acquired_at"])
+            acquisition_time = datetime.fromisoformat(acquired_at)
+            if (
+                acquisition_time.utcoffset() != UTC.utcoffset(None)
+                or cls._timestamp(acquisition_time) != acquired_at
+            ):
+                raise ValueError("lease acquisition time is not canonical UTC")
+        except (TypeError, ValueError, OverflowError) as error:
+            raise cls._corrupt_record(
+                "public-trade lease acquisition projection contains invalid values"
+            ) from error
+
+        if stored_job_id != str(checkpoint.job_id) or stored_token != str(authority_token):
+            raise cls._corrupt_record(
+                "public-trade transition authority differs from its lease acquisition"
+            )
+        is_acquisition = running and transition.actor_lease_token is None
+        if acquired_version < 2 or (
+            (is_acquisition and acquired_version != checkpoint.version)
+            or (not is_acquisition and acquired_version >= checkpoint.version)
+        ):
+            raise cls._corrupt_record("public-trade lease acquisition version is not causal")
+        if acquisition_time > checkpoint.updated_at:
+            raise cls._corrupt_record("public-trade lease acquisition time is not causally prior")
+
+        if is_acquisition:
+            expected = (
+                str(checkpoint.job_id),
+                str(authority_token),
+                checkpoint.lease_owner,
+                checkpoint.version,
+                cls._timestamp(checkpoint.updated_at),
+            )
+            stored = (
+                stored_job_id,
+                stored_token,
+                stored_owner,
+                acquired_version,
+                acquired_at,
+            )
+            if stored != expected:
+                raise cls._corrupt_record(
+                    "public-trade lease acquisition differs from its transition"
+                )
+        elif running and (
+            transition.actor_lease_token != authority_token
+            or stored_owner != checkpoint.lease_owner
+        ):
+            raise cls._corrupt_record(
+                "public-trade running transition differs from acquired lease authority"
+            )
+
+    @classmethod
     def _health_from_row(
         cls,
         row: sqlite3.Row,
     ) -> PublicTradeSourceHealthObservation:
         health = cls._health_from_json(str(row["record_json"]))
-        expected = cls._health_projection(health)
         try:
+            expected = cls._health_projection(health)
             stored: tuple[object, ...] = (
                 str(row["observation_id"]),
                 str(row["job_id"]),
@@ -913,18 +1256,92 @@ class SQLitePublicTradeCollectionCheckpointStore:
                 "stored public-trade source-health observation violates its contract",
             ) from error
 
+    @classmethod
+    def _validate_initial_transition(
+        cls,
+        transition: PublicTradeCollectionTransition,
+    ) -> None:
+        if transition.actor_lease_token is not None or not cls._is_pristine(transition.checkpoint):
+            raise cls._corrupt_record(
+                "public-trade transition history does not begin with pristine creation"
+            )
+
+    @classmethod
+    def _validate_current_checkpoint_for_transition_history(
+        cls,
+        checkpoint: PublicTradeCollectionCheckpoint,
+    ) -> None:
+        """Apply the transition audit boundary to the separately stored current row."""
+
+        try:
+            PublicTradeCollectionTransition(checkpoint=checkpoint)
+        except ValidationError as error:
+            raise cls._corrupt_record(
+                "current public-trade checkpoint violates transition-history canonical form"
+            ) from error
+
+    @classmethod
+    def _validate_persisted_transition_identity(
+        cls,
+        checkpoint: PublicTradeCollectionCheckpoint,
+        transition: PublicTradeCollectionTransition,
+    ) -> None:
+        historical = transition.checkpoint
+        immutable_fields = (
+            "job_id",
+            "source",
+            "venue",
+            "instrument",
+            "provider_symbol",
+            "instrument_type",
+            "policy_fingerprint",
+            "window_start",
+            "window_end_exclusive",
+            "created_at",
+        )
+        if any(
+            getattr(historical, field) != getattr(checkpoint, field) for field in immutable_fields
+        ):
+            raise cls._corrupt_record(
+                "public-trade transition identity differs from current checkpoint"
+            )
+        if historical.version > checkpoint.version:
+            raise cls._corrupt_record("public-trade transition version exceeds current checkpoint")
+
+    @classmethod
+    def _validate_transition_sequence_step(
+        cls,
+        *,
+        previous: PublicTradeCollectionTransition,
+        current: PublicTradeCollectionTransition,
+    ) -> None:
+        try:
+            validate_public_trade_collection_transition(
+                previous.checkpoint,
+                current.checkpoint,
+            )
+            expected_actor = cls._expected_transition_actor_lease_token(
+                previous.checkpoint,
+                current.checkpoint,
+            )
+        except ValueError as error:
+            raise cls._corrupt_record(
+                "public-trade transition history violates lifecycle causality"
+            ) from error
+        if current.actor_lease_token != expected_actor:
+            raise cls._corrupt_record(
+                "public-trade transition actor does not match lease authority"
+            )
+
     @staticmethod
-    def _validate_lease_authority(
+    def _expected_transition_actor_lease_token(
         previous: PublicTradeCollectionCheckpoint,
         current: PublicTradeCollectionCheckpoint,
-        *,
-        expected_lease_token: UUID | None,
-    ) -> None:
-        if previous.status is not CollectionJobStatus.RUNNING:
-            if expected_lease_token is not None:
-                raise ValueError("non-running public-trade job has no lease token to authorize")
-            return
+    ) -> UUID | None:
+        """Return the prior fencing token required to authorize one transition."""
 
+        if previous.status is not CollectionJobStatus.RUNNING:
+            return None
         if previous.lease_token is None or previous.lease_expires_at is None:
             raise ValueError("running public-trade job is missing durable lease authority")
         expired_takeover = (
@@ -932,12 +1349,24 @@ class SQLitePublicTradeCollectionCheckpointStore:
             and current.lease_token != previous.lease_token
             and previous.lease_expires_at <= current.updated_at
         )
-        if expired_takeover:
-            if expected_lease_token is not None:
-                raise ValueError("expired public-trade lease takeover must use a new token")
+        return None if expired_takeover else previous.lease_token
+
+    @classmethod
+    def _validate_lease_authority(
+        cls,
+        previous: PublicTradeCollectionCheckpoint,
+        current: PublicTradeCollectionCheckpoint,
+        *,
+        expected_lease_token: UUID | None,
+    ) -> None:
+        expected_actor = cls._expected_transition_actor_lease_token(previous, current)
+        if expected_lease_token == expected_actor:
             return
-        if expected_lease_token != previous.lease_token:
-            raise ValueError("public-trade transition requires the active lease token")
+        if previous.status is not CollectionJobStatus.RUNNING:
+            raise ValueError("non-running public-trade job has no lease token to authorize")
+        if expected_actor is None:
+            raise ValueError("expired public-trade lease takeover must use a new token")
+        raise ValueError("public-trade transition requires the active lease token")
 
     @staticmethod
     def _acquires_new_lease(
@@ -1250,9 +1679,30 @@ class SQLitePublicTradeCollectionCheckpointStore:
     def _uuid_or_none(value: UUID | None) -> str | None:
         return None if value is None else str(value)
 
+    @classmethod
+    def _stored_optional_text(cls, value: object | None) -> str | None:
+        if value is None:
+            return None
+        return cls._stored_text(value)
+
     @staticmethod
-    def _stored_optional_text(value: object | None) -> str | None:
-        return None if value is None else str(value)
+    def _stored_text(value: object) -> str:
+        if type(value) is not str:
+            raise TypeError("stored SQLite value is not text")
+        return value
+
+    @staticmethod
+    def _stored_integer(value: object) -> int:
+        if type(value) is not int:
+            raise TypeError("stored SQLite value is not an integer")
+        return value
+
+    @staticmethod
+    def _corrupt_record(detail: str) -> SQLitePublicTradeCollectionStorageError:
+        return SQLitePublicTradeCollectionStorageError(
+            SQLitePublicTradeCollectionStorageErrorCode.CORRUPT_RECORD,
+            detail,
+        )
 
     @staticmethod
     def _unsupported_schema(detail: str) -> SQLitePublicTradeCollectionStorageError:

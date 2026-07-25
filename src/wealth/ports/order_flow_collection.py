@@ -6,12 +6,28 @@ from uuid import UUID
 from wealth.domain.order_flow_collection import (
     PublicTradeCollectionCheckpoint,
     PublicTradeCollectionHealthSummary,
+    PublicTradeCollectionTransition,
     PublicTradeSourceHealthObservation,
 )
 from wealth.ports.collection import CollectionCheckpointWriteResult
 
 DEFAULT_PUBLIC_TRADE_HEALTH_PAGE_SIZE = 100
 MAX_PUBLIC_TRADE_HEALTH_PAGE_SIZE = 1_000
+DEFAULT_PUBLIC_TRADE_TRANSITION_PAGE_SIZE = 100
+MAX_PUBLIC_TRADE_TRANSITION_PAGE_SIZE = 1_000
+
+
+class PublicTradeCollectionTransitionReader(Protocol):
+    """Read bounded, causally validated public-trade checkpoint history."""
+
+    def transitions_for_job(
+        self,
+        job_id: UUID,
+        *,
+        after_checkpoint_version: int | None = None,
+        limit: int = DEFAULT_PUBLIC_TRADE_TRANSITION_PAGE_SIZE,
+    ) -> tuple[PublicTradeCollectionTransition, ...]:
+        """Return an ascending page after one previously returned checkpoint version."""
 
 
 class PublicTradeCollectionCheckpointStore(Protocol):

@@ -30,6 +30,7 @@
     "historical_collection",
     "continuous_collection",
     "public_trade_checkpoint_orchestration",
+    "public_trade_transition_history_reader",
     "sqlite_market_data_storage",
     "data_quality_and_reconciliation",
     "collector_health_observability"
@@ -67,8 +68,8 @@
   "open_orders": [],
   "open_tasks": [
     {
-      "task_id": "TASK-025",
-      "action": "phase2.public_trade_transition_history_reader",
+      "task_id": "TASK-026",
+      "action": "phase2.canonical_utc_boundary_inventory_and_migration_plan",
       "status": "ready",
       "risk_tier": 1,
       "requires_human_approval": false
@@ -85,11 +86,6 @@
   "pending_approvals": [],
   "recent_decisions": [
     {
-      "decision_id": "ADR-0023",
-      "summary": "Persist restart-safe checkpoints for bounded public-trade collection.",
-      "artifact": "docs/decisions/0023-restart-safe-bounded-public-trade-collection.md"
-    },
-    {
       "decision_id": "ADR-0024",
       "summary": "Align foundation state and runtime controls with fail-closed project governance.",
       "artifact": "docs/decisions/0024-foundation-alignment-and-fail-closed-runtime.md"
@@ -98,11 +94,16 @@
       "decision_id": "ADR-0025",
       "summary": "Compose restart-safe bounded public-trade checkpoint orchestration.",
       "artifact": "docs/decisions/0025-bounded-public-trade-checkpoint-orchestration.md"
+    },
+    {
+      "decision_id": "ADR-0026",
+      "summary": "Expose bounded, typed, causally validated public-trade transition history.",
+      "artifact": "docs/decisions/0026-typed-public-trade-transition-history.md"
     }
   ],
   "next_action": {
-    "task_id": "TASK-025",
-    "action": "phase2.public_trade_transition_history_reader"
+    "task_id": "TASK-026",
+    "action": "phase2.canonical_utc_boundary_inventory_and_migration_plan"
   },
-  "last_updated_utc": "2026-07-25T11:59:37Z"
+  "last_updated_utc": "2026-07-25T13:03:09Z"
 }
