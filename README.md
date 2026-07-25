@@ -7,11 +7,24 @@ but it has no account access and cannot execute trades.
 
 ## Read First
 
+- `PROJECT_STATE.json` — validated current state and canonical next action
 - `docs/PROJECT_CHARTER.md`
 - `docs/AI_DEPARTMENTS.md`
+- `docs/ORGANIZATION.md`
 - `docs/ARCHITECTURE.md`
+- `docs/POLICIES.md`
+- `docs/SECURITY_POLICY.md`
+- `docs/RISK_POLICY.md`
+- `docs/EXECUTION_POLICY.md`
+- `docs/DATA_CONTRACTS.md`
+- `docs/DATA_CATALOG.md`
+- `RISK_REGISTER.md`
+- `BACKLOG.md`
 - `docs/ROADMAP.md`
 - `AGENTS.md`
+
+Accepted Architecture Decision Records live in `docs/decisions/`. The state file names one next
+action; the backlog supplies its bounded acceptance contract.
 
 ## Prerequisites
 
@@ -56,11 +69,25 @@ Runtime identity is loaded from environment variables and fails closed to:
 ```text
 WEALTH_ENVIRONMENT=development
 WEALTH_OPERATING_MODE=research
+WEALTH_PRIMARY_MARKET=crypto
+WEALTH_TRADING_TYPE=spot
+WEALTH_SYSTEM_TIMEZONE=UTC
+WEALTH_USER_TIMEZONE=Asia/Jerusalem
+WEALTH_BASE_CURRENCY=USD
+WEALTH_ARCHITECTURE_STYLE=modular_monolith
+WEALTH_LIVE_TRADING_ENABLED=false
+WEALTH_LEVERAGE_ENABLED=false
+WEALTH_WITHDRAWALS_ENABLED=false
+WEALTH_EXTERNAL_NOTIFICATIONS_ENABLED=false
+WEALTH_AUTONOMOUS_LIVE_EXECUTION_ENABLED=false
 WEALTH_LOG_LEVEL=INFO
 ```
 
-These values identify the environment and operating mode. They do not grant execution
-authority. No current code path can submit an order.
+The system remains in research mode as an approved safer deviation until a real paper exchange or
+simulator exists. Paper is still the target after the Phase 5 gates; calling the current runtime
+paper would be misleading. Any attempt to enable a sensitive control or use the live environment
+fails validation. Configuration never grants execution authority, and no current code path can
+submit an order.
 
 ## Professional Algorithm Foundation
 
@@ -224,6 +251,8 @@ WebSocket ingestion remain future tasks.
 Included:
 
 - Approved foundation documents.
+- A strict current-state snapshot, governed backlog, risk register, and explicit approval matrix.
+- Versioned security, risk, and execution policies with fail-closed sensitive controls.
 - Architecture Decision Records.
 - Python package and quality-tool configuration.
 - A minimal deterministic event pipeline used to prove validation, storage, logging, and testing boundaries.

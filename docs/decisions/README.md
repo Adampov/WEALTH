@@ -36,3 +36,4 @@ Each ADR records the context, decision, consequences, alternatives, and follow-u
 - `0021-adaptive-public-trade-range-ingestion.md`
 - `0022-shared-budget-for-public-trades.md`
 - `0023-restart-safe-bounded-public-trade-collection.md`
+- `0024-foundation-alignment-and-fail-closed-runtime.md`

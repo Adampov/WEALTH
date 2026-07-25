@@ -32,6 +32,12 @@ Phase 1 is complete. Its accepted evidence includes:
 - A reproducible Python package with environment separation, structured health events, and
   automated format, lint, type, test, lockfile, and dependency-audit checks
 
+The 2026-07-25 foundation-alignment checkpoint adds a validated `PROJECT_STATE.json`, one
+canonical next action in `BACKLOG.md`, a linked `RISK_REGISTER.md`, and explicit governance,
+security, risk, and execution policies. Sensitive runtime permissions are declared disabled and
+fail closed. Development/research remains the truthful temporary baseline until a real paper
+simulator exists; paper remains a later gated target.
+
 Completed Phase 2 slices include:
 
 - A canonical final-candle contract with source lineage and point-in-time timestamps.
@@ -94,6 +100,10 @@ orchestration that maps terminal range traces to those outcomes is still future 
 crash-durable per-job pre-request attempt reservations. The existing shared durable provider-rate
 budget is the current pre-request capacity boundary. A typed reader over append-only transition
 audit history is also deferred; the underlying actor fencing tokens are already retained.
+
+The canonical next action is TASK-024,
+`phase2.public_trade_checkpoint_orchestrator`. Its exact scope and acceptance gates are in
+`BACKLOG.md` and its status is mirrored in `PROJECT_STATE.json`.
 
 ## Phase 1 — Architecture and Engineering Foundation
 
@@ -585,4 +595,6 @@ Only the active phase is converted into detailed work. Each work item should:
 - Define objective completion evidence.
 - End with tests, review, documentation, or a decision record as appropriate.
 
-The next task is selected only after the current task is reviewed and accepted. Later phases remain directional until earlier evidence justifies refining them.
+The next task is selected only after the current task is reviewed and accepted. Record that one
+action in `PROJECT_STATE.json` and its acceptance contract in `BACKLOG.md`. Later phases remain
+directional until earlier evidence justifies refining them.

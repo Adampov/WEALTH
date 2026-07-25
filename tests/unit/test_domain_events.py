@@ -1,6 +1,6 @@
 """Unit tests for canonical event invariants."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from uuid import UUID
 
 import pytest
@@ -43,12 +43,23 @@ def test_event_is_immutable_and_forbids_unknown_fields() -> None:
         event.source = "changed"
 
 
-def test_event_rejects_naive_timestamps_and_string_enums() -> None:
+@pytest.mark.parametrize("field_name", ["event_time", "observed_at", "processed_at"])
+def test_event_rejects_naive_timestamps(field_name: str) -> None:
     with pytest.raises(ValidationError):
-        build_event(event_time=datetime(2026, 7, 20, 12, 0))
+        build_event(**{field_name: datetime(2026, 7, 20, 12, 0)})
 
+
+def test_event_rejects_string_enums() -> None:
     with pytest.raises(ValidationError):
         build_event(environment="test")
+
+
+@pytest.mark.parametrize("field_name", ["event_time", "observed_at", "processed_at"])
+def test_event_rejects_non_utc_timestamps(field_name: str) -> None:
+    non_utc_time = BASE_TIME.astimezone(timezone(timedelta(hours=2)))
+
+    with pytest.raises(ValidationError, match=f"{field_name} must use UTC"):
+        build_event(**{field_name: non_utc_time})
 
 
 @given(
