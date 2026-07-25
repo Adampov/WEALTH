@@ -4,11 +4,13 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta, timezone
+from hashlib import sha256
 from typing import cast
 from uuid import UUID
 
 import pytest
 
+from wealth.adapters.order_flow import InMemoryOrderFlowStore
 from wealth.application.order_flow_range import (
     PublicTradeRangePolicy,
     PublicTradeRetryPolicy,
@@ -21,12 +23,17 @@ from wealth.application.public_trade_collection import (
     PublicTradeCollectionRunStatus,
     public_trade_collection_policy_fingerprint,
 )
-from wealth.domain.collection import SourceHealthStatus
-from wealth.domain.market import InstrumentType
+from wealth.domain.collection import CollectionJobStatus, SourceHealthStatus
+from wealth.domain.market import InstrumentType, RawMarketPayload
 from wealth.domain.order_flow_collection import (
     PublicTradeCollectionCheckpoint,
     PublicTradeCollectionHealthSummary,
     PublicTradeSourceHealthObservation,
+)
+from wealth.domain.order_flow_quality import (
+    OrderFlowBatchWriteResult,
+    OrderFlowRecordType,
+    OrderFlowStream,
 )
 from wealth.domain.rate_budget import (
     RateBudgetDecision,
@@ -39,11 +46,13 @@ from wealth.ports.collection import (
     CollectionCheckpointWriteResult,
     CollectionCheckpointWriteStatus,
 )
+from wealth.ports.foundation import Clock
 from wealth.ports.order_flow import (
     OrderFlowFetchBatch,
     OrderFlowStore,
     PublicTradeSourceError,
     PublicTradeWindowRequest,
+    PublicTradeWindowSource,
 )
 from wealth.ports.rate_budget import RateBudgetCoordinator
 
@@ -261,6 +270,16 @@ class FixedClock:
         return self.value
 
 
+class SequenceClock:
+    """Return explicit public-trade timestamps in call order."""
+
+    def __init__(self, *values: datetime) -> None:
+        self._values = iter(values)
+
+    def now(self) -> datetime:
+        return next(self._values)
+
+
 @dataclass(slots=True)
 class SequenceIdGenerator:
     """Return deterministic, distinct UUIDs."""
@@ -290,6 +309,7 @@ class MemoryCheckpointStore:
     checkpoint: PublicTradeCollectionCheckpoint | None = None
     health: list[PublicTradeSourceHealthObservation] = field(default_factory=list)
     create_calls: int = 0
+    transition_calls: int = 0
 
     def create(
         self,
@@ -325,6 +345,7 @@ class MemoryCheckpointStore:
         health: PublicTradeSourceHealthObservation | None = None,
     ) -> CollectionCheckpointWriteResult:
         del expected_lease_token
+        self.transition_calls += 1
         current = self.checkpoint
         if current is None or current.version != expected_version:
             return CollectionCheckpointWriteResult(
@@ -409,6 +430,52 @@ class FailingPublicTradeSource:
         )
 
 
+@dataclass(slots=True)
+class SuccessfulPublicTradeSource:
+    """Return one empty but fully evidenced public-trade batch per request."""
+
+    calls: list[PublicTradeWindowRequest] = field(default_factory=list)
+
+    def fetch(self, request: PublicTradeWindowRequest) -> OrderFlowFetchBatch:
+        self.calls.append(request)
+        payload = b"[]"
+        observed_at = NOW
+        return OrderFlowFetchBatch(
+            stream=OrderFlowStream(
+                source="binance.public-rest",
+                venue="BINANCE",
+                instrument=request.instrument,
+                instrument_type=request.instrument_type,
+                record_type=OrderFlowRecordType.TRADE,
+            ),
+            observed_at=observed_at,
+            processed_at=observed_at,
+            raw_payload=RawMarketPayload(
+                record_id=UUID(int=90_000 + len(self.calls)),
+                source="binance.public-rest",
+                venue="BINANCE",
+                observed_at=observed_at,
+                processed_at=observed_at,
+                payload_sha256=sha256(payload).hexdigest(),
+                payload=payload,
+                lineage=("binance-public-rest:BTCUSDT",),
+            ),
+            records=(),
+        )
+
+
+@dataclass(slots=True)
+class RecordingEvidenceStore:
+    """Record admitted batches while delegating their typed write result."""
+
+    delegate: InMemoryOrderFlowStore = field(default_factory=InMemoryOrderFlowStore)
+    batches: list[OrderFlowFetchBatch] = field(default_factory=list)
+
+    def append_batch(self, batch: OrderFlowFetchBatch) -> OrderFlowBatchWriteResult:
+        self.batches.append(batch)
+        return self.delegate.append_batch(batch)
+
+
 def request(
     *,
     window_start: datetime = NOW,
@@ -425,22 +492,26 @@ def request(
 
 def orchestrator(
     *,
-    clock: FixedClock,
-    source: FailingPublicTradeSource | None = None,
+    clock: Clock,
+    source: PublicTradeWindowSource | None = None,
+    evidence_store: OrderFlowStore | None = None,
     checkpoint_store: MemoryCheckpointStore | None = None,
+    coordinator: GrantingRateBudgetCoordinator | None = None,
+    ids: SequenceIdGenerator | None = None,
+    sleeper: NoopSleeper | None = None,
     policy: PublicTradeCollectionPolicy | None = None,
 ) -> PublicTradeCollectionOrchestrator:
     return PublicTradeCollectionOrchestrator(
         source=source or FailingPublicTradeSource("unused"),
-        evidence_store=cast(OrderFlowStore, object()),
+        evidence_store=evidence_store or cast(OrderFlowStore, object()),
         checkpoint_store=checkpoint_store or MemoryCheckpointStore(),
         rate_budget_coordinator=cast(
             RateBudgetCoordinator,
-            GrantingRateBudgetCoordinator(),
+            GrantingRateBudgetCoordinator() if coordinator is None else coordinator,
         ),
         clock=clock,
-        id_generator=SequenceIdGenerator(),
-        sleeper=NoopSleeper(),
+        id_generator=SequenceIdGenerator() if ids is None else ids,
+        sleeper=NoopSleeper() if sleeper is None else sleeper,
         worker_id="worker-a",
         source_name="binance.public-rest",
         venue="BINANCE",
@@ -495,6 +566,207 @@ def test_create_job_rejects_a_non_utc_trusted_clock_before_storage() -> None:
         collector.create_job(request(), job_id=JOB_ID)
 
     assert store.create_calls == 0
+
+
+def test_create_job_rejects_invalid_clock_before_ids_or_downstream_calls(
+    invalid_clock_value: datetime,
+) -> None:
+    store = MemoryCheckpointStore()
+    source = FailingPublicTradeSource("unused")
+    coordinator = GrantingRateBudgetCoordinator()
+    ids = SequenceIdGenerator()
+    sleeper = NoopSleeper()
+    collector = orchestrator(
+        clock=FixedClock(invalid_clock_value),
+        source=source,
+        checkpoint_store=store,
+        coordinator=coordinator,
+        ids=ids,
+        sleeper=sleeper,
+    )
+
+    with pytest.raises(PublicTradeCollectionClockError, match="clock"):
+        collector.create_job(request())
+
+    assert ids.next_integer == 100
+    assert store.create_calls == 0
+    assert store.transition_calls == 0
+    assert source.calls == 0
+    assert coordinator.decisions == []
+    assert sleeper.calls == []
+
+
+def test_invalid_claim_clock_stops_before_lease_token_id_or_transition(
+    invalid_clock_value: datetime,
+) -> None:
+    store = MemoryCheckpointStore()
+    source = FailingPublicTradeSource("unused")
+    evidence = RecordingEvidenceStore()
+    coordinator = GrantingRateBudgetCoordinator()
+    ids = SequenceIdGenerator()
+    sleeper = NoopSleeper()
+    collector = orchestrator(
+        clock=FixedClock(invalid_clock_value),
+        source=source,
+        evidence_store=cast(OrderFlowStore, evidence),
+        checkpoint_store=store,
+        coordinator=coordinator,
+        ids=ids,
+        sleeper=sleeper,
+    )
+    collector.create_job(request(), job_id=JOB_ID, created_at=NOW)
+
+    with pytest.raises(PublicTradeCollectionClockError, match="clock"):
+        collector.run(JOB_ID)
+
+    assert ids.next_integer == 100
+    assert store.transition_calls == 0
+    assert store.health == []
+    assert store.checkpoint is not None
+    assert store.checkpoint.status is CollectionJobStatus.PENDING
+    assert store.checkpoint.version == 1
+    assert source.calls == 0
+    assert evidence.batches == []
+    assert coordinator.decisions == []
+    assert sleeper.calls == []
+
+
+def test_named_zero_request_and_creation_boundaries_remain_compatible() -> None:
+    named_zero = timezone(timedelta(0), "legacy-zero")
+    window_start = NOW.replace(tzinfo=named_zero)
+    window_end = (NOW + timedelta(seconds=1)).replace(tzinfo=named_zero)
+    created_at = (NOW + timedelta(seconds=2)).replace(tzinfo=named_zero)
+    store = MemoryCheckpointStore()
+    collector = orchestrator(clock=FixedClock(NOW), checkpoint_store=store)
+
+    created = collector.create_job(
+        request(
+            window_start=window_start,
+            window_end_exclusive=window_end,
+        ),
+        job_id=JOB_ID,
+        created_at=created_at,
+    )
+
+    assert created.window_start.tzinfo is named_zero
+    assert created.window_end_exclusive.tzinfo is named_zero
+    assert created.created_at.tzinfo is named_zero
+    assert store.create_calls == 1
+
+
+def test_invalid_budget_clock_stops_before_reservation_id_or_provider_call(
+    invalid_clock_value: datetime,
+) -> None:
+    store = MemoryCheckpointStore()
+    source = FailingPublicTradeSource("unused")
+    coordinator = GrantingRateBudgetCoordinator()
+    ids = SequenceIdGenerator()
+    sleeper = NoopSleeper()
+    collector = orchestrator(
+        clock=SequenceClock(NOW, invalid_clock_value),
+        source=source,
+        checkpoint_store=store,
+        coordinator=coordinator,
+        ids=ids,
+        sleeper=sleeper,
+    )
+    collector.create_job(request(), job_id=JOB_ID, created_at=NOW)
+
+    with pytest.raises(PublicTradeCollectionClockError, match="clock"):
+        collector.run(JOB_ID)
+
+    assert ids.next_integer == 101
+    assert store.transition_calls == 1
+    assert store.health == []
+    assert store.checkpoint is not None
+    assert store.checkpoint.status is CollectionJobStatus.RUNNING
+    assert store.checkpoint.version == 2
+    assert source.calls == 0
+    assert coordinator.decisions == []
+    assert sleeper.calls == []
+
+
+def test_invalid_post_range_clock_stops_before_health_id_or_checkpoint_transition(
+    invalid_clock_value: datetime,
+) -> None:
+    store = MemoryCheckpointStore()
+    source = FailingPublicTradeSource("provider_unavailable")
+    coordinator = GrantingRateBudgetCoordinator()
+    ids = SequenceIdGenerator()
+    sleeper = NoopSleeper()
+    collector = orchestrator(
+        clock=SequenceClock(NOW, NOW, invalid_clock_value),
+        source=source,
+        checkpoint_store=store,
+        coordinator=coordinator,
+        ids=ids,
+        sleeper=sleeper,
+    )
+    collector.create_job(request(), job_id=JOB_ID, created_at=NOW)
+
+    with pytest.raises(PublicTradeCollectionClockError, match="clock"):
+        collector.run(JOB_ID)
+
+    assert ids.next_integer == 102
+    assert store.transition_calls == 1
+    assert store.health == []
+    assert store.checkpoint is not None
+    assert store.checkpoint.status is CollectionJobStatus.RUNNING
+    assert store.checkpoint.version == 2
+    assert source.calls == 1
+    assert len(coordinator.decisions) == 1
+    assert sleeper.calls == []
+
+
+def test_invalid_before_next_segment_clock_stops_after_one_outcome_transition_and_sleep(
+    invalid_clock_value: datetime,
+) -> None:
+    store = MemoryCheckpointStore()
+    source = SuccessfulPublicTradeSource()
+    evidence = RecordingEvidenceStore()
+    coordinator = GrantingRateBudgetCoordinator()
+    ids = SequenceIdGenerator()
+    sleeper = NoopSleeper()
+    collector = orchestrator(
+        clock=SequenceClock(NOW, NOW, NOW, invalid_clock_value),
+        source=source,
+        evidence_store=cast(OrderFlowStore, evidence),
+        checkpoint_store=store,
+        coordinator=coordinator,
+        ids=ids,
+        sleeper=sleeper,
+    )
+    created = collector.create_job(
+        request(window_end_exclusive=NOW + timedelta(seconds=2)),
+        job_id=JOB_ID,
+        created_at=NOW,
+    )
+    paused_values = created.model_dump()
+    paused_values.update(
+        {
+            "pending_window_end_exclusive": NOW + timedelta(seconds=1),
+            "status": CollectionJobStatus.PAUSED,
+            "last_stop_reason": "request_limit_reached",
+            "version": 2,
+        }
+    )
+    store.checkpoint = PublicTradeCollectionCheckpoint.model_validate(paused_values)
+
+    with pytest.raises(PublicTradeCollectionClockError, match="clock"):
+        collector.run(JOB_ID)
+
+    assert ids.next_integer == 103
+    assert store.transition_calls == 2
+    assert len(store.health) == 1
+    assert store.checkpoint is not None
+    assert store.checkpoint.status is CollectionJobStatus.RUNNING
+    assert store.checkpoint.version == 4
+    assert store.checkpoint.next_window_start == NOW + timedelta(seconds=1)
+    assert store.checkpoint.pending_window_end_exclusive is None
+    assert len(source.calls) == 1
+    assert len(evidence.batches) == 1
+    assert len(coordinator.decisions) == 1
+    assert sleeper.calls == [0.25]
 
 
 def test_create_job_rejects_an_explicit_non_utc_creation_boundary() -> None:

@@ -3,6 +3,7 @@
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 from uuid import UUID
 
 import pytest
@@ -26,7 +27,10 @@ from wealth.domain.collector_service import (
     CollectorServiceRunQuery,
     CollectorServiceStatus,
 )
-from wealth.ports.collector_service import CollectorServiceHeartbeatWriteStatus
+from wealth.ports.collector_service import (
+    CollectorServiceHeartbeatStore,
+    CollectorServiceHeartbeatWriteStatus,
+)
 
 NOW = datetime(2026, 7, 24, 15, 0, tzinfo=UTC)
 START = datetime(2026, 7, 24, 10, 0, tzinfo=UTC)
@@ -41,6 +45,21 @@ class MutableClock:
 
     def now(self) -> datetime:
         return self.value
+
+
+class RecordingRecentRunStore:
+    """Count health reads without exposing any durable mutation boundary."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def recent_runs(
+        self,
+        query: CollectorServiceRunQuery,
+    ) -> tuple[CollectorServiceHeartbeat, ...]:
+        del query
+        self.calls += 1
+        return ()
 
 
 def heartbeat(
@@ -161,6 +180,21 @@ def test_collection_without_service_runs_reports_not_started(tmp_path: Path) -> 
     assert report.status is CollectorServiceHealthReportStatus.NOT_STARTED
     assert report.assessments == ()
     assert report.alerts == ()
+
+
+def test_invalid_health_monitor_clock_fails_before_store_reads(
+    invalid_clock_value: datetime,
+) -> None:
+    store = RecordingRecentRunStore()
+    health = CollectorServiceHealthMonitor(
+        heartbeat_store=cast(CollectorServiceHeartbeatStore, store),
+        clock=MutableClock(invalid_clock_value),
+    )
+
+    with pytest.raises(ValueError):
+        health.report(COLLECTION_ID)
+
+    assert store.calls == 0
 
 
 def test_fresh_run_is_healthy_until_threshold_then_becomes_critical(

@@ -17,7 +17,7 @@ from wealth.domain.market import (
     InstrumentType,
     RawMarketPayload,
 )
-from wealth.ports.foundation import Clock
+from wealth.ports.foundation import Clock, ClockContractError, require_utc_clock
 from wealth.ports.http import HttpResponse, HttpTransportError, PublicHttpClient
 from wealth.ports.market import (
     CandleFetchBatch,
@@ -121,7 +121,7 @@ class CoinbasePublicCandleSource:
     def fetch(self, request: HistoricalCandleRequest) -> CandleFetchBatch:
         """Fetch, bound, and normalize one closed Coinbase candle window."""
 
-        request_started_at = self.clock.now()
+        request_started_at = self._clock_now()
         self._validate_request(request, request_started_at)
         url = f"{self.products_url.rstrip('/')}/{request.provider_symbol}/candles"
         query = self._query_for(request)
@@ -137,7 +137,7 @@ class CoinbasePublicCandleSource:
                 "public candle request did not receive a response",
             ) from error
 
-        observed_at = self.clock.now()
+        observed_at = self._clock_now()
         if observed_at < request_started_at:
             raise CoinbaseCandleError(
                 CoinbaseCandleErrorCode.INVALID_REQUEST,
@@ -145,7 +145,7 @@ class CoinbasePublicCandleSource:
             )
         self._raise_for_status(response)
         rows = self._parse_payload(response.body)
-        processed_at = self.clock.now()
+        processed_at = self._clock_now()
         if processed_at < observed_at:
             raise CoinbaseCandleError(
                 CoinbaseCandleErrorCode.INVALID_REQUEST,
@@ -191,16 +191,20 @@ class CoinbasePublicCandleSource:
             records=tuple(records),
         )
 
+    def _clock_now(self) -> datetime:
+        try:
+            return require_utc_clock(self.clock.now())
+        except ClockContractError as error:
+            raise CoinbaseCandleError(
+                CoinbaseCandleErrorCode.INVALID_REQUEST,
+                str(error),
+            ) from error
+
     @staticmethod
     def _validate_request(
         request: HistoricalCandleRequest,
         now: datetime,
     ) -> None:
-        if now.tzinfo is None or now.utcoffset() is None:
-            raise CoinbaseCandleError(
-                CoinbaseCandleErrorCode.INVALID_REQUEST,
-                "clock must return a timezone-aware timestamp",
-            )
         if request.window_end_exclusive > now:
             raise CoinbaseCandleError(
                 CoinbaseCandleErrorCode.INVALID_REQUEST,

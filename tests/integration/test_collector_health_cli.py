@@ -1,14 +1,16 @@
 """Integration tests for the read-only collector health JSON command."""
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from io import StringIO
 from pathlib import Path
+from typing import ClassVar
 from uuid import UUID
 
 import pytest
 from pydantic import JsonValue
 
+import wealth.collector_health_cli as collector_health_cli_module
 from wealth.adapters.sqlite_collector_service import (
     SQLiteCollectorServiceHeartbeatStore,
     SQLiteCollectorServiceStorageError,
@@ -24,6 +26,7 @@ from wealth.collector_health_cli import (
 from wealth.domain.collector_service import (
     CollectorCycleStatus,
     CollectorServiceHeartbeat,
+    CollectorServiceRunQuery,
     CollectorServiceStatus,
 )
 from wealth.ports.collector_service import CollectorServiceHeartbeatWriteStatus
@@ -31,13 +34,31 @@ from wealth.ports.collector_service import CollectorServiceHeartbeatWriteStatus
 NOW = datetime(2026, 7, 24, 16, 0, tzinfo=UTC)
 START = datetime(2026, 7, 24, 10, 0, tzinfo=UTC)
 COLLECTION_ID = UUID(int=500)
+INVALID_CLOCK_VALUES = (
+    pytest.param(NOW.replace(tzinfo=None), id="naive"),
+    pytest.param(
+        NOW.astimezone(timezone(timedelta(hours=5, minutes=30))),
+        id="positive-offset",
+    ),
+    pytest.param(
+        NOW.astimezone(timezone(-timedelta(hours=4))),
+        id="negative-offset",
+    ),
+    pytest.param(
+        NOW.replace(tzinfo=timezone(timedelta(0), "named-zero")),
+        id="named-zero-offset",
+    ),
+)
 
 
 class FixedClock:
     """Return one deterministic health-evaluation instant."""
 
+    def __init__(self, value: datetime = NOW) -> None:
+        self.value = value
+
     def now(self) -> datetime:
-        return NOW
+        return self.value
 
 
 def starting(*, observed_at: datetime, run_id: int = 1) -> CollectorServiceHeartbeat:
@@ -243,6 +264,56 @@ def test_invalid_arguments_use_unknown_instead_of_critical_exit() -> None:
     assert exit_code == COLLECTOR_HEALTH_EXIT_UNKNOWN
     assert stdout.getvalue() == ""
     assert error["error_code"] == "invalid_arguments"
+
+
+@pytest.mark.parametrize("invalid_time", INVALID_CLOCK_VALUES)
+def test_invalid_clock_is_unknown_before_durable_report_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invalid_time: datetime,
+) -> None:
+    database = database_with(
+        tmp_path / "service.sqlite3",
+        starting(observed_at=NOW - timedelta(seconds=1)),
+    )
+
+    class RecordingHeartbeatStore(SQLiteCollectorServiceHeartbeatStore):
+        recent_run_queries: ClassVar[list[CollectorServiceRunQuery]] = []
+
+        def recent_runs(
+            self,
+            query: CollectorServiceRunQuery,
+        ) -> tuple[CollectorServiceHeartbeat, ...]:
+            self.recent_run_queries.append(query)
+            return super().recent_runs(query)
+
+    monkeypatch.setattr(
+        collector_health_cli_module,
+        "SQLiteCollectorServiceHeartbeatStore",
+        RecordingHeartbeatStore,
+    )
+    stdout = StringIO()
+    stderr = StringIO()
+
+    exit_code = run_collector_health_cli(
+        (
+            "--database",
+            str(database),
+            "--collection-id",
+            str(COLLECTION_ID),
+        ),
+        stdout=stdout,
+        stderr=stderr,
+        clock=FixedClock(invalid_time),
+    )
+    error: dict[str, JsonValue] = json.loads(stderr.getvalue())
+
+    assert exit_code == COLLECTOR_HEALTH_EXIT_UNKNOWN
+    assert stdout.getvalue() == ""
+    assert error["status"] == "unknown"
+    assert error["error_code"] == "invalid_arguments"
+    assert "tzinfo exactly datetime.UTC" in str(error["detail"])
+    assert RecordingHeartbeatStore.recent_run_queries == []
 
 
 def test_read_only_store_rejects_writes_but_allows_health_queries(tmp_path: Path) -> None:

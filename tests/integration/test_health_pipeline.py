@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from io import StringIO
 from uuid import UUID
 
+import pytest
 from pydantic import JsonValue
 
 from wealth.adapters.foundation import InMemoryEventStore
@@ -29,8 +30,10 @@ class SequenceIdGenerator:
 
     def __init__(self, values: tuple[UUID, ...]) -> None:
         self._values = iter(values)
+        self.calls = 0
 
     def new(self) -> UUID:
+        self.calls += 1
         return next(self._values)
 
 
@@ -63,3 +66,26 @@ def test_health_pipeline_validates_stores_and_logs_one_event() -> None:
     assert logged_event["event_id"] == str(event_id)
     assert logged_event["environment"] == "test"
     assert logged_event["payload"] == {"status": "ok"}
+
+
+def test_invalid_health_clock_fails_before_ids_storage_or_logging(
+    invalid_clock_value: datetime,
+) -> None:
+    output = StringIO()
+    ids = SequenceIdGenerator((UUID(int=11), UUID(int=12)))
+    store = InMemoryEventStore()
+    service = HealthCheckService(
+        clock=FixedClock(invalid_clock_value),
+        ids=ids,
+        store=store,
+        logger=StandardLibraryEventLogger(
+            configure_json_logger(name="wealth.test.invalid-health-clock", stream=output)
+        ),
+    )
+
+    with pytest.raises(ValueError):
+        service.run(Environment.TEST)
+
+    assert ids.calls == 0
+    assert store.all() == ()
+    assert output.getvalue() == ""

@@ -24,7 +24,7 @@ from wealth.ports.collection import (
     CollectionCheckpointStore,
     CollectionCheckpointWriteStatus,
 )
-from wealth.ports.foundation import Clock, IdGenerator, Sleeper
+from wealth.ports.foundation import Clock, IdGenerator, Sleeper, require_utc_clock
 from wealth.ports.market import CandleStore, HistoricalCandleRequest, HistoricalCandleSource
 
 MAX_COLLECTION_LEASE = timedelta(hours=1)
@@ -90,7 +90,7 @@ class RecoverableHistoricalCandleCollector:
         """Create a durable pending job after validating the complete work bound."""
 
         HistoricalCandlePagePlanner(self.pagination_policy).page_count(request)
-        now = self.clock.now() if created_at is None else created_at
+        now = require_utc_clock(self.clock.now()) if created_at is None else created_at
         job = HistoricalCollectionJob(
             job_id=self.id_generator.new() if job_id is None else job_id,
             source=self.source_name,
@@ -165,7 +165,7 @@ class RecoverableHistoricalCandleCollector:
             start=1,
         ):
             page_result = page_ingestor.ingest(page_request)
-            observed_at = self.clock.now()
+            observed_at = require_utc_clock(self.clock.now())
             if current.lease_expires_at is None or current.lease_expires_at <= observed_at:
                 return CollectionRunResult(
                     status=CollectionRunStatus.LOST_LEASE,
@@ -270,7 +270,7 @@ class RecoverableHistoricalCandleCollector:
     ) -> HistoricalCollectionJob | None:
         current = checkpoint
         for _ in range(2):
-            now = self.clock.now()
+            now = require_utc_clock(self.clock.now())
             if current.status is CollectionJobStatus.COMPLETED:
                 return None
             if (

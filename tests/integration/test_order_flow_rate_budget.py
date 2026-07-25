@@ -32,8 +32,8 @@ NOW = WINDOW_START + timedelta(hours=1)
 class MutableClock:
     """Expose deterministic provider and coordinator time."""
 
-    def __init__(self) -> None:
-        self.current = NOW
+    def __init__(self, current: datetime = NOW) -> None:
+        self.current = current
 
     def now(self) -> datetime:
         return self.current
@@ -47,8 +47,10 @@ class SequentialIds:
 
     def __init__(self) -> None:
         self._next = 1
+        self.calls = 0
 
     def new(self) -> UUID:
+        self.calls += 1
         value = UUID(int=self._next)
         self._next += 1
         return value
@@ -156,6 +158,33 @@ def test_weighted_trade_request_shares_budget_and_denial_prevents_network(
     assert summary.granted_count == 2
     assert summary.denied_count == 1
     assert summary.total_requested_cost == 9
+
+
+def test_invalid_trade_budget_clock_fails_before_reservation_id_or_provider(
+    tmp_path: Path,
+    invalid_clock_value: datetime,
+) -> None:
+    clock = MutableClock(invalid_clock_value)
+    ids = SequentialIds()
+    http = EmptyHttpClient()
+    coordinator = SQLiteRateBudgetCoordinator(tmp_path / "rate-budget.sqlite3")
+    configured = policy(capacity=5, period_seconds=10)
+    source = RateBudgetedPublicTradeSource(
+        source=BinancePublicAggregateTradeSource(http=http, clock=clock),
+        coordinator=coordinator,
+        policy=configured,
+        clock=clock,
+        id_generator=ids,
+        request_cost=BINANCE_SPOT_AGG_TRADES_REQUEST_WEIGHT,
+    )
+
+    with pytest.raises(ValueError):
+        source.fetch(trade_request())
+
+    summary = coordinator.summary(configured.budget_key)
+    assert ids.calls == 0
+    assert http.calls == []
+    assert summary.reservation_count == 0
 
 
 def test_adaptive_range_waits_for_local_budget_then_performs_one_network_request(

@@ -5,46 +5,50 @@ This file records approved, bounded work. `PROJECT_STATE.json` identifies the on
 
 ## Next Action
 
-### TASK-027 — Canonical UTC clock-boundary enforcement
+### TASK-028 — Additive canonical UTC codec primitives
 
-- **Key:** `phase2.canonical_utc_clock_boundary_enforcement`
+- **Key:** `phase2.canonical_utc_codec_primitives`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
-- **Goal:** Prevent an injected clock value outside Python's fixed `datetime.UTC` zone from
-  creating new offset-preserving evidence or control state while preserving every current stored
-  contract and representation.
-- **Scope:** Add one reusable strict-UTC clock assertion; strengthen the `Clock` contract to UTC;
-  apply the assertion at every direct clock read in historical and continuous collection,
-  collector service and health, the foundation `HealthCheckService`, shared rate-budget admission,
-  Binance and Coinbase public-data adapters, and public-trade orchestration; add
-  fail-before-side-effect tests.
-- **Constraints:** Clock output only. Do not tighten a timestamp-bearing domain/request model,
-  normalize caller request windows, change JSON/text serialization, digest or natural-key
-  behavior, alter a database schema or stored row, scan or repair an operator database, call a
-  real provider, schedule new work, access credentials, produce a signal, make a portfolio or
-  Risk decision, submit an order, or perform any financial action.
+- **Goal:** Add pure, unused canonical UTC conversion and text-codec primitives so later
+  compatibility work can target one exact representation without changing any active contract.
+- **Scope:** Add a reusable fixed-`datetime.UTC` value validator, an explicit aware-to-UTC edge
+  normalizer, an exact six-fractional-digit RFC 3339 `Z` serializer, a strict canonical parser,
+  and exhaustive deterministic tests.
+- **Constraints:** Additive primitives only. Do not wire them into a model, provider adapter,
+  request, stored row, JSON/log/CLI output, digest, natural key, SQLite projection, schema, or
+  operator database. Do not call a real provider, access credentials, produce a signal, make a
+  portfolio or Risk decision, submit an order, or perform any financial action.
 
 Acceptance gates:
 
-1. One shared helper rejects naive, nonzero-offset, and zero-offset non-`datetime.UTC` clock
-   results and returns an existing fixed-UTC value unchanged.
-2. `Clock.now()` documents canonical UTC, and `SystemClock` plus every accepted injected UTC fake
-   conform without changing their timestamp value.
-3. Every direct clock call in the scoped applications and adapters is checked before its value
-   can reach the next HTTP, storage, reservation, wait, log, or canonical-record side effect.
-4. Table-driven tests cover fixed UTC, naive, positive-offset, negative-offset, and a
-   fold-capable or named zero-offset timezone. An invalid initial clock produces zero ID,
-   downstream, or external calls; an invalid later clock fails before the next mutation.
-5. Existing typed error/code mapping remains equivalent at every scoped provider and application
-   boundary after adopting the shared helper; invalid later clock reads fail before persistence
-   or canonical-evidence creation.
-6. Persisted model validation, request-window acceptance, JSON bytes, digests, keys, schemas,
-   database contents, and migration state remain unchanged.
-7. Relevant unit, integration, format, lint, type, lockfile, health-slice, dependency-audit, and
+1. The fixed-UTC validator accepts only values whose `tzinfo is datetime.UTC` and returns the
+   original object unchanged.
+2. The edge normalizer rejects naive values and converts every aware positive, negative, named,
+   regional, and fold-capable input to the same instant with `tzinfo is datetime.UTC`.
+3. The serializer emits exactly `YYYY-MM-DDTHH:MM:SS.ffffffZ`; the parser accepts only that
+   canonical form, rejects offset or variable-precision alternatives, and returns fixed UTC.
+4. Boundary and property-style tests cover microsecond extremes, calendar limits, malformed
+   input, named/rule-based zones, folds, exact round trips, and instant preservation.
+5. No existing runtime path imports or calls the new codec primitives, and current request/model
+   acceptance, serialized bytes, digests, keys, schemas, projections, and stored data are
+   unchanged.
+6. Relevant unit, integration, format, lint, type, lockfile, health-slice, dependency-audit, and
    CI gates pass.
 
 ## Recently Completed
+
+### TASK-027 — Canonical UTC clock-boundary enforcement
+
+- **Key:** `phase2.canonical_utc_clock_boundary_enforcement`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Result:** One shared exact-`datetime.UTC` assertion now guards every direct injected-clock
+  read in the scoped foundation, application, rate-budget, provider, and public-trade boundaries.
+  Invalid initial values fail before IDs or downstream mutations; invalid later reads fail before
+  the next side effect; provider and application error mappings remain typed. Persisted models,
+  request acceptance, JSON, digests, keys, schemas, projections, and stored data are unchanged.
 
 ### TASK-026 — Canonical UTC boundary inventory and migration plan
 

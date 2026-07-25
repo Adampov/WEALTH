@@ -34,7 +34,13 @@ from wealth.domain.order_flow_quality import (
 from wealth.domain.quality import DataQualityStatus, RawPayloadWriteStatus
 from wealth.domain.rate_budget import RateBudgetPolicy
 from wealth.ports.collection import CollectionCheckpointWriteStatus
-from wealth.ports.foundation import Clock, IdGenerator, Sleeper
+from wealth.ports.foundation import (
+    Clock,
+    ClockContractError,
+    IdGenerator,
+    Sleeper,
+    require_utc_clock,
+)
 from wealth.ports.order_flow import (
     OrderFlowFetchBatch,
     OrderFlowStore,
@@ -563,7 +569,7 @@ class PublicTradeCollectionOrchestrator:
         )
 
     def _trusted_now(self) -> datetime:
-        return _require_utc("clock", self.clock.now())
+        return _require_utc_clock(self.clock)
 
     @staticmethod
     def _copy_checkpoint(
@@ -607,7 +613,7 @@ class _UtcCheckedClock:
     clock: Clock
 
     def now(self) -> datetime:
-        return _require_utc("clock", self.clock.now())
+        return _require_utc_clock(self.clock)
 
 
 def _map_range_outcome(
@@ -714,6 +720,13 @@ def _require_utc(name: str, value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() != timedelta(0):
         raise PublicTradeCollectionClockError(f"{name} must use UTC")
     return value
+
+
+def _require_utc_clock(clock: Clock) -> datetime:
+    try:
+        return require_utc_clock(clock.now())
+    except ClockContractError as error:
+        raise PublicTradeCollectionClockError(f"clock must use datetime.UTC: {error}") from error
 
 
 def _validate_identifier(name: str, value: str, *, maximum_length: int) -> None:

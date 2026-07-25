@@ -22,7 +22,7 @@ from wealth.domain.order_flow_quality import (
     OrderFlowStream,
     ProviderSequencePolicy,
 )
-from wealth.ports.foundation import Clock
+from wealth.ports.foundation import Clock, ClockContractError, require_utc_clock
 from wealth.ports.http import HttpResponse, HttpTransportError, PublicHttpClient
 from wealth.ports.order_flow import (
     OrderFlowFetchBatch,
@@ -133,7 +133,7 @@ class BinancePublicAggregateTradeSource:
     def fetch(self, request: PublicTradeWindowRequest) -> OrderFlowFetchBatch:
         """Fetch one bounded aggregate-trade window or reject possible truncation."""
 
-        request_started_at = self.clock.now()
+        request_started_at = self._clock_now()
         self._validate_request(request, request_started_at)
         url = self._endpoint_for(request.instrument_type)
         query = self._query_for(request)
@@ -149,7 +149,7 @@ class BinancePublicAggregateTradeSource:
                 "public aggregate-trade request did not receive a response",
             ) from error
 
-        observed_at = self.clock.now()
+        observed_at = self._clock_now()
         if observed_at < request_started_at:
             raise BinanceAggregateTradeError(
                 BinanceAggregateTradeErrorCode.INVALID_REQUEST,
@@ -162,7 +162,7 @@ class BinancePublicAggregateTradeSource:
                 BinanceAggregateTradeErrorCode.POSSIBLY_TRUNCATED,
                 "provider response reached the row cap; request a smaller time window",
             )
-        processed_at = self.clock.now()
+        processed_at = self._clock_now()
         if processed_at < observed_at:
             raise BinanceAggregateTradeError(
                 BinanceAggregateTradeErrorCode.INVALID_REQUEST,
@@ -203,13 +203,17 @@ class BinancePublicAggregateTradeSource:
             records=records,
         )
 
-    @staticmethod
-    def _validate_request(request: PublicTradeWindowRequest, now: datetime) -> None:
-        if now.tzinfo is None or now.utcoffset() is None:
+    def _clock_now(self) -> datetime:
+        try:
+            return require_utc_clock(self.clock.now())
+        except ClockContractError as error:
             raise BinanceAggregateTradeError(
                 BinanceAggregateTradeErrorCode.INVALID_REQUEST,
-                "clock must return a timezone-aware timestamp",
-            )
+                str(error),
+            ) from error
+
+    @staticmethod
+    def _validate_request(request: PublicTradeWindowRequest, now: datetime) -> None:
         if request.window_end_exclusive > now:
             raise BinanceAggregateTradeError(
                 BinanceAggregateTradeErrorCode.INVALID_REQUEST,

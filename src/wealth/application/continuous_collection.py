@@ -27,7 +27,7 @@ from wealth.ports.continuous_collection import (
     ContinuousCollectionCheckpointStore,
     ContinuousCollectionWriteStatus,
 )
-from wealth.ports.foundation import Clock, IdGenerator, Sleeper
+from wealth.ports.foundation import Clock, IdGenerator, Sleeper, require_utc_clock
 from wealth.ports.market import HistoricalCandleRequest
 
 MAX_CONTINUOUS_CYCLES_PER_RUN = 100
@@ -194,7 +194,7 @@ class SupervisedContinuousCandleCollector:
             or request.venue != self.bounded_collector.venue
         ):
             raise ValueError("continuous stream identity must match its bounded collector")
-        now = self.clock.now()
+        now = require_utc_clock(self.clock.now())
         checkpoint = ContinuousCollectionCheckpoint(
             collection_id=self.id_generator.new(),
             source=request.source,
@@ -261,8 +261,7 @@ class SupervisedContinuousCandleCollector:
                 status=ContinuousCollectionCycleStatus.PAUSED,
                 checkpoint=checkpoint,
             )
-        now = self.clock.now()
-        _require_aware_time(now)
+        now = require_utc_clock(self.clock.now())
         if now < checkpoint.updated_at:
             raise ContinuousCollectionClockRegressionError(
                 "current time precedes the durable continuous checkpoint"
@@ -364,7 +363,7 @@ class SupervisedContinuousCandleCollector:
         paused = self._copy(
             checkpoint,
             status=ContinuousCollectionStatus.PAUSED,
-            updated_at=self.clock.now(),
+            updated_at=require_utc_clock(self.clock.now()),
             version=checkpoint.version + 1,
             next_retry_at=None,
             pause_reason=reason,
@@ -380,7 +379,7 @@ class SupervisedContinuousCandleCollector:
         resumed = self._copy(
             checkpoint,
             status=ContinuousCollectionStatus.ACTIVE,
-            updated_at=self.clock.now(),
+            updated_at=require_utc_clock(self.clock.now()),
             version=checkpoint.version + 1,
             consecutive_failures=0,
             next_retry_at=None,
@@ -398,7 +397,7 @@ class SupervisedContinuousCandleCollector:
         active_end = checkpoint.active_window_end_exclusive
         if active_end is None or bounded_run.checkpoint.window_end_exclusive != active_end:
             raise RuntimeError("completed bounded job does not match its continuous active window")
-        now = self.clock.now()
+        now = require_utc_clock(self.clock.now())
         candles_advanced = (
             active_end - checkpoint.next_window_start
         ) // checkpoint.timeframe.duration
@@ -445,7 +444,7 @@ class SupervisedContinuousCandleCollector:
         stop_reason = failed_job.last_stop_reason
         if failure_code is None or stop_reason is None:
             raise RuntimeError("failed bounded job lacks reconnect evidence")
-        now = self.clock.now()
+        now = require_utc_clock(self.clock.now())
         failure_count = checkpoint.consecutive_failures + 1
         retryable = (
             failure_code in RECONNECTABLE_FAILURE_CODES

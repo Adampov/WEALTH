@@ -21,9 +21,10 @@ model and its tests. The cross-boundary timestamp evidence and staged target are
 | Public-trade collection state | `wealth.domain.order_flow_collection` and `wealth.ports.order_flow_collection` | Active checkpoint, health, and immutable transition contracts; bounded orchestration and causally validated transition-history reader active |
 | Public-trade collection application | `wealth.application.public_trade_collection` | Active, explicitly invoked, bounded, evidence-first |
 | Shared provider-rate budget | `wealth.domain.rate_budget` | Active |
+| Foundation clock | `wealth.ports.foundation.Clock` and `require_utc_clock` | Active; injected results require `tzinfo is datetime.UTC` before downstream side effects |
 | Cross-source reconciliation | `wealth.domain.reconciliation` and `wealth.domain.reconciliation_history` | Active |
 | Repository operating state | `wealth.domain.project_state.ProjectState` | Active; validates `PROJECT_STATE.json` |
-| Canonical UTC target | ADR 0027 and the UTC boundary inventory | Planning accepted; implementation and migration remain open under `RISK-005` |
+| Canonical UTC target | ADR 0027 and the UTC boundary inventory | Clock enforcement active; codec, persisted-contract, and migration work remain open under `RISK-005` |
 
 ## Contract Rules
 
@@ -31,6 +32,10 @@ model and its tests. The cross-boundary timestamp evidence and staged target are
   rejects naive timestamps. Non-UTC aware timestamps are currently rejected only at the explicit
   strict boundaries identified in the UTC inventory; most other timestamp-bearing models remain
   aware-only while `RISK-005` is open.
+- `Clock.now()` must return a value whose `tzinfo is datetime.UTC`. The shared clock assertion
+  rejects naive, nonzero-offset, and named/rule-based zero-offset results without normalizing
+  them. This rule applies only to injected clock output; it does not tighten existing persisted
+  models, request windows, or explicit legacy timestamp inputs.
 - The accepted target is a Python datetime in the fixed `datetime.UTC` zone, fixed
   microsecond-precision RFC 3339 `Z` text, and checked epoch-microsecond SQL projections.
   Zero offset alone is insufficient because a regional timezone can have offset zero only for

@@ -43,6 +43,7 @@ from wealth.ports.continuous_collection import (
     ContinuousCollectionCheckpointStore,
     ContinuousCollectionWriteResult,
 )
+from wealth.ports.foundation import Clock
 from wealth.ports.market import (
     CandleFetchBatch,
     HistoricalCandleRequest,
@@ -64,6 +65,16 @@ class MutableClock:
 
     def advance(self, duration: timedelta) -> None:
         self.value += duration
+
+
+class SequenceClock:
+    """Return explicit continuous-collection timestamps in call order."""
+
+    def __init__(self, *values: datetime) -> None:
+        self._values = iter(values)
+
+    def now(self) -> datetime:
+        return next(self._values)
 
 
 class SequentialIds:
@@ -95,7 +106,7 @@ class ScriptedCandleSource:
     def __init__(
         self,
         *,
-        clock: MutableClock,
+        clock: Clock,
         ids: SequentialIds,
         outcomes: tuple[str, ...],
     ) -> None:
@@ -245,7 +256,7 @@ def stream() -> CandleStream:
 def service(
     *,
     source: ScriptedCandleSource,
-    clock: MutableClock,
+    clock: Clock,
     ids: SequentialIds,
     sleeper: AdvancingSleeper,
     market_store: SQLiteCandleStore,
@@ -291,6 +302,214 @@ def service(
             max_consecutive_failures=max_failures,
         ),
     )
+
+
+def test_invalid_initial_continuous_clock_fails_before_id_or_storage(
+    tmp_path: Path,
+    invalid_clock_value: datetime,
+) -> None:
+    clock = MutableClock(invalid_clock_value)
+    ids = SequentialIds()
+    sleeper = AdvancingSleeper(clock)
+    source = ScriptedCandleSource(clock=clock, ids=ids, outcomes=())
+    continuous_store = SQLiteContinuousCollectionCheckpointStore(tmp_path / "continuous.sqlite3")
+    process = service(
+        source=source,
+        clock=clock,
+        ids=ids,
+        sleeper=sleeper,
+        market_store=SQLiteCandleStore(tmp_path / "market.sqlite3"),
+        bounded_store=SQLiteCollectionCheckpointStore(tmp_path / "bounded.sqlite3"),
+        continuous_store=continuous_store,
+    )
+
+    with pytest.raises(ValueError):
+        process.create(collection_request())
+
+    assert ids.value == 0
+    assert continuous_store.get(UUID(int=1)) is None
+    assert source.calls == []
+    assert sleeper.delays == []
+
+
+def test_invalid_run_cycle_clock_stops_before_id_or_cursor_transition(
+    tmp_path: Path,
+    invalid_clock_value: datetime,
+) -> None:
+    clock = MutableClock()
+    ids = SequentialIds()
+    sleeper = AdvancingSleeper(clock)
+    source = ScriptedCandleSource(clock=clock, ids=ids, outcomes=())
+    continuous_store = SQLiteContinuousCollectionCheckpointStore(tmp_path / "continuous.sqlite3")
+    process = service(
+        source=source,
+        clock=clock,
+        ids=ids,
+        sleeper=sleeper,
+        market_store=SQLiteCandleStore(tmp_path / "market.sqlite3"),
+        bounded_store=SQLiteCollectionCheckpointStore(tmp_path / "bounded.sqlite3"),
+        continuous_store=continuous_store,
+    )
+    created = process.create(collection_request())
+    clock.value = invalid_clock_value
+
+    with pytest.raises(ValueError):
+        process.run_cycle(created.collection_id)
+
+    assert continuous_store.get(created.collection_id) == created
+    assert ids.value == 1
+    assert source.calls == []
+    assert sleeper.delays == []
+
+
+def test_invalid_pause_clock_stops_before_cursor_transition(
+    tmp_path: Path,
+    invalid_clock_value: datetime,
+) -> None:
+    clock = MutableClock()
+    ids = SequentialIds()
+    sleeper = AdvancingSleeper(clock)
+    source = ScriptedCandleSource(clock=clock, ids=ids, outcomes=())
+    continuous_store = SQLiteContinuousCollectionCheckpointStore(tmp_path / "continuous.sqlite3")
+    process = service(
+        source=source,
+        clock=clock,
+        ids=ids,
+        sleeper=sleeper,
+        market_store=SQLiteCandleStore(tmp_path / "market.sqlite3"),
+        bounded_store=SQLiteCollectionCheckpointStore(tmp_path / "bounded.sqlite3"),
+        continuous_store=continuous_store,
+    )
+    created = process.create(collection_request())
+    clock.value = invalid_clock_value
+
+    with pytest.raises(ValueError):
+        process.pause(created.collection_id)
+
+    assert continuous_store.get(created.collection_id) == created
+    assert ids.value == 1
+    assert source.calls == []
+    assert sleeper.delays == []
+
+
+def test_invalid_resume_clock_stops_before_cursor_transition(
+    tmp_path: Path,
+    invalid_clock_value: datetime,
+) -> None:
+    clock = MutableClock()
+    ids = SequentialIds()
+    sleeper = AdvancingSleeper(clock)
+    source = ScriptedCandleSource(clock=clock, ids=ids, outcomes=())
+    continuous_store = SQLiteContinuousCollectionCheckpointStore(tmp_path / "continuous.sqlite3")
+    process = service(
+        source=source,
+        clock=clock,
+        ids=ids,
+        sleeper=sleeper,
+        market_store=SQLiteCandleStore(tmp_path / "market.sqlite3"),
+        bounded_store=SQLiteCollectionCheckpointStore(tmp_path / "bounded.sqlite3"),
+        continuous_store=continuous_store,
+    )
+    created = process.create(collection_request())
+    paused = process.pause(created.collection_id)
+    clock.value = invalid_clock_value
+
+    with pytest.raises(ValueError):
+        process.resume(created.collection_id)
+
+    assert continuous_store.get(created.collection_id) == paused
+    assert ids.value == 1
+    assert source.calls == []
+    assert sleeper.delays == []
+
+
+def test_invalid_post_bounded_success_clock_stops_before_cursor_advance(
+    tmp_path: Path,
+    invalid_clock_value: datetime,
+) -> None:
+    clock = SequenceClock(
+        INITIAL_NOW,
+        INITIAL_NOW,
+        INITIAL_NOW,
+        INITIAL_NOW,
+        INITIAL_NOW,
+        invalid_clock_value,
+    )
+    ids = SequentialIds()
+    sleeper = AdvancingSleeper(MutableClock())
+    source = ScriptedCandleSource(clock=clock, ids=ids, outcomes=("success",))
+    bounded_store = SQLiteCollectionCheckpointStore(tmp_path / "bounded.sqlite3")
+    continuous_store = SQLiteContinuousCollectionCheckpointStore(tmp_path / "continuous.sqlite3")
+    process = service(
+        source=source,
+        clock=clock,
+        ids=ids,
+        sleeper=sleeper,
+        market_store=SQLiteCandleStore(tmp_path / "market.sqlite3"),
+        bounded_store=bounded_store,
+        continuous_store=continuous_store,
+    )
+    created = process.create(collection_request())
+
+    with pytest.raises(ValueError):
+        process.run_cycle(created.collection_id)
+
+    durable = continuous_store.get(created.collection_id)
+    assert durable is not None
+    assert durable.status is ContinuousCollectionStatus.ACTIVE
+    assert durable.version == 2
+    assert durable.next_window_start == created.next_window_start
+    assert durable.active_job_id is not None
+    bounded = bounded_store.get(durable.active_job_id)
+    assert bounded is not None
+    assert bounded.status is CollectionJobStatus.COMPLETED
+    assert len(source.calls) == 1
+    assert sleeper.delays == []
+
+
+def test_invalid_post_bounded_failure_clock_stops_before_continuous_transition(
+    tmp_path: Path,
+    invalid_clock_value: datetime,
+) -> None:
+    clock = SequenceClock(
+        INITIAL_NOW,
+        INITIAL_NOW,
+        INITIAL_NOW,
+        INITIAL_NOW,
+        invalid_clock_value,
+    )
+    ids = SequentialIds()
+    sleeper = AdvancingSleeper(MutableClock())
+    source = ScriptedCandleSource(clock=clock, ids=ids, outcomes=("malformed",))
+    bounded_store = SQLiteCollectionCheckpointStore(tmp_path / "bounded.sqlite3")
+    continuous_store = SQLiteContinuousCollectionCheckpointStore(tmp_path / "continuous.sqlite3")
+    process = service(
+        source=source,
+        clock=clock,
+        ids=ids,
+        sleeper=sleeper,
+        market_store=SQLiteCandleStore(tmp_path / "market.sqlite3"),
+        bounded_store=bounded_store,
+        continuous_store=continuous_store,
+    )
+    created = process.create(collection_request())
+
+    with pytest.raises(ValueError):
+        process.run_cycle(created.collection_id)
+
+    durable = continuous_store.get(created.collection_id)
+    assert durable is not None
+    assert durable.status is ContinuousCollectionStatus.ACTIVE
+    assert durable.version == 2
+    assert durable.next_window_start == created.next_window_start
+    assert durable.active_job_id is not None
+    assert durable.consecutive_failures == 0
+    assert durable.next_retry_at is None
+    bounded = bounded_store.get(durable.active_job_id)
+    assert bounded is not None
+    assert bounded.status is CollectionJobStatus.FAILED
+    assert len(source.calls) == 1
+    assert sleeper.delays == []
 
 
 def test_planned_disconnect_reconnects_without_gap_or_duplicate(tmp_path: Path) -> None:
