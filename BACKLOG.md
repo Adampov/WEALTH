@@ -5,44 +5,61 @@ This file records approved, bounded work. `PROJECT_STATE.json` identifies the on
 
 ## Next Action
 
-### TASK-026 — Canonical UTC boundary inventory and migration plan
+### TASK-027 — Canonical UTC clock-boundary enforcement
 
-- **Key:** `phase2.canonical_utc_boundary_inventory_and_migration_plan`
+- **Key:** `phase2.canonical_utc_clock_boundary_enforcement`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
-- **Goal:** Produce an evidence-backed inventory of every timestamp boundary still covered by
-  `RISK-005` and one reviewable, staged plan for converging them on canonical UTC.
-- **Scope:** Catalog timestamp-bearing domain, port, application, adapter, persistence, JSON, and
-  text boundaries; record their validation, normalization, serialization, comparison, sorting,
-  indexing, and test behavior; then define compatibility, quarantine, rollback, migration-order,
-  and regression-test requirements.
-- **Constraints:** Inventory and plan only. Do not change a runtime contract, schema, stored data,
-  migration, or application behavior; do not write to a project database, repair data, call a
-  provider, schedule work, access credentials, produce a signal, make a portfolio or Risk
-  decision, submit an order, or perform any financial action.
+- **Goal:** Prevent an injected clock value outside Python's fixed `datetime.UTC` zone from
+  creating new offset-preserving evidence or control state while preserving every current stored
+  contract and representation.
+- **Scope:** Add one reusable strict-UTC clock assertion; strengthen the `Clock` contract to UTC;
+  apply the assertion at every direct clock read in historical and continuous collection,
+  collector service and health, the foundation `HealthCheckService`, shared rate-budget admission,
+  Binance and Coinbase public-data adapters, and public-trade orchestration; add
+  fail-before-side-effect tests.
+- **Constraints:** Clock output only. Do not tighten a timestamp-bearing domain/request model,
+  normalize caller request windows, change JSON/text serialization, digest or natural-key
+  behavior, alter a database schema or stored row, scan or repair an operator database, call a
+  real provider, schedule new work, access credentials, produce a signal, make a portfolio or
+  Risk decision, submit an order, or perform any financial action.
 
 Acceptance gates:
 
-1. The inventory names every timestamp-bearing canonical model and persistence path discoverable
-   from the repository, its owner, representation, and current UTC guarantee or gap.
-2. Stored JSON/text, indexed projections, SQL ordering, cursor logic, comparisons, clocks, and
-   provider inputs are traced separately so an indexed-UTC projection cannot hide
-   offset-preserving canonical content.
-3. Each uncovered boundary has evidence links, an impact classification, compatibility concerns,
-   and an explicit proposed treatment; unknown behavior remains marked unknown rather than
-   inferred.
-4. The plan defines one canonical UTC representation and staged contract, storage, and test work,
-   including quarantine, rollback, backward-compatibility, and migration verification.
-5. The output identifies decisions or approvals required before any incompatible contract,
-   schema, or stored-data migration begins.
-6. Repository state remains unchanged apart from inventory, planning, and governance artifacts;
-   no migration or runtime implementation is authorized by completing this task.
-7. Relevant format, lint, link, state-validation, and CI gates pass.
-8. The roadmap, backlog, risk register, data-contract index, and `PROJECT_STATE.json` are updated
-   with the planning result and the next bounded action.
+1. One shared helper rejects naive, nonzero-offset, and zero-offset non-`datetime.UTC` clock
+   results and returns an existing fixed-UTC value unchanged.
+2. `Clock.now()` documents canonical UTC, and `SystemClock` plus every accepted injected UTC fake
+   conform without changing their timestamp value.
+3. Every direct clock call in the scoped applications and adapters is checked before its value
+   can reach the next HTTP, storage, reservation, wait, log, or canonical-record side effect.
+4. Table-driven tests cover fixed UTC, naive, positive-offset, negative-offset, and a
+   fold-capable or named zero-offset timezone. An invalid initial clock produces zero ID,
+   downstream, or external calls; an invalid later clock fails before the next mutation.
+5. Existing typed error/code mapping remains equivalent at every scoped provider and application
+   boundary after adopting the shared helper; invalid later clock reads fail before persistence
+   or canonical-evidence creation.
+6. Persisted model validation, request-window acceptance, JSON bytes, digests, keys, schemas,
+   database contents, and migration state remain unchanged.
+7. Relevant unit, integration, format, lint, type, lockfile, health-slice, dependency-audit, and
+   CI gates pass.
 
 ## Recently Completed
+
+### TASK-026 — Canonical UTC boundary inventory and migration plan
+
+- **Key:** `phase2.canonical_utc_boundary_inventory_and_migration_plan`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Decision:** `docs/decisions/0027-canonical-utc-boundary-and-migration-plan.md`
+- **Result:** The repository now has an evidence-backed inventory of every discovered
+  timestamp-bearing model, clock, provider edge, JSON/text boundary, SQLite projection, order,
+  index, cursor, and test path. It selects Python datetimes in the fixed `datetime.UTC` zone, fixed
+  microsecond-precision RFC 3339 `Z` text, and derived epoch-microsecond SQL projections as the
+  target, with staged compatibility readers, preflight, quarantine, collision handling, digest
+  versioning, backup, rollback, and migration verification. No runtime, schema, or data migration
+  was performed.
+- **Inventory:** `docs/CANONICAL_UTC_BOUNDARY_INVENTORY_AND_MIGRATION_PLAN.md`
 
 ### TASK-025 — Typed public-trade transition-history reader
 

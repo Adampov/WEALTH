@@ -4,7 +4,8 @@
 
 This index identifies the canonical Phase 2 data boundaries. The detailed behavioral contract is
 [`contracts/MARKET_DATA.md`](contracts/MARKET_DATA.md); executable truth is the strict Pydantic
-model and its tests.
+model and its tests. The cross-boundary timestamp evidence and staged target are recorded in the
+[`Canonical UTC boundary inventory and migration plan`](CANONICAL_UTC_BOUNDARY_INVENTORY_AND_MIGRATION_PLAN.md).
 
 ## Active Contracts
 
@@ -22,11 +23,18 @@ model and its tests.
 | Shared provider-rate budget | `wealth.domain.rate_budget` | Active |
 | Cross-source reconciliation | `wealth.domain.reconciliation` and `wealth.domain.reconciliation_history` | Active |
 | Repository operating state | `wealth.domain.project_state.ProjectState` | Active; validates `PROJECT_STATE.json` |
+| Canonical UTC target | ADR 0027 and the UTC boundary inventory | Planning accepted; implementation and migration remain open under `RISK-005` |
 
 ## Contract Rules
 
-- Unknown fields, mutable records, naive timestamps, and non-UTC internal timestamps are rejected
-  at the applicable canonical boundary.
+- Unknown fields and mutable records are rejected by the strict canonical models. `AwareDatetime`
+  rejects naive timestamps. Non-UTC aware timestamps are currently rejected only at the explicit
+  strict boundaries identified in the UTC inventory; most other timestamp-bearing models remain
+  aware-only while `RISK-005` is open.
+- The accepted target is a Python datetime in the fixed `datetime.UTC` zone, fixed
+  microsecond-precision RFC 3339 `Z` text, and checked epoch-microsecond SQL projections.
+  Zero offset alone is insufficient because a regional timezone can have offset zero only for
+  part of the year. ADR 0027 does not authorize a runtime, schema, or stored-data migration.
 - Source identity, event time, observation time, processing time, schema version, and lineage are
   retained whenever applicable.
 - Missing, stale, conflicting, truncated, or unverifiable evidence is represented explicitly and

@@ -99,6 +99,10 @@ Completed Phase 2 slices include:
   ascending contiguous checkpoint-version pages, strict cursor and page bounds, full projection
   and lifecycle validation, restart replay, and fail-closed corruption tests without a schema
   migration.
+- An evidence-backed canonical UTC boundary inventory covering every discovered model, clock,
+  provider edge, JSON/text representation, SQLite projection, order, index, cursor, and test path,
+  with an accepted staged compatibility, quarantine, backup, rollback, and migration plan. No
+  runtime, schema, or stored-data migration has begun.
 
 Phase 2 is not complete. Operating-system service deployment, live streaming, multi-host
 rate-budget coordination, durable raw and canonical storage beyond the local SQLite baseline,
@@ -110,12 +114,17 @@ pre-request attempt reservations remain future work; the existing shared durable
 budget is the current pre-request capacity boundary. The append-only transition audit history is
 now available through a bounded typed port that revalidates causal versions and the retained actor
 fencing authority without mutating control state. Operational recovery drills remain required
-before continuous public-trade collection.
+before continuous public-trade collection. `RISK-005` remains open: the accepted plan selects
+Python datetimes in the fixed `datetime.UTC` zone, fixed microsecond RFC 3339 `Z` text, and derived
+epoch-microsecond SQL projections, but current aware-only contracts and legacy stores have not
+been migrated.
 
-The canonical next action is TASK-026,
-`phase2.canonical_utc_boundary_inventory_and_migration_plan`. It is an inventory and planning task
-only: it does not authorize a contract, schema, stored-data, or runtime migration. Its exact scope
-and acceptance gates are in `BACKLOG.md` and its status is mirrored in `PROJECT_STATE.json`.
+The canonical next action is TASK-027,
+`phase2.canonical_utc_clock_boundary_enforcement`. It prevents new drift by checking every direct
+injected-clock value against the existing UTC policy before downstream side effects. It does not
+tighten persisted models, normalize request windows, change serialized bytes or identities, alter
+a schema, or migrate stored data. Its exact scope and acceptance gates are in `BACKLOG.md` and its
+status is mirrored in `PROJECT_STATE.json`.
 
 ## Phase 1 — Architecture and Engineering Foundation
 
