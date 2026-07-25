@@ -46,13 +46,15 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert "canonical_utc_codec_primitives" in state.active_components
     assert "canonical_utc_epoch_microsecond_primitives" in state.active_components
     assert "canonical_utc_preflight_fingerprint_foundation" in state.active_components
+    assert "canonical_utc_preflight_timestamp_evidence_foundation" in state.active_components
     assert len(state.open_tasks) == 1
-    assert state.open_tasks[0].task_id == "TASK-031"
+    assert state.open_tasks[0].task_id == "TASK-032"
     assert state.open_tasks[0].status == "ready"
     assert state.open_tasks[0].requires_human_approval is False
-    assert state.next_action.task_id == "TASK-031"
+    assert state.next_action.task_id == "TASK-032"
     assert (
-        state.next_action.action == "phase2.canonical_utc_preflight_timestamp_evidence_foundation"
+        state.next_action.action
+        == "phase2.canonical_utc_preflight_timestamp_parse_evidence_foundation"
     )
     assert any(decision.decision_id == "ADR-0027" for decision in state.recent_decisions)
 
@@ -73,15 +75,15 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     completed_section = backlog.split("## Recently Completed", maxsplit=1)[1].split(
         "## Queued, Not Yet Approved", maxsplit=1
     )[0]
-    task_030_section = completed_section.split("### TASK-030 ", maxsplit=1)[1].split(
+    task_031_section = completed_section.split("### TASK-031 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
-    assert "- **Status:** COMPLETE" in task_030_section
-    assert "`phase2.canonical_utc_preflight_fingerprint_foundation`" in task_030_section
+    assert "- **Status:** COMPLETE" in task_031_section
+    assert "`phase2.canonical_utc_preflight_timestamp_evidence_foundation`" in task_031_section
 
 
 def test_project_state_forbids_unknown_fields() -> None:

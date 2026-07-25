@@ -16,6 +16,11 @@ __all__ = [
     "MAX_SQLITE_MARKER_COLUMNS",
     "MAX_SQLITE_MARKER_ROWS",
     "MAX_SQLITE_MARKER_VALUE_BYTES",
+    "MAX_SQLITE_TIMESTAMP_COLUMNS_PER_TARGET",
+    "MAX_SQLITE_TIMESTAMP_KEY_COLUMNS",
+    "MAX_SQLITE_TIMESTAMP_ROWS_PER_TARGET",
+    "MAX_SQLITE_TIMESTAMP_TARGETS",
+    "MAX_SQLITE_TIMESTAMP_VALUE_BYTES",
     "SQLiteColumnFingerprint",
     "SQLiteExpectedStoreIdentity",
     "SQLiteForeignKeyFingerprint",
@@ -36,15 +41,30 @@ __all__ = [
     "SQLiteStoreFamily",
     "SQLiteStoreFingerprint",
     "SQLiteTableFingerprint",
+    "SQLiteTimestampCellEvidence",
+    "SQLiteTimestampExtractionPlan",
+    "SQLiteTimestampExtractionResult",
+    "SQLiteTimestampExtractionTarget",
+    "SQLiteTimestampRowEvidence",
+    "SQLiteTimestampTableEvidence",
     "SQLiteTriggerFingerprint",
 ]
 
 MAX_SQLITE_MARKER_COLUMNS: Final[int] = 16
 MAX_SQLITE_MARKER_ROWS: Final[int] = 64
 MAX_SQLITE_MARKER_VALUE_BYTES: Final[int] = 4096
+MAX_SQLITE_TIMESTAMP_COLUMNS_PER_TARGET: Final[int] = 16
+MAX_SQLITE_TIMESTAMP_KEY_COLUMNS: Final[int] = 8
+MAX_SQLITE_TIMESTAMP_ROWS_PER_TARGET: Final[int] = 64
+MAX_SQLITE_TIMESTAMP_TARGETS: Final[int] = 32
+MAX_SQLITE_TIMESTAMP_VALUE_BYTES: Final[int] = 4096
 ContractVersion = Literal["1.0"]
 Sha256Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 NonEmptyText = Annotated[str, Field(min_length=1)]
+SQLiteIdentifier = Annotated[
+    str,
+    Field(min_length=1, max_length=255, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$"),
+]
 
 
 class _StrictContract(BaseModel):
@@ -363,4 +383,203 @@ class SQLitePreflightResult(_StrictContract):
             raise ValueError(
                 "ambiguous SQLite preflight requires multiple evidence-consistent families"
             )
+        return self
+
+
+class SQLiteTimestampExtractionTarget(_StrictContract):
+    """One trusted table target with a schema-enforced stable row key."""
+
+    table_name: SQLiteIdentifier
+    stable_row_key_columns: tuple[SQLiteIdentifier, ...]
+    timestamp_columns: tuple[SQLiteIdentifier, ...]
+
+    @model_validator(mode="after")
+    def target_is_unambiguous(self) -> Self:
+        """Reject aliases, overlaps, and duplicate identifiers."""
+
+        forbidden_row_keys = {"rowid", "_rowid_", "oid"}
+        folded_row_keys = tuple(column.casefold() for column in self.stable_row_key_columns)
+        folded_timestamps = tuple(column.casefold() for column in self.timestamp_columns)
+        if (
+            not self.stable_row_key_columns
+            or len(self.stable_row_key_columns) > MAX_SQLITE_TIMESTAMP_KEY_COLUMNS
+            or len(folded_row_keys) != len(set(folded_row_keys))
+            or any(column in forbidden_row_keys for column in folded_row_keys)
+        ):
+            raise ValueError("stable row-key columns must be non-empty, unique, and declared")
+        if (
+            not self.timestamp_columns
+            or len(self.timestamp_columns) > MAX_SQLITE_TIMESTAMP_COLUMNS_PER_TARGET
+            or len(folded_timestamps) != len(set(folded_timestamps))
+        ):
+            raise ValueError("timestamp columns must be non-empty and unique")
+        if set(folded_row_keys) & set(folded_timestamps):
+            raise ValueError("timestamp columns may not be used as stable row-key columns")
+        return self
+
+
+class SQLiteTimestampExtractionPlan(_StrictContract):
+    """Pinned, caller-independent extraction plan for one TASK-030 layout."""
+
+    schema_version: ContractVersion = "1.0"
+    family: SQLiteStoreFamily
+    layout_version: Literal[1]
+    expected_store_sha256: Sha256Digest
+    max_rows_per_target: Literal[64] = 64
+    targets: tuple[SQLiteTimestampExtractionTarget, ...]
+
+    @model_validator(mode="after")
+    def plan_is_complete_and_deterministic(self) -> Self:
+        """Require one bounded, canonically ordered declaration per table."""
+
+        if not self.targets:
+            raise ValueError("timestamp extraction plan must contain at least one target")
+        if len(self.targets) > MAX_SQLITE_TIMESTAMP_TARGETS:
+            raise ValueError("timestamp extraction plan exceeds the bounded target count")
+        table_names = tuple(target.table_name for target in self.targets)
+        folded_table_names = tuple(table_name.casefold() for table_name in table_names)
+        if len(folded_table_names) != len(set(folded_table_names)):
+            raise ValueError("timestamp extraction plan may target each table only once")
+        if folded_table_names != tuple(sorted(folded_table_names)):
+            raise ValueError("timestamp extraction targets must use canonical table order")
+        return self
+
+
+class SQLiteTimestampCellEvidence(_StrictContract):
+    """One SQLite cell preserved as storage class plus exact cast-byte evidence."""
+
+    column_name: SQLiteIdentifier
+    storage_class: SQLiteStorageClass
+    blob_hex: Annotated[
+        str,
+        Field(
+            max_length=MAX_SQLITE_TIMESTAMP_VALUE_BYTES * 2,
+            pattern=r"^(?:[0-9A-F]{2})*$",
+        ),
+    ]
+    byte_length: Annotated[int, Field(ge=0, le=MAX_SQLITE_TIMESTAMP_VALUE_BYTES)]
+
+    @model_validator(mode="after")
+    def byte_length_matches_hex_evidence(self) -> Self:
+        """Reject evidence whose declared length or NULL representation is inconsistent."""
+
+        if len(self.blob_hex) != self.byte_length * 2:
+            raise ValueError("timestamp byte_length must equal the exact blob_hex length")
+        if self.storage_class is SQLiteStorageClass.NULL and (self.blob_hex or self.byte_length):
+            raise ValueError("a SQLite NULL cell must have empty byte evidence")
+        return self
+
+
+class SQLiteTimestampRowEvidence(_StrictContract):
+    """One deterministically ordered row without materializing raw Python values."""
+
+    row_ordinal: Annotated[int, Field(ge=0, lt=MAX_SQLITE_TIMESTAMP_ROWS_PER_TARGET)]
+    stable_row_key: tuple[SQLiteTimestampCellEvidence, ...]
+    timestamp_cells: tuple[SQLiteTimestampCellEvidence, ...]
+
+    @model_validator(mode="after")
+    def row_shapes_are_unambiguous(self) -> Self:
+        """Require non-empty, duplicate-free key and timestamp evidence."""
+
+        key_names = tuple(cell.column_name for cell in self.stable_row_key)
+        timestamp_names = tuple(cell.column_name for cell in self.timestamp_cells)
+        folded_key_names = tuple(name.casefold() for name in key_names)
+        folded_timestamp_names = tuple(name.casefold() for name in timestamp_names)
+        if (
+            not key_names
+            or len(key_names) > MAX_SQLITE_TIMESTAMP_KEY_COLUMNS
+            or len(folded_key_names) != len(set(folded_key_names))
+        ):
+            raise ValueError("row-key evidence must be non-empty and unique")
+        if any(cell.storage_class is SQLiteStorageClass.NULL for cell in self.stable_row_key):
+            raise ValueError("stable row-key evidence may not contain SQLite NULL")
+        if (
+            not timestamp_names
+            or len(timestamp_names) > MAX_SQLITE_TIMESTAMP_COLUMNS_PER_TARGET
+            or len(folded_timestamp_names) != len(set(folded_timestamp_names))
+        ):
+            raise ValueError("timestamp evidence must be non-empty and unique")
+        if set(folded_key_names) & set(folded_timestamp_names):
+            raise ValueError("row-key and timestamp evidence may not overlap")
+        return self
+
+
+def _timestamp_row_sort_key(
+    row: SQLiteTimestampRowEvidence,
+) -> tuple[tuple[str, str, int], ...]:
+    return tuple(
+        (cell.storage_class.value, cell.blob_hex, cell.byte_length) for cell in row.stable_row_key
+    )
+
+
+class SQLiteTimestampTableEvidence(_StrictContract):
+    """Complete bounded evidence for one declared table target."""
+
+    target_ordinal: Annotated[int, Field(ge=0, lt=MAX_SQLITE_TIMESTAMP_TARGETS)]
+    target: SQLiteTimestampExtractionTarget
+    rows: tuple[SQLiteTimestampRowEvidence, ...]
+
+    @model_validator(mode="after")
+    def rows_match_target_and_order(self) -> Self:
+        """Reject missing columns, duplicate keys, truncation, or unstable ordering."""
+
+        if len(self.rows) > MAX_SQLITE_TIMESTAMP_ROWS_PER_TARGET:
+            raise ValueError("timestamp evidence exceeds the bounded row count")
+        if tuple(row.row_ordinal for row in self.rows) != tuple(range(len(self.rows))):
+            raise ValueError("timestamp row ordinals must be contiguous")
+        expected_keys = self.target.stable_row_key_columns
+        expected_timestamps = self.target.timestamp_columns
+        for row in self.rows:
+            if tuple(cell.column_name for cell in row.stable_row_key) != expected_keys:
+                raise ValueError("row-key evidence does not match its declared target")
+            if tuple(cell.column_name for cell in row.timestamp_cells) != expected_timestamps:
+                raise ValueError("timestamp evidence does not match its declared target")
+        sort_keys = tuple(_timestamp_row_sort_key(row) for row in self.rows)
+        if len(sort_keys) != len(set(sort_keys)):
+            raise ValueError("stable row-key evidence must be unique")
+        if sort_keys != tuple(sorted(sort_keys)):
+            raise ValueError("timestamp rows must use deterministic stable-key order")
+        return self
+
+
+class SQLiteTimestampExtractionResult(_StrictContract):
+    """Raw timestamp evidence linked to the exact unchanged TASK-030 snapshot."""
+
+    schema_version: ContractVersion = "1.0"
+    source_kind: Literal["generated_synthetic_fixture"]
+    fixture_id: UUID
+    plan: SQLiteTimestampExtractionPlan
+    preflight: SQLitePreflightResult
+    snapshot_identity: SQLiteSnapshotIdentity
+    tables: tuple[SQLiteTimestampTableEvidence, ...]
+    source_unchanged: Literal[True] = True
+
+    @model_validator(mode="after")
+    def result_is_bound_to_matched_snapshot(self) -> Self:
+        """Require exact plan, fingerprint, fixture, and whole-file identity linkage."""
+
+        preflight = self.preflight
+        if (
+            preflight.status is not SQLitePreflightStatus.MATCHED
+            or preflight.source_kind != self.source_kind
+            or preflight.fixture_id != self.fixture_id
+            or preflight.matched_families != (self.plan.family,)
+            or preflight.expected_identity.family is not self.plan.family
+            or preflight.expected_identity.layout_version != self.plan.layout_version
+            or preflight.expected_identity.store_sha256 != self.plan.expected_store_sha256
+            or preflight.observation.fingerprint.store_sha256 != self.plan.expected_store_sha256
+        ):
+            raise ValueError("timestamp evidence requires one exact matched TASK-030 identity")
+        observation = preflight.observation
+        if (
+            observation.source_before != self.snapshot_identity
+            or observation.source_after != self.snapshot_identity
+        ):
+            raise ValueError("timestamp evidence must link to the unchanged snapshot identity")
+        if tuple(table.target_ordinal for table in self.tables) != tuple(range(len(self.tables))):
+            raise ValueError("timestamp table ordinals must be contiguous")
+        if tuple(table.target for table in self.tables) != self.plan.targets:
+            raise ValueError("timestamp table evidence must exactly match the pinned plan")
+        if any(len(table.rows) > self.plan.max_rows_per_target for table in self.tables):
+            raise ValueError("timestamp table evidence exceeds the pinned row bound")
         return self

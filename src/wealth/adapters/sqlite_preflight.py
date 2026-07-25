@@ -14,11 +14,13 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Final, Never, cast
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from wealth.domain.sqlite_preflight import (
     MAX_SQLITE_MARKER_ROWS,
     MAX_SQLITE_MARKER_VALUE_BYTES,
+    MAX_SQLITE_TIMESTAMP_ROWS_PER_TARGET,
+    MAX_SQLITE_TIMESTAMP_VALUE_BYTES,
     SQLiteColumnFingerprint,
     SQLiteExpectedStoreIdentity,
     SQLiteForeignKeyFingerprint,
@@ -39,13 +41,21 @@ from wealth.domain.sqlite_preflight import (
     SQLiteStoreFamily,
     SQLiteStoreFingerprint,
     SQLiteTableFingerprint,
+    SQLiteTimestampCellEvidence,
+    SQLiteTimestampExtractionPlan,
+    SQLiteTimestampExtractionResult,
+    SQLiteTimestampExtractionTarget,
+    SQLiteTimestampRowEvidence,
+    SQLiteTimestampTableEvidence,
     SQLiteTriggerFingerprint,
 )
 
 __all__ = [
     "SQLITE_EXPECTED_STORE_IDENTITIES",
+    "SQLITE_TIMESTAMP_EXTRACTION_PLANS",
     "SQLitePreflightError",
     "SQLitePreflightErrorCode",
+    "extract_synthetic_sqlite_timestamp_evidence",
     "fingerprint_synthetic_sqlite_fixture",
 ]
 
@@ -62,6 +72,7 @@ _MAX_DDL_CHARACTERS: Final[int] = 1_000_000
 _MAX_DIRECTORY_ENTRIES: Final[int] = 1024
 _MAX_FIXTURE_BYTES: Final[int] = 128 * 1024 * 1024
 _SIDECAR_SUFFIXES: Final[tuple[str, ...]] = ("-journal", "-wal", "-shm")
+_TIMESTAMP_PLAN_CAPABILITY: Final[object] = object()
 
 _MARKER_SPECS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     (
@@ -157,10 +168,11 @@ class _ImmutableSQLiteConnection:
     create a new file.
     """
 
-    __slots__ = ("__connection",)
+    __slots__ = ("__connection", "__validated_timestamp_targets")
 
     def __init__(self, connection: sqlite3.Connection) -> None:
         self.__connection = connection
+        self.__validated_timestamp_targets: frozenset[SQLiteTimestampExtractionTarget] = frozenset()
 
     def execute(
         self,
@@ -192,6 +204,38 @@ class _ImmutableSQLiteConnection:
 
         self.__connection.set_trace_callback(trace_callback)
 
+    def authorize_timestamp_target(
+        self,
+        target: SQLiteTimestampExtractionTarget,
+    ) -> None:
+        """Temporarily permit only the declared key and timestamp columns."""
+
+        if target not in self.__validated_timestamp_targets:
+            raise SQLitePreflightError(
+                SQLitePreflightErrorCode.FINGERPRINT_NOT_MATCHED,
+                "timestamp authorization requires a validated matched extraction plan",
+            )
+        self.__connection.set_authorizer(_timestamp_target_authorizer(target))
+
+    def bind_validated_timestamp_plan(
+        self,
+        plan: SQLiteTimestampExtractionPlan,
+        capability: object,
+    ) -> None:
+        """Bind the private connection to one already validated pinned plan."""
+
+        if capability is not _TIMESTAMP_PLAN_CAPABILITY:
+            raise SQLitePreflightError(
+                SQLitePreflightErrorCode.INVALID_EXTRACTION_PLAN,
+                "timestamp plan binding requires the internal validated capability",
+            )
+        self.__validated_timestamp_targets = frozenset(plan.targets)
+
+    def restore_metadata_authorizer(self) -> None:
+        """Restore the schema-and-marker-only TASK-030 read boundary."""
+
+        self.__connection.set_authorizer(_read_only_authorizer)
+
     def close(self) -> None:
         """Close the private raw SQLite connection."""
 
@@ -212,6 +256,8 @@ class SQLitePreflightErrorCode(StrEnum):
     SQLITE_OPEN_FAILED = "sqlite_open_failed"
     SQLITE_READ_FAILED = "sqlite_read_failed"
     INVALID_SCHEMA = "invalid_schema"
+    FINGERPRINT_NOT_MATCHED = "fingerprint_not_matched"
+    INVALID_EXTRACTION_PLAN = "invalid_extraction_plan"
     RESOURCE_LIMIT = "resource_limit"
 
 
@@ -334,12 +380,189 @@ SQLITE_EXPECTED_STORE_IDENTITIES: tuple[SQLiteExpectedStoreIdentity, ...] = (
     ),
 )
 
+_TIMESTAMP_TARGET_SPECS: Final[
+    dict[
+        SQLiteStoreFamily,
+        tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...],
+    ]
+] = {
+    SQLiteStoreFamily.MARKET: (
+        (
+            "candle_conflicts",
+            ("existing_record_id", "incoming_record_id"),
+            ("open_time", "detected_at"),
+        ),
+        ("canonical_candles", ("record_id",), ("open_time",)),
+        ("raw_market_payloads", ("record_id",), ("observed_at", "processed_at")),
+    ),
+    SQLiteStoreFamily.ORDER_FLOW: (
+        ("canonical_order_flow_records", ("record_id",), ("event_time",)),
+        (
+            "order_flow_conflicts",
+            ("existing_record_id", "incoming_record_id"),
+            ("event_time", "detected_at"),
+        ),
+        (
+            "raw_order_flow_payloads",
+            ("record_id",),
+            ("observed_at", "processed_at"),
+        ),
+    ),
+    SQLiteStoreFamily.HISTORICAL_COLLECTION: (
+        ("collection_jobs", ("job_id",), ("next_window_start",)),
+        ("collection_transitions", ("job_id", "version"), ("recorded_at",)),
+        ("source_health_observations", ("observation_id",), ("observed_at",)),
+    ),
+    SQLiteStoreFamily.CONTINUOUS_COLLECTION: (
+        (
+            "continuous_collection_checkpoints",
+            ("collection_id",),
+            (
+                "next_window_start",
+                "active_window_end_exclusive",
+                "next_retry_at",
+            ),
+        ),
+        (
+            "continuous_collection_transitions",
+            ("collection_id", "version"),
+            ("recorded_at",),
+        ),
+    ),
+    SQLiteStoreFamily.COLLECTOR_SERVICE: (
+        (
+            "collector_service_heartbeats",
+            ("run_id", "sequence"),
+            ("observed_at",),
+        ),
+        ("collector_service_runs", ("run_id",), ("observed_at",)),
+    ),
+    SQLiteStoreFamily.PUBLIC_TRADE_COLLECTION: (
+        (
+            "public_trade_collection_jobs",
+            ("job_id",),
+            (
+                "window_start",
+                "window_end_exclusive",
+                "next_window_start",
+                "pending_window_end_exclusive",
+                "created_at",
+                "updated_at",
+                "lease_expires_at",
+            ),
+        ),
+        (
+            "public_trade_collection_leases",
+            ("job_id", "lease_token"),
+            ("acquired_at",),
+        ),
+        (
+            "public_trade_collection_transitions",
+            ("job_id", "version"),
+            ("recorded_at",),
+        ),
+        (
+            "public_trade_source_health",
+            ("job_id", "checkpoint_version"),
+            (
+                "range_start",
+                "range_end_exclusive",
+                "next_window_start",
+                "pending_window_end_exclusive",
+                "observed_at",
+            ),
+        ),
+    ),
+    SQLiteStoreFamily.RATE_BUDGET: (
+        ("rate_budget_reservations", ("reservation_id",), ("requested_at",)),
+        (
+            "rate_budget_state",
+            ("budget_key",),
+            ("theoretical_arrival_us", "last_observed_us"),
+        ),
+    ),
+    SQLiteStoreFamily.RECONCILIATION: (
+        ("reconciliation_observations", ("observation_id",), ("recorded_at",)),
+    ),
+}
+
+
+def _timestamp_target(
+    spec: tuple[str, tuple[str, ...], tuple[str, ...]],
+) -> SQLiteTimestampExtractionTarget:
+    table_name, stable_row_key_columns, timestamp_columns = spec
+    return SQLiteTimestampExtractionTarget(
+        table_name=table_name,
+        stable_row_key_columns=stable_row_key_columns,
+        timestamp_columns=timestamp_columns,
+    )
+
+
+SQLITE_TIMESTAMP_EXTRACTION_PLANS: tuple[SQLiteTimestampExtractionPlan, ...] = tuple(
+    SQLiteTimestampExtractionPlan(
+        family=identity.family,
+        layout_version=identity.layout_version,
+        expected_store_sha256=identity.store_sha256,
+        targets=tuple(_timestamp_target(spec) for spec in _TIMESTAMP_TARGET_SPECS[identity.family]),
+    )
+    for identity in SQLITE_EXPECTED_STORE_IDENTITIES
+)
+
 
 def fingerprint_synthetic_sqlite_fixture(
     request: SQLitePreflightRequest,
 ) -> SQLitePreflightResult:
     """Fingerprint one generated fixture and match it against the pinned registry."""
 
+    expected_identity = _expected_identity(request)
+    observation = _observe_synthetic_sqlite_fixture(request.fixture_path)
+    return _preflight_result(request, expected_identity, observation)
+
+
+def extract_synthetic_sqlite_timestamp_evidence(
+    request: SQLitePreflightRequest,
+) -> SQLiteTimestampExtractionResult:
+    """Extract bounded raw timestamp bytes only after one exact TASK-030 match."""
+
+    expected_identity = _expected_identity(request)
+    plan = _timestamp_plan(request, expected_identity)
+
+    def extract_after_match(
+        connection: _ImmutableSQLiteConnection,
+        fingerprint: SQLiteStoreFingerprint,
+    ) -> object:
+        matched_families = _matching_families(fingerprint)
+        if matched_families != (request.expected_family,):
+            raise SQLitePreflightError(
+                SQLitePreflightErrorCode.FINGERPRINT_NOT_MATCHED,
+                "timestamp rows require one exact expected SQLite family match",
+            )
+        _validate_timestamp_plan(plan, fingerprint, expected_identity)
+        connection.bind_validated_timestamp_plan(
+            plan,
+            _TIMESTAMP_PLAN_CAPABILITY,
+        )
+        return _extract_timestamp_tables(connection, plan)
+
+    observation, payload = _inspect_synthetic_sqlite_fixture(
+        request.fixture_path,
+        post_fingerprint=extract_after_match,
+    )
+    preflight = _preflight_result(request, expected_identity, observation)
+    if preflight.status is not SQLitePreflightStatus.MATCHED:
+        raise AssertionError("timestamp extraction passed its gate without a matched preflight")
+    tables = cast(tuple[SQLiteTimestampTableEvidence, ...], payload)
+    return SQLiteTimestampExtractionResult(
+        source_kind=request.source_kind,
+        fixture_id=request.fixture_id,
+        plan=plan,
+        preflight=preflight,
+        snapshot_identity=observation.source_before,
+        tables=tables,
+    )
+
+
+def _expected_identity(request: SQLitePreflightRequest) -> SQLiteExpectedStoreIdentity:
     expected_identity = next(
         (
             identity
@@ -354,13 +577,38 @@ def fingerprint_synthetic_sqlite_fixture(
             SQLitePreflightErrorCode.INVALID_SCHEMA,
             "the requested SQLite family and layout version are not registered",
         )
+    return expected_identity
 
-    observation = _observe_synthetic_sqlite_fixture(request.fixture_path)
-    matched_families = tuple(
+
+def _identity_matches_fingerprint(
+    identity: SQLiteExpectedStoreIdentity,
+    fingerprint: SQLiteStoreFingerprint,
+) -> bool:
+    return (
+        identity.store_sha256 == fingerprint.store_sha256
+        and identity.encoding == fingerprint.encoding
+        and identity.application_id == fingerprint.application_id
+        and identity.user_version == fingerprint.user_version
+        and identity.markers == fingerprint.markers
+    )
+
+
+def _matching_families(
+    fingerprint: SQLiteStoreFingerprint,
+) -> tuple[SQLiteStoreFamily, ...]:
+    return tuple(
         identity.family
         for identity in SQLITE_EXPECTED_STORE_IDENTITIES
-        if identity.store_sha256 == observation.fingerprint.store_sha256
+        if _identity_matches_fingerprint(identity, fingerprint)
     )
+
+
+def _preflight_result(
+    request: SQLitePreflightRequest,
+    expected_identity: SQLiteExpectedStoreIdentity,
+    observation: SQLiteSnapshotObservation,
+) -> SQLitePreflightResult:
+    matched_families = _matching_families(observation.fingerprint)
     if len(matched_families) > 1:
         status = SQLitePreflightStatus.AMBIGUOUS
     elif not matched_families:
@@ -369,7 +617,6 @@ def fingerprint_synthetic_sqlite_fixture(
         status = SQLitePreflightStatus.WRONG_FAMILY
     else:
         status = SQLitePreflightStatus.MATCHED
-
     return SQLitePreflightResult(
         source_kind=request.source_kind,
         fixture_id=request.fixture_id,
@@ -381,6 +628,19 @@ def fingerprint_synthetic_sqlite_fixture(
 
 
 def _observe_synthetic_sqlite_fixture(path: Path) -> SQLiteSnapshotObservation:
+    observation, payload = _inspect_synthetic_sqlite_fixture(path)
+    if payload is not None:
+        raise AssertionError("fingerprint-only inspection unexpectedly returned row evidence")
+    return observation
+
+
+def _inspect_synthetic_sqlite_fixture(
+    path: Path,
+    *,
+    post_fingerprint: (
+        Callable[[_ImmutableSQLiteConnection, SQLiteStoreFingerprint], object] | None
+    ) = None,
+) -> tuple[SQLiteSnapshotObservation, object | None]:
     resolved_path = _resolve_existing_regular_file(path)
     directory_entries_before = _directory_entries(resolved_path.parent)
     _reject_sidecars(resolved_path)
@@ -389,10 +649,20 @@ def _observe_synthetic_sqlite_fixture(path: Path) -> SQLiteSnapshotObservation:
     connection: _ImmutableSQLiteConnection | None = None
     original_error: Exception | None = None
     fingerprint: SQLiteStoreFingerprint | None = None
+    payload: object | None = None
     try:
         connection = _open_immutable_connection(resolved_path)
         _assert_connection_matches_snapshot(connection, source_before)
         fingerprint = _fingerprint_connection(connection)
+        if post_fingerprint is not None:
+            _assert_source_invariants(
+                resolved_path,
+                source_before,
+                directory_entries_before,
+                phase="before timestamp extraction",
+            )
+            payload = post_fingerprint(connection, fingerprint)
+        _assert_connection_matches_snapshot(connection, source_before)
     except Exception as error:
         original_error = error
     finally:
@@ -423,19 +693,27 @@ def _observe_synthetic_sqlite_fixture(path: Path) -> SQLiteSnapshotObservation:
     if fingerprint is None:
         raise AssertionError("SQLite inspection completed without a fingerprint or an error")
 
-    return SQLiteSnapshotObservation(
-        snapshot_path=resolved_path,
-        source_before=source_before,
-        source_after=source_after,
-        directory_entries_before=directory_entries_before,
-        directory_entries_after=directory_entries_after,
-        fingerprint=fingerprint,
+    return (
+        SQLiteSnapshotObservation(
+            snapshot_path=resolved_path,
+            source_before=source_before,
+            source_after=source_after,
+            directory_entries_before=directory_entries_before,
+            directory_entries_after=directory_entries_after,
+            fingerprint=fingerprint,
+        ),
+        payload,
     )
 
 
 def _raise_inspection_error(error: Exception) -> Never:
     if isinstance(error, SQLitePreflightError):
         raise error
+    if isinstance(error, ValidationError):
+        raise SQLitePreflightError(
+            SQLitePreflightErrorCode.INVALID_SCHEMA,
+            "SQLite row evidence violated the strict extraction contract",
+        ) from error
     if isinstance(error, sqlite3.Error):
         raise SQLitePreflightError(
             SQLitePreflightErrorCode.SQLITE_READ_FAILED,
@@ -605,6 +883,26 @@ def _capture_stable_identity(path: Path) -> SQLiteSnapshotIdentity:
     )
 
 
+def _assert_source_invariants(
+    path: Path,
+    expected_identity: SQLiteSnapshotIdentity,
+    expected_directory_entries: tuple[str, ...],
+    *,
+    phase: str,
+) -> None:
+    _reject_sidecars(path)
+    if _capture_stable_identity(path) != expected_identity:
+        raise SQLitePreflightError(
+            SQLitePreflightErrorCode.SOURCE_CHANGED,
+            f"the SQLite fixture changed {phase}",
+        )
+    if _directory_entries(path.parent) != expected_directory_entries:
+        raise SQLitePreflightError(
+            SQLitePreflightErrorCode.DIRECTORY_CHANGED,
+            f"the fixture directory changed {phase}",
+        )
+
+
 def _assert_connection_matches_snapshot(
     connection: _ImmutableSQLiteConnection,
     source_identity: SQLiteSnapshotIdentity,
@@ -674,6 +972,290 @@ def _read_only_authorizer(
         if function_name is not None and function_name.casefold() in _ALLOWED_FUNCTIONS:
             return sqlite3.SQLITE_OK
     return sqlite3.SQLITE_DENY
+
+
+def _timestamp_target_authorizer(
+    target: SQLiteTimestampExtractionTarget,
+) -> Callable[[int, str | None, str | None, str | None, str | None], int]:
+    allowed_columns = frozenset(
+        column.casefold() for column in (*target.stable_row_key_columns, *target.timestamp_columns)
+    )
+    allowed_table = target.table_name.casefold()
+
+    def authorize(
+        action: int,
+        argument_one: str | None,
+        argument_two: str | None,
+        database_name: str | None,
+        trigger_name: str | None,
+    ) -> int:
+        metadata_decision = _read_only_authorizer(
+            action,
+            argument_one,
+            argument_two,
+            database_name,
+            trigger_name,
+        )
+        if metadata_decision == sqlite3.SQLITE_OK:
+            return sqlite3.SQLITE_OK
+        if (
+            action == sqlite3.SQLITE_READ
+            and database_name == "main"
+            and trigger_name is None
+            and argument_one is not None
+            and argument_one.casefold() == allowed_table
+            and argument_two is not None
+            and argument_two.casefold() in allowed_columns
+        ):
+            return sqlite3.SQLITE_OK
+        return sqlite3.SQLITE_DENY
+
+    return authorize
+
+
+def _timestamp_plan(
+    request: SQLitePreflightRequest,
+    expected_identity: SQLiteExpectedStoreIdentity,
+) -> SQLiteTimestampExtractionPlan:
+    plans = tuple(
+        plan
+        for plan in SQLITE_TIMESTAMP_EXTRACTION_PLANS
+        if plan.family is request.expected_family
+        and plan.layout_version == request.expected_layout_version
+    )
+    if len(plans) != 1:
+        raise SQLitePreflightError(
+            SQLitePreflightErrorCode.INVALID_EXTRACTION_PLAN,
+            "the requested family must have exactly one timestamp extraction plan",
+        )
+    plan = plans[0]
+    expected_plan = SQLiteTimestampExtractionPlan(
+        family=expected_identity.family,
+        layout_version=expected_identity.layout_version,
+        expected_store_sha256=expected_identity.store_sha256,
+        targets=tuple(
+            _timestamp_target(spec) for spec in _TIMESTAMP_TARGET_SPECS[expected_identity.family]
+        ),
+    )
+    if plan != expected_plan:
+        raise SQLitePreflightError(
+            SQLitePreflightErrorCode.INVALID_EXTRACTION_PLAN,
+            "the timestamp extraction plan differs from the reviewed declaration",
+        )
+    return plan
+
+
+def _validate_timestamp_plan(
+    plan: SQLiteTimestampExtractionPlan,
+    fingerprint: SQLiteStoreFingerprint,
+    expected_identity: SQLiteExpectedStoreIdentity,
+) -> None:
+    if (
+        plan.family is not expected_identity.family
+        or plan.layout_version != expected_identity.layout_version
+        or plan.expected_store_sha256 != expected_identity.store_sha256
+        or plan.expected_store_sha256 != fingerprint.store_sha256
+    ):
+        raise SQLitePreflightError(
+            SQLitePreflightErrorCode.INVALID_EXTRACTION_PLAN,
+            "the timestamp extraction plan is not bound to this exact fingerprint",
+        )
+
+    tables_by_name = {table.name: table for table in fingerprint.tables}
+    indexes_by_table: dict[str, list[SQLiteIndexFingerprint]] = {}
+    for index in fingerprint.indexes:
+        indexes_by_table.setdefault(index.table_name, []).append(index)
+
+    for target in plan.targets:
+        table = tables_by_name.get(target.table_name)
+        if table is None:
+            raise SQLitePreflightError(
+                SQLitePreflightErrorCode.INVALID_EXTRACTION_PLAN,
+                "a timestamp extraction table is absent from the matched fingerprint",
+            )
+        declared_columns = {column.name: column for column in table.columns if column.hidden == 0}
+        requested_columns = (
+            *target.stable_row_key_columns,
+            *target.timestamp_columns,
+        )
+        if any(column not in declared_columns for column in requested_columns):
+            raise SQLitePreflightError(
+                SQLitePreflightErrorCode.INVALID_EXTRACTION_PLAN,
+                "a timestamp extraction column is absent from the matched fingerprint",
+            )
+        if not _has_schema_enforced_unique_key(
+            table,
+            indexes_by_table.get(table.name, []),
+            target.stable_row_key_columns,
+        ):
+            raise SQLitePreflightError(
+                SQLitePreflightErrorCode.INVALID_EXTRACTION_PLAN,
+                "a timestamp extraction key is not a complete schema-enforced unique key",
+            )
+
+
+def _has_schema_enforced_unique_key(
+    table: SQLiteTableFingerprint,
+    indexes: list[SQLiteIndexFingerprint],
+    key_columns: tuple[str, ...],
+) -> bool:
+    primary_key = tuple(
+        column.name
+        for column in sorted(
+            (column for column in table.columns if column.primary_key_ordinal > 0),
+            key=lambda column: column.primary_key_ordinal,
+        )
+    )
+    if primary_key == key_columns:
+        return True
+    for index in indexes:
+        if not index.unique or index.partial:
+            continue
+        index_key = tuple(term.name for term in index.columns if term.key)
+        if None not in index_key and cast(tuple[str, ...], index_key) == key_columns:
+            return True
+    return False
+
+
+def _extract_timestamp_tables(
+    connection: _ImmutableSQLiteConnection,
+    plan: SQLiteTimestampExtractionPlan,
+) -> tuple[SQLiteTimestampTableEvidence, ...]:
+    return tuple(
+        _extract_timestamp_table(connection, target, target_ordinal)
+        for target_ordinal, target in enumerate(plan.targets)
+    )
+
+
+def _extract_timestamp_table(
+    connection: _ImmutableSQLiteConnection,
+    target: SQLiteTimestampExtractionTarget,
+    target_ordinal: int,
+) -> SQLiteTimestampTableEvidence:
+    select_expressions: list[str] = []
+    for position, column_name in enumerate(target.stable_row_key_columns):
+        select_expressions.extend(_timestamp_cell_expressions(column_name, f"key_{position}"))
+    for position, column_name in enumerate(target.timestamp_columns):
+        select_expressions.extend(_timestamp_cell_expressions(column_name, f"timestamp_{position}"))
+    order_expressions = tuple(
+        expression
+        for column_name in target.stable_row_key_columns
+        for expression in _timestamp_order_expressions(column_name)
+    )
+    sql = (
+        f"SELECT {', '.join(select_expressions)} "
+        f"FROM main.{_quote_identifier(target.table_name)} "
+        f"ORDER BY {', '.join(order_expressions)} "
+        "LIMIT ?"
+    )
+    connection.authorize_timestamp_target(target)
+    try:
+        raw_rows = _bounded_rows(
+            connection.execute(
+                sql,
+                (MAX_SQLITE_TIMESTAMP_ROWS_PER_TARGET + 1,),
+            ),
+            maximum=MAX_SQLITE_TIMESTAMP_ROWS_PER_TARGET,
+            label=f"timestamp rows for {target.table_name}",
+        )
+    finally:
+        connection.restore_metadata_authorizer()
+
+    rows = tuple(
+        SQLiteTimestampRowEvidence(
+            row_ordinal=row_ordinal,
+            stable_row_key=tuple(
+                _timestamp_cell_from_row(
+                    raw_row,
+                    f"key_{position}",
+                    column_name,
+                )
+                for position, column_name in enumerate(target.stable_row_key_columns)
+            ),
+            timestamp_cells=tuple(
+                _timestamp_cell_from_row(
+                    raw_row,
+                    f"timestamp_{position}",
+                    column_name,
+                )
+                for position, column_name in enumerate(target.timestamp_columns)
+            ),
+        )
+        for row_ordinal, raw_row in enumerate(raw_rows)
+    )
+    return SQLiteTimestampTableEvidence(
+        target_ordinal=target_ordinal,
+        target=target,
+        rows=rows,
+    )
+
+
+def _timestamp_cell_expressions(column_name: str, alias: str) -> tuple[str, ...]:
+    quoted = _quote_identifier(column_name)
+    byte_length = f"length(CAST({quoted} AS BLOB))"
+    return (
+        f'typeof({quoted}) AS "{alias}_type"',
+        (
+            f"CASE WHEN {byte_length} <= {MAX_SQLITE_TIMESTAMP_VALUE_BYTES} "
+            f'THEN hex(CAST({quoted} AS BLOB)) END AS "{alias}_hex"'
+        ),
+        f'{byte_length} AS "{alias}_length"',
+    )
+
+
+def _timestamp_order_expressions(column_name: str) -> tuple[str, ...]:
+    quoted = _quote_identifier(column_name)
+    byte_length = f"length(CAST({quoted} AS BLOB))"
+    return (
+        f"typeof({quoted})",
+        (
+            f"CASE WHEN {byte_length} <= {MAX_SQLITE_TIMESTAMP_VALUE_BYTES} "
+            f"THEN hex(CAST({quoted} AS BLOB)) END"
+        ),
+        byte_length,
+    )
+
+
+def _quote_identifier(identifier: str) -> str:
+    if (
+        not identifier
+        or len(identifier) > 255
+        or not (identifier[0].isalpha() or identifier[0] == "_")
+        or any(not (character.isalnum() or character == "_") for character in identifier)
+        or not identifier.isascii()
+    ):
+        raise SQLitePreflightError(
+            SQLitePreflightErrorCode.INVALID_EXTRACTION_PLAN,
+            "timestamp extraction identifiers must use the reviewed ASCII identifier form",
+        )
+    return f'"{identifier}"'
+
+
+def _timestamp_cell_from_row(
+    row: sqlite3.Row,
+    alias: str,
+    column_name: str,
+) -> SQLiteTimestampCellEvidence:
+    storage_class = _storage_class(row[f"{alias}_type"])
+    raw_length = row[f"{alias}_length"]
+    byte_length = (
+        0 if raw_length is None else _nonnegative_int(raw_length, "timestamp cell byte length")
+    )
+    if byte_length > MAX_SQLITE_TIMESTAMP_VALUE_BYTES:
+        raise SQLitePreflightError(
+            SQLitePreflightErrorCode.RESOURCE_LIMIT,
+            "SQLite timestamp cell exceeded the synthetic-fixture byte limit",
+        )
+    raw_hex = row[f"{alias}_hex"]
+    blob_hex = (
+        "" if storage_class is SQLiteStorageClass.NULL and raw_hex is None else _blob_hex(raw_hex)
+    )
+    return SQLiteTimestampCellEvidence(
+        column_name=column_name,
+        storage_class=storage_class,
+        blob_hex=blob_hex,
+        byte_length=byte_length,
+    )
 
 
 def _fingerprint_connection(

@@ -5,46 +5,63 @@ This file records approved, bounded work. `PROJECT_STATE.json` identifies the on
 
 ## Next Action
 
-### TASK-031 — Synthetic SQLite timestamp-byte evidence foundation
+### TASK-032 — Synthetic SQLite timestamp parse-evidence foundation
 
-- **Key:** `phase2.canonical_utc_preflight_timestamp_evidence_foundation`
+- **Key:** `phase2.canonical_utc_preflight_timestamp_parse_evidence_foundation`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
-- **Goal:** Extend the unused fixture-only preflight so exact timestamp-byte evidence can be
-  extracted deterministically from generated SQLite fixtures, but only after TASK-030 identifies
-  one exact registered store layout.
-- **Scope:** Add strict frozen versioned extraction-plan and observed-evidence contracts for every
-  current timestamp-bearing SQLite column. Record the table, stable row key, SQLite `typeof`,
-  exact `hex(CAST(column AS BLOB))`, byte length, deterministic bounded order, and linkage to the
-  unchanged TASK-030 snapshot identity. Parsing, normalization, collision analysis, quarantine,
-  manifests, and actual operator scans remain later tasks.
-- **Constraints:** Generated temporary fixtures only. Do not inspect an operator, user-selected,
-  deployment, or discovered database path. Do not add CLI, service, adapter, or active runtime
-  wiring. Do not write a report or manifest. Row access must reuse the direct immutable
-  `mode=ro&immutable=1` boundary and must stop unless the exact TASK-030 fingerprint matches one
-  expected family. It must not invoke a normal adapter, create directories, install schemas,
-  enable WAL, or write beside the source. Do not migrate or repair data, change canonical truth,
-  call a provider, access credentials, produce a signal, make a portfolio or Risk decision,
-  submit an order, or perform any financial action. Do not claim Stage 3 completion.
+- **Goal:** Add an unused pure interpretation layer that converts exact TASK-031 timestamp-cell
+  byte evidence into deterministic typed parse outcomes while preserving the original bytes,
+  storage class, row key, fingerprint, and snapshot linkage unchanged.
+- **Scope:** Add strict frozen versioned parse-plan and parse-evidence contracts for the same 37
+  direct timestamp columns. Register legacy ISO-8601 text or signed epoch-microsecond
+  representation plus nullability per target. Consume only a valid TASK-031 extraction result and
+  produce one typed outcome per input cell for parsed aware text, declared absence, naive text,
+  malformed UTF-8 or timestamp text, out-of-range epoch values, and unexpected storage classes.
+  Preserve original offset and spelling; do not normalize or emit replacement bytes.
+- **Constraints:** Pure evidence consumption only: no SQLite connection, filesystem/path access,
+  adapter invocation, schema inspection, or row query. Do not parse JSON containers. Do not
+  normalize timestamps, compare projection agreement, analyze collisions, quarantine data, write
+  a report or manifest, inspect operator or discovered data, or add CLI, service, provider,
+  migration, repair, credential, signal, portfolio, Risk, order, financial, or active runtime
+  wiring. Do not claim Stage 3 completion.
 
 Acceptance gates:
 
-1. Versioned strict frozen plans and evidence reject unknown fields, undeclared tables or columns,
-   unstable row keys, unbounded limits, and duplicate extraction targets.
-2. No timestamp row is read until the exact TASK-030 fingerprint matches one and only one
-   registered expected family; mismatches and ambiguity fail closed.
-3. Generated fixtures cover every current timestamp-bearing SQLite column plus hostile NULL,
-   INTEGER, REAL, TEXT, and BLOB cells without silently coercing the original storage class or
-   bytes.
-4. Extraction is bounded and deterministic, preserves explicit stable row-key evidence, and links
-   every result to the exact unchanged snapshot identity.
-5. Source hash, size, modification time, file identity, and directory entries remain unchanged;
-   no journal, WAL, SHM, report, or manifest is created.
+1. Strict frozen plans and evidence reject unknown, duplicate, missing, unsupported, altered, or
+   incorrectly linked declarations and input evidence.
+2. Parsing accepts only one exact successful TASK-031 result and performs no SQLite or filesystem
+   operation.
+3. Text uses strict UTF-8 plus a frozen writer-compatible grammar; epoch evidence requires SQLite
+   `INTEGER`, canonical decimal cast bytes, and an explicit supported range. Distinct malformed,
+   naive, absent, overflow, and unexpected-storage outcomes remain typed.
+4. Generated evidence covers all 37 columns plus fixed UTC, positive/negative offsets, legacy
+   precision variants, calendar limits, malformed UTF-8/text, NULL, INTEGER, REAL, TEXT, BLOB,
+   and epoch underflow/overflow.
+5. Every input cell yields exactly one result in unchanged deterministic order, with row-key,
+   storage-class, exact-byte, TASK-030, and TASK-031 evidence preserved.
 6. No existing runtime path imports or calls the foundation, and relevant unit, integration,
    format, lint, type, lockfile, health-slice, dependency-audit, and CI gates pass.
 
 ## Recently Completed
+
+### TASK-031 — Synthetic SQLite timestamp-byte evidence foundation
+
+- **Key:** `phase2.canonical_utc_preflight_timestamp_evidence_foundation`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Result:** One pinned strict extraction plan per TASK-030 family now declares all 20 direct
+  timestamp-bearing tables and 37 timestamp columns. The unused generated-fixture-only inspector
+  fingerprints and extracts through the same immutable connection and exact whole-file snapshot,
+  fails before row access unless exactly one expected family matches, and temporarily authorizes
+  only each declared stable key and timestamp target. Bounded deterministic evidence preserves
+  SQLite `typeof`, exact `hex(CAST(column AS BLOB))`, byte length, row-key bytes, and snapshot
+  linkage without materializing a raw timestamp value. Tests cover all layouts, NULL, INTEGER,
+  REAL, TEXT, BLOB, malformed text bytes, ordering, bounds, oversized cells, mismatches,
+  wrong-family and ambiguity rejection, and unchanged source/directory evidence. No operator
+  database, parser, report, manifest, runtime consumer, migration, or repair was added, and Stage
+  3 remains incomplete.
 
 ### TASK-030 — Synthetic read-only SQLite preflight fingerprint foundation
 
