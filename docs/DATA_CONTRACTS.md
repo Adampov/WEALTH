@@ -25,7 +25,8 @@ model and its tests. The cross-boundary timestamp evidence and staged target are
 | Cross-source reconciliation | `wealth.domain.reconciliation` and `wealth.domain.reconciliation_history` | Active |
 | Repository operating state | `wealth.domain.project_state.ProjectState` | Active; validates `PROJECT_STATE.json` |
 | Canonical UTC primitives | `wealth.domain.canonical_utc` | Pure and intentionally unused; strict fixed-UTC validation, explicit edge normalization, exact six-digit RFC 3339 `Z` serialization/parsing, and exact signed epoch-microsecond projection/decoding |
-| Canonical UTC target | ADR 0027 and the UTC boundary inventory | Clock enforcement and the isolated codec/projection foundation are complete; persisted-contract, query, schema, and migration work remain open under `RISK-005` |
+| SQLite preflight fingerprint contracts | `wealth.domain.sqlite_preflight` and `wealth.adapters.sqlite_preflight` | Intentionally unused and generated-fixture-only; strict expected identity remains separate from directly observed immutable fingerprint and source evidence |
+| Canonical UTC target | ADR 0027 and the UTC boundary inventory | Clock enforcement plus the isolated codec, projection, and synthetic fingerprint foundations are complete; timestamp-row evidence, operator preflight, persisted-contract, query, schema, and migration work remain open under `RISK-005` |
 
 ## Contract Rules
 
@@ -48,6 +49,12 @@ model and its tests. The cross-boundary timestamp evidence and staged target are
   `datetime.UTC`. Exact bounds, negative/zero/positive values, full-range round trips, and order
   preservation are tested. No existing runtime, model, serializer, provider, digest, key, query,
   projection, or persistence path imports or calls these primitives yet.
+- The SQLite preflight accepts only a request labelled as a generated synthetic fixture and selects
+  the trusted identity from a pinned registry rather than caller-supplied DDL or digests. Its
+  direct `mode=ro&immutable=1` connection fingerprints exact typed marker bytes and the complete
+  logical schema, while source-file and directory identity remain separate observed evidence.
+  It rejects sidecars and mutations and never invokes a schema-installing adapter. No runtime
+  consumer, operator path, timestamp-row scan, report, repair, or migration exists.
 - Source identity, event time, observation time, processing time, schema version, and lineage are
   retained whenever applicable.
 - Missing, stale, conflicting, truncated, or unverifiable evidence is represented explicitly and

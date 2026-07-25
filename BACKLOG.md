@@ -5,43 +5,62 @@ This file records approved, bounded work. `PROJECT_STATE.json` identifies the on
 
 ## Next Action
 
-### TASK-030 — Synthetic read-only SQLite preflight fingerprint foundation
+### TASK-031 — Synthetic SQLite timestamp-byte evidence foundation
 
-- **Key:** `phase2.canonical_utc_preflight_fingerprint_foundation`
+- **Key:** `phase2.canonical_utc_preflight_timestamp_evidence_foundation`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
-- **Goal:** Build an unused, fixture-only foundation for exact SQLite store identification and
-  immutable read-only access before any timestamp rows or operator databases can be scanned.
-- **Scope:** Add immutable preflight request, fingerprint, and result contracts; deterministic
-  schema/store fingerprinting; and generated synthetic fixtures for every existing SQLite store
-  layout. Cover database encoding, application/storage markers, declared version, normalized DDL,
-  tables, columns, indexes, and triggers. Row-level timestamp extraction, manifests, collision
-  analysis, and actual operator scans remain later tasks.
+- **Goal:** Extend the unused fixture-only preflight so exact timestamp-byte evidence can be
+  extracted deterministically from generated SQLite fixtures, but only after TASK-030 identifies
+  one exact registered store layout.
+- **Scope:** Add strict frozen versioned extraction-plan and observed-evidence contracts for every
+  current timestamp-bearing SQLite column. Record the table, stable row key, SQLite `typeof`,
+  exact `hex(CAST(column AS BLOB))`, byte length, deterministic bounded order, and linkage to the
+  unchanged TASK-030 snapshot identity. Parsing, normalization, collision analysis, quarantine,
+  manifests, and actual operator scans remain later tasks.
 - **Constraints:** Generated temporary fixtures only. Do not inspect an operator, user-selected,
   deployment, or discovered database path. Do not add CLI, service, adapter, or active runtime
-  wiring. Inspection opens only an existing immutable fixture snapshot through SQLite
-  `mode=ro&immutable=1`; it must not invoke a normal adapter, create directories, install schemas,
-  enable WAL, or write reports beside the source. Do not migrate or repair data, change canonical
-  truth, call a provider, access credentials, produce a signal, make a portfolio or Risk decision,
+  wiring. Do not write a report or manifest. Row access must reuse the direct immutable
+  `mode=ro&immutable=1` boundary and must stop unless the exact TASK-030 fingerprint matches one
+  expected family. It must not invoke a normal adapter, create directories, install schemas,
+  enable WAL, or write beside the source. Do not migrate or repair data, change canonical truth,
+  call a provider, access credentials, produce a signal, make a portfolio or Risk decision,
   submit an order, or perform any financial action. Do not claim Stage 3 completion.
 
 Acceptance gates:
 
-1. Versioned strict contracts reject unknown fields and separate expected store identity from
-   observed fingerprint evidence.
-2. Fingerprinting is deterministic and does not trust `user_version` alone; marker, normalized
-   schema, tables, columns, indexes, and triggers must all agree.
-3. Synthetic fixtures represent every current SQLite adapter layout and reject missing, extra,
-   renamed, or altered objects, marker/version spoofing, and ambiguous layouts before any
-   row-level scan.
-4. Source file hash, size, modification time, and directory entries remain unchanged; inspection
-   creates no journal, WAL, or SHM file.
-5. Mutation attempts fail, and tests prove inspection never uses schema-installing adapters.
+1. Versioned strict frozen plans and evidence reject unknown fields, undeclared tables or columns,
+   unstable row keys, unbounded limits, and duplicate extraction targets.
+2. No timestamp row is read until the exact TASK-030 fingerprint matches one and only one
+   registered expected family; mismatches and ambiguity fail closed.
+3. Generated fixtures cover every current timestamp-bearing SQLite column plus hostile NULL,
+   INTEGER, REAL, TEXT, and BLOB cells without silently coercing the original storage class or
+   bytes.
+4. Extraction is bounded and deterministic, preserves explicit stable row-key evidence, and links
+   every result to the exact unchanged snapshot identity.
+5. Source hash, size, modification time, file identity, and directory entries remain unchanged;
+   no journal, WAL, SHM, report, or manifest is created.
 6. No existing runtime path imports or calls the foundation, and relevant unit, integration,
    format, lint, type, lockfile, health-slice, dependency-audit, and CI gates pass.
 
 ## Recently Completed
+
+### TASK-030 — Synthetic read-only SQLite preflight fingerprint foundation
+
+- **Key:** `phase2.canonical_utc_preflight_fingerprint_foundation`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Result:** Strict frozen version-1 contracts now keep the expected family identity separate
+  from observed evidence. A direct `mode=ro&immutable=1` inspector fingerprints encoding,
+  application and user versions, exact typed marker bytes, normalized DDL, every schema object,
+  tables, columns, foreign keys, explicit and implicit indexes, and triggers for all eight
+  generated SQLite layouts. Exact pinned digests reject missing, extra, renamed, altered,
+  spoofed, combined, wrong-family, or ambiguous layouts before timestamp rows can be read. Source
+  hash, size, modification time, file identity, directory entries, and sidecar absence are
+  reverified; an authorizer denies writes, temporary objects, `ATTACH`, and write pragmas. The
+  foundation remains unused, scans no operator database or timestamp row, writes no report, and
+  does not complete Stage 3.
 
 ### TASK-029 — Additive exact epoch-microsecond projection primitives
 
