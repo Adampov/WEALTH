@@ -205,6 +205,11 @@ def test_failed_checkpoint_requires_a_pending_leaf() -> None:
         )
 
 
+def test_checkpoint_rejects_noncanonical_policy_fingerprint() -> None:
+    with pytest.raises(ValidationError, match="policy_fingerprint"):
+        copy_checkpoint(checkpoint(), policy_fingerprint="range-policy-v1")
+
+
 def test_running_checkpoint_rejects_a_lease_longer_than_one_hour() -> None:
     with pytest.raises(ValidationError, match="one hour"):
         running_checkpoint = running(checkpoint())

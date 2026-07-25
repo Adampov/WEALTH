@@ -36,7 +36,7 @@ class PublicTradeCollectionCheckpoint(BaseModel):
     instrument: str = Field(min_length=1, max_length=64)
     provider_symbol: str = Field(min_length=1, max_length=64)
     instrument_type: InstrumentType
-    policy_fingerprint: str = Field(min_length=1, max_length=128)
+    policy_fingerprint: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     window_start: AwareDatetime
     window_end_exclusive: AwareDatetime
     next_window_start: AwareDatetime

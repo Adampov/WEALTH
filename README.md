@@ -215,19 +215,27 @@ and is read in bounded, causally ordered pages (100 rows by default, 1,000 maxim
 
 These counters do not claim to be crash-durable hard job limits. A request made before an
 uncommitted checkpoint transition can be repeated after restart; the shared durable provider-rate
-budget remains the pre-request capacity protection. Per-job attempt reservation before network
-access is future orchestration work. That orchestrator must also classify clean outer request- or
-record-limit stops as resumable `PAUSED` outcomes with truthful `HEALTHY` or `DEGRADED` source
-health, while typed terminal source or admission failures become `FAILED`. Stop-reason text alone
-is not a sufficient classifier. The future mapper must emit a bounded canonical control failure
-code; it must not copy an arbitrary upstream machine-code string into persisted state.
+budget remains the pre-request capacity protection. Crash-durable per-job attempt reservation
+before network access remains future work.
 
-This slice does not start or recover a collector. Future orchestration must store market evidence
-before advancing control state and tolerate an idempotent refetch after a crash because the
-evidence and control databases cannot commit atomically together. Append-only transitions retain
-the responsible actor token, but a typed transition-history reader remains future audit tooling.
-The control store enforces monotonic timestamps and bounded TTL; the future orchestrator remains
-responsible for supplying timestamps from its injected trusted clock.
+An explicitly invoked bounded orchestrator now validates the immutable policy fingerprint, claims
+the job with a fresh UUID fencing token, and invokes finite range collection from the durable
+cursor or exact pending leaf. Recovery finishes that exact leaf first and may then process the
+remaining range once, so one operator invocation contains at most two bounded segments. It
+classifies clean outer request- or record-limit stops as resumable `PAUSED` outcomes with truthful
+`HEALTHY` or `DEGRADED` source health. Typed terminal source or admission failures become `FAILED`
+with a bounded canonical control code; stop-reason text and arbitrary upstream machine-code
+strings are not trusted as classifications.
+
+The lease claim is a control-only transition; the orchestrator advances the durable work cursor
+and counters only after market evidence is durable. A crash between the evidence and work-progress
+commits therefore causes an idempotent refetch rather than a permanent gap. The work transition
+and matching health observation commit atomically in the control database when lease authority
+remains current and compare-and-swap succeeds. Lost authority or a version conflict returns an
+explicit non-progress result and leaves the durable cursor unchanged for safe refetch. Append-only
+transitions retain the responsible actor token, but a typed transition-history reader remains
+future audit tooling. Transition time comes from an injected trusted UTC clock. This flow is not a
+scheduler, daemon, continuous poller, or live stream.
 
 Operators and monitoring tools can read the separate candle collector-service state through a
 dedicated JSON command:
@@ -282,15 +290,17 @@ Included:
 - Shared durable weighted request-budget gating for candle and public-trade sources.
 - Restart-safe bounded public-trade checkpoint and health contracts with a dedicated local SQLite
   control store, UUID fencing, provider-symbol identity, and validated UTC projections.
+- Explicitly invoked bounded public-trade checkpoint orchestration with policy validation,
+  evidence-first progress, typed pause/failure outcomes, and restart recovery.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:
 
 - Private exchange or account access.
 - An automatically started operating-system service, deployment, or live WebSocket ingestion.
-- Public-trade checkpoint orchestration, automatic aggregate-trade scheduling, continuous
-  collection, live WebSockets, or provider gap recovery, including typed terminal classification
-  and crash-durable per-job pre-request attempt reservations.
+- Automatic aggregate-trade scheduling, continuous collection, live WebSockets, provider gap
+  recovery, typed transition-history query tooling, or crash-durable per-job pre-request attempt
+  reservations.
 - Automatic historical collection scheduling.
 - Multi-host request-budget coordination.
 - Automatic source ranking, price blending, or cross-quote conversion.
