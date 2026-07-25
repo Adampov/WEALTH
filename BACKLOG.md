@@ -5,40 +5,56 @@ This file records approved, bounded work. `PROJECT_STATE.json` identifies the on
 
 ## Next Action
 
-### TASK-029 — Additive exact epoch-microsecond projection primitives
+### TASK-030 — Synthetic read-only SQLite preflight fingerprint foundation
 
-- **Key:** `phase2.canonical_utc_epoch_microsecond_primitives`
+- **Key:** `phase2.canonical_utc_preflight_fingerprint_foundation`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
-- **Goal:** Add pure, unused exact conversions between canonical UTC datetimes and signed integer
-  microseconds since the Unix epoch so later storage work can use one sortable projection without
-  floating-point or platform-dependent timestamp behavior.
-- **Scope:** Extend the isolated canonical-UTC primitive module with a strict fixed-UTC-to-epoch
-  microsecond projector, an exact inverse decoder, and exhaustive deterministic and property-style
-  tests.
-- **Constraints:** Additive primitives only. Do not wire them into a model, provider adapter,
-  request, stored row, JSON/log/CLI output, digest, natural key, SQLite query, projection, schema,
-  migration, or operator database. Do not call a real provider, access credentials, produce a
-  signal, make a portfolio or Risk decision, submit an order, or perform any financial action.
+- **Goal:** Build an unused, fixture-only foundation for exact SQLite store identification and
+  immutable read-only access before any timestamp rows or operator databases can be scanned.
+- **Scope:** Add immutable preflight request, fingerprint, and result contracts; deterministic
+  schema/store fingerprinting; and generated synthetic fixtures for every existing SQLite store
+  layout. Cover database encoding, application/storage markers, declared version, normalized DDL,
+  tables, columns, indexes, and triggers. Row-level timestamp extraction, manifests, collision
+  analysis, and actual operator scans remain later tasks.
+- **Constraints:** Generated temporary fixtures only. Do not inspect an operator, user-selected,
+  deployment, or discovered database path. Do not add CLI, service, adapter, or active runtime
+  wiring. Inspection opens only an existing immutable fixture snapshot through SQLite
+  `mode=ro&immutable=1`; it must not invoke a normal adapter, create directories, install schemas,
+  enable WAL, or write reports beside the source. Do not migrate or repair data, change canonical
+  truth, call a provider, access credentials, produce a signal, make a portfolio or Risk decision,
+  submit an order, or perform any financial action. Do not claim Stage 3 completion.
 
 Acceptance gates:
 
-1. Projection accepts only the existing strict canonical UTC value contract and uses integer
-   `timedelta` arithmetic rather than `datetime.timestamp()` or floating point.
-2. Decoding accepts only integers, rejects booleans and values outside Python's representable
-   datetime range, and returns a value whose `tzinfo is datetime.UTC`.
-3. Exact round trips hold before, at, and after the Unix epoch and at both Python calendar
-   boundaries; one-microsecond differences remain distinct and chronological order is preserved.
-4. Boundary and property-style tests cover negative values, zero, positive values, microsecond
-   extremes, calendar limits, invalid types, overflow, exact round trips, and monotonicity.
-5. No existing runtime path imports or calls the epoch primitives, and current request/model
-   acceptance, serialized bytes, digests, keys, schemas, projections, queries, and stored data
-   remain unchanged.
-6. Relevant unit, integration, format, lint, type, lockfile, health-slice, dependency-audit, and
-   CI gates pass.
+1. Versioned strict contracts reject unknown fields and separate expected store identity from
+   observed fingerprint evidence.
+2. Fingerprinting is deterministic and does not trust `user_version` alone; marker, normalized
+   schema, tables, columns, indexes, and triggers must all agree.
+3. Synthetic fixtures represent every current SQLite adapter layout and reject missing, extra,
+   renamed, or altered objects, marker/version spoofing, and ambiguous layouts before any
+   row-level scan.
+4. Source file hash, size, modification time, and directory entries remain unchanged; inspection
+   creates no journal, WAL, or SHM file.
+5. Mutation attempts fail, and tests prove inspection never uses schema-installing adapters.
+6. No existing runtime path imports or calls the foundation, and relevant unit, integration,
+   format, lint, type, lockfile, health-slice, dependency-audit, and CI gates pass.
 
 ## Recently Completed
+
+### TASK-029 — Additive exact epoch-microsecond projection primitives
+
+- **Key:** `phase2.canonical_utc_epoch_microsecond_primitives`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Result:** The isolated canonical-UTC module now exposes exact signed bounds plus integer-only
+  projection and inverse decoding between strict fixed-`datetime.UTC` values and Unix-epoch
+  microseconds. Strict type and range handling rejects booleans, non-integers, and values outside
+  Python's calendar; deterministic, property-style, and hostile-subclass tests prove exact
+  negative/zero/positive landmarks, full-range round trips, one-microsecond distinction, and
+  monotonic order. No runtime consumer, model, serialized byte, digest, identity, schema, query,
+  projection, migration, or stored record changed.
 
 ### TASK-028 — Additive canonical UTC codec primitives
 

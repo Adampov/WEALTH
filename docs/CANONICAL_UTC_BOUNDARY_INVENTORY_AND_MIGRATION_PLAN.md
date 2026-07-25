@@ -208,7 +208,9 @@ Current explicit UTC defenses are exercised by:
   clock identity and fail-closed handling of naive, offset, named/rule-based, and hostile values;
 - [`test_canonical_utc.py`](../tests/unit/test_canonical_utc.py), which verifies the isolated
   validator, explicit normalizer, exact text codec, calendar boundaries, folds, hostile
-  subclasses, malformed inputs, property-style instant preservation, and canonical round trips;
+  subclasses, malformed inputs, property-style instant preservation, canonical text round trips,
+  exact signed epoch bounds, invalid integer/range handling, full-calendar projection round trips,
+  one-microsecond distinction, and monotonic ordering;
 - [`test_public_trade_collection_orchestrator.py`](../tests/unit/test_public_trade_collection_orchestrator.py#L451-L508),
   which rejects non-UTC request, clock, and creation boundaries before storage;
 - [`test_order_flow_collection_contracts.py`](../tests/unit/test_order_flow_collection_contracts.py#L115-L123)
@@ -223,9 +225,9 @@ Missing coverage is material:
 
 - no field-complete nonzero-offset rejection or normalization matrix exists for the aware-only
   domain and port models;
-- the fixed-`Z`, fixed-microsecond codec has no runtime consumer yet, so existing exact model,
-  storage, log, and CLI bytes remain intentionally unconverted and unverified against it;
-- no exact epoch-microsecond conversion and range matrix exists yet;
+- the fixed-`Z`, fixed-microsecond codec and exact epoch projection have no runtime consumer yet,
+  so existing exact model, storage, query, log, and CLI representations remain intentionally
+  unconverted and unverified against the isolated primitives;
 - no regression compares equivalent instants across Python equality/hash, JSON bytes, natural
   keys, conflict identity, and SQL keys;
 - no mixed-offset SQL-order test covers the legacy market, order-flow, historical collection,
@@ -255,7 +257,7 @@ Unknown behavior is not treated as safe:
 ## Staged Implementation and Migration Plan
 
 Each stage has a separate acceptance gate. A later stage cannot use completion of TASK-026,
-TASK-027, or TASK-028 as authorization for incompatible wiring or migration.
+TASK-027, TASK-028, or TASK-029 as authorization for incompatible wiring or migration.
 
 ### Stage 1 — Prevent new clock drift — COMPLETE
 
@@ -277,13 +279,16 @@ Completed exit evidence:
 - each scoped provider/application keeps its existing typed error and error-code mapping; and
 - existing persisted models, JSON, digests, keys, schemas, and stored data remain unchanged.
 
-### Stage 2 — Additive codec and conformance foundation — IN PROGRESS
+### Stage 2 — Additive codec and conformance foundation — COMPLETE
 
 TASK-028 added the shared strict validator, explicit edge normalizer, and fixed RFC 3339
-serializer/parser as one isolated pure module with exhaustive deterministic and property-style
-tests. No existing runtime path imports or calls those helpers. TASK-029 remains the bounded
-additive exact epoch-microsecond projection slice. Neither slice may be wired into an existing
-persisted model until its compatibility reader and version plan are accepted.
+serializer/parser as one isolated pure module. TASK-029 completed that unused foundation with
+exact signed epoch-microsecond bounds plus integer-only projection and inverse decoding across
+Python's full calendar range. Exhaustive deterministic, property-style, and hostile-subclass tests
+cover type/range rejection, negative/zero/positive landmarks, one-microsecond distinction, exact
+round trips, and monotonic order. No existing runtime path imports or calls these helpers. They
+may not be wired into an existing persisted model until its compatibility reader and version plan
+are accepted.
 
 Exit evidence:
 
@@ -291,7 +296,7 @@ Exit evidence:
   rejects naive or inconsistent values and returns a `datetime.UTC` instance;
 - the serializer emits exactly six digits plus `Z`, and the strict parser rejects noncanonical
   variants and returns `datetime.UTC`;
-- the remaining epoch conversion is exact, integer-only, range-safe, and order-preserving; and
+- epoch conversion is exact, integer-only, range-safe, and order-preserving; and
 - current stored representations and external output remain byte-for-byte unchanged.
 
 ### Stage 3 — Read-only compatibility preflight
@@ -473,10 +478,10 @@ forward version-2 path.
 
 ## Decisions and Approvals Required
 
-ADR 0027 accepts the target and staged plan, but not an incompatible cutover. TASK-027 and
-TASK-028 are complete. The canonical next action is the bounded, additive RISK-1 TASK-029; it
-introduces unused exact epoch-microsecond projection primitives only. Department and agent reviews
-are validation evidence, not human approval.
+ADR 0027 accepts the target and staged plan, but not an incompatible cutover. TASK-027 through
+TASK-029 are complete. The canonical next action is the bounded RISK-1 TASK-030; it introduces
+only an unused, synthetic-fixture foundation for exact SQLite store fingerprints and immutable
+read-only access. Department and agent reviews are validation evidence, not human approval.
 
 Before Stage 3 accesses any operator database, the project owner must approve the exact read-only
 database/path list, snapshot method, report destination, and evidence retention/disposal boundary.
@@ -489,18 +494,21 @@ backup, validation, rollback, and affected control-owner review as required by
 [`POLICIES.md`](POLICIES.md#explicit-human-approval-matrix).
 
 Completed TASK-027 needed no migration approval because it enforced the existing internal UTC
-clock policy without changing a persisted model or representation. Completed TASK-028 likewise
-added only unused pure codec primitives, and TASK-029 remains limited to unused pure projection
-primitives. Wiring any of those primitives into an existing contract or advancing Stages 3
-through 7 requires the stage-specific authorization and applicable approvals described here.
+clock policy without changing a persisted model or representation. TASK-028 and TASK-029 likewise
+added only unused pure codec and projection primitives. Wiring any of those primitives into an
+existing contract or advancing Stages 3 through 7 requires the stage-specific authorization and
+applicable approvals described here.
 
-## TASK-029 Handoff
+## TASK-030 Handoff
 
-The next bounded action is `phase2.canonical_utc_epoch_microsecond_primitives`.
+The next bounded action is `phase2.canonical_utc_preflight_fingerprint_foundation`.
 
-It is limited to unused pure helpers that project a strict canonical UTC datetime to exact signed
-integer microseconds since the Unix epoch and decode a representable integer back to fixed UTC,
-using integer arithmetic with exhaustive boundary, round-trip, and ordering tests. It may not
-wire those helpers into a persisted model, provider adapter, request, output, digest, identity,
-SQLite query or projection, schema, migration, or stored row; inspect or write an operator
-database; or call a real provider.
+It is limited to unused strict contracts, deterministic schema/store fingerprints, and immutable
+read-only inspection of generated temporary SQLite fixture snapshots through
+`mode=ro&immutable=1`. It covers database encoding, application/storage markers, declared
+version, normalized DDL, tables, columns, indexes, and triggers without scanning timestamp rows.
+It may not inspect an operator, user-selected, deployment, or discovered database; write a
+report; invoke a schema-installing adapter; create a journal, WAL, or SHM file; wire into an
+active runtime; migrate or repair data; or claim Stage 3 completion. Before any later operator
+database scan, the project owner must still approve the exact path list, immutable snapshot
+method, report destination, and evidence retention/disposal boundary.

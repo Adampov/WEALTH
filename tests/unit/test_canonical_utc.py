@@ -2,23 +2,31 @@
 
 import re
 from datetime import UTC, date, datetime, timedelta, timezone, tzinfo
+from enum import IntEnum
+from typing import Self, overload
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 from wealth.domain.canonical_utc import (
+    MAX_EPOCH_MICROSECONDS,
+    MIN_EPOCH_MICROSECONDS,
     CanonicalUtcError,
+    from_epoch_microseconds,
     normalize_aware_to_utc,
     parse_canonical_utc,
     require_canonical_utc,
     serialize_canonical_utc,
+    to_epoch_microseconds,
 )
 
 CANONICAL_TEXT_PATTERN = re.compile(
     r"[0-9]{4}-[0-9]{2}-[0-9]{2}T"
     r"[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z"
 )
+SQLITE_MIN_INTEGER = -(2**63)
+SQLITE_MAX_INTEGER = 2**63 - 1
 
 
 class SeasonalZeroTimezone(tzinfo):
@@ -176,6 +184,73 @@ class MisleadingComponentsDatetime(datetime):
     ) -> str:
         del sep, timespec
         return "not-canonical"
+
+
+class HostileProjectionDatetime(MisleadingComponentsDatetime):
+    """Reject subclass conversion shortcuts while preserving canonical stored state."""
+
+    @overload  # type: ignore[override]
+    def __sub__(self, value: datetime, /) -> timedelta: ...
+
+    @overload
+    def __sub__(self, value: timedelta, /) -> Self: ...
+
+    def __sub__(self, value: timedelta | datetime, /) -> Self | timedelta:
+        del value
+        raise AssertionError("projection must not call subclass subtraction")
+
+    def astimezone(self, tz: tzinfo | None = None) -> Self:
+        del tz
+        raise AssertionError("projection must not call astimezone")
+
+    def timestamp(self) -> float:
+        raise AssertionError("projection must not call timestamp")
+
+
+class HostileEpochInteger(int):
+    """Lie through every overridable integer operation."""
+
+    def __int__(self) -> int:
+        raise AssertionError("decoder must not call the integer override")
+
+    def __index__(self) -> int:
+        raise AssertionError("decoder must not call the index override")
+
+    def __lt__(self, value: object) -> bool:
+        del value
+        raise AssertionError("decoder must compare the stored base integer")
+
+    def __le__(self, value: object) -> bool:
+        del value
+        raise AssertionError("decoder must compare the stored base integer")
+
+    def __add__(self, value: object) -> int:
+        del value
+        raise AssertionError("decoder must use the stored base integer")
+
+
+class IntegerLike:
+    """Expose integer conversion without actually being an integer."""
+
+    def __int__(self) -> int:
+        raise AssertionError("decoder must reject before conversion")
+
+    def __index__(self) -> int:
+        raise AssertionError("decoder must reject before conversion")
+
+
+class MasqueradingIntegerLike(IntegerLike):
+    """Spoof ``isinstance(value, int)`` without being an integer."""
+
+    @property  # type: ignore[misc]
+    def __class__(self) -> type[int]:  # type: ignore[override]
+        return int
+
+
+class EpochMarker(IntEnum):
+    """Exercise a conventional integer subclass."""
+
+    EPOCH = 0
 
 
 def test_require_canonical_utc_returns_the_original_object() -> None:
@@ -631,3 +706,375 @@ def test_canonical_utc_fold_flag_does_not_change_the_canonical_text() -> None:
     parsed = parse_canonical_utc(serialize_canonical_utc(folded))
     assert parsed == folded
     assert parsed.fold == 0
+
+
+def test_epoch_microsecond_bounds_are_exact_and_fit_sqlite_integer_storage() -> None:
+    assert MIN_EPOCH_MICROSECONDS == -62_135_596_800_000_000
+    assert MAX_EPOCH_MICROSECONDS == 253_402_300_799_999_999
+    assert SQLITE_MIN_INTEGER <= MIN_EPOCH_MICROSECONDS
+    assert MAX_EPOCH_MICROSECONDS <= SQLITE_MAX_INTEGER
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param(
+            datetime.min.replace(tzinfo=UTC),
+            MIN_EPOCH_MICROSECONDS,
+            id="calendar-minimum",
+        ),
+        pytest.param(
+            datetime(1969, 12, 30, 23, 59, 59, 999999, tzinfo=UTC),
+            -86_400_000_001,
+            id="negative-day-minus-one-microsecond",
+        ),
+        pytest.param(
+            datetime(1969, 12, 31, tzinfo=UTC),
+            -86_400_000_000,
+            id="negative-day-boundary",
+        ),
+        pytest.param(
+            datetime(1969, 12, 31, 0, 0, 0, 1, tzinfo=UTC),
+            -86_399_999_999,
+            id="negative-day-plus-one-microsecond",
+        ),
+        pytest.param(
+            datetime(1969, 12, 31, 23, 59, 58, 999999, tzinfo=UTC),
+            -1_000_001,
+            id="negative-second-minus-one-microsecond",
+        ),
+        pytest.param(
+            datetime(1969, 12, 31, 23, 59, 59, tzinfo=UTC),
+            -1_000_000,
+            id="negative-second-boundary",
+        ),
+        pytest.param(
+            datetime(1969, 12, 31, 23, 59, 59, 1, tzinfo=UTC),
+            -999_999,
+            id="negative-fraction",
+        ),
+        pytest.param(
+            datetime(1969, 12, 31, 23, 59, 59, 999999, tzinfo=UTC),
+            -1,
+            id="epoch-minus-one-microsecond",
+        ),
+        pytest.param(datetime(1970, 1, 1, tzinfo=UTC), 0, id="epoch"),
+        pytest.param(
+            datetime(1970, 1, 1, 0, 0, 0, 1, tzinfo=UTC),
+            1,
+            id="epoch-plus-one-microsecond",
+        ),
+        pytest.param(
+            datetime(1970, 1, 1, 0, 0, 0, 999999, tzinfo=UTC),
+            999_999,
+            id="positive-fraction",
+        ),
+        pytest.param(
+            datetime(1970, 1, 1, 0, 0, 1, tzinfo=UTC),
+            1_000_000,
+            id="positive-second-boundary",
+        ),
+        pytest.param(
+            datetime.max.replace(tzinfo=UTC),
+            MAX_EPOCH_MICROSECONDS,
+            id="calendar-maximum",
+        ),
+    ],
+)
+def test_to_epoch_microseconds_projects_exact_landmarks(
+    value: datetime,
+    expected: int,
+) -> None:
+    assert to_epoch_microseconds(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param(
+            MIN_EPOCH_MICROSECONDS,
+            datetime.min.replace(tzinfo=UTC),
+            id="calendar-minimum",
+        ),
+        pytest.param(
+            -86_400_000_001,
+            datetime(1969, 12, 30, 23, 59, 59, 999999, tzinfo=UTC),
+            id="negative-day-minus-one-microsecond",
+        ),
+        pytest.param(
+            -86_400_000_000,
+            datetime(1969, 12, 31, tzinfo=UTC),
+            id="negative-day-boundary",
+        ),
+        pytest.param(
+            -86_399_999_999,
+            datetime(1969, 12, 31, 0, 0, 0, 1, tzinfo=UTC),
+            id="negative-day-plus-one-microsecond",
+        ),
+        pytest.param(
+            -1_000_001,
+            datetime(1969, 12, 31, 23, 59, 58, 999999, tzinfo=UTC),
+            id="negative-second-minus-one-microsecond",
+        ),
+        pytest.param(
+            -1_000_000,
+            datetime(1969, 12, 31, 23, 59, 59, tzinfo=UTC),
+            id="negative-second-boundary",
+        ),
+        pytest.param(
+            -999_999,
+            datetime(1969, 12, 31, 23, 59, 59, 1, tzinfo=UTC),
+            id="negative-fraction",
+        ),
+        pytest.param(
+            -1,
+            datetime(1969, 12, 31, 23, 59, 59, 999999, tzinfo=UTC),
+            id="epoch-minus-one-microsecond",
+        ),
+        pytest.param(0, datetime(1970, 1, 1, tzinfo=UTC), id="epoch"),
+        pytest.param(
+            1,
+            datetime(1970, 1, 1, 0, 0, 0, 1, tzinfo=UTC),
+            id="epoch-plus-one-microsecond",
+        ),
+        pytest.param(
+            999_999,
+            datetime(1970, 1, 1, 0, 0, 0, 999999, tzinfo=UTC),
+            id="positive-fraction",
+        ),
+        pytest.param(
+            1_000_000,
+            datetime(1970, 1, 1, 0, 0, 1, tzinfo=UTC),
+            id="positive-second-boundary",
+        ),
+        pytest.param(
+            MAX_EPOCH_MICROSECONDS,
+            datetime.max.replace(tzinfo=UTC),
+            id="calendar-maximum",
+        ),
+    ],
+)
+def test_from_epoch_microseconds_decodes_exact_landmarks(
+    value: int,
+    expected: datetime,
+) -> None:
+    decoded = from_epoch_microseconds(value)
+
+    assert type(decoded) is datetime
+    assert decoded == expected
+    assert decoded.tzinfo is UTC
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(datetime(2026, 7, 25, 14, 30), id="naive"),
+        pytest.param(
+            datetime(2026, 7, 25, 14, 30, tzinfo=timezone(timedelta(hours=1))),
+            id="nonzero-offset",
+        ),
+        pytest.param(
+            datetime(2026, 7, 25, 14, 30, tzinfo=timezone(timedelta(0), "named-zero")),
+            id="named-zero-offset",
+        ),
+        pytest.param(
+            ShiftedUtcDatetime(2026, 7, 25, 14, 30, tzinfo=UTC),
+            id="overridden-offset",
+        ),
+        pytest.param(
+            LyingOffsetUtcDatetime(2026, 7, 25, 14, 30, tzinfo=UTC),
+            id="lying-offset",
+        ),
+        pytest.param(
+            ExplodingUtcDatetime(2026, 7, 25, 14, 30, tzinfo=UTC),
+            id="exploding-offset",
+        ),
+        pytest.param(
+            MasqueradingUtcDatetime(
+                2026,
+                7,
+                25,
+                14,
+                30,
+                tzinfo=timezone(timedelta(hours=5)),
+            ),
+            id="masquerading-zone",
+        ),
+        pytest.param("1970-01-01T00:00:00.000000Z", id="text"),
+    ],
+)
+def test_to_epoch_microseconds_reuses_the_strict_canonical_contract(value: object) -> None:
+    with pytest.raises(CanonicalUtcError, match=r"tzinfo exactly datetime\.UTC"):
+        to_epoch_microseconds(value)
+
+
+def test_to_epoch_microseconds_uses_stored_components_and_base_arithmetic() -> None:
+    value = HostileProjectionDatetime(
+        2026,
+        7,
+        25,
+        9,
+        0,
+        15,
+        123456,
+        tzinfo=UTC,
+    )
+    expected = to_epoch_microseconds(datetime(2026, 7, 25, 9, 0, 15, 123456, tzinfo=UTC))
+
+    assert to_epoch_microseconds(value) == expected
+
+
+def test_fixed_utc_fold_flag_does_not_change_epoch_projection() -> None:
+    ordinary = datetime(2026, 7, 25, 9, 0, 15, 123456, tzinfo=UTC, fold=0)
+    folded = ordinary.replace(fold=1)
+
+    assert to_epoch_microseconds(folded) == to_epoch_microseconds(ordinary)
+    assert from_epoch_microseconds(to_epoch_microseconds(folded)).fold == 0
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(True, id="true"),
+        pytest.param(False, id="false"),
+        pytest.param(0.0, id="float"),
+        pytest.param("0", id="text"),
+        pytest.param(b"0", id="bytes"),
+        pytest.param(None, id="none"),
+        pytest.param(datetime(1970, 1, 1, tzinfo=UTC), id="datetime"),
+        pytest.param(timedelta(0), id="timedelta"),
+        pytest.param(IntegerLike(), id="integer-like"),
+        pytest.param(MasqueradingIntegerLike(), id="spoofed-integer-class"),
+    ],
+)
+def test_from_epoch_microseconds_rejects_noninteger_values(value: object) -> None:
+    with pytest.raises(CanonicalUtcError, match="integer"):
+        from_epoch_microseconds(value)
+
+
+def test_masquerading_integer_like_reaches_the_isinstance_trap() -> None:
+    value = MasqueradingIntegerLike()
+
+    assert isinstance(value, int)
+    with pytest.raises(CanonicalUtcError, match="integer"):
+        from_epoch_microseconds(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(MIN_EPOCH_MICROSECONDS - 1, id="below-calendar-minimum"),
+        pytest.param(MAX_EPOCH_MICROSECONDS + 1, id="above-calendar-maximum"),
+        pytest.param(SQLITE_MIN_INTEGER, id="sqlite-minimum"),
+        pytest.param(SQLITE_MAX_INTEGER, id="sqlite-maximum"),
+        pytest.param(-(1 << 4096), id="enormous-negative"),
+        pytest.param(1 << 4096, id="enormous-positive"),
+    ],
+)
+def test_from_epoch_microseconds_rejects_out_of_range_integers(value: int) -> None:
+    with pytest.raises(CanonicalUtcError, match="datetime range"):
+        from_epoch_microseconds(value)
+
+
+def test_from_epoch_microseconds_copies_hostile_integer_subclass_storage() -> None:
+    value = HostileEpochInteger(1)
+
+    assert from_epoch_microseconds(value) == datetime(
+        1970,
+        1,
+        1,
+        0,
+        0,
+        0,
+        1,
+        tzinfo=UTC,
+    )
+
+
+def test_from_epoch_microseconds_accepts_conventional_integer_subclasses() -> None:
+    assert from_epoch_microseconds(EpochMarker.EPOCH) == datetime(1970, 1, 1, tzinfo=UTC)
+
+
+@given(value=st.datetimes(timezones=st.just(UTC)))
+def test_epoch_microsecond_datetime_round_trip_is_exact(value: datetime) -> None:
+    projected = to_epoch_microseconds(value)
+    decoded = from_epoch_microseconds(projected)
+
+    assert decoded == value
+    assert decoded.tzinfo is UTC
+    assert to_epoch_microseconds(decoded) == projected
+
+
+@given(
+    value=st.integers(
+        min_value=MIN_EPOCH_MICROSECONDS,
+        max_value=MAX_EPOCH_MICROSECONDS,
+    )
+)
+def test_epoch_microsecond_integer_round_trip_is_exact(value: int) -> None:
+    decoded = from_epoch_microseconds(value)
+
+    assert type(decoded) is datetime
+    assert decoded.tzinfo is UTC
+    assert to_epoch_microseconds(decoded) == value
+
+
+@given(
+    left=st.integers(
+        min_value=MIN_EPOCH_MICROSECONDS,
+        max_value=MAX_EPOCH_MICROSECONDS,
+    ),
+    right=st.integers(
+        min_value=MIN_EPOCH_MICROSECONDS,
+        max_value=MAX_EPOCH_MICROSECONDS,
+    ),
+)
+def test_epoch_microsecond_projection_preserves_total_order(left: int, right: int) -> None:
+    left_datetime = from_epoch_microseconds(left)
+    right_datetime = from_epoch_microseconds(right)
+
+    assert (left_datetime < right_datetime) is (left < right)
+    assert (left_datetime == right_datetime) is (left == right)
+
+
+@given(
+    value=st.integers(
+        min_value=MIN_EPOCH_MICROSECONDS,
+        max_value=MAX_EPOCH_MICROSECONDS - 1,
+    )
+)
+def test_adjacent_epoch_microseconds_remain_exactly_distinct(value: int) -> None:
+    earlier = from_epoch_microseconds(value)
+    later = from_epoch_microseconds(value + 1)
+
+    assert later - earlier == timedelta(microseconds=1)
+    assert to_epoch_microseconds(later) - to_epoch_microseconds(earlier) == 1
+
+
+@pytest.mark.parametrize(
+    "earlier",
+    [
+        pytest.param(
+            datetime(1969, 12, 31, 23, 59, 59, 999999, tzinfo=UTC),
+            id="unix-epoch",
+        ),
+        pytest.param(
+            datetime(1999, 12, 31, 23, 59, 59, 999999, tzinfo=UTC),
+            id="millennium",
+        ),
+        pytest.param(
+            datetime(2000, 2, 29, 23, 59, 59, 999999, tzinfo=UTC),
+            id="leap-day",
+        ),
+        pytest.param(
+            datetime(9998, 12, 31, 23, 59, 59, 999999, tzinfo=UTC),
+            id="late-calendar-boundary",
+        ),
+    ],
+)
+def test_one_microsecond_adjacency_crosses_calendar_boundaries_exactly(
+    earlier: datetime,
+) -> None:
+    later = earlier + timedelta(microseconds=1)
+
+    assert to_epoch_microseconds(later) == to_epoch_microseconds(earlier) + 1
