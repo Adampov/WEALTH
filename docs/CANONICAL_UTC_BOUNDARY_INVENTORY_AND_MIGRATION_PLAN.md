@@ -99,7 +99,7 @@ classification.
 | Public-trade audit domain — [`order_flow_collection.py`](../src/wealth/domain/order_flow_collection.py#L166-L195) | `PublicTradeCollectionTransition` wraps every checkpoint timestamp | **Strict UTC** at the typed history-reader boundary | **Low locally / High ecosystem inconsistency.** Retain this defense while underlying checkpoint and health contracts migrate. |
 | Market source port — [`ports/market.py`](../src/wealth/ports/market.py#L46-L137) | `HistoricalCandleRequest.window_start`, `window_end_exclusive`; `CandleFetchBatch.observed_at`, `processed_at` | **Aware only.** Request start is converted to UTC only for grid validation; batch equality preserves offsets. | **High.** Make requests/batches strict in the core-evidence wave; provider adapters normalize before constructing them. |
 | Order-flow source port — [`ports/order_flow.py`](../src/wealth/ports/order_flow.py#L28-L126) | `PublicTradeWindowRequest.window_start`, `window_end_exclusive`; `OrderFlowFetchBatch.observed_at`, `processed_at` | **Aware only.** Millisecond alignment and causal checks retain offsets. | **High.** Make the source/batch contract strict after legacy callers are inventoried. |
-| Foundation clock — [`ports/foundation.py`](../src/wealth/ports/foundation.py#L1-L42), [`adapters/foundation.py`](../src/wealth/adapters/foundation.py#L30-L38) | `Clock.now()` returns plain `datetime`; concrete `SystemClock.now()` calls `datetime.now(UTC)` | The protocol documentation promises awareness, not fixed UTC. `SystemClock` currently returns the fixed UTC singleton, but the protocol cannot enforce an injected result itself. | **High cross-cutting.** Specify fixed UTC, add a checked helper, and require conformance tests for the concrete clock and every injected fake. |
+| Foundation clock — [`ports/foundation.py`](../src/wealth/ports/foundation.py#L1-L54), [`adapters/foundation.py`](../src/wealth/adapters/foundation.py#L30-L38) | `Clock.now()` returns plain `datetime`; concrete `SystemClock.now()` calls `datetime.now(UTC)` | **Strict fixed UTC at use boundaries.** The protocol documents `tzinfo is datetime.UTC`; `require_utc_clock` checks identity and returns the accepted value unchanged. `SystemClock` conforms. | **Controlled for new clock output / High ecosystem migration remains.** Keep conformance coverage and do not use the clock-only assertion to tighten legacy request or persisted-model inputs. |
 | Replay application — [`replay.py`](../src/wealth/application/replay.py#L27-L103) | `ReplaySlice.evaluation_time`, `next_observation_time`; `MarketReplay.slice_at` input | Plain dataclass; rejects naive evaluation time only. Python filtering/sorting is instant-correct and returns original offsets. No serializer is defined. | **High for honest replay.** Make evaluation strict UTC and define serialization only if the dataclass becomes an external boundary. |
 | Range-result wrappers — [`pagination.py`](../src/wealth/application/pagination.py#L240-L269), [`order_flow_range.py`](../src/wealth/application/order_flow_range.py#L310-L377) | `HistoricalCandleRangeIngestionResult.next_window_start` and `PublicTradeRangeIngestionResult.next_window_start` derive a resume timestamp from nested requests/traces | They preserve the selected nested request's aware offset and define no serializer. | **Medium.** Their derived cursor must become fixed UTC when the underlying request contracts migrate; retain explicit causal prefix logic. |
 | Collector-health command envelope — [`collector_health_cli.py`](../src/wealth/collector_health_cli.py#L46-L78) | `CollectorHealthCommandOutput` serializes a timestamp-bearing `CollectorServiceHealthReport` and its assessments | Nested `evaluated_at` values are aware-only and can expose caller offsets in external JSON. | **High/Medium external compatibility.** Version the command output before adopting the fixed serializer and inventory exact-byte consumers. |
@@ -112,12 +112,12 @@ classification.
 | Order-flow quality and ingestion — [`order_flow_quality.py`](../src/wealth/application/order_flow_quality.py#L39-L238), [`order_flow_ingestion.py`](../src/wealth/application/order_flow_ingestion.py#L42-L72) | Windows are aware-only; event comparisons and issue order use Python datetimes. | Make request and record contracts strict before changing the persisted conflict or natural-key representation. |
 | Cross-source reconciliation — [`reconciliation.py`](../src/wealth/application/reconciliation.py#L49-L233) | Window offsets are preserved; dictionaries and comparison order use Python instants. | A representation-only change alters report digest bytes. Introduce digest versioning first. |
 | Candle and trade page/range planning — [`pagination.py`](../src/wealth/application/pagination.py#L148-L266), [`order_flow_range.py`](../src/wealth/application/order_flow_range.py#L245-L376) | Timed request objects are split, compared, and resumed without normalizing their original offsets. | Tighten the port contract after callers have a normalization edge; keep causal resume cursors explicit. |
-| Recoverable historical collection — [`collection.py`](../src/wealth/application/collection.py#L83-L389) | Direct clock values and optional `created_at` flow unchanged into checkpoint, lease, transition, and health models. Lease checks use Python instant comparison. | Route direct clock reads through the checked UTC clock now. Add legacy checkpoint reading later, before tightening the persisted model itself. |
-| Continuous candle collection — [`continuous_collection.py`](../src/wealth/application/continuous_collection.py#L65-L129), [`continuous_collection.py`](../src/wealth/application/continuous_collection.py#L186-L478) | Settlement calculation returns a UTC grid boundary, but creation/update/retry values preserve an aware clock's offset. The helper at lines 579-581 rejects naive values only. | Check all new clock reads now without changing storage; later migrate checkpoint and retry representations as one atomic unit. |
-| Collector service and health — [`collector_service.py`](../src/wealth/application/collector_service.py#L67-L217), [`collector_health.py`](../src/wealth/application/collector_health.py#L50-L135) | Service and evaluation clocks are aware-only. Heartbeat age and freshness use Python instants. | Make clocks strict; retain sequence as durable history order and use ID as equal-time tie-break. |
-| Shared rate budget — [`rate_budget.py`](../src/wealth/application/rate_budget.py#L105-L127) | `clock.now()` flows directly to `RateBudgetRequest.requested_at`. | Route new clock reads through the checked UTC clock now; retain version-1 decision compatibility until the later storage wave. |
-| Foundation health event — [`health.py`](../src/wealth/application/health.py#L18-L35) | The raw clock value becomes all three `DomainEvent` times; the strict event model fails closed on non-UTC. | Adopt the shared checked clock for earlier and clearer failure without changing the strict event contract. |
-| Public-trade orchestration — [`public_trade_collection.py`](../src/wealth/application/public_trade_collection.py#L241-L610), [`public_trade_collection.py`](../src/wealth/application/public_trade_collection.py#L713-L716) | Rejects nonzero offsets for request bounds, explicit creation, trusted clocks, loaded checkpoints, and lease values. | Current reference behavior. In TASK-027 route only direct clock reads through the fixed-UTC helper and retain current request/checkpoint acceptance; replace broader local validation only in a later compatibility wave. |
+| Recoverable historical collection — [`collection.py`](../src/wealth/application/collection.py#L83-L389) | Every direct clock result is checked for fixed `datetime.UTC` before ID or checkpoint/health mutation. Optional caller `created_at` and loaded durable state retain their current aware-only contract. | New clock drift is controlled. Add legacy checkpoint reading later, before tightening the persisted model itself. |
+| Continuous candle collection — [`continuous_collection.py`](../src/wealth/application/continuous_collection.py#L65-L129), [`continuous_collection.py`](../src/wealth/application/continuous_collection.py#L186-L478) | Every creation, cycle, pause/resume, success, and failure clock result is fixed-UTC checked before the next cursor mutation. Settlement policy inputs and persisted checkpoint fields retain current acceptance. | New clock drift is controlled; later migrate checkpoint and retry representations as one atomic unit. |
+| Collector service and health — [`collector_service.py`](../src/wealth/application/collector_service.py#L67-L217), [`collector_health.py`](../src/wealth/application/collector_health.py#L50-L135) | Service and evaluation clocks require fixed `datetime.UTC` before heartbeat IDs, writes, or health-store reads. Heartbeat age and freshness still use Python instants. | Clock output is controlled; retain sequence as durable history order and use ID as equal-time tie-break during later representation migration. |
+| Shared rate budget — [`rate_budget.py`](../src/wealth/application/rate_budget.py#L105-L128) | The clock is fixed-UTC checked before reservation ID generation or coordinator access; the accepted value becomes `RateBudgetRequest.requested_at`. | New clock drift is controlled; retain version-1 decision compatibility until the later storage wave. |
+| Foundation health event — [`health.py`](../src/wealth/application/health.py#L18-L35) | The clock is fixed-UTC checked before either event ID, storage, or logging; the accepted value becomes all three `DomainEvent` times. | Enforced without changing the strict event contract or its representation. |
+| Public-trade orchestration — [`public_trade_collection.py`](../src/wealth/application/public_trade_collection.py#L241-L616), [`public_trade_collection.py`](../src/wealth/application/public_trade_collection.py#L719-L729) | Direct trusted-clock and shared-budget clock reads require fixed `datetime.UTC` and preserve `PublicTradeCollectionClockError`. Request bounds, explicit creation, loaded checkpoints, and lease values retain their existing zero-offset acceptance. | New clock drift is controlled without tightening compatibility boundaries; replace broader local validation only in a later approved wave. |
 
 For the fixed numeric-offset values produced by current serializers and tests, Python comparison,
 subtraction, hashing, and equality are generally instant-based. This is not universal for
@@ -131,9 +131,9 @@ cover fixed offsets, regional/fold cases, and representation identity together.
 
 | Boundary and evidence | Input/output representation | Current UTC behavior | Treatment |
 | --- | --- | --- | --- |
-| Binance candles — [`binance.py`](../src/wealth/adapters/binance.py#L123-L203), [`binance.py`](../src/wealth/adapters/binance.py#L298-L433) | Request bounds become epoch milliseconds; Spot requests specify UTC; provider epoch milliseconds become UTC datetimes. Capture times come from an injected clock. | Provider market time is **edge normalized**. Capture clock is **aware only** and its offset reaches raw/canonical records. | Range-check provider integers before conversion, reject a capture clock outside fixed UTC before side effects, and construct strict UTC models. |
-| Coinbase candles — [`coinbase.py`](../src/wealth/adapters/coinbase.py#L121-L220), [`coinbase.py`](../src/wealth/adapters/coinbase.py#L307-L437) | Request bounds become UTC `Z` seconds; provider epoch seconds become UTC datetimes. | Provider market time is **edge normalized**. Capture clock is **aware only**. | Preserve documented second precision, range-check input, and reject a capture clock outside fixed UTC before side effects. |
-| Binance aggregate trades — [`binance_order_flow.py`](../src/wealth/adapters/binance_order_flow.py#L133-L231), [`binance_order_flow.py`](../src/wealth/adapters/binance_order_flow.py#L332-L506) | Request bounds become epoch milliseconds; provider event milliseconds become UTC. | Provider event time is **edge normalized**. Capture clock is **aware only**. | Apply the same fixed-UTC clock rejection and provider-edge normalization as candles; keep provider raw bytes and aggregation evidence unchanged. |
+| Binance candles — [`binance.py`](../src/wealth/adapters/binance.py#L123-L212), [`binance.py`](../src/wealth/adapters/binance.py#L307-L442) | Request bounds become epoch milliseconds; Spot requests specify UTC; provider epoch milliseconds become UTC datetimes. Capture times come from an injected clock. | Provider market time is **edge normalized**. Every capture clock read is fixed-UTC checked and maps failures to `BinanceCandleErrorCode.INVALID_REQUEST`. | Range-check provider integers before conversion and construct strict UTC models in the later core-evidence wave; keep raw bytes unchanged. |
+| Coinbase candles — [`coinbase.py`](../src/wealth/adapters/coinbase.py#L121-L229), [`coinbase.py`](../src/wealth/adapters/coinbase.py#L316-L446) | Request bounds become UTC `Z` seconds; provider epoch seconds become UTC datetimes. | Provider market time is **edge normalized**. Every capture clock read is fixed-UTC checked and maps failures to `CoinbaseCandleErrorCode.INVALID_REQUEST`. | Preserve documented second precision and range-check provider input in the later core-evidence wave. |
+| Binance aggregate trades — [`binance_order_flow.py`](../src/wealth/adapters/binance_order_flow.py#L133-L239), [`binance_order_flow.py`](../src/wealth/adapters/binance_order_flow.py#L340-L514) | Request bounds become epoch milliseconds; provider event milliseconds become UTC. | Provider event time is **edge normalized**. Every capture clock read is fixed-UTC checked and maps failures to `BinanceAggregateTradeErrorCode.INVALID_REQUEST`. | Keep provider raw bytes and aggregation evidence unchanged; add provider-range hardening in the later adapter wave. |
 | HTTP `Retry-After` — [`binance.py`](../src/wealth/adapters/binance.py#L436-L440), [`coinbase.py`](../src/wealth/adapters/coinbase.py#L440-L444), [`binance_order_flow.py`](../src/wealth/adapters/binance_order_flow.py#L509-L513) | At most ten ASCII digits interpreted as delay seconds; HTTP-date is not supported. | This is a duration/text boundary, not an internal instant. Malformed or absolute-date values are not converted. | Keep duration behavior explicit. Any future HTTP-date support must parse at the adapter edge and immediately normalize to the canonical instant. |
 | Structured logs — [`logging.py`](../src/wealth/observability/logging.py#L14-L44) | Log-record epoch float becomes UTC ISO text with `+00:00`; strict domain events are JSON-dumped, normally with `Z`. | UTC instant is guaranteed, but two textual conventions and variable fractional precision remain. | Use the canonical serializer in a versioned log-envelope change; do not reinterpret historical log bytes. |
 | Collector-health CLI — [`collector_health_cli.py`](../src/wealth/collector_health_cli.py#L253-L267) | Pydantic JSON-mode output with no extra datetime normalization | Stored heartbeat/report offsets can become externally visible. | Version the CLI output before fixed UTC serialization if any consumer depends on exact bytes. |
@@ -249,19 +249,19 @@ Unknown behavior is not treated as safe:
 
 ## Staged Implementation and Migration Plan
 
-Each stage has a separate acceptance gate. A later stage cannot use completion of TASK-026 as
-authorization.
+Each stage has a separate acceptance gate. A later stage cannot use completion of TASK-026 or
+TASK-027 as authorization for incompatible wiring or migration.
 
-### Stage 1 — Prevent new clock drift
+### Stage 1 — Prevent new clock drift — COMPLETE
 
-Promote TASK-027 to add one reusable strict-UTC assertion, strengthen the `Clock` contract, and
-check every direct injected-clock result before it can flow into a provider call, persistence
-write, wait, or canonical record. Cover historical and continuous collection, collector service
-and health, the foundation `HealthCheckService`, rate budget, all three public provider adapters,
-and the already strict public-trade orchestrator. Do not tighten persisted models or change JSON,
-schemas, or stored bytes.
+TASK-027 added one reusable exact fixed-UTC assertion, strengthened the `Clock` contract, and
+checks every scoped direct injected-clock result before it can flow into the next ID, provider
+call, persistence write, reservation, wait, log, or canonical record. Historical and continuous
+collection, collector service and health, the foundation `HealthCheckService`, rate budget, all
+three public provider adapters, and public-trade orchestration are covered. Persisted models,
+request acceptance, JSON, digests, keys, schemas, projections, and stored bytes were not changed.
 
-Exit evidence:
+Completed exit evidence:
 
 - the helper rejects naive, nonzero-offset, and zero-offset non-`datetime.UTC` clock values and
   returns an existing fixed-UTC value unchanged;
@@ -465,9 +465,9 @@ forward version-2 path.
 
 ## Decisions and Approvals Required
 
-ADR 0027 accepts the target and staged plan, but not an incompatible cutover. The project owner's
-instruction to continue authorizes completion of this planning task and promotion of the bounded
-RISK-1 TASK-027 only. Department and agent reviews are validation evidence, not human approval.
+ADR 0027 accepts the target and staged plan, but not an incompatible cutover. TASK-027 is complete.
+The canonical next action is the bounded, additive RISK-1 TASK-028; it introduces unused codec
+primitives only. Department and agent reviews are validation evidence, not human approval.
 
 Before Stage 3 accesses any operator database, the project owner must approve the exact read-only
 database/path list, snapshot method, report destination, and evidence retention/disposal boundary.
@@ -479,18 +479,18 @@ stored-state migration, the project owner must also approve a dedicated implemen
 backup, validation, rollback, and affected control-owner review as required by
 [`POLICIES.md`](POLICIES.md#explicit-human-approval-matrix).
 
-The active TASK-027 needs no migration approval because it enforces the existing internal UTC
-clock policy without changing a persisted model or representation. Stages 4 through 7 must record
-their applicable approvals before work that is incompatible with a current contract or store
-begins.
+Completed TASK-027 needed no migration approval because it enforced the existing internal UTC
+clock policy without changing a persisted model or representation. TASK-028 likewise may add only
+unused pure primitives. Wiring those primitives into an existing contract or advancing Stages 3
+through 7 requires the stage-specific authorization and applicable approvals described here.
 
-## TASK-027 Handoff
+## TASK-028 Handoff
 
-The next bounded action is
-`phase2.canonical_utc_clock_boundary_enforcement`.
+The next bounded action is `phase2.canonical_utc_codec_primitives`.
 
-It is limited to one reusable fixed-`datetime.UTC` clock assertion, a UTC `Clock` contract, direct
-clock-call enforcement, preservation of each scoped boundary's typed error mapping, and
-fail-before-side-effect tests. It may not tighten a persisted model, normalize a request window,
-change current JSON or identity, alter a schema, inspect or write an operator database, or call a
-real provider.
+It is limited to unused pure helpers: a general fixed-`datetime.UTC` validator, an explicit
+aware-to-UTC edge normalizer, an exact six-fractional-digit RFC 3339 `Z` serializer, a strict
+canonical parser, and exhaustive tests. It may not wire those helpers into a persisted model,
+provider adapter, request, output, digest, identity, SQLite projection, or schema; inspect or write
+an operator database; or call a real provider. Exact epoch-microsecond projection remains a
+separate bounded follow-up within Stage 2.

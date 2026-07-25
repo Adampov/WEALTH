@@ -32,7 +32,7 @@ class SystemClock:
     """UTC wall-clock adapter for non-replay runtime entry points."""
 
     def now(self) -> datetime:
-        """Return the current timezone-aware UTC timestamp."""
+        """Return the current timestamp in the fixed ``datetime.UTC`` zone."""
 
         return datetime.now(UTC)
 

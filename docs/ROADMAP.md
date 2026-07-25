@@ -103,6 +103,9 @@ Completed Phase 2 slices include:
   provider edge, JSON/text representation, SQLite projection, order, index, cursor, and test path,
   with an accepted staged compatibility, quarantine, backup, rollback, and migration plan. No
   runtime, schema, or stored-data migration has begun.
+- Exact fixed-`datetime.UTC` enforcement at every scoped injected-clock boundary, with
+  fail-before-ID/HTTP/storage/reservation/wait/log tests, preserved typed error mappings, and no
+  persisted-contract, serialization, schema, projection, or stored-data change.
 
 Phase 2 is not complete. Operating-system service deployment, live streaming, multi-host
 rate-budget coordination, durable raw and canonical storage beyond the local SQLite baseline,
@@ -116,15 +119,15 @@ now available through a bounded typed port that revalidates causal versions and 
 fencing authority without mutating control state. Operational recovery drills remain required
 before continuous public-trade collection. `RISK-005` remains open: the accepted plan selects
 Python datetimes in the fixed `datetime.UTC` zone, fixed microsecond RFC 3339 `Z` text, and derived
-epoch-microsecond SQL projections, but current aware-only contracts and legacy stores have not
-been migrated.
+epoch-microsecond SQL projections. New injected clock values are now fixed-UTC, but current
+aware-only models, external text, and legacy stores have not been migrated.
 
-The canonical next action is TASK-027,
-`phase2.canonical_utc_clock_boundary_enforcement`. It prevents new drift by checking every direct
-injected-clock value against the existing UTC policy before downstream side effects. It does not
-tighten persisted models, normalize request windows, change serialized bytes or identities, alter
-a schema, or migrate stored data. Its exact scope and acceptance gates are in `BACKLOG.md` and its
-status is mirrored in `PROJECT_STATE.json`.
+The canonical next action is TASK-028, `phase2.canonical_utc_codec_primitives`. It adds pure,
+unused fixed-UTC validation, explicit edge normalization, and exact six-microsecond-digit RFC 3339
+`Z` serializer/parser primitives with exhaustive tests. It does not wire those primitives into an
+existing runtime, model, output, digest, identity, schema, projection, or stored record. Its exact
+scope and acceptance gates are in `BACKLOG.md` and its status is mirrored in
+`PROJECT_STATE.json`.
 
 ## Phase 1 — Architecture and Engineering Foundation
 

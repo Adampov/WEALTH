@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 from wealth.domain.events import DomainEvent, Environment, EventType
-from wealth.ports.foundation import Clock, EventLogger, EventStore, IdGenerator
+from wealth.ports.foundation import Clock, EventLogger, EventStore, IdGenerator, require_utc_clock
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,7 +18,7 @@ class HealthCheckService:
     def run(self, environment: Environment) -> DomainEvent:
         """Create a deterministic event using only injected external capabilities."""
 
-        now = self.clock.now()
+        now = require_utc_clock(self.clock.now())
         event = DomainEvent(
             event_id=self.ids.new(),
             correlation_id=self.ids.new(),

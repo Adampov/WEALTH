@@ -26,6 +26,7 @@ from wealth.domain.continuous_collection import (
     ContinuousCollectionStatus,
 )
 from wealth.domain.market import CandleTimeframe, InstrumentType
+from wealth.ports.foundation import Clock
 
 NOW = datetime(2026, 7, 24, 12, 0, tzinfo=UTC)
 START = datetime(2026, 7, 24, 10, 0, tzinfo=UTC)
@@ -35,8 +36,21 @@ COLLECTION_ID = UUID(int=500)
 class FixedClock:
     """Keep lifecycle timing deterministic while allowing equal timestamps."""
 
+    def __init__(self, value: datetime = NOW) -> None:
+        self.value = value
+
     def now(self) -> datetime:
-        return NOW
+        return self.value
+
+
+class SequenceClock:
+    """Return explicit lifecycle timestamps in call order."""
+
+    def __init__(self, *values: datetime) -> None:
+        self._values = iter(values)
+
+    def now(self) -> datetime:
+        return next(self._values)
 
 
 class SequentialIds:
@@ -152,6 +166,7 @@ def runner(
     store: SQLiteCollectorServiceHeartbeatStore,
     shutdown: NeverShutdown,
     ids: SequentialIds | None = None,
+    clock: Clock | None = None,
     worker_id: str = "worker-a",
 ) -> ContinuousCollectorServiceRunner:
     """Compose the real runner and SQLite heartbeat boundary."""
@@ -159,7 +174,7 @@ def runner(
     return ContinuousCollectorServiceRunner(
         collector=collector,
         heartbeat_store=store,
-        clock=FixedClock(),
+        clock=FixedClock() if clock is None else clock,
         id_generator=SequentialIds() if ids is None else ids,
         shutdown=shutdown,
         worker_id=worker_id,
@@ -313,6 +328,61 @@ def test_shutdown_before_first_cycle_persists_pristine_stop(tmp_path: Path) -> N
     assert result.heartbeat.status is CollectorServiceStatus.STOPPED
     assert result.cycles_attempted == 0
     assert process.cycle_calls == []
+
+
+def test_invalid_initial_service_clock_fails_before_ids_or_downstream_calls(
+    tmp_path: Path,
+    invalid_clock_value: datetime,
+) -> None:
+    database = tmp_path / "service.sqlite3"
+    store = SQLiteCollectorServiceHeartbeatStore(database)
+    process = ScriptedCollector(checkpoint(), ())
+    ids = SequentialIds()
+    shutdown = NeverShutdown()
+
+    with pytest.raises(ValueError):
+        runner(
+            collector=process,
+            store=store,
+            shutdown=shutdown,
+            ids=ids,
+            clock=FixedClock(invalid_clock_value),
+        ).run(COLLECTION_ID, cycle_limit=1)
+
+    assert ids.value == 1_000
+    assert process.checkpoint_calls == []
+    assert process.cycle_calls == []
+    assert shutdown.waits == []
+    with sqlite3.connect(database) as connection:
+        heartbeat_count = connection.execute(
+            "SELECT COUNT(*) FROM collector_service_heartbeats"
+        ).fetchone()
+    assert heartbeat_count == (0,)
+
+
+def test_invalid_later_service_clock_stops_before_terminal_id_or_append(
+    tmp_path: Path,
+    invalid_clock_value: datetime,
+) -> None:
+    store = SQLiteCollectorServiceHeartbeatStore(tmp_path / "service.sqlite3")
+    process = ScriptedCollector(checkpoint(), ())
+    ids = SequentialIds()
+
+    with pytest.raises(ValueError):
+        runner(
+            collector=process,
+            store=store,
+            shutdown=AlreadyShutdown(),
+            ids=ids,
+            clock=SequenceClock(NOW, invalid_clock_value),
+        ).run(COLLECTION_ID, cycle_limit=1)
+
+    run_id = UUID(int=1_001)
+    history = store.observations(CollectorServiceHeartbeatQuery(run_id=run_id))
+    assert ids.value == 1_002
+    assert process.checkpoint_calls == [COLLECTION_ID]
+    assert process.cycle_calls == []
+    assert [item.status for item in history] == [CollectorServiceStatus.STARTING]
 
 
 def test_tampered_current_projection_fails_closed(tmp_path: Path) -> None:

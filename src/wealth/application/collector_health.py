@@ -16,7 +16,7 @@ from wealth.domain.collector_service import (
     CollectorServiceStatus,
 )
 from wealth.ports.collector_service import CollectorServiceHeartbeatStore
-from wealth.ports.foundation import Clock
+from wealth.ports.foundation import Clock, require_utc_clock
 
 MAX_COLLECTOR_STALE_AFTER_SECONDS = 604_800.0
 
@@ -129,7 +129,4 @@ class CollectorServiceHealthMonitor:
         )
 
     def _now(self) -> datetime:
-        now = self.clock.now()
-        if now.tzinfo is None or now.utcoffset() is None:
-            raise ValueError("collector service health clock must be timezone-aware")
-        return now
+        return require_utc_clock(self.clock.now())

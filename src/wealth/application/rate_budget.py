@@ -7,7 +7,7 @@ from wealth.domain.rate_budget import (
     RateBudgetPolicy,
     RateBudgetRequest,
 )
-from wealth.ports.foundation import Clock, IdGenerator
+from wealth.ports.foundation import Clock, IdGenerator, require_utc_clock
 from wealth.ports.market import (
     CandleFetchBatch,
     HistoricalCandleRequest,
@@ -110,12 +110,13 @@ def _reserve_request_capacity(
     id_generator: IdGenerator,
     request_cost: int,
 ) -> int | None:
+    requested_at = require_utc_clock(clock.now())
     reservation = coordinator.reserve(
         policy=policy,
         request=RateBudgetRequest(
             reservation_id=id_generator.new(),
             budget_key=policy.budget_key,
-            requested_at=clock.now(),
+            requested_at=requested_at,
             cost=request_cost,
         ),
     )

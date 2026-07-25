@@ -20,7 +20,7 @@ from wealth.ports.collector_service import (
     CollectorServiceHeartbeatWriteStatus,
     ShutdownSignal,
 )
-from wealth.ports.foundation import Clock, IdGenerator
+from wealth.ports.foundation import Clock, IdGenerator, require_utc_clock
 
 MAX_COLLECTOR_SERVICE_CYCLES = 10_000
 
@@ -74,6 +74,7 @@ class ContinuousCollectorServiceRunner:
 
         if not 1 <= cycle_limit <= MAX_COLLECTOR_SERVICE_CYCLES:
             raise ValueError(f"cycle_limit must be between 1 and {MAX_COLLECTOR_SERVICE_CYCLES}")
+        observed_at = self._now()
         run_id = self.id_generator.new()
         checkpoint = self.collector.checkpoint(collection_id)
         heartbeat = CollectorServiceHeartbeat(
@@ -82,7 +83,7 @@ class ContinuousCollectorServiceRunner:
             collection_id=collection_id,
             worker_id=self.worker_id,
             sequence=1,
-            observed_at=self._now(),
+            observed_at=observed_at,
             status=CollectorServiceStatus.STARTING,
             cycles_attempted=0,
             checkpoint_version=checkpoint.version,
@@ -188,13 +189,14 @@ class ContinuousCollectorServiceRunner:
         last_cycle_status: CollectorCycleStatus | None,
         reason_code: str | None,
     ) -> CollectorServiceHeartbeat:
+        observed_at = self._now()
         return CollectorServiceHeartbeat(
             heartbeat_id=self.id_generator.new(),
             run_id=previous.run_id,
             collection_id=previous.collection_id,
             worker_id=previous.worker_id,
             sequence=previous.sequence + 1,
-            observed_at=self._now(),
+            observed_at=observed_at,
             status=status,
             cycles_attempted=cycles_attempted,
             checkpoint_version=checkpoint.version,
@@ -211,10 +213,7 @@ class ContinuousCollectorServiceRunner:
             )
 
     def _now(self) -> datetime:
-        now = self.clock.now()
-        if now.tzinfo is None or now.utcoffset() is None:
-            raise ValueError("collector service clock must return timezone-aware timestamps")
-        return now
+        return require_utc_clock(self.clock.now())
 
     @staticmethod
     def _result(heartbeat: CollectorServiceHeartbeat) -> CollectorServiceRunResult:

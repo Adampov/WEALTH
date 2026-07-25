@@ -41,6 +41,7 @@ from wealth.ports.collection import (
     CollectionCheckpointWriteResult,
     CollectionCheckpointWriteStatus,
 )
+from wealth.ports.foundation import Clock
 from wealth.ports.http import HttpResponse
 from wealth.ports.market import HistoricalCandleRequest, HistoricalCandleSource
 
@@ -60,6 +61,16 @@ class MutableClock:
 
     def advance(self, duration: timedelta) -> None:
         self.value += duration
+
+
+class SequenceClock:
+    """Return explicit collection timestamps in call order."""
+
+    def __init__(self, *values: datetime) -> None:
+        self._values = iter(values)
+
+    def now(self) -> datetime:
+        return next(self._values)
 
 
 class SequentialIds:
@@ -223,7 +234,7 @@ def collector(
     http: ScenarioHttpClient,
     market_store: SQLiteCandleStore,
     checkpoint_store: CollectionCheckpointStore,
-    clock: MutableClock,
+    clock: Clock,
     ids: SequentialIds,
     sleeper: RecordingSleeper,
     worker_id: str,
@@ -255,6 +266,139 @@ def collector(
             max_retry_after_seconds=60,
         ),
     )
+
+
+def test_invalid_initial_collection_clock_fails_before_id_or_storage(
+    tmp_path: Path,
+    invalid_clock_value: datetime,
+) -> None:
+    clock = MutableClock(invalid_clock_value)
+    ids = SequentialIds()
+    http = ScenarioHttpClient()
+    sleeper = RecordingSleeper()
+    state_store = SQLiteCollectionCheckpointStore(tmp_path / "collection.sqlite3")
+    service = collector(
+        http=http,
+        market_store=SQLiteCandleStore(tmp_path / "market.sqlite3"),
+        checkpoint_store=state_store,
+        clock=clock,
+        ids=ids,
+        sleeper=sleeper,
+        worker_id="worker-a",
+    )
+
+    with pytest.raises(ValueError):
+        service.create_job(request(1))
+
+    assert ids.value == 0
+    assert state_store.get(UUID(int=1)) is None
+    assert http.calls == []
+    assert sleeper.delays == []
+
+
+def test_invalid_claim_clock_stops_before_checkpoint_transition(
+    tmp_path: Path,
+    invalid_clock_value: datetime,
+) -> None:
+    clock = MutableClock(invalid_clock_value)
+    ids = SequentialIds()
+    http = ScenarioHttpClient()
+    sleeper = RecordingSleeper()
+    state_store = SQLiteCollectionCheckpointStore(tmp_path / "collection.sqlite3")
+    service = collector(
+        http=http,
+        market_store=SQLiteCandleStore(tmp_path / "market.sqlite3"),
+        checkpoint_store=state_store,
+        clock=clock,
+        ids=ids,
+        sleeper=sleeper,
+        worker_id="worker-a",
+    )
+    job_id = UUID(int=899)
+    created = service.create_job(
+        request(1),
+        job_id=job_id,
+        created_at=INITIAL_NOW,
+    )
+
+    with pytest.raises(ValueError):
+        service.run(job_id)
+
+    assert state_store.get(job_id) == created
+    assert state_store.health_for_job(job_id) == ()
+    assert ids.value == 0
+    assert http.calls == []
+    assert sleeper.delays == []
+
+
+def test_invalid_post_ingestion_clock_stops_before_health_or_checkpoint_transition(
+    tmp_path: Path,
+    invalid_clock_value: datetime,
+) -> None:
+    clock = SequenceClock(
+        INITIAL_NOW,
+        INITIAL_NOW,
+        INITIAL_NOW + timedelta(seconds=1),
+        INITIAL_NOW + timedelta(seconds=2),
+        invalid_clock_value,
+    )
+    ids = SequentialIds()
+    http = ScenarioHttpClient()
+    sleeper = RecordingSleeper()
+    state_store = SQLiteCollectionCheckpointStore(tmp_path / "collection.sqlite3")
+    service = collector(
+        http=http,
+        market_store=SQLiteCandleStore(tmp_path / "market.sqlite3"),
+        checkpoint_store=state_store,
+        clock=clock,
+        ids=ids,
+        sleeper=sleeper,
+        worker_id="worker-a",
+    )
+    job_id = UUID(int=900)
+    service.create_job(request(1), job_id=job_id, created_at=INITIAL_NOW)
+
+    with pytest.raises(ValueError):
+        service.run(job_id)
+
+    durable = state_store.get(job_id)
+    assert durable is not None
+    assert durable.status is CollectionJobStatus.RUNNING
+    assert durable.version == 2
+    assert state_store.health_for_job(job_id) == ()
+    assert ids.value == 0
+    assert len(http.calls) == 1
+    assert sleeper.delays == []
+
+
+def test_invalid_rate_budget_clock_fails_before_reservation_id_or_provider(
+    tmp_path: Path,
+    invalid_clock_value: datetime,
+) -> None:
+    clock = MutableClock(invalid_clock_value)
+    ids = SequentialIds()
+    http = ScenarioHttpClient()
+    configured = RateBudgetPolicy(
+        budget_key="binance.public-rest.shared-ip",
+        capacity=1,
+        period_seconds=10,
+    )
+    coordinator = SQLiteRateBudgetCoordinator(tmp_path / "rate-budget.sqlite3")
+    source = RateBudgetedHistoricalCandleSource(
+        source=BinancePublicCandleSource(http=http, clock=clock),
+        coordinator=coordinator,
+        policy=configured,
+        clock=clock,
+        id_generator=ids,
+    )
+
+    with pytest.raises(ValueError):
+        source.fetch(request(1))
+
+    summary = coordinator.summary(configured.budget_key)
+    assert ids.value == 0
+    assert http.calls == []
+    assert summary.reservation_count == 0
 
 
 def test_completed_job_is_durable_observable_and_idempotent(tmp_path: Path) -> None:

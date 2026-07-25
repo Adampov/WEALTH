@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 from hashlib import sha256
 
@@ -28,6 +28,21 @@ WINDOW_END = WINDOW_START + timedelta(minutes=1)
 REQUEST_TIME = WINDOW_END + timedelta(hours=1)
 OBSERVED_AT = REQUEST_TIME + timedelta(seconds=1)
 PROCESSED_AT = REQUEST_TIME + timedelta(seconds=2)
+INVALID_CLOCK_VALUES = (
+    pytest.param(REQUEST_TIME.replace(tzinfo=None), id="naive"),
+    pytest.param(
+        REQUEST_TIME.astimezone(timezone(timedelta(hours=5, minutes=30))),
+        id="positive-offset",
+    ),
+    pytest.param(
+        REQUEST_TIME.astimezone(timezone(-timedelta(hours=4))),
+        id="negative-offset",
+    ),
+    pytest.param(
+        REQUEST_TIME.replace(tzinfo=timezone(timedelta(0), "named-zero")),
+        id="named-zero-offset",
+    ),
+)
 
 
 class SequenceClock:
@@ -146,6 +161,39 @@ def source(http: StubHttpClient) -> BinancePublicAggregateTradeSource:
         http=http,
         clock=SequenceClock(REQUEST_TIME, OBSERVED_AT, PROCESSED_AT),
     )
+
+
+@pytest.mark.parametrize("invalid_time", INVALID_CLOCK_VALUES)
+def test_invalid_initial_clock_fails_typed_before_http(invalid_time: datetime) -> None:
+    http = StubHttpClient(response([]))
+    adapter = BinancePublicAggregateTradeSource(http=http, clock=SequenceClock(invalid_time))
+
+    with pytest.raises(BinanceAggregateTradeError) as error:
+        adapter.fetch(request())
+
+    assert error.value.code is BinanceAggregateTradeErrorCode.INVALID_REQUEST
+    assert http.calls == []
+
+
+@pytest.mark.parametrize("invalid_time", INVALID_CLOCK_VALUES)
+@pytest.mark.parametrize("clock_position", [2, 3], ids=["observed", "processed"])
+def test_invalid_later_clock_fails_typed_after_one_http_without_evidence(
+    invalid_time: datetime,
+    clock_position: int,
+) -> None:
+    http = StubHttpClient(response([]))
+    values = (
+        (REQUEST_TIME, invalid_time)
+        if clock_position == 2
+        else (REQUEST_TIME, OBSERVED_AT, invalid_time)
+    )
+    adapter = BinancePublicAggregateTradeSource(http=http, clock=SequenceClock(*values))
+
+    with pytest.raises(BinanceAggregateTradeError) as error:
+        adapter.fetch(request())
+
+    assert error.value.code is BinanceAggregateTradeErrorCode.INVALID_REQUEST
+    assert len(http.calls) == 1
 
 
 def test_spot_aggregate_trade_is_requested_and_normalized_with_explicit_evidence() -> None:
