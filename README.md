@@ -233,9 +233,16 @@ commits therefore causes an idempotent refetch rather than a permanent gap. The 
 and matching health observation commit atomically in the control database when lease authority
 remains current and compare-and-swap succeeds. Lost authority or a version conflict returns an
 explicit non-progress result and leaves the durable cursor unchanged for safe refetch. Append-only
-transitions retain the responsible actor token, but a typed transition-history reader remains
-future audit tooling. Transition time comes from an injected trusted UTC clock. This flow is not a
-scheduler, daemon, continuous poller, or live stream.
+transitions are now available through a typed read-only port. Each immutable result contains the
+validated canonical checkpoint and the actor fencing token retained for that transition. Pages
+are ascending and contiguous by checkpoint version, use a returned version as an exclusive cursor,
+default to 100 records, and reject a requested limit above 1,000. The SQLite reader revalidates
+canonical JSON, indexed projections, immutable job identity, UTC content, lifecycle causality,
+actor authority against the durable lease-acquisition ledger, exact SQLite storage types, page
+continuity, and agreement between the ledger tail and current checkpoint. Corruption fails closed
+through the existing control-storage error boundary. Reads do not change the database or schema
+and remain separate from source-health history. Transition time comes from an injected trusted UTC
+clock. This flow is not a scheduler, daemon, continuous poller, or live stream.
 
 Operators and monitoring tools can read the separate candle collector-service state through a
 dedicated JSON command:
@@ -292,6 +299,8 @@ Included:
   control store, UUID fencing, provider-symbol identity, and validated UTC projections.
 - Explicitly invoked bounded public-trade checkpoint orchestration with policy validation,
   evidence-first progress, typed pause/failure outcomes, and restart recovery.
+- Typed read-only public-trade transition history with bounded checkpoint-version pagination,
+  actor-authority validation, restart replay, and fail-closed corruption detection.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:
@@ -299,8 +308,8 @@ Not included:
 - Private exchange or account access.
 - An automatically started operating-system service, deployment, or live WebSocket ingestion.
 - Automatic aggregate-trade scheduling, continuous collection, live WebSockets, provider gap
-  recovery, typed transition-history query tooling, or crash-durable per-job pre-request attempt
-  reservations.
+  recovery, an operator transition-history CLI or dashboard, or crash-durable per-job pre-request
+  attempt reservations.
 - Automatic historical collection scheduling.
 - Multi-host request-budget coordination.
 - Automatic source ranking, price blending, or cross-quote conversion.

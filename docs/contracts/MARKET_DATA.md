@@ -164,8 +164,23 @@ Indexed timestamps are normalized to UTC, all persisted projections and computed
 validated against canonical records, health is ordered by checkpoint version rather than timestamp
 or observation ID, and the complete versioned DDL is checked before use. Schema installation is
 transactional. One checkpoint transition and its matching health observation commit atomically
-inside this control database. The transition history is durable, but a typed reader for that actor
-audit trail remains future tooling. The store enforces monotonic transition time and bounded TTL;
+inside this control database.
+
+`PublicTradeCollectionTransition` is the immutable typed view of one retained transition. It
+contains the full canonical checkpoint and the optional actor fencing token stored for that
+transition; it does not copy mutable control projections or source-health evidence.
+`PublicTradeCollectionTransitionReader.transitions_for_job` returns ascending contiguous
+checkpoint versions, uses a previously returned version as an exclusive cursor, defaults to 100
+records, and rejects limits above 1,000. A missing job without a cursor and a cursor at the
+validated tail return an empty tuple; an invalid or missing stored cursor is rejected.
+
+The SQLite reader revalidates canonical JSON, exact SQLite storage types and indexed projections,
+immutable identity, UTC content, pristine creation, lifecycle causality, actor authority against
+the durable lease-acquisition ledger, cursor and page continuity, the ledger tail, and equality
+between the latest transition and current checkpoint. Malformed, noncanonical, orphaned, gapped,
+unauthorized, reused-authority, or otherwise inconsistent history fails closed as a control-storage
+`CORRUPT_RECORD`. Reads use the existing schema, do not mutate any table, and do not infer causal
+order from timestamps. The store separately enforces monotonic transition time and bounded TTL;
 the bounded orchestrator sources transition time from its injected trusted clock.
 
 The control store itself does not compose or start a collector, service, scheduler, or network
@@ -330,8 +345,9 @@ automatically.
   orchestrated provider fetch passes through the required shared durable single-host
   request-budget wrapper. Committed checkpoint counters do not durably reserve per-job attempts
   made before a crash; that reservation design remains future work. Health history is available
-  only through bounded checkpoint-version pages; actor transition-history inspection does not yet
-  have a typed application port.
+  only through bounded checkpoint-version pages. Actor transition history now has a separate
+  typed bounded read port, but neither history has an operator CLI, dashboard, repair endpoint, or
+  external audit export.
 - Each Binance provider request remains bounded to one already-closed window of at most 1,000
   candles; the application composes multiple requests into a bounded range.
 - No operating-system-managed scheduling, deployment, adaptive pacing, retry jitter, or live

@@ -5,40 +5,56 @@ This file records approved, bounded work. `PROJECT_STATE.json` identifies the on
 
 ## Next Action
 
-### TASK-025 — Typed public-trade transition-history reader
+### TASK-026 — Canonical UTC boundary inventory and migration plan
 
-- **Key:** `phase2.public_trade_transition_history_reader`
+- **Key:** `phase2.canonical_utc_boundary_inventory_and_migration_plan`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
-- **Goal:** Expose the existing append-only public-trade checkpoint transitions through one
-  strict, bounded, causally ordered audit contract.
-- **Scope:** An immutable typed transition record, a read-only store port, bounded SQLite pages
-  using checkpoint version as the exclusive cursor, full projection and record validation, and
-  restart, pagination, and corruption tests.
-- **Constraints:** Reuse the existing transition table without schema migration; perform no
-  control-state mutation, repair, collection, network request, scheduling, credential access,
-  signal, portfolio, risk approval, order, or financial action.
+- **Goal:** Produce an evidence-backed inventory of every timestamp boundary still covered by
+  `RISK-005` and one reviewable, staged plan for converging them on canonical UTC.
+- **Scope:** Catalog timestamp-bearing domain, port, application, adapter, persistence, JSON, and
+  text boundaries; record their validation, normalization, serialization, comparison, sorting,
+  indexing, and test behavior; then define compatibility, quarantine, rollback, migration-order,
+  and regression-test requirements.
+- **Constraints:** Inventory and plan only. Do not change a runtime contract, schema, stored data,
+  migration, or application behavior; do not write to a project database, repair data, call a
+  provider, schedule work, access credentials, produce a signal, make a portfolio or Risk
+  decision, submit an order, or perform any financial action.
 
 Acceptance gates:
 
-1. A transition record exposes the validated canonical checkpoint and the actor fencing token
-   retained for that transition without duplicating mutable control state.
-2. `transitions_for_job` returns ascending, contiguous checkpoint versions with an exclusive
-   version cursor, a default page of 100, and a hard maximum of 1,000.
-3. Initial creation, lease claim, renewal, pause, resume, failure, takeover, and completion records
-   retain their exact causal order and actor authority.
-4. Malformed canonical JSON, projection mismatch, version gap, impossible transition, or invalid
-   actor token fails with the bounded existing control-storage error boundary.
-5. Reads remain bounded and do not update the database, infer order from timestamps, or duplicate
-   the separate source-health history contract.
-6. Unit and integration tests cover pagination, restart, empty and missing jobs, every transition
-   family, and targeted corruption of each indexed projection and canonical record.
-7. Format, lint, type, test, lockfile, health-slice, dependency-audit, and CI gates pass.
-8. The ADR, roadmap, backlog, risk register, data-contract index, and `PROJECT_STATE.json` are
-   updated with the result and the next bounded action.
+1. The inventory names every timestamp-bearing canonical model and persistence path discoverable
+   from the repository, its owner, representation, and current UTC guarantee or gap.
+2. Stored JSON/text, indexed projections, SQL ordering, cursor logic, comparisons, clocks, and
+   provider inputs are traced separately so an indexed-UTC projection cannot hide
+   offset-preserving canonical content.
+3. Each uncovered boundary has evidence links, an impact classification, compatibility concerns,
+   and an explicit proposed treatment; unknown behavior remains marked unknown rather than
+   inferred.
+4. The plan defines one canonical UTC representation and staged contract, storage, and test work,
+   including quarantine, rollback, backward-compatibility, and migration verification.
+5. The output identifies decisions or approvals required before any incompatible contract,
+   schema, or stored-data migration begins.
+6. Repository state remains unchanged apart from inventory, planning, and governance artifacts;
+   no migration or runtime implementation is authorized by completing this task.
+7. Relevant format, lint, link, state-validation, and CI gates pass.
+8. The roadmap, backlog, risk register, data-contract index, and `PROJECT_STATE.json` are updated
+   with the planning result and the next bounded action.
 
 ## Recently Completed
+
+### TASK-025 — Typed public-trade transition-history reader
+
+- **Key:** `phase2.public_trade_transition_history_reader`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Decision:** `docs/decisions/0026-typed-public-trade-transition-history.md`
+- **Result:** The existing append-only SQLite transition ledger is now exposed through an
+  immutable typed record and a read-only port with ascending contiguous checkpoint-version pages,
+  an exclusive cursor, actor-authority and lifecycle validation, strict bounds, restart behavior,
+  and fail-closed projection, canonical-record, continuity, and corruption checks. The existing
+  schema is unchanged.
 
 ### TASK-024 — Public-trade checkpoint orchestrator
 
@@ -53,9 +69,6 @@ Acceptance gates:
 
 ## Queued, Not Yet Approved
 
-- Audit and normalize all remaining uncovered timestamp contracts and persistence paths to
-  canonical UTC
-  (`RISK-005`).
 - Design continuous public-trade collection only after typed transition audit access and
   operational recovery drills are accepted.
 

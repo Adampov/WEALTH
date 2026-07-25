@@ -163,6 +163,38 @@ class PublicTradeCollectionCheckpoint(BaseModel):
         return self
 
 
+class PublicTradeCollectionTransition(BaseModel):
+    """One immutable checkpoint transition plus its acting fencing authority."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    schema_version: Literal["1.0"] = "1.0"
+    checkpoint: PublicTradeCollectionCheckpoint
+    actor_lease_token: UUID | None = None
+
+    @model_validator(mode="after")
+    def transition_record_is_canonical(self) -> Self:
+        """Keep the audit boundary UTC-only and creation authority unambiguous."""
+
+        timestamps = (
+            self.checkpoint.window_start,
+            self.checkpoint.window_end_exclusive,
+            self.checkpoint.next_window_start,
+            self.checkpoint.pending_window_end_exclusive,
+            self.checkpoint.created_at,
+            self.checkpoint.updated_at,
+            self.checkpoint.lease_expires_at,
+        )
+        if any(
+            timestamp is not None and timestamp.utcoffset() != timedelta(0)
+            for timestamp in timestamps
+        ):
+            raise ValueError("public trade transition checkpoint timestamps must use UTC")
+        if self.checkpoint.version == 1 and self.actor_lease_token is not None:
+            raise ValueError("initial public trade transition cannot have an actor lease token")
+        return self
+
+
 class PublicTradeSourceHealthObservation(BaseModel):
     """Append-only outcome evidence for one bounded range invocation."""
 

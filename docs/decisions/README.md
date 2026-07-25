@@ -38,3 +38,4 @@ Each ADR records the context, decision, consequences, alternatives, and follow-u
 - `0023-restart-safe-bounded-public-trade-collection.md`
 - `0024-foundation-alignment-and-fail-closed-runtime.md`
 - `0025-bounded-public-trade-checkpoint-orchestration.md`
+- `0026-typed-public-trade-transition-history.md`

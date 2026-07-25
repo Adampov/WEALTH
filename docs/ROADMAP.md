@@ -95,6 +95,10 @@ Completed Phase 2 slices include:
   validation, fresh UUID-fenced claims, evidence-first checkpoint progress, typed clean-pause and
   terminal-failure classification, injected UTC time, and recovery tests on both cross-database
   crash seams.
+- Typed read-only public-trade transition history with immutable checkpoint-and-actor records,
+  ascending contiguous checkpoint-version pages, strict cursor and page bounds, full projection
+  and lifecycle validation, restart replay, and fail-closed corruption tests without a schema
+  migration.
 
 Phase 2 is not complete. Operating-system service deployment, live streaming, multi-host
 rate-budget coordination, durable raw and canonical storage beyond the local SQLite baseline,
@@ -103,12 +107,15 @@ tasks. The bounded application orchestrator now maps typed range evidence to `CO
 or `FAILED`, preserves the exact pending leaf, and advances durable work progress only after market
 evidence is durable. Lease claims remain control-only transitions. Crash-durable per-job
 pre-request attempt reservations remain future work; the existing shared durable provider-rate
-budget is the current pre-request capacity boundary. A typed reader over append-only transition
-audit history remains future work; the underlying actor fencing tokens are already retained.
+budget is the current pre-request capacity boundary. The append-only transition audit history is
+now available through a bounded typed port that revalidates causal versions and the retained actor
+fencing authority without mutating control state. Operational recovery drills remain required
+before continuous public-trade collection.
 
-The canonical next action is TASK-025,
-`phase2.public_trade_transition_history_reader`. Its exact scope and acceptance gates are in
-`BACKLOG.md` and its status is mirrored in `PROJECT_STATE.json`.
+The canonical next action is TASK-026,
+`phase2.canonical_utc_boundary_inventory_and_migration_plan`. It is an inventory and planning task
+only: it does not authorize a contract, schema, stored-data, or runtime migration. Its exact scope
+and acceptance gates are in `BACKLOG.md` and its status is mirrored in `PROJECT_STATE.json`.
 
 ## Phase 1 — Architecture and Engineering Foundation
 

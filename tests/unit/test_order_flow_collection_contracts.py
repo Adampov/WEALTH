@@ -1,6 +1,6 @@
 """Tests for restart-safe public-trade collection control contracts."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from uuid import UUID
 
 import pytest
@@ -11,6 +11,7 @@ from wealth.domain.market import InstrumentType
 from wealth.domain.order_flow_collection import (
     PublicTradeCollectionCheckpoint,
     PublicTradeCollectionHealthSummary,
+    PublicTradeCollectionTransition,
     PublicTradeSourceHealthObservation,
     validate_public_trade_collection_transition,
 )
@@ -77,6 +78,49 @@ def running(
         last_failure_code=None,
         last_stop_reason=None,
     )
+
+
+def test_transition_record_is_minimal_frozen_and_round_trips() -> None:
+    transition = PublicTradeCollectionTransition(checkpoint=checkpoint())
+
+    assert (
+        PublicTradeCollectionTransition.model_validate_json(transition.model_dump_json())
+        == transition
+    )
+    assert set(PublicTradeCollectionTransition.model_fields) == {
+        "schema_version",
+        "checkpoint",
+        "actor_lease_token",
+    }
+    with pytest.raises(ValidationError, match="frozen"):
+        transition.actor_lease_token = LEASE_TOKEN_A
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        PublicTradeCollectionTransition.model_validate(
+            {
+                "checkpoint": checkpoint(),
+                "actor_lease_token": None,
+                "status": CollectionJobStatus.PENDING,
+            }
+        )
+
+
+def test_initial_transition_rejects_actor_authority() -> None:
+    with pytest.raises(ValidationError, match=r"initial.*actor"):
+        PublicTradeCollectionTransition(
+            checkpoint=checkpoint(),
+            actor_lease_token=LEASE_TOKEN_A,
+        )
+
+
+def test_transition_reader_contract_rejects_non_utc_checkpoint_content() -> None:
+    non_utc = copy_checkpoint(
+        checkpoint(),
+        created_at=NOW.astimezone(timezone(timedelta(hours=3))),
+        updated_at=NOW.astimezone(timezone(timedelta(hours=3))),
+    )
+
+    with pytest.raises(ValidationError, match="must use UTC"):
+        PublicTradeCollectionTransition(checkpoint=non_utc)
 
 
 def test_partial_failure_preserves_exact_pending_leaf_for_restart() -> None:
