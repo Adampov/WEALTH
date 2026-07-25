@@ -30,6 +30,7 @@
     "historical_collection",
     "continuous_collection",
     "canonical_utc_clock_boundary_enforcement",
+    "canonical_utc_codec_primitives",
     "public_trade_checkpoint_orchestration",
     "public_trade_transition_history_reader",
     "sqlite_market_data_storage",
@@ -69,8 +70,8 @@
   "open_orders": [],
   "open_tasks": [
     {
-      "task_id": "TASK-028",
-      "action": "phase2.canonical_utc_codec_primitives",
+      "task_id": "TASK-029",
+      "action": "phase2.canonical_utc_epoch_microsecond_primitives",
       "status": "ready",
       "risk_tier": 1,
       "requires_human_approval": false
@@ -103,8 +104,8 @@
     }
   ],
   "next_action": {
-    "task_id": "TASK-028",
-    "action": "phase2.canonical_utc_codec_primitives"
+    "task_id": "TASK-029",
+    "action": "phase2.canonical_utc_epoch_microsecond_primitives"
   },
-  "last_updated_utc": "2026-07-25T15:02:37Z"
+  "last_updated_utc": "2026-07-25T16:20:40Z"
 }

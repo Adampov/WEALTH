@@ -106,6 +106,9 @@ Completed Phase 2 slices include:
 - Exact fixed-`datetime.UTC` enforcement at every scoped injected-clock boundary, with
   fail-before-ID/HTTP/storage/reservation/wait/log tests, preserved typed error mappings, and no
   persisted-contract, serialization, schema, projection, or stored-data change.
+- Isolated canonical UTC codec primitives for strict fixed-zone validation, explicit aware-input
+  normalization, exact six-fractional-digit RFC 3339 `Z` serialization, and strict parsing, with
+  deterministic and property-style edge coverage and no existing runtime consumer.
 
 Phase 2 is not complete. Operating-system service deployment, live streaming, multi-host
 rate-budget coordination, durable raw and canonical storage beyond the local SQLite baseline,
@@ -119,15 +122,16 @@ now available through a bounded typed port that revalidates causal versions and 
 fencing authority without mutating control state. Operational recovery drills remain required
 before continuous public-trade collection. `RISK-005` remains open: the accepted plan selects
 Python datetimes in the fixed `datetime.UTC` zone, fixed microsecond RFC 3339 `Z` text, and derived
-epoch-microsecond SQL projections. New injected clock values are now fixed-UTC, but current
-aware-only models, external text, and legacy stores have not been migrated.
+epoch-microsecond SQL projections. New injected clock values are fixed-UTC and the exact canonical
+text codec now exists as an unused pure module, but current aware-only models, external text,
+sortable projections, and legacy stores have not been migrated.
 
-The canonical next action is TASK-028, `phase2.canonical_utc_codec_primitives`. It adds pure,
-unused fixed-UTC validation, explicit edge normalization, and exact six-microsecond-digit RFC 3339
-`Z` serializer/parser primitives with exhaustive tests. It does not wire those primitives into an
-existing runtime, model, output, digest, identity, schema, projection, or stored record. Its exact
-scope and acceptance gates are in `BACKLOG.md` and its status is mirrored in
-`PROJECT_STATE.json`.
+The canonical next action is TASK-029,
+`phase2.canonical_utc_epoch_microsecond_primitives`. It adds pure, unused, integer-only conversion
+between fixed-UTC datetimes and signed epoch microseconds, with exact boundary, round-trip, and
+ordering tests. It does not wire those primitives into an existing runtime, model, output, digest,
+identity, schema, query, projection, migration, or stored record. Its exact scope and acceptance
+gates are in `BACKLOG.md` and its status is mirrored in `PROJECT_STATE.json`.
 
 ## Phase 1 — Architecture and Engineering Foundation
 

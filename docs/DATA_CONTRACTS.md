@@ -24,7 +24,8 @@ model and its tests. The cross-boundary timestamp evidence and staged target are
 | Foundation clock | `wealth.ports.foundation.Clock` and `require_utc_clock` | Active; injected results require `tzinfo is datetime.UTC` before downstream side effects |
 | Cross-source reconciliation | `wealth.domain.reconciliation` and `wealth.domain.reconciliation_history` | Active |
 | Repository operating state | `wealth.domain.project_state.ProjectState` | Active; validates `PROJECT_STATE.json` |
-| Canonical UTC target | ADR 0027 and the UTC boundary inventory | Clock enforcement active; codec, persisted-contract, and migration work remain open under `RISK-005` |
+| Canonical UTC codec primitives | `wealth.domain.canonical_utc` | Pure and intentionally unused; strict fixed-UTC validation, explicit edge normalization, exact six-digit RFC 3339 `Z` serialization, and strict parsing |
+| Canonical UTC target | ADR 0027 and the UTC boundary inventory | Clock enforcement and isolated codec primitives complete; epoch projection, persisted-contract, and migration work remain open under `RISK-005` |
 
 ## Contract Rules
 
@@ -40,6 +41,10 @@ model and its tests. The cross-boundary timestamp evidence and staged target are
   microsecond-precision RFC 3339 `Z` text, and checked epoch-microsecond SQL projections.
   Zero offset alone is insufficient because a regional timezone can have offset zero only for
   part of the year. ADR 0027 does not authorize a runtime, schema, or stored-data migration.
+- The pure canonical UTC codec validates without copying, normalizes only through an explicit edge
+  function, emits exactly `YYYY-MM-DDTHH:MM:SS.ffffffZ`, and accepts only that exact text. No
+  existing runtime, model, serializer, provider, digest, key, query, or persistence path imports
+  or calls it yet.
 - Source identity, event time, observation time, processing time, schema version, and lineage are
   retained whenever applicable.
 - Missing, stale, conflicting, truncated, or unverifiable evidence is represented explicitly and

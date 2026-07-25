@@ -5,39 +5,52 @@ This file records approved, bounded work. `PROJECT_STATE.json` identifies the on
 
 ## Next Action
 
-### TASK-028 — Additive canonical UTC codec primitives
+### TASK-029 — Additive exact epoch-microsecond projection primitives
 
-- **Key:** `phase2.canonical_utc_codec_primitives`
+- **Key:** `phase2.canonical_utc_epoch_microsecond_primitives`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
-- **Goal:** Add pure, unused canonical UTC conversion and text-codec primitives so later
-  compatibility work can target one exact representation without changing any active contract.
-- **Scope:** Add a reusable fixed-`datetime.UTC` value validator, an explicit aware-to-UTC edge
-  normalizer, an exact six-fractional-digit RFC 3339 `Z` serializer, a strict canonical parser,
-  and exhaustive deterministic tests.
+- **Goal:** Add pure, unused exact conversions between canonical UTC datetimes and signed integer
+  microseconds since the Unix epoch so later storage work can use one sortable projection without
+  floating-point or platform-dependent timestamp behavior.
+- **Scope:** Extend the isolated canonical-UTC primitive module with a strict fixed-UTC-to-epoch
+  microsecond projector, an exact inverse decoder, and exhaustive deterministic and property-style
+  tests.
 - **Constraints:** Additive primitives only. Do not wire them into a model, provider adapter,
-  request, stored row, JSON/log/CLI output, digest, natural key, SQLite projection, schema, or
-  operator database. Do not call a real provider, access credentials, produce a signal, make a
-  portfolio or Risk decision, submit an order, or perform any financial action.
+  request, stored row, JSON/log/CLI output, digest, natural key, SQLite query, projection, schema,
+  migration, or operator database. Do not call a real provider, access credentials, produce a
+  signal, make a portfolio or Risk decision, submit an order, or perform any financial action.
 
 Acceptance gates:
 
-1. The fixed-UTC validator accepts only values whose `tzinfo is datetime.UTC` and returns the
-   original object unchanged.
-2. The edge normalizer rejects naive values and converts every aware positive, negative, named,
-   regional, and fold-capable input to the same instant with `tzinfo is datetime.UTC`.
-3. The serializer emits exactly `YYYY-MM-DDTHH:MM:SS.ffffffZ`; the parser accepts only that
-   canonical form, rejects offset or variable-precision alternatives, and returns fixed UTC.
-4. Boundary and property-style tests cover microsecond extremes, calendar limits, malformed
-   input, named/rule-based zones, folds, exact round trips, and instant preservation.
-5. No existing runtime path imports or calls the new codec primitives, and current request/model
-   acceptance, serialized bytes, digests, keys, schemas, projections, and stored data are
-   unchanged.
+1. Projection accepts only the existing strict canonical UTC value contract and uses integer
+   `timedelta` arithmetic rather than `datetime.timestamp()` or floating point.
+2. Decoding accepts only integers, rejects booleans and values outside Python's representable
+   datetime range, and returns a value whose `tzinfo is datetime.UTC`.
+3. Exact round trips hold before, at, and after the Unix epoch and at both Python calendar
+   boundaries; one-microsecond differences remain distinct and chronological order is preserved.
+4. Boundary and property-style tests cover negative values, zero, positive values, microsecond
+   extremes, calendar limits, invalid types, overflow, exact round trips, and monotonicity.
+5. No existing runtime path imports or calls the epoch primitives, and current request/model
+   acceptance, serialized bytes, digests, keys, schemas, projections, queries, and stored data
+   remain unchanged.
 6. Relevant unit, integration, format, lint, type, lockfile, health-slice, dependency-audit, and
    CI gates pass.
 
 ## Recently Completed
+
+### TASK-028 — Additive canonical UTC codec primitives
+
+- **Key:** `phase2.canonical_utc_codec_primitives`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Result:** One isolated pure module now provides strict fixed-`datetime.UTC` validation,
+  explicit aware-input normalization, exact six-fractional-digit RFC 3339 `Z` serialization, and a
+  strict canonical parser. Exhaustive deterministic and property-style tests cover offsets,
+  named/rule-based zones, folds, calendar limits, malformed text, exact round trips, and hostile
+  datetime subclasses. No existing runtime path imports or calls the helpers, and no model,
+  serializer, digest, identity, schema, projection, query, or stored record changed.
 
 ### TASK-027 — Canonical UTC clock-boundary enforcement
 
