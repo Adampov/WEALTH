@@ -17,7 +17,8 @@ model and its tests.
 | Order-flow quality | `wealth.domain.order_flow_quality` | Active, fail closed |
 | Bounded collection state | `wealth.domain.collection` | Active |
 | Continuous candle collection state | `wealth.domain.continuous_collection` | Active |
-| Public-trade collection state | `wealth.domain.order_flow_collection` | Active control-state contract; orchestration pending |
+| Public-trade collection state | `wealth.domain.order_flow_collection` | Active checkpoint and health contracts; bounded orchestration active; typed transition-history reader pending |
+| Public-trade collection application | `wealth.application.public_trade_collection` | Active, explicitly invoked, bounded, evidence-first |
 | Shared provider-rate budget | `wealth.domain.rate_budget` | Active |
 | Cross-source reconciliation | `wealth.domain.reconciliation` and `wealth.domain.reconciliation_history` | Active |
 | Repository operating state | `wealth.domain.project_state.ProjectState` | Active; validates `PROJECT_STATE.json` |

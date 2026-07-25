@@ -40,8 +40,9 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert state.open_positions == ()
     assert state.open_orders == ()
     assert state.pending_approvals == ()
-    assert state.next_action.task_id == "TASK-024"
-    assert state.next_action.action == "phase2.public_trade_checkpoint_orchestrator"
+    assert "public_trade_checkpoint_orchestration" in state.active_components
+    assert state.next_action.task_id == "TASK-025"
+    assert state.next_action.action == "phase2.public_trade_transition_history_reader"
 
 
 def test_project_state_references_existing_governance_artifacts() -> None:

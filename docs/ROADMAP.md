@@ -91,18 +91,23 @@ Completed Phase 2 slices include:
   counters, non-reusable UUID-fenced leases, checkpoint-versioned and bounded-paginated
   provider-symbol-aware health evidence, and a local SQLite control-state store with transactional
   schema installation and validated UTC projections.
+- Explicitly invoked bounded public-trade checkpoint orchestration with immutable-policy
+  validation, fresh UUID-fenced claims, evidence-first checkpoint progress, typed clean-pause and
+  terminal-failure classification, injected UTC time, and recovery tests on both cross-database
+  crash seams.
 
 Phase 2 is not complete. Operating-system service deployment, live streaming, multi-host
 rate-budget coordination, durable raw and canonical storage beyond the local SQLite baseline,
 additional market-data schemas, operational dashboards, and external alert delivery remain future
-tasks. The checkpoint contracts define typed `PAUSED` versus `FAILED` outcomes, but the application
-orchestration that maps terminal range traces to those outcomes is still future work, as are
-crash-durable per-job pre-request attempt reservations. The existing shared durable provider-rate
+tasks. The bounded application orchestrator now maps typed range evidence to `COMPLETED`, `PAUSED`,
+or `FAILED`, preserves the exact pending leaf, and advances durable work progress only after market
+evidence is durable. Lease claims remain control-only transitions. Crash-durable per-job
+pre-request attempt reservations remain future work; the existing shared durable provider-rate
 budget is the current pre-request capacity boundary. A typed reader over append-only transition
-audit history is also deferred; the underlying actor fencing tokens are already retained.
+audit history remains future work; the underlying actor fencing tokens are already retained.
 
-The canonical next action is TASK-024,
-`phase2.public_trade_checkpoint_orchestrator`. Its exact scope and acceptance gates are in
+The canonical next action is TASK-025,
+`phase2.public_trade_transition_history_reader`. Its exact scope and acceptance gates are in
 `BACKLOG.md` and its status is mirrored in `PROJECT_STATE.json`.
 
 ## Phase 1 — Architecture and Engineering Foundation
