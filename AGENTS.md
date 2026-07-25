@@ -14,14 +14,26 @@ support trading decisions or orders.
 
 ## Source of Truth
 
-Read these documents before proposing or implementing a material change:
+Read these artifacts before proposing or implementing a material change:
 
-1. `docs/PROJECT_CHARTER.md` — vision, scope, objectives, and operating modes.
-2. `docs/AI_DEPARTMENTS.md` — responsibilities and authority boundaries.
+1. `PROJECT_STATE.json` — validated current phase, active capabilities, controls, risks, and the
+   single canonical `next_action`.
+2. `docs/PROJECT_CHARTER.md` — vision, scope, objectives, and operating modes.
 3. `docs/ARCHITECTURE.md` — logical architecture, invariants, control flow, and Codex role.
-4. `docs/ROADMAP.md` — phase order, deliverables, and promotion gates.
+4. `docs/ORGANIZATION.md` and `docs/AI_DEPARTMENTS.md` — current activation and complete
+   responsibility and authority boundaries.
+5. `docs/POLICIES.md`, `docs/SECURITY_POLICY.md`, `docs/RISK_POLICY.md`, and
+   `docs/EXECUTION_POLICY.md` — approvals and fail-closed operating rules.
+6. `BACKLOG.md` and `RISK_REGISTER.md` — accepted work order and known risk treatment.
+7. `docs/ROADMAP.md` — phase order, deliverables, and promotion gates.
+8. `docs/DATA_CONTRACTS.md` and `docs/DATA_CATALOG.md` — active typed boundaries and approved
+   data inventory.
 
 If a task conflicts with these documents, identify the conflict before changing code. Do not silently redefine approved architecture.
+
+Use `PROJECT_STATE.json.next_action` to resume work after an interruption. Update the state,
+backlog, risk register, and applicable decision record together when an accepted change makes any
+of them stale; do not use chat history as durable project state.
 
 Do not modify an approved foundation document unless the active task explicitly places that document in scope.
 

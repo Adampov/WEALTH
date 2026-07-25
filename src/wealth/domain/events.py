@@ -1,6 +1,6 @@
 """Canonical domain-event contracts."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Literal, Self
 from uuid import UUID
@@ -41,8 +41,13 @@ class DomainEvent(BaseModel):
     payload: dict[str, JsonValue] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def timestamps_are_monotonic(self) -> Self:
-        """Reject records that claim processing happened before observation."""
+    def timestamps_are_utc_and_monotonic(self) -> Self:
+        """Reject non-UTC records and impossible event-processing sequences."""
+
+        for field_name in ("event_time", "observed_at", "processed_at"):
+            timestamp = getattr(self, field_name)
+            if timestamp.utcoffset() != timedelta(0):
+                raise ValueError(f"{field_name} must use UTC")
 
         if self.event_time > self.observed_at:
             raise ValueError("event_time must not be after observed_at")

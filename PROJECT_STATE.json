@@ -1,0 +1,107 @@
+{
+  "schema_version": "1.0",
+  "project_id": "WEALTH",
+  "project_goal": "Build a governed, evidence-driven cryptocurrency research and trading platform that progresses from research toward simulated and restricted real execution only through explicit safety and promotion gates.",
+  "current_phase": "PHASE_2_MARKET_DATA",
+  "operating_mode": "research",
+  "approved_architecture": {
+    "style": "modular_monolith",
+    "decision_record": "ADR-0002"
+  },
+  "project_constants": {
+    "primary_market": "crypto",
+    "trading_type": "spot",
+    "system_timezone": "UTC",
+    "user_timezone": "Asia/Jerusalem",
+    "base_currency": "USD",
+    "architecture_style": "modular_monolith"
+  },
+  "control_flags": {
+    "live_trading_enabled": false,
+    "leverage_enabled": false,
+    "withdrawals_enabled": false,
+    "external_notifications_enabled": false,
+    "autonomous_live_execution_enabled": false
+  },
+  "active_components": [
+    "domain_event_contracts",
+    "public_candle_adapters",
+    "public_trade_adapters",
+    "historical_collection",
+    "continuous_collection",
+    "sqlite_market_data_storage",
+    "data_quality_and_reconciliation",
+    "collector_health_observability"
+  ],
+  "active_integrations": [
+    "github_actions_ci"
+  ],
+  "active_data_sources": [
+    {
+      "source_id": "binance_public_rest",
+      "provider": "binance",
+      "interface": "public_rest",
+      "access": "public_read_only",
+      "datasets": [
+        "candles",
+        "aggregate_trades"
+      ]
+    },
+    {
+      "source_id": "coinbase_public_rest",
+      "provider": "coinbase",
+      "interface": "public_rest",
+      "access": "public_read_only",
+      "datasets": [
+        "candles"
+      ]
+    }
+  ],
+  "active_strategies": [],
+  "champion_strategy": null,
+  "challenger_strategies": [],
+  "risk_policy_version": "1.0",
+  "current_risk_state": "NO_TRADING_CAPABILITY",
+  "open_positions": [],
+  "open_orders": [],
+  "open_tasks": [
+    {
+      "task_id": "TASK-024",
+      "action": "phase2.public_trade_checkpoint_orchestrator",
+      "status": "ready",
+      "risk_tier": 1,
+      "requires_human_approval": false
+    }
+  ],
+  "blockers": [],
+  "known_risks": [
+    "RISK-001",
+    "RISK-002",
+    "RISK-003",
+    "RISK-004",
+    "RISK-005"
+  ],
+  "pending_approvals": [],
+  "recent_decisions": [
+    {
+      "decision_id": "ADR-0022",
+      "summary": "Share a durable weighted request budget across public-trade collectors.",
+      "artifact": "docs/decisions/0022-shared-budget-for-public-trades.md"
+    },
+    {
+      "decision_id": "ADR-0023",
+      "summary": "Persist restart-safe checkpoints for bounded public-trade collection.",
+      "artifact": "docs/decisions/0023-restart-safe-bounded-public-trade-collection.md"
+    },
+    {
+      "decision_id": "ADR-0024",
+      "summary": "Align foundation state and runtime controls with fail-closed project governance.",
+      "artifact": "docs/decisions/0024-foundation-alignment-and-fail-closed-runtime.md"
+    }
+  ],
+  "next_action": {
+    "task_id": "TASK-024",
+    "action": "phase2.public_trade_checkpoint_orchestrator"
+  },
+  "last_updated_utc": "2026-07-25T11:10:00Z"
+}
