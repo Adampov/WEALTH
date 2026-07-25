@@ -204,6 +204,11 @@ Current explicit UTC defenses are exercised by:
   nonzero-offset event fields;
 - [`test_project_state.py`](../tests/unit/test_project_state.py#L91-L96), which rejects a non-UTC
   repository-state timestamp;
+- [`test_clock_contract.py`](../tests/unit/test_clock_contract.py), which verifies exact fixed-UTC
+  clock identity and fail-closed handling of naive, offset, named/rule-based, and hostile values;
+- [`test_canonical_utc.py`](../tests/unit/test_canonical_utc.py), which verifies the isolated
+  validator, explicit normalizer, exact text codec, calendar boundaries, folds, hostile
+  subclasses, malformed inputs, property-style instant preservation, and canonical round trips;
 - [`test_public_trade_collection_orchestrator.py`](../tests/unit/test_public_trade_collection_orchestrator.py#L451-L508),
   which rejects non-UTC request, clock, and creation boundaries before storage;
 - [`test_order_flow_collection_contracts.py`](../tests/unit/test_order_flow_collection_contracts.py#L115-L123)
@@ -218,14 +223,14 @@ Missing coverage is material:
 
 - no field-complete nonzero-offset rejection or normalization matrix exists for the aware-only
   domain and port models;
-- no repository-wide fixed-`Z`, fixed-microsecond serializer contract exists;
+- the fixed-`Z`, fixed-microsecond codec has no runtime consumer yet, so existing exact model,
+  storage, log, and CLI bytes remain intentionally unconverted and unverified against it;
+- no exact epoch-microsecond conversion and range matrix exists yet;
 - no regression compares equivalent instants across Python equality/hash, JSON bytes, natural
   keys, conflict identity, and SQL keys;
 - no mixed-offset SQL-order test covers the legacy market, order-flow, historical collection,
   collector-service, or rate-budget stores;
-- reconciliation tests do not version the digest when only timestamp representation changes;
-- clocks are mostly tested with UTC fakes, so nonzero-aware clock leakage is not generally tested;
-  and
+- reconciliation tests do not version the digest when only timestamp representation changes; and
 - no preflight, quarantine, migration, restore, or rollback test suite exists.
 
 The implementation program must add table-driven and property-based tests for every listed field:
@@ -249,8 +254,8 @@ Unknown behavior is not treated as safe:
 
 ## Staged Implementation and Migration Plan
 
-Each stage has a separate acceptance gate. A later stage cannot use completion of TASK-026 or
-TASK-027 as authorization for incompatible wiring or migration.
+Each stage has a separate acceptance gate. A later stage cannot use completion of TASK-026,
+TASK-027, or TASK-028 as authorization for incompatible wiring or migration.
 
 ### Stage 1 — Prevent new clock drift — COMPLETE
 
@@ -272,18 +277,21 @@ Completed exit evidence:
 - each scoped provider/application keeps its existing typed error and error-code mapping; and
 - existing persisted models, JSON, digests, keys, schemas, and stored data remain unchanged.
 
-### Stage 2 — Additive codec and conformance foundation
+### Stage 2 — Additive codec and conformance foundation — IN PROGRESS
 
-Implement the explicit edge normalizer, fixed RFC 3339 serializer/parser, and exact
-epoch-microsecond projection helpers. Add exhaustive unit and property tests. Do not wire the
-serializer into an existing persisted model until its compatibility reader and version plan are
-accepted.
+TASK-028 added the shared strict validator, explicit edge normalizer, and fixed RFC 3339
+serializer/parser as one isolated pure module with exhaustive deterministic and property-style
+tests. No existing runtime path imports or calls those helpers. TASK-029 remains the bounded
+additive exact epoch-microsecond projection slice. Neither slice may be wired into an existing
+persisted model until its compatibility reader and version plan are accepted.
 
 Exit evidence:
 
-- the edge normalizer accepts only aware values and returns a `datetime.UTC` instance;
-- the serializer emits exactly six digits plus `Z`, the strict parser rejects noncanonical
-  variants and returns `datetime.UTC`, and epoch conversion is exact and range-safe; and
+- the fixed-UTC validator returns the accepted object unchanged, and the explicit edge normalizer
+  rejects naive or inconsistent values and returns a `datetime.UTC` instance;
+- the serializer emits exactly six digits plus `Z`, and the strict parser rejects noncanonical
+  variants and returns `datetime.UTC`;
+- the remaining epoch conversion is exact, integer-only, range-safe, and order-preserving; and
 - current stored representations and external output remain byte-for-byte unchanged.
 
 ### Stage 3 — Read-only compatibility preflight
@@ -465,9 +473,10 @@ forward version-2 path.
 
 ## Decisions and Approvals Required
 
-ADR 0027 accepts the target and staged plan, but not an incompatible cutover. TASK-027 is complete.
-The canonical next action is the bounded, additive RISK-1 TASK-028; it introduces unused codec
-primitives only. Department and agent reviews are validation evidence, not human approval.
+ADR 0027 accepts the target and staged plan, but not an incompatible cutover. TASK-027 and
+TASK-028 are complete. The canonical next action is the bounded, additive RISK-1 TASK-029; it
+introduces unused exact epoch-microsecond projection primitives only. Department and agent reviews
+are validation evidence, not human approval.
 
 Before Stage 3 accesses any operator database, the project owner must approve the exact read-only
 database/path list, snapshot method, report destination, and evidence retention/disposal boundary.
@@ -480,17 +489,18 @@ backup, validation, rollback, and affected control-owner review as required by
 [`POLICIES.md`](POLICIES.md#explicit-human-approval-matrix).
 
 Completed TASK-027 needed no migration approval because it enforced the existing internal UTC
-clock policy without changing a persisted model or representation. TASK-028 likewise may add only
-unused pure primitives. Wiring those primitives into an existing contract or advancing Stages 3
+clock policy without changing a persisted model or representation. Completed TASK-028 likewise
+added only unused pure codec primitives, and TASK-029 remains limited to unused pure projection
+primitives. Wiring any of those primitives into an existing contract or advancing Stages 3
 through 7 requires the stage-specific authorization and applicable approvals described here.
 
-## TASK-028 Handoff
+## TASK-029 Handoff
 
-The next bounded action is `phase2.canonical_utc_codec_primitives`.
+The next bounded action is `phase2.canonical_utc_epoch_microsecond_primitives`.
 
-It is limited to unused pure helpers: a general fixed-`datetime.UTC` validator, an explicit
-aware-to-UTC edge normalizer, an exact six-fractional-digit RFC 3339 `Z` serializer, a strict
-canonical parser, and exhaustive tests. It may not wire those helpers into a persisted model,
-provider adapter, request, output, digest, identity, SQLite projection, or schema; inspect or write
-an operator database; or call a real provider. Exact epoch-microsecond projection remains a
-separate bounded follow-up within Stage 2.
+It is limited to unused pure helpers that project a strict canonical UTC datetime to exact signed
+integer microseconds since the Unix epoch and decode a representable integer back to fixed UTC,
+using integer arithmetic with exhaustive boundary, round-trip, and ordering tests. It may not
+wire those helpers into a persisted model, provider adapter, request, output, digest, identity,
+SQLite query or projection, schema, migration, or stored row; inspect or write an operator
+database; or call a real provider.
