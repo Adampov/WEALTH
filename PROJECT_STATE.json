@@ -38,6 +38,7 @@
     "canonical_utc_preflight_timestamp_canonical_candidate_evidence_foundation",
     "canonical_utc_preflight_timestamp_candidate_census_evidence_foundation",
     "canonical_utc_preflight_timestamp_candidate_census_bundle_evidence_foundation",
+    "canonical_utc_preflight_operator_authorization_request_contract_foundation",
     "public_trade_checkpoint_orchestration",
     "public_trade_transition_history_reader",
     "sqlite_market_data_storage",
@@ -77,11 +78,11 @@
   "open_orders": [],
   "open_tasks": [
     {
-      "task_id": "TASK-036",
-      "action": "phase2.canonical_utc_preflight_operator_authorization_request_contract_foundation",
+      "task_id": "TASK-037",
+      "action": "phase2.canonical_utc_preflight_operator_authorization_package_owner_decision",
       "status": "ready",
-      "risk_tier": 1,
-      "requires_human_approval": false
+      "risk_tier": 3,
+      "requires_human_approval": true
     }
   ],
   "blockers": [],
@@ -92,7 +93,9 @@
     "RISK-004",
     "RISK-005"
   ],
-  "pending_approvals": [],
+  "pending_approvals": [
+    "TASK-037 project-owner decision plus independent Risk and Security reviews for the exact operator-preflight authorization package"
+  ],
   "recent_decisions": [
     {
       "decision_id": "ADR-0025",
@@ -111,8 +114,8 @@
     }
   ],
   "next_action": {
-    "task_id": "TASK-036",
-    "action": "phase2.canonical_utc_preflight_operator_authorization_request_contract_foundation"
+    "task_id": "TASK-037",
+    "action": "phase2.canonical_utc_preflight_operator_authorization_package_owner_decision"
   },
-  "last_updated_utc": "2026-07-26T05:51:49Z"
+  "last_updated_utc": "2026-07-26T06:16:08Z"
 }

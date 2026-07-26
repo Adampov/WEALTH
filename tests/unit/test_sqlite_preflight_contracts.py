@@ -34,6 +34,13 @@ TIMESTAMP_CANDIDATE_CENSUS_PATH = (
 TIMESTAMP_CANDIDATE_CENSUS_BUNDLE_PATH = (
     REPOSITORY_ROOT / "src" / "wealth" / "domain" / "sqlite_timestamp_candidate_census_bundle.py"
 )
+OPERATOR_PREFLIGHT_AUTHORIZATION_REQUEST_PATH = (
+    REPOSITORY_ROOT
+    / "src"
+    / "wealth"
+    / "domain"
+    / "sqlite_operator_preflight_authorization_request.py"
+)
 
 
 def valid_request(tmp_path: Path) -> SQLitePreflightRequest:
@@ -242,6 +249,7 @@ def test_no_existing_runtime_module_imports_the_preflight_foundation() -> None:
             TIMESTAMP_CANDIDATE_CENSUS_PATH,
             TIMESTAMP_CANDIDATE_CENSUS_BUNDLE_PATH,
             TIMESTAMP_PARSE_PATH,
+            OPERATOR_PREFLIGHT_AUTHORIZATION_REQUEST_PATH,
         }:
             continue
         source = path.read_text(encoding="utf-8")

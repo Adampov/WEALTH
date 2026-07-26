@@ -51,6 +51,13 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 BUNDLE_MODULE_PATH = (
     REPOSITORY_ROOT / "src" / "wealth" / "domain" / "sqlite_timestamp_candidate_census_bundle.py"
 )
+AUTHORIZATION_REQUEST_MODULE_PATH = (
+    REPOSITORY_ROOT
+    / "src"
+    / "wealth"
+    / "domain"
+    / "sqlite_operator_preflight_authorization_request.py"
+)
 MAX_BUNDLE_CANDIDATES = 37 * MAX_SQLITE_TIMESTAMP_ROWS_PER_TARGET
 
 
@@ -814,7 +821,7 @@ def test_bundle_module_is_pure_and_has_no_runtime_consumer() -> None:
 
     consumers = []
     for path in (REPOSITORY_ROOT / "src" / "wealth").rglob("*.py"):
-        if path == BUNDLE_MODULE_PATH:
+        if path in {BUNDLE_MODULE_PATH, AUTHORIZATION_REQUEST_MODULE_PATH}:
             continue
         if "sqlite_timestamp_candidate_census_bundle" in path.read_text(encoding="utf-8"):
             consumers.append(path)

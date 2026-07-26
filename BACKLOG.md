@@ -5,44 +5,67 @@ This file records approved, bounded work. `PROJECT_STATE.json` identifies the on
 
 ## Next Action
 
-### TASK-036 — Synthetic operator-preflight authorization-request contract foundation
+### TASK-037 — Operator-preflight authorization package and project-owner decision
 
-- **Key:** `phase2.canonical_utc_preflight_operator_authorization_request_contract_foundation`
+- **Key:** `phase2.canonical_utc_preflight_operator_authorization_package_owner_decision`
 - **Phase:** 2 — Reliable Market Data Platform
-- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Risk tier:** RISK 3 — PRODUCTION AFFECTING (authorization decision only)
 - **Status:** READY
-- **Goal:** Add an unused pure proposal-only authorization-request envelope for a possible later
-  operator preflight without accessing operator data or granting approval.
-- **Scope:** Add strict frozen versioned contracts pinned to the exact TASK-035 bundle plan.
-  Synthetic placeholders may represent the proposed exact family/path entries, immutable
-  snapshot method, report destination, and evidence retention/disposal boundary.
-- **Constraints:** Proposal structure only: no path existence checks, filesystem, SQLite,
-  operator data, scanning, adapters, report or manifest creation, serialization, runtime wiring,
-  migration, repair, schema change, or Stage 3 action. A structurally valid envelope is not human
-  approval and cannot authorize access. The actual populated authorization and scanner remain
-  separate later actions. Before either can access operator data, the project owner must approve
-  the exact read-only path list, immutable snapshot method, report destination, and evidence
-  retention/disposal boundary.
+- **Human approval:** REQUIRED — project owner plus independent Risk and Security review.
+- **Goal:** Prepare the exact operator-preflight authorization package and obtain an explicit
+  project-owner `APPROVE`, `REJECT`, or `REVISE` decision without accessing operator data.
+- **Scope:** Record the proposed exact read-only database/path list and its real deployment
+  cardinality, the writer-fenced consistent/immutable snapshot procedure, report destination,
+  evidence retention/disposal boundary, and the change, environment, evidence, approver, UTC
+  decision time, expiry or review trigger, monitoring, and tested rollback evidence required by
+  policy.
+- **Constraints:** Governance preparation and decision only. Do not inspect, resolve, check, or
+  open any proposed operator path or database; access SQLite or operator data; scan rows; invoke
+  an adapter; create an operational report or manifest; add serialization or scanner code; wire a
+  runtime; migrate or repair data; alter a schema; or perform or claim Stage 3. Approved
+  governance-artifact writes are the only filesystem mutation in scope. Do not store sensitive
+  path metadata in an unapproved location. Missing, ambiguous, expired, conflicting, rejected, or
+  revise-required authority remains denial.
 
 Acceptance gates:
 
-1. One strict frozen proposal-only plan is pinned to the exact TASK-035 all-family bundle plan and
-   cannot accept caller-supplied family or census semantics.
-2. Synthetic placeholder evidence represents the proposed exact family/path entries in canonical
-   order plus the immutable snapshot method, report destination, and retention/disposal boundary.
-3. Contracts reject altered, missing, duplicate, reordered, unsupported, extra, or incorrectly
-   linked proposal fields and nested declarations.
-4. A structurally valid envelope is not human approval. No field, status, or successful
-   validation grants operator-data access or satisfies the project-owner approval gate.
-5. Construction performs no path existence check, filesystem or SQLite I/O, operator-data scan,
-   adapter call, report or manifest creation, serialization, runtime operation, migration,
-   repair, schema change, or Stage 3 action.
-6. The actual populated authorization and scanner remain separate later actions; the project
-   owner must approve the exact read-only path list, immutable snapshot method, report
-   destination, and retention/disposal boundary before any later scan, and all repository gates
-   pass.
+1. The package distinguishes the real proposed path-list cardinality from TASK-036's eight
+   synthetic family-coverage slots and makes every exact family/path entry explicit.
+2. The exact snapshot procedure is writer-fenced and SQLite-safe and specifies its consistency,
+   immutability, and WAL/checkpoint handling without executing it.
+3. The exact report destination and evidence retention/disposal boundary are identified through
+   an approved handling location, with independent Risk and Security review recorded.
+4. The decision identifies the change, scope, environment, evidence, project-owner approver, UTC
+   decision time, expiry or review trigger, monitoring, tested rollback evidence, and one explicit
+   `APPROVE`, `REJECT`, or `REVISE` outcome. Anything else fails closed.
+5. No proposed operator path or database is inspected, resolved, checked, or opened; no SQLite or
+   operator-data access, scan, adapter, operational report or manifest, serializer, scanner code,
+   runtime action, migration, repair, schema change, or Stage 3 action occurs. Only approved
+   governance-artifact writes are allowed.
+6. Any approved scanner remains a separately scoped later task with its own risk review; no
+   approval outcome automatically runs or authorizes code beyond its exact recorded scope, and
+   all repository gates pass.
 
 ## Recently Completed
+
+### TASK-036 — Synthetic operator-preflight authorization-request contract foundation
+
+- **Key:** `phase2.canonical_utc_preflight_operator_authorization_request_contract_foundation`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Result:** One unused strict frozen proposal plan is pinned to the private exact TASK-035
+  all-family bundle plan. A zero-argument pure builder emits exactly eight ordered immutable
+  literal slots linked to the reviewed families plus fixed unselected snapshot-method,
+  report-destination, and retention/disposal placeholders. Fixed states remain `proposal_only`,
+  `none_proposal_only`, human approval `not_recorded`, operator-data access `not_authorized`, and
+  the Stage 3 gate `not_satisfied`; successful construction, validation, review, or merge grants
+  no authority. Deep strict validation rejects altered plans, ordinals, family/slot mappings,
+  placeholders, subclasses, bypassed construction, extras, and any authority-state forgery. The
+  eight symbolic slots prove synthetic family coverage only and do not assert that a future real
+  deployment has one path per family; a later populated package must establish its own reviewed
+  cardinality. No real path, path check, filesystem, SQLite, operator data, scan, adapter, report,
+  manifest, serialization, runtime consumer, scanner, migration, schema change, or Stage 3 action
+  was added.
 
 ### TASK-035 — Synthetic all-family candidate-census bundle reconciliation evidence foundation
 
