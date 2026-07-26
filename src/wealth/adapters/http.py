@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from math import isfinite
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -29,8 +30,10 @@ class UrllibPublicHttpClient:
     ) -> HttpResponse:
         """Return one bounded response, including HTTP error responses."""
 
-        if timeout_seconds <= 0:
-            raise ValueError("timeout_seconds must be positive")
+        if timeout_seconds <= 0 or (
+            not isinstance(timeout_seconds, int) and not isfinite(timeout_seconds)
+        ):
+            raise ValueError("timeout_seconds must be finite and positive")
         query_string = urlencode(sorted(query.items()))
         request = Request(
             f"{url}?{query_string}",

@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from hashlib import sha256
+from math import isfinite
 from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import ValidationError
@@ -114,8 +115,10 @@ class BinancePublicCandleSource:
     usdm_klines_url: str = BINANCE_USDM_KLINES_URL
 
     def __post_init__(self) -> None:
-        if self.timeout_seconds <= 0:
-            raise ValueError("timeout_seconds must be positive")
+        if self.timeout_seconds <= 0 or (
+            not isinstance(self.timeout_seconds, int) and not isfinite(self.timeout_seconds)
+        ):
+            raise ValueError("timeout_seconds must be finite and positive")
         for url in (self.spot_klines_url, self.usdm_klines_url):
             if not url.startswith("https://"):
                 raise ValueError("Binance public endpoints must use HTTPS")

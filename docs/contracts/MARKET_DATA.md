@@ -7,6 +7,16 @@ required for honest research, replay, and backtesting.
 
 It does not define a trading strategy and does not connect to an exchange.
 
+## Public HTTP Finite-Work Boundary
+
+`UrllibPublicHttpClient` accepts only a finite, positive request timeout. The Binance candle,
+Coinbase candle, and Binance aggregate-trade sources enforce the same rule when configured.
+`NaN`, positive or negative infinity, zero, and negative values fail with one explicit error before
+URL/request construction or provider HTTP work. Finite positive integer and fractional values are
+forwarded unchanged. No boundary coerces an invalid value, substitutes a fallback, or adds a retry;
+the timeout retains the standard transport semantics rather than claiming a total wall-clock
+deadline.
+
 ## Canonical Order-Flow Foundation
 
 `CanonicalTrade`, `CanonicalTicker`, and `CanonicalBestBidAsk` establish the provider-independent

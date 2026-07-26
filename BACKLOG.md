@@ -6,46 +6,46 @@ promoted through review.
 
 ## Next Action
 
-### TASK-041 — Finite public HTTP timeout-boundary validation
+### TASK-042 — Strict bounded public-HTTP response-byte-limit validation
 
-- **Key:** `phase2.finite_public_http_timeout_boundary_validation`
+- **Key:** `phase2.strict_public_http_response_byte_limit_validation`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
 - **Human approval:** NOT REQUIRED — bounded fail-closed development hardening under the owner's
   explicit authorization; no permission, deployment, or operator-data change.
-- **Context:** The shared `UrllibHttpClient` and the Binance candle, Coinbase candle, and Binance
-  aggregate-trade adapters reject `timeout_seconds <= 0`, but `NaN` and positive infinity bypass
-  that comparison and can reach the transport boundary as invalid finite-work configuration.
-- **Goal:** Require every active public HTTP timeout to be finite and positive before any network
-  call while preserving all existing finite positive behavior.
-- **Scope:** Harden the shared transport and all three active public-provider constructor
-  boundaries with one exact finite-positive rule. Add deterministic tests for `NaN`, positive and
-  negative infinity, zero, and negative values, including proof that invalid transport values
-  never reach `urlopen` and invalid provider values never reach an HTTP client.
-- **Files:** `src/wealth/adapters/http.py`, `src/wealth/adapters/binance.py`,
-  `src/wealth/adapters/coinbase.py`, `src/wealth/adapters/binance_order_flow.py`,
-  `tests/unit/test_http_adapter.py`, the three existing provider unit-test files,
+- **Context:** `UrllibPublicHttpClient.__post_init__` checks only
+  `max_response_bytes <= 0`. It therefore accepts booleans, positive fractions, `NaN`, positive
+  infinity, and arbitrarily large integers even though the adapter promises bounded reads; those
+  values can survive construction and reach response-read arithmetic.
+- **Goal:** Make the public HTTP response bound an exact positive built-in integer capped by the
+  current 2,000,000-byte safety ceiling before any request, network, or response-read work.
+- **Scope:** Define one explicit hard ceiling, validate `max_response_bytes` strictly at client
+  construction, and add deterministic boundary tests. Preserve valid smaller integer caps, the
+  current default ceiling, the one-byte overflow sentinel read, and typed oversize handling for
+  both successful and HTTP-error responses.
+- **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
   `docs/contracts/MARKET_DATA.md`, plus coordinated governance files and governance tests.
-- **Constraints:** Do not change endpoints, queries, headers, retry, pagination, range splitting,
-  rate budgets, payload parsing, canonicalization, quality, storage, schemas, dependencies,
-  runtime wiring, operator paths, TASK-037 authority, migration, or Stage 3. Do not add a network
-  request, retry, fallback timeout, coercion, or silent repair.
+- **Constraints:** Do not change public-provider constructors, timeout behavior, endpoints,
+  queries, headers, retries, response bodies, provider parsing, canonicalization, quality,
+  storage, schemas, dependencies, runtime wiring, operator paths, TASK-037 authority, migration,
+  or Stage 3. Do not stream, truncate, coerce, clamp, silently repair, or add network work.
 
 Acceptance gates:
 
-1. `UrllibHttpClient.get` rejects non-finite, zero, and negative `timeout_seconds` with the exact
-   public error `timeout_seconds must be finite and positive` before constructing or invoking any
-   network request.
-2. Each active provider constructor rejects the same invalid values with the same exact error
-   before an HTTP client can be called; finite positive integer and fractional values remain
-   accepted unchanged.
-3. Deterministic tests cover `NaN`, positive infinity, negative infinity, zero, and negative
-   values at every boundary and prove no invalid value reaches `urlopen` or provider work.
-4. Existing transport exception mapping, provider endpoints, queries, timeout forwarding, parsing,
-   canonicalization, and typed failure behavior remain unchanged.
-5. Documentation records the finite-work timeout boundary. Formatting, lint, strict typing,
-   complete tests, lockfile verification, dependency audit, health slice, and CI pass.
+1. Construction accepts only `type(max_response_bytes) is int` with a value from 1 through
+   2,000,000 inclusive; booleans, integer subclasses, floats including integral, fractional,
+   `NaN`, and infinities, zero, negatives, and larger integers fail with one exact public error.
+2. Invalid configuration fails during construction before URL/request construction, `urlopen`, or
+   response `read`; no coercion, clamping, default substitution, or network work occurs.
+3. Valid cap 1, a representative smaller cap, and the default/maximum 2,000,000 retain the exact
+   configured value. Successful reads request `cap + 1` bytes and reject a body above the cap
+   without returning truncated evidence.
+4. HTTP-error response reads use the same `cap + 1` sentinel and preserve the existing bounded
+   response versus typed oversize-failure behavior.
+5. Provider adapters, finite-positive timeout behavior, exception mapping outside this bound, and
+   every endpoint/query/header remain unchanged. Formatting, lint, strict typing, complete tests,
+   lockfile verification, dependency audit, health slice, and CI pass.
 6. TASK-037 remains blocked and authorization remains denied; no operator data, path, database,
    scanner, report, migration, or Stage 3 action occurs.
 
@@ -102,6 +102,24 @@ Acceptance gates:
    all repository gates pass.
 
 ## Recently Completed
+
+### TASK-041 — Finite public HTTP timeout-boundary validation
+
+- **Key:** `phase2.finite_public_http_timeout_boundary_validation`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Files:** `src/wealth/adapters/http.py`, `src/wealth/adapters/binance.py`,
+  `src/wealth/adapters/coinbase.py`, `src/wealth/adapters/binance_order_flow.py`,
+  `tests/unit/test_http_adapter.py`, the three public-provider unit-test files,
+  `docs/contracts/MARKET_DATA.md`, and the coordinated governance files and governance tests.
+- **Result:** The shared public transport and all three active provider constructors now reject
+  `NaN`, positive and negative infinity, zero, and negative timeouts with one exact error before
+  request construction or provider HTTP work. A deterministic four-boundary matrix proves invalid
+  values never reach `Request`, `urlopen`, or an injected HTTP client, while literal integer and
+  fractional positive values are forwarded unchanged. The contract preserves standard urllib
+  timeout semantics and does not claim a total wall-clock deadline. Endpoints, queries, headers,
+  retry, pagination, range, budgets, parsing, canonical evidence, quality, storage, schemas,
+  dependencies, runtime wiring, operator authority, migration, and Stage 3 remain unchanged.
 
 ### TASK-040 — Exact order-flow persistence-evidence validation
 
