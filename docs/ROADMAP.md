@@ -148,20 +148,25 @@ integer, and five nullable declarations. It preserves every source byte and type
 naive, absent, offset-policy, overflow, and storage-class outcomes without I/O or normalization.
 TASK-033 now derives exact fixed-UTC datetime, canonical six-digit `Z` text, and epoch-microsecond
 candidate triples from successful outcomes while leaving failures and year-boundary overflow
-nonprojectable. Equal instants retain their distinct ordered source evidence. No operator database
-has been scanned, no replacement timestamp has been selected or emitted, and current aware-only
-models, external text, sortable runtime projections, queries, and legacy stores have not been
-migrated.
+nonprojectable. Equal instants retain their distinct ordered source evidence. TASK-034 now adds
+one exact family-scoped summary for every declared timestamp column, including empty columns, and
+collectively reconciles all eight families, 20 tables, and 37 columns through exhaustive status
+counts, source-offset and precision frequencies, and projectable epoch extrema. No operator
+database has been scanned, no replacement timestamp has been selected or emitted, and current
+aware-only models, external text, sortable runtime projections, queries, and legacy stores have
+not been migrated.
 
-The canonical next action is TASK-034,
-`phase2.canonical_utc_preflight_timestamp_candidate_census_evidence_foundation`. It may consume
-only an exact TASK-033 result and produce exactly 37 ordered in-memory per-column summaries of
-candidate and parse statuses, source offsets and precision, and projectable epoch minima/maxima.
-It cannot open SQLite or a filesystem path, compare stored projections, group rows, instants, or
-collisions, inspect operator or discovered data, serialize or write a report or manifest,
-quarantine or replace bytes, use an adapter, wire a runtime, or claim Stage 3 completion. Any
-operator-data preflight remains explicitly approval-gated. TASK-034's exact scope and acceptance
-gates are in `BACKLOG.md` and its status is mirrored in `PROJECT_STATE.json`.
+The canonical next action is TASK-035,
+`phase2.canonical_utc_preflight_timestamp_candidate_census_bundle_evidence_foundation`. It may
+consume exactly eight exact TASK-034 results, one per reviewed family in canonical order, retain
+every input, reconcile exactly eight families, 20 tables, and 37 columns, and aggregate only the
+existing counts, offset and precision frequencies, and projectable epoch extrema. It cannot open
+SQLite or a filesystem path, compare stored projections, group rows, instants, or collisions,
+assign collision identities, inspect operator or discovered data, serialize or write a report or
+manifest, deduplicate, merge, quarantine or replace bytes, use an adapter, wire a runtime, migrate
+or alter a schema, or claim Stage 3 completion. Any operator-data preflight remains explicitly
+approval-gated. TASK-035's exact scope and acceptance gates are in `BACKLOG.md` and its status is
+mirrored in `PROJECT_STATE.json`.
 
 ## Phase 1 — Architecture and Engineering Foundation
 

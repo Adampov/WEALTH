@@ -504,11 +504,12 @@ forward version-2 path.
 ## Decisions and Approvals Required
 
 ADR 0027 accepts the target and staged plan, but not an incompatible cutover. TASK-027 through
-TASK-033 are complete. The canonical next action is the bounded RISK-1 TASK-034; it may add only a
-pure per-column census over valid TASK-033 generated-fixture candidate evidence. It may not open
-SQLite or a filesystem path, inspect stored projections, group rows, instants, or collisions,
-serialize a report, quarantine or replace bytes, or inspect operator data. Department and agent
-reviews are validation evidence, not human approval.
+TASK-034 are complete. The canonical next action is the bounded RISK-1 TASK-035; it may add only a
+pure canonical-order bundle reconciliation over exactly eight valid TASK-034 generated-fixture
+family censuses. It may not open SQLite or a filesystem path, inspect stored projections, group
+rows, instants, or collisions, assign collision identities, serialize a report, quarantine or
+replace bytes, or inspect operator data. Department and agent reviews are validation evidence, not
+human approval.
 
 Before Stage 3 accesses any operator database, the project owner must approve the exact read-only
 database/path list, snapshot method, report destination, and evidence retention/disposal boundary.
@@ -531,24 +532,27 @@ interpretation evidence for those exact bytes; it retained offset spelling and e
 identity, performed no I/O or normalization, and emitted no replacement value. TASK-033 added
 only unused pure canonical candidate evidence for successful parse outcomes; it preserved prior
 failures, typed calendar overflow, retained duplicate instants separately, and performed no I/O,
-grouping, report, replacement, or runtime action. Wiring any of these foundations into an existing
-runtime or advancing Stages 3 through 7 requires the stage-specific authorization and applicable
-approvals described here.
+grouping, report, replacement, or runtime action. TASK-034 added only unused pure family-scoped
+census evidence; it retained every nested source, reconciled empty and populated columns through
+exact counts, bounded source-offset and precision frequencies, and projectable epoch extrema, and
+performed no I/O, grouping, report, replacement, or runtime action. Wiring any of these
+foundations into an existing runtime or advancing Stages 3 through 7 requires the stage-specific
+authorization and applicable approvals described here.
 
-## TASK-034 Handoff
+## TASK-035 Handoff
 
 The next bounded action is
-`phase2.canonical_utc_preflight_timestamp_candidate_census_evidence_foundation`.
+`phase2.canonical_utc_preflight_timestamp_candidate_census_bundle_evidence_foundation`.
 
-It is limited to unused strict frozen versioned census plans and exactly one ordered in-memory
-summary for every declared timestamp column in an already valid TASK-033 result, including empty
-columns. Each summary may contain only exactly reconciled total, candidate-status,
-source-parse-status, bounded sorted source-offset and fractional-precision frequencies, and
-projectable canonical epoch minimum/maximum evidence. The complete TASK-033 result and all
-TASK-030/031/032 evidence remain nested unchanged. It may not open SQLite or a filesystem path,
-inspect JSON containers, compare stored-projection agreement, group rows, instants, or
-collisions, assign collision identities, deduplicate, merge, quarantine or replace data, inspect
-operator or discovered data, serialize or write a report or manifest, invoke an adapter, wire
-into an active runtime, migrate or repair data, or claim Stage 3 completion. Before any later
-operator database scan, the project owner must still approve the exact path list, immutable
-snapshot method, report destination, and evidence retention/disposal boundary.
+It is limited to unused strict frozen versioned bundle plans and one pure reconciliation result
+over exactly eight exact TASK-034 results, one per reviewed family in canonical order. Every input
+remains nested unchanged; the bundle must reconcile exactly eight families, 20 tables, and 37
+columns and may aggregate only existing total and exhaustive status counts, bounded sorted
+source-offset and fractional-precision frequencies, and projectable canonical epoch extrema. It
+may not open SQLite or a filesystem path, inspect JSON containers, compare stored-projection
+agreement, group rows, instants, or collisions, assign collision identities, deduplicate, merge,
+quarantine or replace data, inspect operator or discovered data, serialize or write a report or
+manifest, invoke an adapter, wire into an active runtime, migrate or repair data, alter a schema,
+or claim Stage 3 completion. Before any later operator database scan, the project owner must still
+approve the exact path list, immutable snapshot method, report destination, and evidence
+retention/disposal boundary.

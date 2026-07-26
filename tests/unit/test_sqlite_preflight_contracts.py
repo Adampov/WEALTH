@@ -28,6 +28,9 @@ TIMESTAMP_PARSE_PATH = REPOSITORY_ROOT / "src" / "wealth" / "domain" / "sqlite_t
 TIMESTAMP_CANDIDATE_PATH = (
     REPOSITORY_ROOT / "src" / "wealth" / "domain" / "sqlite_timestamp_candidate.py"
 )
+TIMESTAMP_CANDIDATE_CENSUS_PATH = (
+    REPOSITORY_ROOT / "src" / "wealth" / "domain" / "sqlite_timestamp_candidate_census.py"
+)
 
 
 def valid_request(tmp_path: Path) -> SQLitePreflightRequest:
@@ -233,6 +236,7 @@ def test_no_existing_runtime_module_imports_the_preflight_foundation() -> None:
             PREFLIGHT_ADAPTER_PATH,
             REPOSITORY_ROOT / "src" / "wealth" / "domain" / "sqlite_preflight.py",
             TIMESTAMP_CANDIDATE_PATH,
+            TIMESTAMP_CANDIDATE_CENSUS_PATH,
             TIMESTAMP_PARSE_PATH,
         }:
             continue

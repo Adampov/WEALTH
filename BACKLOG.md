@@ -5,43 +5,61 @@ This file records approved, bounded work. `PROJECT_STATE.json` identifies the on
 
 ## Next Action
 
-### TASK-034 — Synthetic canonical-candidate census evidence foundation
+### TASK-035 — Synthetic all-family candidate-census bundle reconciliation evidence foundation
 
-- **Key:** `phase2.canonical_utc_preflight_timestamp_candidate_census_evidence_foundation`
+- **Key:** `phase2.canonical_utc_preflight_timestamp_candidate_census_bundle_evidence_foundation`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
-- **Goal:** Add an unused pure in-memory census that summarizes one exact TASK-033 result per
-  declared timestamp column without losing or grouping any source evidence.
-- **Scope:** Add strict frozen versioned census plans and exactly 37 ordered per-column summaries,
-  including empty columns. Each summary reconciles total candidate count, exact candidate-status
-  and source-parse-status counts, bounded sorted source-offset and fractional-precision
-  frequencies, and canonical epoch minimum/maximum derived only from projectable candidates. The
-  complete TASK-033 result remains nested unchanged.
-- **Constraints:** Consume only one exact TASK-033 result and perform no SQLite, filesystem,
-  adapter, JSON-container, report, manifest, operator-data, or runtime access. Do not compare
-  stored projections, group rows or instants, assign collision identities, deduplicate, merge,
-  quarantine, choose replacement bytes, migrate, repair, alter a schema, or add CLI, service,
-  provider, credential, signal, portfolio, Risk, order, financial, or active runtime wiring. Do
-  not claim Stage 3 completion.
+- **Goal:** Add an unused pure all-family reconciliation layer over the complete reviewed set of
+  TASK-034 synthetic candidate censuses while retaining every input result unchanged.
+- **Scope:** Consume exactly eight exact TASK-034 results, one per reviewed family in canonical
+  family order. Reconcile exactly eight families, 20 tables, and 37 declared timestamp columns,
+  and aggregate only the existing total and exhaustive status counts, source-offset and
+  fractional-precision frequencies, and projectable canonical epoch extrema.
+- **Constraints:** Pure evidence consumption only: no SQLite, filesystem, adapter,
+  JSON-container, serialization, report, manifest, operator-data, or runtime access. Do not
+  compare stored projections, group rows or instants, assign collision identities, deduplicate,
+  merge, quarantine, choose replacement bytes, migrate, repair, alter a schema, or add CLI,
+  service, provider, credential, signal, portfolio, Risk, order, financial, or active runtime
+  wiring. Do not claim Stage 3 completion.
 
 Acceptance gates:
 
-1. Strict frozen plans and census evidence reject altered, missing, duplicate, reordered,
-   unsupported, or incorrectly linked TASK-033 input and summary declarations.
-2. Census construction accepts only one exact successful TASK-033 result and performs no I/O,
-   adapter, report, serialization, or runtime operation.
-3. Exactly one summary exists for each of the 37 declared columns in reviewed family/table/column
-   order, including columns with zero rows.
-4. Total, candidate-status, source-parse-status, offset, precision, and projectable epoch-range
-   evidence reconciles exactly to the unchanged ordered TASK-033 candidates.
-5. Empty, mixed-success, overflow, malformed, nullable, positive/negative/subminute offset,
-   precision, duplicate-instant, and epoch-bound cases remain deterministic and bounded.
-6. The complete TASK-030/031/032/033 evidence remains nested unchanged; no row/instant/collision
-   grouping, replacement, quarantine, migration, or Stage 3 claim is introduced, and all
+1. Strict frozen plans and bundle evidence reject altered, missing, duplicate, reordered,
+   unsupported, or incorrectly linked TASK-034 inputs and aggregate declarations.
+2. Construction accepts exactly eight exact successful TASK-034 results in reviewed family order
+   and performs no I/O, adapter, serialization, report, manifest, or runtime operation.
+3. The bundle reconciles exactly eight families, 20 tables, and 37 per-column summaries while
+   retaining every complete TASK-034 result and all nested TASK-030/031/032/033 evidence.
+4. Aggregate totals, exhaustive status counts, bounded sorted offset and precision frequencies,
+   and projectable epoch extrema reconcile exactly to the unchanged family censuses.
+5. Empty families or columns, mixed outcomes, duplicate instants, normalization overflow, signed
+   offsets, precision variants, and epoch bounds remain deterministic without row or instant
+   grouping.
+6. No operator data, stored-projection comparison, collision identity, deduplication, merge,
+   quarantine, replacement, migration, schema change, or Stage 3 claim is introduced, and all
    repository gates pass.
 
 ## Recently Completed
+
+### TASK-034 — Synthetic canonical-candidate census evidence foundation
+
+- **Key:** `phase2.canonical_utc_preflight_timestamp_candidate_census_evidence_foundation`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Result:** Eight immutable pure family-scoped census plans now flatten the exact TASK-033
+  declarations into one ordered summary per source-family timestamp column, collectively covering
+  all eight families, 20 tables, and 37 columns, including genuinely empty columns. Every summary
+  exactly reconciles its total, exhaustive candidate and parse status counts, bounded sorted
+  source-offset and fractional-precision frequencies, and projectable epoch extrema while
+  retaining the complete TASK-033 and nested TASK-030/031/032 evidence unchanged. Deep validation
+  rejects forged plans, candidates, declarations, summaries, counts, frequencies, extrema,
+  registry replacement, and reordered or missing evidence. Synthetic tests cover all families,
+  empty and mixed columns, malformed and nullable inputs, signed and subminute offsets, precision,
+  duplicate instants, calendar overflow, epoch bounds, and post-snapshot no-I/O behavior. No
+  report, operator scan, grouping, collision identity, replacement, runtime consumer, migration,
+  schema change, or Stage 3 completion was added.
 
 ### TASK-033 — Synthetic canonical-instant candidate evidence foundation
 
