@@ -12,6 +12,9 @@ This file records approved, bounded work. `PROJECT_STATE.json` identifies the on
 - **Risk tier:** RISK 3 — PRODUCTION AFFECTING (authorization decision only)
 - **Status:** READY
 - **Human approval:** REQUIRED — project owner plus independent Risk and Security review.
+- **Preparation artifact:** The repository contains only the non-authorizing placeholder template
+  at `docs/governance/TASK-037-operator-preflight-authorization-package.template.md`. It prohibits
+  real deployment values and cannot satisfy any acceptance gate or approval requirement.
 - **Goal:** Prepare the exact operator-preflight authorization package and obtain an explicit
   project-owner `APPROVE`, `REJECT`, or `REVISE` decision without accessing operator data.
 - **Scope:** Record the proposed exact read-only database/path list and its real deployment
