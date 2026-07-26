@@ -504,13 +504,14 @@ forward version-2 path.
 ## Decisions and Approvals Required
 
 ADR 0027 accepts the target and staged plan, but not an incompatible cutover. TASK-027 through
-TASK-035 are complete. The canonical next action is the bounded RISK-1 TASK-036; it may add only a
-pure unused strict frozen proposal-only authorization-request envelope pinned to the exact
-TASK-035 bundle plan. Synthetic placeholders may represent proposed exact family/path entries,
-the immutable snapshot method, report destination, and evidence retention/disposal boundary. It
-may not check path existence, access SQLite, a filesystem, or operator data, scan data, invoke an
-adapter, create a report or manifest, serialize output, wire a runtime, migrate or repair data,
-alter a schema, or perform Stage 3. A structurally valid envelope is not human approval.
+TASK-036 are complete. The canonical next action is the bounded RISK-3 TASK-037 authorization
+decision. It requires project-owner approval plus independent Risk and Security review and may
+prepare the exact authorization package required before any operator preflight. It may not
+inspect, resolve, check, or open a proposed operator path or database; access SQLite or operator
+data; scan rows; invoke an adapter; create an operational report or manifest; add serialization
+or scanner code; wire a runtime; migrate or repair data; alter a schema; or perform Stage 3.
+Approved governance-artifact writes are the only filesystem mutation in scope. Missing,
+ambiguous, expired, conflicting, rejected, or revise-required authority remains denial.
 
 Before Stage 3 accesses any operator database, the project owner must approve the exact read-only
 database/path list, immutable snapshot method, report destination, and evidence
@@ -542,24 +543,38 @@ performed no I/O, grouping, report, replacement, or runtime action. TASK-035 add
 pure all-family bundle evidence; it retained the exact eight TASK-034 results unchanged,
 reconciled the reviewed 8-family, 20-table, 37-column shape through existing counts, frequencies,
 and projectable extrema, rejected invalid sources before aggregation, and performed no I/O,
-grouping, serialization, report, replacement, or runtime action. Wiring any of these foundations
-into an existing runtime or advancing Stages 3 through 7 requires the stage-specific authorization
-and applicable approvals described here.
+grouping, serialization, report, replacement, or runtime action. TASK-036 added only an unused
+pure authorization-request proposal pinned to TASK-035's private exact bundle plan. It exposes
+eight ordered family-linked immutable literal slots and unselected snapshot-method,
+report-destination, and retention/disposal placeholders while fixing proposal, human-approval,
+operator-access, and Stage 3 states to no authority. Deep validation rejects altered or forged
+declarations. The eight slots prove synthetic family coverage only and do not assert future real
+path cardinality. TASK-036 performed no I/O, serialization workflow, report, runtime action,
+scanner, or Stage 3 action. Wiring any of these foundations into an existing runtime or advancing
+Stages 3 through 7 requires the stage-specific authorization and applicable approvals described
+here.
 
-## TASK-036 Handoff
+## TASK-037 Handoff
 
 The next bounded action is
-`phase2.canonical_utc_preflight_operator_authorization_request_contract_foundation`.
+`phase2.canonical_utc_preflight_operator_authorization_package_owner_decision`.
 
-It is limited to unused strict frozen versioned proposal-only contracts pinned to the exact
-TASK-035 all-family bundle plan. Synthetic placeholders may represent proposed exact family/path
-entries in canonical order, an immutable snapshot method, a report destination, and the evidence
-retention/disposal boundary. The contracts must reject altered, missing, duplicate, reordered,
-unsupported, extra, or incorrectly linked proposal evidence without checking a path or performing
-I/O. A structurally valid envelope is not human approval, cannot authorize operator-data access,
-and cannot satisfy the Stage 3 approval gate. TASK-036 may not access a filesystem, SQLite, or
-operator data; scan data; invoke an adapter; create a report or manifest; serialize output; wire a
-runtime; migrate or repair data; alter a schema; or perform or claim Stage 3. The actual populated
-authorization and scanner remain separate later actions. Before either can access any operator
-database, the project owner must still approve the exact read-only path list, immutable snapshot
-method, report destination, and evidence retention/disposal boundary.
+It is limited to preparing the exact operator-preflight authorization package and obtaining an
+explicit project-owner `APPROVE`, `REJECT`, or `REVISE` decision. The package must distinguish
+the actual proposed path-list cardinality from TASK-036's eight synthetic slots and identify each
+exact read-only family/path entry, the writer-fenced SQLite-safe consistent/immutable snapshot
+procedure including WAL/checkpoint handling, the approved report destination, and the evidence
+retention/disposal boundary. It must also identify the change, scope, environment, evidence,
+approver, UTC decision time, expiry or review trigger, and rollback required by
+[`POLICIES.md`](POLICIES.md#explicit-human-approval-matrix). Sensitive path metadata must use an
+approved handling location. Permission expansion requires Security review.
+
+TASK-037 is RISK 3 and requires independent Risk and Security review, monitoring, and tested
+rollback evidence in addition to the project-owner decision. It may not inspect, resolve, check,
+or open a proposed operator path or database; access SQLite or operator data; scan rows; invoke an
+adapter; create an operational report or manifest; add serialization or scanner code; wire a
+runtime; migrate or repair data; alter a schema; or perform or claim Stage 3. Approved
+governance-artifact writes are the only filesystem mutation in scope. Any missing, ambiguous,
+expired, conflicting, rejected, or revise-required decision fails closed. Even an approval
+authorizes only its exact recorded scope and does not run code. Any scanner remains a separately
+scoped later task with its own risk review.

@@ -153,23 +153,30 @@ one exact family-scoped summary for every declared timestamp column, including e
 collectively reconciles all eight families, 20 tables, and 37 columns through exhaustive status
 counts, source-offset and precision frequencies, and projectable epoch extrema. TASK-035 now
 retains the complete canonical sequence of eight exact TASK-034 results and reconciles only their
-existing evidence into one strict pure 8-family, 20-table, 37-column bundle aggregate. No operator
+existing evidence into one strict pure 8-family, 20-table, 37-column bundle aggregate. TASK-036
+now adds only an unused strict frozen proposal contract pinned to TASK-035's private exact bundle
+plan. Its eight ordered family-linked immutable literal slots are not paths, its snapshot, destination, and
+retention/disposal placeholders remain unselected, and its proposal, approval, operator-access,
+and Stage 3 states are fixed to no authority. The eight slots prove synthetic family coverage
+only; they do not assert that a future real deployment has one path per family. No operator
 database has been scanned, no replacement timestamp has been selected or emitted, and current
 aware-only models, external text, sortable runtime projections, queries, and legacy stores have
 not been migrated.
 
-The canonical next action is TASK-036,
-`phase2.canonical_utc_preflight_operator_authorization_request_contract_foundation`. It may add
-only a pure unused strict frozen proposal-only envelope pinned to the exact TASK-035 bundle plan.
-Synthetic placeholders may represent proposed exact family/path entries, an immutable snapshot
-method, report destination, and evidence retention/disposal boundary. A structurally valid
-envelope is not human approval and cannot authorize access. It cannot check path existence,
-access a filesystem, SQLite, or operator data, scan data, invoke an adapter, create a report or
-manifest, serialize output, wire a runtime, migrate or repair data, alter a schema, or perform or
-claim Stage 3. The actual populated authorization and scanner remain separate later actions
-behind explicit project-owner approval of the exact read-only path list, immutable snapshot
-method, report destination, and retention/disposal boundary. TASK-036's exact scope and acceptance
-gates are in `BACKLOG.md`, and its status is mirrored in `PROJECT_STATE.json`.
+The canonical next action is TASK-037,
+`phase2.canonical_utc_preflight_operator_authorization_package_owner_decision`. It is a RISK-3
+authorization decision that requires project-owner approval plus independent Risk and Security
+review. It may prepare the exact proposed
+read-only path list and real cardinality, writer-fenced consistent/immutable snapshot procedure,
+report destination, retention/disposal boundary, and the change, scope, environment, evidence,
+approver, UTC time, expiry or review trigger, monitoring, and rollback required by policy. It
+cannot inspect, resolve, check, or open a proposed operator path or database; access SQLite or
+operator data; scan rows; invoke an adapter; create an operational report or manifest; add
+serialization or scanner code; wire a runtime; migrate or repair data; alter a schema; or perform
+or claim Stage 3. Approved governance-artifact writes are the only filesystem mutation in scope.
+Missing or ambiguous authority remains denial. Any approved scanner remains a separately scoped
+later task. TASK-037's exact scope and acceptance gates are in `BACKLOG.md`, and its RISK-3 human
+approval and independent review requirements are mirrored in `PROJECT_STATE.json`.
 
 ## Phase 1 — Architecture and Engineering Foundation
 

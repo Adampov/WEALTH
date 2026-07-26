@@ -30,7 +30,8 @@ model and its tests. The cross-boundary timestamp evidence and staged target are
 | SQLite canonical candidate evidence | `wealth.domain.sqlite_timestamp_candidate` | Pure and intentionally unused; consumes only an exact parse result and derives exact fixed-UTC datetime, canonical six-digit `Z` text, and epoch-microsecond triples for successful outcomes while retaining failures, overflow, ordering, and all source evidence |
 | SQLite canonical candidate census evidence | `wealth.domain.sqlite_timestamp_candidate_census` | Pure and intentionally unused; consumes one exact family-scoped candidate result and produces one ordered summary per declared column, including empty columns, with exact status counts, source-offset and precision frequencies, and projectable epoch extrema while retaining all source evidence |
 | SQLite all-family candidate census bundle evidence | `wealth.domain.sqlite_timestamp_candidate_census_bundle` | Pure and intentionally unused; consumes exactly eight exact family censuses in reviewed order, retains every source unchanged, and reconciles only their existing counts, frequencies, and projectable epoch extrema across the exact 8-family, 20-table, 37-column shape |
-| Canonical UTC target | ADR 0027 and the UTC boundary inventory | Clock enforcement plus the isolated codec, projection, synthetic fingerprint, raw timestamp-byte, pure parse-evidence, canonical-candidate, family-scoped census, and all-family bundle foundations are complete; authorization-request, operator preflight, persisted-contract, query, schema, and migration work remain open under `RISK-005` |
+| SQLite operator-preflight authorization-request proposal | `wealth.domain.sqlite_operator_preflight_authorization_request` | Pure and intentionally unused; pins the private exact TASK-035 bundle plan, exposes eight ordered non-path symbolic family slots plus unselected snapshot/destination/retention placeholders, and fixes proposal, approval, access, and Stage 3 states to no authority |
+| Canonical UTC target | ADR 0027 and the UTC boundary inventory | Clock enforcement plus the isolated codec, projection, synthetic fingerprint, raw timestamp-byte, pure parse-evidence, canonical-candidate, family-scoped census, all-family bundle, and symbolic authorization-request foundations are complete; the populated owner decision, operator preflight, persisted-contract, query, schema, and migration work remain open under `RISK-005` |
 
 ## Contract Rules
 
@@ -88,6 +89,14 @@ model and its tests. The cross-boundary timestamp evidence and staged target are
   tables, and 37 columns. It performs no I/O, row or instant grouping, stored-projection
   comparison, serialization, report or manifest creation, runtime action, operator-data access,
   migration, schema change, or Stage 3 action.
+- The pure authorization-request proposal is pinned to the private exact TASK-035 bundle plan and
+  contains exactly eight ordered family-linked immutable literal slots that accept no filesystem
+  path values. Its boundary placeholders remain explicitly unselected, and its fixed states record
+  proposal only, no authority, no human approval, no operator-data authorization, and an
+  unsatisfied Stage 3 gate. Eight slots prove synthetic family coverage only and do not assert
+  future real path cardinality. Construction performs no I/O and adds no operator path,
+  serialization workflow, runtime consumer, scanner, report, manifest, migration, schema change,
+  or Stage 3 action.
 - Source identity, event time, observation time, processing time, schema version, and lineage are
   retained whenever applicable.
 - Missing, stale, conflicting, truncated, or unverifiable evidence is represented explicitly and
