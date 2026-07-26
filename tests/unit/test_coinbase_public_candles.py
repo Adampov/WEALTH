@@ -39,6 +39,13 @@ INVALID_CLOCK_VALUES = (
         id="named-zero-offset",
     ),
 )
+INVALID_TIMEOUTS = (
+    pytest.param(float("nan"), id="nan"),
+    pytest.param(float("inf"), id="positive-infinity"),
+    pytest.param(float("-inf"), id="negative-infinity"),
+    pytest.param(0.0, id="zero"),
+    pytest.param(-0.25, id="negative"),
+)
 
 
 @pytest.fixture
@@ -154,6 +161,48 @@ def source(http: StubHttpClient) -> CoinbasePublicCandleSource:
         http=http,
         clock=SequenceClock(REQUEST_TIME, OBSERVED_AT, PROCESSED_AT),
     )
+
+
+@pytest.mark.parametrize("timeout_seconds", INVALID_TIMEOUTS)
+def test_invalid_timeout_is_rejected_before_http(
+    timeout_seconds: float,
+) -> None:
+    http = StubHttpClient(response([]))
+
+    with pytest.raises(ValueError) as error:
+        CoinbasePublicCandleSource(
+            http=http,
+            clock=SequenceClock(REQUEST_TIME),
+            timeout_seconds=timeout_seconds,
+        )
+
+    assert str(error.value) == "timeout_seconds must be finite and positive"
+    assert http.calls == []
+
+
+@pytest.mark.parametrize(
+    "timeout_seconds",
+    [
+        pytest.param(1, id="integer"),
+        pytest.param(10**1_000, id="large-integer"),
+        pytest.param(0.25, id="fractional"),
+    ],
+)
+def test_finite_positive_timeout_is_forwarded_unchanged(
+    timeout_seconds: float,
+) -> None:
+    http = StubHttpClient(response([]))
+    adapter = CoinbasePublicCandleSource(
+        http=http,
+        clock=SequenceClock(REQUEST_TIME, OBSERVED_AT, PROCESSED_AT),
+        timeout_seconds=timeout_seconds,
+    )
+
+    adapter.fetch(request())
+
+    assert len(http.calls) == 1
+    assert http.calls[0][2] == timeout_seconds
+    assert http.calls[0][2] is timeout_seconds
 
 
 @pytest.mark.parametrize("invalid_time", INVALID_CLOCK_VALUES)
