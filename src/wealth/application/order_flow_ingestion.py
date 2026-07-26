@@ -8,6 +8,7 @@ from wealth.domain.order_flow_quality import (
     OrderFlowSequenceReport,
     OrderFlowWriteResult,
     OrderFlowWriteStatus,
+    order_flow_record_type,
 )
 from wealth.domain.quality import (
     DataQualityStatus,
@@ -30,13 +31,38 @@ class OrderFlowIngestionResult:
     def accepted(self) -> bool:
         """Return whether every record passed quality and durable admission."""
 
-        return (
-            self.quality.status is DataQualityStatus.PASS
-            and self.raw_write is not None
-            and self.raw_write.status is not RawPayloadWriteStatus.CONFLICT
-            and len(self.writes) == len(self.batch.records)
-            and all(write.status is not OrderFlowWriteStatus.CONFLICT for write in self.writes)
-        )
+        if self.quality.status is not DataQualityStatus.PASS or self.raw_write is None:
+            return False
+
+        raw_record_id = self.batch.raw_payload.record_id
+        if self.raw_write.incoming_record_id != raw_record_id:
+            return False
+        if self.raw_write.status is RawPayloadWriteStatus.INSERTED:
+            if self.raw_write.existing_record_id is not None:
+                return False
+        elif self.raw_write.status is RawPayloadWriteStatus.DUPLICATE:
+            if self.raw_write.existing_record_id != raw_record_id:
+                return False
+        else:
+            return False
+
+        if len(self.writes) != len(self.batch.records):
+            return False
+        for write, record in zip(self.writes, self.batch.records, strict=True):
+            if (
+                write.incoming_record_id != record.record_id
+                or write.record_type is not order_flow_record_type(record)
+            ):
+                return False
+            if write.status is OrderFlowWriteStatus.INSERTED:
+                if write.existing_record_id is not None:
+                    return False
+            elif write.status is OrderFlowWriteStatus.DUPLICATE:
+                if write.existing_record_id is None:
+                    return False
+            else:
+                return False
+        return True
 
 
 @dataclass(frozen=True, slots=True)

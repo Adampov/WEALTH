@@ -6,62 +6,47 @@ promoted through review.
 
 ## Next Action
 
-### TASK-040 — Exact order-flow persistence-evidence validation
+### TASK-041 — Finite public HTTP timeout-boundary validation
 
-- **Key:** `phase2.exact_order_flow_persistence_evidence_validation`
+- **Key:** `phase2.finite_public_http_timeout_boundary_validation`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
 - **Human approval:** NOT REQUIRED — bounded fail-closed development hardening under the owner's
   explicit authorization; no permission, deployment, or operator-data change.
-- **Context:** `OrderFlowIngestionResult.accepted` checks quality, result count, and conflicts but
-  does not bind the raw outcome to the batch raw payload or each ordered write outcome to the
-  corresponding record identity and family. A nonconforming store can therefore return
-  same-length misattributed evidence that appears accepted.
-- **Goal:** Accept a quality-passing order-flow batch only when the returned raw and canonical
-  write outcomes exactly and coherently correspond to that batch, while preserving legitimate
-  empty public-trade windows.
-- **Scope:** Harden the order-flow ingestion-result boundary. Bind raw identity and status
-  coherence; require exact ordered result count, incoming record IDs, and record-family types;
-  reject missing, extra, duplicated, reordered, misattributed, contradictory, or conflicting
-  outcomes; preserve a valid zero-record batch as accepted when its raw evidence is coherent.
-  Add deterministic hostile-store tests and downstream recoverable public-trade checkpoint
-  non-advancement evidence.
-- **Files:** `src/wealth/application/order_flow_ingestion.py`,
-  `src/wealth/ports/order_flow.py`,
-  `tests/unit/test_order_flow_persistence_evidence.py`,
-  `tests/integration/test_recoverable_public_trade_collection.py`,
+- **Context:** The shared `UrllibHttpClient` and the Binance candle, Coinbase candle, and Binance
+  aggregate-trade adapters reject `timeout_seconds <= 0`, but `NaN` and positive infinity bypass
+  that comparison and can reach the transport boundary as invalid finite-work configuration.
+- **Goal:** Require every active public HTTP timeout to be finite and positive before any network
+  call while preserving all existing finite positive behavior.
+- **Scope:** Harden the shared transport and all three active public-provider constructor
+  boundaries with one exact finite-positive rule. Add deterministic tests for `NaN`, positive and
+  negative infinity, zero, and negative values, including proof that invalid transport values
+  never reach `urlopen` and invalid provider values never reach an HTTP client.
+- **Files:** `src/wealth/adapters/http.py`, `src/wealth/adapters/binance.py`,
+  `src/wealth/adapters/coinbase.py`, `src/wealth/adapters/binance_order_flow.py`,
+  `tests/unit/test_http_adapter.py`, the three existing provider unit-test files,
   `docs/contracts/MARKET_DATA.md`, plus coordinated governance files and governance tests.
-- **Constraints:** Do not change provider adapters, network requests, retry, splitting or range
-  policy, order-flow quality rules, raw bytes, digests, lineage, canonical serialization,
-  persistence-result model validators, store implementations, storage schemas, SQLite SQL or
-  transactions, checkpoint transition rules, dependencies, candle ingestion, operator paths,
-  TASK-037 authority, migration, or Stage 3. Do not add post-write storage reads or claim that
-  returned outcome validation independently proves physical durability.
+- **Constraints:** Do not change endpoints, queries, headers, retry, pagination, range splitting,
+  rate budgets, payload parsing, canonicalization, quality, storage, schemas, dependencies,
+  runtime wiring, operator paths, TASK-037 authority, migration, or Stage 3. Do not add a network
+  request, retry, fallback timeout, coercion, or silent repair.
 
 Acceptance gates:
 
-1. A quality-passing result is accepted only when the raw outcome identifies the batch's exact raw
-   payload; `INSERTED` has no existing identity; and `DUPLICATE` identifies that same prior raw
-   identity. A raw `CONFLICT`, missing result, wrong ID, or contradictory identity is rejected.
-2. After a non-conflicting raw outcome, the write tuple has exactly the batch-record length and
-   each ordered result has the matching `incoming_record_id` and exact
-   `OrderFlowRecordType`. Acceptance permits only `INSERTED` or `DUPLICATE` results and rejects
-   every conflict.
-3. For a non-empty batch, empty, short, extra, reordered, duplicated, wrong-ID, wrong-family, and
-   contradictory outcomes from deterministic hostile stores all fail closed without sorting,
-   repairing, or inventing evidence.
-4. A valid quality-passing zero-record batch with coherent non-conflicting raw evidence and an
-   empty write tuple remains accepted.
-5. Recoverable public-trade collection receiving malformed persistence evidence records the
-   existing rejected outcome, does not advance its durable cursor or completion counters, and
-   does not request later work.
-6. Existing valid in-memory and SQLite insert, empty-window, restart, replay, duplicate, and
-   conflict behavior remains unchanged; no additional storage or network I/O occurs.
-7. Documentation preserves the returned-evidence versus physical-durability limitation.
-   Formatting, lint, strict typing, complete tests, lockfile verification, dependency audit,
-   health slice, and CI pass.
-8. TASK-037 remains blocked and authorization remains denied; no operator data, path, database,
+1. `UrllibHttpClient.get` rejects non-finite, zero, and negative `timeout_seconds` with the exact
+   public error `timeout_seconds must be finite and positive` before constructing or invoking any
+   network request.
+2. Each active provider constructor rejects the same invalid values with the same exact error
+   before an HTTP client can be called; finite positive integer and fractional values remain
+   accepted unchanged.
+3. Deterministic tests cover `NaN`, positive infinity, negative infinity, zero, and negative
+   values at every boundary and prove no invalid value reaches `urlopen` or provider work.
+4. Existing transport exception mapping, provider endpoints, queries, timeout forwarding, parsing,
+   canonicalization, and typed failure behavior remain unchanged.
+5. Documentation records the finite-work timeout boundary. Formatting, lint, strict typing,
+   complete tests, lockfile verification, dependency audit, health slice, and CI pass.
+6. TASK-037 remains blocked and authorization remains denied; no operator data, path, database,
    scanner, report, migration, or Stage 3 action occurs.
 
 ## Blocked, Awaiting Owner-Supplied Restricted Inputs
@@ -117,6 +102,28 @@ Acceptance gates:
    all repository gates pass.
 
 ## Recently Completed
+
+### TASK-040 — Exact order-flow persistence-evidence validation
+
+- **Key:** `phase2.exact_order_flow_persistence_evidence_validation`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Files:** `src/wealth/application/order_flow_ingestion.py`,
+  `src/wealth/ports/order_flow.py`, `tests/unit/test_order_flow_persistence_evidence.py`,
+  `tests/integration/test_recoverable_public_trade_collection.py`,
+  `docs/contracts/MARKET_DATA.md`, and the coordinated governance files and governance tests.
+- **Result:** Order-flow admission now requires a passing quality report, an exact coherent raw
+  identity, and one ordered status-coherent outcome per canonical batch record, each bound to the
+  corresponding incoming ID and record family. Missing, extra, duplicated, reordered,
+  misidentified, wrong-family, contradictory, and conflicting evidence fails closed.
+  Deterministic hostile-store tests cover the complete matrix while preserving valid zero-record
+  windows, and recoverable public-trade collection proves malformed returned evidence leaves its
+  durable cursor and completion counters unchanged and prevents a later request even when the
+  nonconforming store physically wrote the first window. Returned-outcome validation does not
+  independently prove physical durability, undo store mutations, or make the evidence and control
+  databases atomic. Provider, network, retry, range, quality, canonical models, raw bytes, store
+  implementations, schemas, dependencies, operator authority, migration, and Stage 3 remain
+  unchanged.
 
 ### TASK-039 — Exact candle persistence-evidence validation
 

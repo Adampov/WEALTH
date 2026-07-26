@@ -63,8 +63,13 @@ schemas, natural keys, record types, and stream indexes are revalidated when evi
 
 `OrderFlowBatchIngestor` is the fail-closed admission path. It audits the complete bounded batch
 before storage. A quality failure causes no raw or canonical write. A passing report permits the
-atomic batch write, but a raw or canonical storage conflict keeps the overall result unaccepted.
-Exact repeats remain accepted idempotent outcomes.
+atomic batch write. Admission then requires the returned raw outcome to identify the exact batch
+payload with a coherent inserted or duplicate status, plus exactly one ordered outcome for every
+canonical record. Each canonical outcome must bind the incoming record ID and record family, use a
+coherent inserted or duplicate status, and preserve input order. Missing, extra, duplicated,
+reordered, misidentified, wrong-family, conflicting, or status-incoherent outcomes keep the result
+unaccepted. A valid zero-record batch remains accepted when its raw outcome is coherent and its
+canonical outcome tuple is empty. Exact repeats remain accepted idempotent outcomes.
 
 ## Public Binance Aggregate-Trade Adapter
 
@@ -198,8 +203,12 @@ refetch.
 Because the evidence and control databases cannot commit atomically together, a crash after
 evidence and before control advancement causes the retained leaf to be fetched again. The existing
 order-flow store accepts that replay idempotently. Advancing the checkpoint before evidence is
-durable remains forbidden. The orchestrator is not a scheduler, daemon, continuous poller, or live
-stream.
+durable remains forbidden. Malformed non-conflicting persistence evidence follows the existing
+ingestion-rejected path: the checkpoint records degraded health and failure diagnostics without
+advancing its cursor or completion counters and without requesting a later window. Typed write
+outcomes establish internally coherent admission evidence; they do not prove physical durability,
+readback, `fsync`, rollback, or atomicity between the evidence and control databases. The
+orchestrator is not a scheduler, daemon, continuous poller, or live stream.
 
 ## Canonical Candle
 
