@@ -29,7 +29,8 @@ model and its tests. The cross-boundary timestamp evidence and staged target are
 | SQLite timestamp parse evidence | `wealth.domain.sqlite_timestamp_parse` | Pure and intentionally unused; consumes only an exact timestamp-byte result and classifies the reviewed writer grammar, offset policy, nullability, storage class, and epoch range while retaining all source evidence |
 | SQLite canonical candidate evidence | `wealth.domain.sqlite_timestamp_candidate` | Pure and intentionally unused; consumes only an exact parse result and derives exact fixed-UTC datetime, canonical six-digit `Z` text, and epoch-microsecond triples for successful outcomes while retaining failures, overflow, ordering, and all source evidence |
 | SQLite canonical candidate census evidence | `wealth.domain.sqlite_timestamp_candidate_census` | Pure and intentionally unused; consumes one exact family-scoped candidate result and produces one ordered summary per declared column, including empty columns, with exact status counts, source-offset and precision frequencies, and projectable epoch extrema while retaining all source evidence |
-| Canonical UTC target | ADR 0027 and the UTC boundary inventory | Clock enforcement plus the isolated codec, projection, synthetic fingerprint, raw timestamp-byte, pure parse-evidence, canonical-candidate, and family-scoped census foundations are complete; all-family bundle reconciliation, operator preflight, persisted-contract, query, schema, and migration work remain open under `RISK-005` |
+| SQLite all-family candidate census bundle evidence | `wealth.domain.sqlite_timestamp_candidate_census_bundle` | Pure and intentionally unused; consumes exactly eight exact family censuses in reviewed order, retains every source unchanged, and reconciles only their existing counts, frequencies, and projectable epoch extrema across the exact 8-family, 20-table, 37-column shape |
+| Canonical UTC target | ADR 0027 and the UTC boundary inventory | Clock enforcement plus the isolated codec, projection, synthetic fingerprint, raw timestamp-byte, pure parse-evidence, canonical-candidate, family-scoped census, and all-family bundle foundations are complete; authorization-request, operator preflight, persisted-contract, query, schema, and migration work remain open under `RISK-005` |
 
 ## Contract Rules
 
@@ -80,6 +81,13 @@ model and its tests. The cross-boundary timestamp evidence and staged target are
   payload. Equal instants are not grouped, and every TASK-030/031/032 object and source spelling
   remains linked in unchanged order. The layer performs no I/O, has no runtime consumer, selects
   no replacement, and does not inspect operator data or complete Stage 3.
+- The pure all-family census bundle accepts only an exact built-in tuple containing one deeply
+  revalidated TASK-034 result per reviewed family in canonical order. It retains all eight
+  sources unchanged and aggregates only their existing exhaustive counts, sorted source-offset
+  and precision frequencies, and projectable epoch extrema across exactly eight families, 20
+  tables, and 37 columns. It performs no I/O, row or instant grouping, stored-projection
+  comparison, serialization, report or manifest creation, runtime action, operator-data access,
+  migration, schema change, or Stage 3 action.
 - Source identity, event time, observation time, processing time, schema version, and lineage are
   retained whenever applicable.
 - Missing, stale, conflicting, truncated, or unverifiable evidence is represented explicitly and

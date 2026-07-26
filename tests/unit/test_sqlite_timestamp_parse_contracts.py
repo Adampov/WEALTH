@@ -37,6 +37,9 @@ CANDIDATE_MODULE_PATH = (
 CANDIDATE_CENSUS_MODULE_PATH = (
     REPOSITORY_ROOT / "src" / "wealth" / "domain" / "sqlite_timestamp_candidate_census.py"
 )
+CANDIDATE_CENSUS_BUNDLE_MODULE_PATH = (
+    REPOSITORY_ROOT / "src" / "wealth" / "domain" / "sqlite_timestamp_candidate_census_bundle.py"
+)
 
 EXPECTED_NULLABLE_COLUMNS = {
     ("continuous_collection_checkpoints", "active_window_end_exclusive"),
@@ -533,6 +536,7 @@ def test_parse_module_is_pure_and_has_no_normalization_or_runtime_consumer() -> 
             PARSE_MODULE_PATH,
             CANDIDATE_MODULE_PATH,
             CANDIDATE_CENSUS_MODULE_PATH,
+            CANDIDATE_CENSUS_BUNDLE_MODULE_PATH,
         }:
             continue
         text = path.read_text(encoding="utf-8")

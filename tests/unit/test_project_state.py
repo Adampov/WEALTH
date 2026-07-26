@@ -58,14 +58,18 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
         "canonical_utc_preflight_timestamp_candidate_census_evidence_foundation"
         in state.active_components
     )
+    assert (
+        "canonical_utc_preflight_timestamp_candidate_census_bundle_evidence_foundation"
+        in state.active_components
+    )
     assert len(state.open_tasks) == 1
-    assert state.open_tasks[0].task_id == "TASK-035"
+    assert state.open_tasks[0].task_id == "TASK-036"
     assert state.open_tasks[0].status == "ready"
     assert state.open_tasks[0].requires_human_approval is False
-    assert state.next_action.task_id == "TASK-035"
+    assert state.next_action.task_id == "TASK-036"
     assert (
         state.next_action.action
-        == "phase2.canonical_utc_preflight_timestamp_candidate_census_bundle_evidence_foundation"
+        == "phase2.canonical_utc_preflight_operator_authorization_request_contract_foundation"
     )
     assert any(decision.decision_id == "ADR-0027" for decision in state.recent_decisions)
 
@@ -98,10 +102,22 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_034_section = completed_section.split("### TASK-034 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
+    task_035_section = completed_section.split("### TASK-035 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
+    assert "A structurally valid envelope is not human approval." in next_action_section
+    assert "actual populated authorization and scanner remain separate later actions" in (
+        next_action_section
+    )
+    assert "project owner must approve" in next_action_section
+    assert "exact read-only path list" in next_action_section
+    assert "immutable snapshot method" in next_action_section
+    assert "report destination" in next_action_section
+    assert "retention/disposal boundary" in next_action_section
     assert "- **Status:** COMPLETE" in task_031_section
     assert "`phase2.canonical_utc_preflight_timestamp_evidence_foundation`" in task_031_section
     assert "- **Status:** COMPLETE" in task_032_section
@@ -117,6 +133,11 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert (
         "`phase2.canonical_utc_preflight_timestamp_candidate_census_evidence_foundation`"
         in task_034_section
+    )
+    assert "- **Status:** COMPLETE" in task_035_section
+    assert (
+        "`phase2.canonical_utc_preflight_timestamp_candidate_census_bundle_evidence_foundation`"
+        in task_035_section
     )
 
 

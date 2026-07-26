@@ -5,43 +5,62 @@ This file records approved, bounded work. `PROJECT_STATE.json` identifies the on
 
 ## Next Action
 
-### TASK-035 — Synthetic all-family candidate-census bundle reconciliation evidence foundation
+### TASK-036 — Synthetic operator-preflight authorization-request contract foundation
 
-- **Key:** `phase2.canonical_utc_preflight_timestamp_candidate_census_bundle_evidence_foundation`
+- **Key:** `phase2.canonical_utc_preflight_operator_authorization_request_contract_foundation`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
-- **Goal:** Add an unused pure all-family reconciliation layer over the complete reviewed set of
-  TASK-034 synthetic candidate censuses while retaining every input result unchanged.
-- **Scope:** Consume exactly eight exact TASK-034 results, one per reviewed family in canonical
-  family order. Reconcile exactly eight families, 20 tables, and 37 declared timestamp columns,
-  and aggregate only the existing total and exhaustive status counts, source-offset and
-  fractional-precision frequencies, and projectable canonical epoch extrema.
-- **Constraints:** Pure evidence consumption only: no SQLite, filesystem, adapter,
-  JSON-container, serialization, report, manifest, operator-data, or runtime access. Do not
-  compare stored projections, group rows or instants, assign collision identities, deduplicate,
-  merge, quarantine, choose replacement bytes, migrate, repair, alter a schema, or add CLI,
-  service, provider, credential, signal, portfolio, Risk, order, financial, or active runtime
-  wiring. Do not claim Stage 3 completion.
+- **Goal:** Add an unused pure proposal-only authorization-request envelope for a possible later
+  operator preflight without accessing operator data or granting approval.
+- **Scope:** Add strict frozen versioned contracts pinned to the exact TASK-035 bundle plan.
+  Synthetic placeholders may represent the proposed exact family/path entries, immutable
+  snapshot method, report destination, and evidence retention/disposal boundary.
+- **Constraints:** Proposal structure only: no path existence checks, filesystem, SQLite,
+  operator data, scanning, adapters, report or manifest creation, serialization, runtime wiring,
+  migration, repair, schema change, or Stage 3 action. A structurally valid envelope is not human
+  approval and cannot authorize access. The actual populated authorization and scanner remain
+  separate later actions. Before either can access operator data, the project owner must approve
+  the exact read-only path list, immutable snapshot method, report destination, and evidence
+  retention/disposal boundary.
 
 Acceptance gates:
 
-1. Strict frozen plans and bundle evidence reject altered, missing, duplicate, reordered,
-   unsupported, or incorrectly linked TASK-034 inputs and aggregate declarations.
-2. Construction accepts exactly eight exact successful TASK-034 results in reviewed family order
-   and performs no I/O, adapter, serialization, report, manifest, or runtime operation.
-3. The bundle reconciles exactly eight families, 20 tables, and 37 per-column summaries while
-   retaining every complete TASK-034 result and all nested TASK-030/031/032/033 evidence.
-4. Aggregate totals, exhaustive status counts, bounded sorted offset and precision frequencies,
-   and projectable epoch extrema reconcile exactly to the unchanged family censuses.
-5. Empty families or columns, mixed outcomes, duplicate instants, normalization overflow, signed
-   offsets, precision variants, and epoch bounds remain deterministic without row or instant
-   grouping.
-6. No operator data, stored-projection comparison, collision identity, deduplication, merge,
-   quarantine, replacement, migration, schema change, or Stage 3 claim is introduced, and all
-   repository gates pass.
+1. One strict frozen proposal-only plan is pinned to the exact TASK-035 all-family bundle plan and
+   cannot accept caller-supplied family or census semantics.
+2. Synthetic placeholder evidence represents the proposed exact family/path entries in canonical
+   order plus the immutable snapshot method, report destination, and retention/disposal boundary.
+3. Contracts reject altered, missing, duplicate, reordered, unsupported, extra, or incorrectly
+   linked proposal fields and nested declarations.
+4. A structurally valid envelope is not human approval. No field, status, or successful
+   validation grants operator-data access or satisfies the project-owner approval gate.
+5. Construction performs no path existence check, filesystem or SQLite I/O, operator-data scan,
+   adapter call, report or manifest creation, serialization, runtime operation, migration,
+   repair, schema change, or Stage 3 action.
+6. The actual populated authorization and scanner remain separate later actions; the project
+   owner must approve the exact read-only path list, immutable snapshot method, report
+   destination, and retention/disposal boundary before any later scan, and all repository gates
+   pass.
 
 ## Recently Completed
+
+### TASK-035 — Synthetic all-family candidate-census bundle reconciliation evidence foundation
+
+- **Key:** `phase2.canonical_utc_preflight_timestamp_candidate_census_bundle_evidence_foundation`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Result:** One immutable pure bundle plan now pins the complete reviewed TASK-034 plan sequence
+  and accepts only an exact built-in tuple of eight deeply valid family census results in
+  canonical order. The result retains all eight TASK-034 inputs and their nested evidence
+  unchanged while exactly reconciling eight families, 20 tables, 37 columns, total and exhaustive
+  status counts, sorted source-offset and precision frequencies, and projectable epoch extrema.
+  Deep validation rejects missing, duplicate, reordered, forged, subclassed, or altered sources,
+  plans, counts, frequencies, and extrema before aggregation. Synthetic tests cover the exact
+  one-row aggregate, all-empty families, mixed outcomes and bounds, hostile source sequences,
+  deep forgery before aggregation, and post-TASK-034 no-I/O behavior. No filesystem, SQLite,
+  operator scan, stored-projection comparison, row/instant/collision grouping, serialization,
+  report, manifest, adapter, replacement, runtime consumer, migration, schema change, or Stage 3
+  completion was added.
 
 ### TASK-034 — Synthetic canonical-candidate census evidence foundation
 

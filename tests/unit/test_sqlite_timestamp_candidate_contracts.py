@@ -43,6 +43,9 @@ CANDIDATE_MODULE_PATH = (
 CANDIDATE_CENSUS_MODULE_PATH = (
     REPOSITORY_ROOT / "src" / "wealth" / "domain" / "sqlite_timestamp_candidate_census.py"
 )
+CANDIDATE_CENSUS_BUNDLE_MODULE_PATH = (
+    REPOSITORY_ROOT / "src" / "wealth" / "domain" / "sqlite_timestamp_candidate_census_bundle.py"
+)
 
 
 def _cell(
@@ -426,7 +429,11 @@ def test_candidate_module_is_pure_and_has_no_runtime_consumer() -> None:
 
     consumers = []
     for path in (REPOSITORY_ROOT / "src" / "wealth").rglob("*.py"):
-        if path in {CANDIDATE_MODULE_PATH, CANDIDATE_CENSUS_MODULE_PATH}:
+        if path in {
+            CANDIDATE_MODULE_PATH,
+            CANDIDATE_CENSUS_MODULE_PATH,
+            CANDIDATE_CENSUS_BUNDLE_MODULE_PATH,
+        }:
             continue
         if "sqlite_timestamp_candidate" in path.read_text(encoding="utf-8"):
             consumers.append(path)
