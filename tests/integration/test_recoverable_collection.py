@@ -34,7 +34,7 @@ from wealth.domain.collection import (
     SourceHealthStatus,
 )
 from wealth.domain.market import CandleTimeframe, InstrumentType
-from wealth.domain.quality import CandleStream
+from wealth.domain.quality import CandleStream, MarketDataBatchWriteResult
 from wealth.domain.rate_budget import RateBudgetPolicy, RateBudgetRequest
 from wealth.ports.collection import (
     CollectionCheckpointStore,
@@ -43,7 +43,11 @@ from wealth.ports.collection import (
 )
 from wealth.ports.foundation import Clock
 from wealth.ports.http import HttpResponse
-from wealth.ports.market import HistoricalCandleRequest, HistoricalCandleSource
+from wealth.ports.market import (
+    CandleFetchBatch,
+    HistoricalCandleRequest,
+    HistoricalCandleSource,
+)
 
 WINDOW_START = datetime(2026, 7, 24, 10, 0, tzinfo=UTC)
 INITIAL_NOW = WINDOW_START + timedelta(days=1)
@@ -132,6 +136,19 @@ class ScenarioHttpClient:
             kline(start + index * timedelta(minutes=1)) for index in range(int(captured["limit"]))
         ]
         return response(rows)
+
+
+class IncompleteEvidenceCandleStore(SQLiteCandleStore):
+    """Persist a page but deliberately omit its returned candle outcomes."""
+
+    def __init__(self, path: Path) -> None:
+        super().__init__(path)
+        self.appended_batches: list[CandleFetchBatch] = []
+
+    def append_batch(self, batch: CandleFetchBatch) -> MarketDataBatchWriteResult:
+        self.appended_batches.append(batch)
+        result = super().append_batch(batch)
+        return result.model_copy(update={"candles": ()})
 
 
 class CrashingCheckpointStore:
@@ -439,6 +456,57 @@ def test_completed_job_is_durable_observable_and_idempotent(tmp_path: Path) -> N
     assert summary.observation_count == 3
     assert summary.healthy_count == 3
     assert summary.accepted_count == 3
+
+
+def test_incomplete_persistence_evidence_does_not_advance_checkpoint(
+    tmp_path: Path,
+) -> None:
+    clock = MutableClock()
+    ids = SequentialIds()
+    http = ScenarioHttpClient()
+    sleeper = RecordingSleeper()
+    market_store = IncompleteEvidenceCandleStore(tmp_path / "market.sqlite3")
+    state_store = SQLiteCollectionCheckpointStore(tmp_path / "collection.sqlite3")
+    service = collector(
+        http=http,
+        market_store=market_store,
+        checkpoint_store=state_store,
+        clock=clock,
+        ids=ids,
+        sleeper=sleeper,
+        worker_id="worker-a",
+    )
+    job = service.create_job(request(4))
+
+    result = service.run(job.job_id)
+    durable = state_store.get(job.job_id)
+    observations = state_store.health_for_job(job.job_id)
+    summary = state_store.health_summary(job.job_id)
+
+    assert result.status is CollectionRunStatus.FAILED
+    assert result.pages_attempted == 1
+    assert durable == result.checkpoint
+    assert durable is not None
+    assert durable.status is CollectionJobStatus.FAILED
+    assert durable.next_window_start == WINDOW_START
+    assert durable.pages_completed == 0
+    assert durable.candles_completed == 0
+    assert durable.total_attempts == 1
+    assert durable.last_failure_code == "page_rejected"
+    assert durable.last_stop_reason == "quality_or_storage_gate"
+    assert len(http.calls) == 1
+    assert len(market_store.appended_batches) == 1
+    assert sleeper.delays == []
+    assert len(market_store.records_for_stream(stream())) == 2
+    assert len(observations) == 1
+    assert observations[0].status is SourceHealthStatus.DEGRADED
+    assert observations[0].accepted is False
+    assert observations[0].failure_code == "page_rejected"
+    assert observations[0].stop_reason == "quality_or_storage_gate"
+    assert summary.observation_count == 1
+    assert summary.degraded_count == 1
+    assert summary.accepted_count == 0
+    assert summary.total_attempts == 1
 
 
 def test_compare_and_swap_lease_prevents_duplicate_worker(tmp_path: Path) -> None:

@@ -31,14 +31,38 @@ class HistoricalCandleIngestionResult:
 
     @property
     def accepted(self) -> bool:
-        """Return whether the complete requested batch passed the gate."""
+        """Return whether quality and exact persistence evidence passed the gate."""
 
-        return (
-            self.quality.status is DataQualityStatus.PASS
-            and self.raw_write is not None
-            and self.raw_write.status is not RawPayloadWriteStatus.CONFLICT
-            and all(write.status is not CandleWriteStatus.CONFLICT for write in self.writes)
-        )
+        raw_write = self.raw_write
+        if (
+            self.quality.status is not DataQualityStatus.PASS
+            or raw_write is None
+            or raw_write.incoming_record_id != self.batch.raw_payload.record_id
+        ):
+            return False
+        if raw_write.status is RawPayloadWriteStatus.INSERTED:
+            if raw_write.existing_record_id is not None:
+                return False
+        elif raw_write.status is RawPayloadWriteStatus.DUPLICATE:
+            if raw_write.existing_record_id != self.batch.raw_payload.record_id:
+                return False
+        else:
+            return False
+        if len(self.writes) != len(self.batch.records):
+            return False
+
+        for write, record in zip(self.writes, self.batch.records, strict=True):
+            if write.incoming_record_id != record.record_id:
+                return False
+            if write.status is CandleWriteStatus.INSERTED:
+                if write.existing_record_id is not None:
+                    return False
+            elif write.status is CandleWriteStatus.DUPLICATE:
+                if write.existing_record_id is None:
+                    return False
+            else:
+                return False
+        return True
 
 
 @dataclass(frozen=True, slots=True)

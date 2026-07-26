@@ -44,7 +44,8 @@
     "sqlite_market_data_storage",
     "data_quality_and_reconciliation",
     "collector_health_observability",
-    "public_provider_payload_failure_boundary_hardening"
+    "public_provider_payload_failure_boundary_hardening",
+    "exact_candle_persistence_evidence_validation"
   ],
   "active_integrations": [
     "github_actions_ci"
@@ -86,8 +87,8 @@
       "requires_human_approval": true
     },
     {
-      "task_id": "TASK-039",
-      "action": "phase2.exact_candle_persistence_evidence_validation",
+      "task_id": "TASK-040",
+      "action": "phase2.exact_order_flow_persistence_evidence_validation",
       "status": "ready",
       "risk_tier": 1,
       "requires_human_approval": false
@@ -124,8 +125,8 @@
     }
   ],
   "next_action": {
-    "task_id": "TASK-039",
-    "action": "phase2.exact_candle_persistence_evidence_validation"
+    "task_id": "TASK-040",
+    "action": "phase2.exact_order_flow_persistence_evidence_validation"
   },
-  "last_updated_utc": "2026-07-26T20:10:19Z"
+  "last_updated_utc": "2026-07-26T20:39:20Z"
 }
