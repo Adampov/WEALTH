@@ -69,16 +69,24 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
         "canonical_utc_preflight_operator_authorization_request_contract_foundation"
         in state.active_components
     )
-    assert len(state.open_tasks) == 1
-    assert state.open_tasks[0].task_id == "TASK-037"
-    assert state.open_tasks[0].status == "ready"
-    assert state.open_tasks[0].risk_tier == 3
-    assert state.open_tasks[0].requires_human_approval is True
-    assert state.next_action.task_id == "TASK-037"
-    assert (
-        state.next_action.action
-        == "phase2.canonical_utc_preflight_operator_authorization_package_owner_decision"
+    assert "public_provider_payload_failure_boundary_hardening" in state.active_components
+    assert len(state.open_tasks) == 2
+    task_037, task_039 = state.open_tasks
+    assert task_037.task_id == "TASK-037"
+    assert task_037.status == "blocked"
+    assert task_037.risk_tier == 3
+    assert task_037.requires_human_approval is True
+    assert task_039.task_id == "TASK-039"
+    assert task_039.status == "ready"
+    assert task_039.risk_tier == 1
+    assert task_039.requires_human_approval is False
+    assert state.blockers == (
+        "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance "
+        "location before independent Risk and Security review and the project-owner decision; "
+        "authorization remains denied.",
     )
+    assert state.next_action.task_id == "TASK-039"
+    assert state.next_action.action == "phase2.exact_candle_persistence_evidence_validation"
     assert any(decision.decision_id == "ADR-0027" for decision in state.recent_decisions)
 
 
@@ -93,7 +101,14 @@ def test_project_state_references_existing_governance_artifacts() -> None:
         assert f"| {risk_id} |" in risk_register
 
     next_action_section = backlog.split("## Next Action", maxsplit=1)[1].split(
-        "## Recently Completed", maxsplit=1
+        "## Blocked, Awaiting Owner-Supplied Restricted Inputs", maxsplit=1
+    )[0]
+    blocked_section = backlog.split(
+        "## Blocked, Awaiting Owner-Supplied Restricted Inputs",
+        maxsplit=1,
+    )[1].split(
+        "## Recently Completed",
+        maxsplit=1,
     )[0]
     completed_section = backlog.split("## Recently Completed", maxsplit=1)[1].split(
         "## Queued, Not Yet Approved", maxsplit=1
@@ -116,23 +131,40 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_036_section = completed_section.split("### TASK-036 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
+    task_038_section = completed_section.split("### TASK-038 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
-    assert "- **Risk tier:** RISK 3" in next_action_section
-    assert "- **Human approval:** REQUIRED" in next_action_section
-    assert "independent Risk and Security review" in next_action_section
-    assert "project-owner `APPROVE`, `REJECT`, or `REVISE` decision" in next_action_section
-    assert "real deployment" in next_action_section
-    assert "writer-fenced consistent/immutable snapshot procedure" in next_action_section
-    assert "report destination" in next_action_section
-    assert "retention/disposal boundary" in next_action_section
-    assert "monitoring, and tested rollback evidence" in next_action_section
-    assert "Do not inspect, resolve, check, or" in next_action_section
-    assert "governance-artifact writes are the only filesystem mutation" in next_action_section
-    assert "add serialization or scanner code" in next_action_section
-    assert "Any approved scanner remains a separately scoped later task" in next_action_section
+    assert "- **Risk tier:** RISK 1" in next_action_section
+    assert "- **Human approval:** NOT REQUIRED" in next_action_section
+    assert "HistoricalCandleIngestionResult.accepted" in next_action_section
+    assert "an empty write tuple satisfies `all(...)`" in next_action_section
+    assert "exact incoming record ID" in next_action_section
+    assert "deterministic hostile-store tests" in next_action_section
+    assert "does not advance `next_window_start`" in next_action_section
+    assert "independently proves physical durability" in next_action_section
+    assert "TASK-037 remains blocked and authorization remains denied" in next_action_section
+    assert blocked_section.count("### TASK-") == 1
+    assert "### TASK-037 " in blocked_section
+    assert "- **Status:** BLOCKED" in blocked_section
+    assert "- **Risk tier:** RISK 3" in blocked_section
+    assert "- **Human approval:** REQUIRED" in blocked_section
+    assert "independent Risk and Security reviews" in blocked_section
+    assert "Authorization remains `DENIED`" in blocked_section
+    assert "Return TASK-037 to `READY` only after" in blocked_section
+    assert "project-owner `APPROVE`, `REJECT`, or `REVISE` decision" in blocked_section
+    assert "real deployment" in blocked_section
+    assert "writer-fenced consistent/immutable snapshot procedure" in blocked_section
+    assert "report destination" in blocked_section
+    assert "retention/disposal boundary" in blocked_section
+    assert "monitoring, and tested rollback evidence" in blocked_section
+    assert "Do not inspect, resolve, check, or" in blocked_section
+    assert "governance-artifact writes are the only filesystem mutation" in blocked_section
+    assert "add serialization or scanner code" in blocked_section
+    assert "Any approved scanner remains a separately scoped later task" in blocked_section
     assert "- **Status:** COMPLETE" in task_031_section
     assert "`phase2.canonical_utc_preflight_timestamp_evidence_foundation`" in task_031_section
     assert "- **Status:** COMPLETE" in task_032_section
@@ -162,6 +194,12 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "private exact TASK-035" in task_036_section
     assert "eight symbolic slots prove synthetic family coverage only" in task_036_section
     assert "do not assert that a future real" in task_036_section
+    assert "- **Status:** COMPLETE" in task_038_section
+    assert "`phase2.public_provider_payload_failure_boundary_hardening`" in task_038_section
+    assert "UTF-8, malformed JSON" in task_038_section
+    assert "excessive nesting" in task_038_section
+    assert "non-retryable typed `INVALID_PAYLOAD`" in task_038_section
+    assert "TASK-037 authority" in task_038_section
 
 
 def test_project_state_forbids_unknown_fields() -> None:

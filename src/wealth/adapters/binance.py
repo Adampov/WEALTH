@@ -262,10 +262,10 @@ class BinancePublicCandleSource:
     def _parse_payload(body: bytes) -> tuple[_BinanceKline, ...]:
         try:
             payload: object = json.loads(body.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        except (ValueError, RecursionError) as error:
             raise BinanceCandleError(
                 BinanceCandleErrorCode.INVALID_PAYLOAD,
-                "response was not valid UTF-8 JSON",
+                "response could not be decoded as bounded UTF-8 JSON",
             ) from error
         if not isinstance(payload, list):
             raise BinanceCandleError(

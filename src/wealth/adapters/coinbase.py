@@ -272,10 +272,10 @@ class CoinbasePublicCandleSource:
                 body.decode("utf-8"),
                 parse_float=str,
             )
-        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
+        except (ValueError, RecursionError) as error:
             raise CoinbaseCandleError(
                 CoinbaseCandleErrorCode.INVALID_PAYLOAD,
-                "response was not valid UTF-8 JSON",
+                "response could not be decoded as bounded UTF-8 JSON",
             ) from error
         if not isinstance(payload, list):
             raise CoinbaseCandleError(

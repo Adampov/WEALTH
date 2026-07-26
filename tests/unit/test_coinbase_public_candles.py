@@ -1,7 +1,8 @@
 """Tests for the public, read-only Coinbase Exchange candle adapter."""
 
 import json
-from collections.abc import Mapping
+import sys
+from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime, timedelta, timezone
 from hashlib import sha256
 
@@ -38,6 +39,21 @@ INVALID_CLOCK_VALUES = (
         id="named-zero-offset",
     ),
 )
+
+
+@pytest.fixture
+def fixed_json_decoder_limits() -> Iterator[None]:
+    """Pin and restore the interpreter-wide JSON decoder resource boundaries."""
+
+    previous_integer_limit = sys.get_int_max_str_digits()
+    previous_recursion_limit = sys.getrecursionlimit()
+    sys.set_int_max_str_digits(4_300)
+    sys.setrecursionlimit(1_000)
+    try:
+        yield
+    finally:
+        sys.setrecursionlimit(previous_recursion_limit)
+        sys.set_int_max_str_digits(previous_integer_limit)
 
 
 class SequenceClock:
@@ -354,17 +370,52 @@ def test_open_and_oversized_windows_fail_before_network() -> None:
 
 
 @pytest.mark.parametrize(
+    ("body", "expected_cause"),
+    [
+        pytest.param(b"\xff", UnicodeDecodeError, id="invalid-utf8"),
+        pytest.param(b"not-json", json.JSONDecodeError, id="malformed-json"),
+        pytest.param(
+            b"[" + (b"1" * 5_000) + b"]",
+            ValueError,
+            id="integer-conversion-limit",
+        ),
+        pytest.param(
+            (b"[" * 10_000) + (b"]" * 10_000),
+            RecursionError,
+            id="excessive-nesting",
+        ),
+    ],
+)
+def test_decoder_failures_are_sanitized_and_fail_closed(
+    body: bytes,
+    expected_cause: type[Exception],
+    fixed_json_decoder_limits: None,
+) -> None:
+    http = StubHttpClient(HttpResponse(status_code=200, headers=(), body=body))
+
+    with pytest.raises(CoinbaseCandleError) as error:
+        source(http).fetch(request())
+
+    assert error.value.code is CoinbaseCandleErrorCode.INVALID_PAYLOAD
+    assert error.value.retryable is False
+    assert error.value.retry_after_seconds is None
+    assert type(error.value.__cause__) is expected_cause
+    assert (
+        str(error.value) == "invalid_payload: response could not be decoded as bounded UTF-8 JSON"
+    )
+    assert len(http.calls) == 1
+
+
+@pytest.mark.parametrize(
     "body",
     [
-        b"not-json",
         b'{"message":"not an array"}',
-        b"[" * 2_000 + b"]" * 2_000,
         json.dumps([["too", "short"]]).encode(),
         json.dumps([[1.5, 95, 105, 100, 102, 12]]).encode(),
         json.dumps([[1, True, 105, 100, 102, 12]]).encode(),
     ],
 )
-def test_malformed_provider_payload_fails_closed(body: bytes) -> None:
+def test_structurally_invalid_provider_payload_fails_closed(body: bytes) -> None:
     http = StubHttpClient(HttpResponse(status_code=200, headers=(), body=body))
 
     with pytest.raises(CoinbaseCandleError) as error:

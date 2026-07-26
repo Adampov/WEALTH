@@ -1,17 +1,81 @@
 # Governed Backlog
 
 This file records approved, bounded work. `PROJECT_STATE.json` identifies the one canonical
-`next_action`; later items are directional until promoted through review.
+`next_action`; blocked work remains open without authority, and later items are directional until
+promoted through review.
 
 ## Next Action
+
+### TASK-039 — Exact candle persistence-evidence validation
+
+- **Key:** `phase2.exact_candle_persistence_evidence_validation`
+- **Phase:** 2 — Reliable Market Data Platform
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** READY
+- **Human approval:** NOT REQUIRED — bounded fail-closed development hardening under the owner's
+  explicit authorization; no permission, deployment, or operator-data change.
+- **Context:** `HistoricalCandleIngestionResult.accepted` does not yet bind returned storage
+  evidence to the fetched batch's exact raw-payload identity or candle count, order, and record
+  identities. In particular, an empty write tuple satisfies `all(...)`; downstream recoverable
+  collection can therefore advance a checkpoint without evidence for every fetched candle.
+- **Goal:** Permit a quality-passing candle page to be accepted, and therefore eligible for
+  durable cursor advancement, only when the returned storage evidence exactly and coherently
+  accounts for the batch raw payload and every canonical candle.
+- **Scope:** Harden the historical-candle ingestion-result boundary. Validate the raw write's
+  incoming identity and status/existing-identity relationship; require one ordered candle-write
+  outcome per batch record with the exact incoming record ID; reject missing, extra, duplicated,
+  reordered, misattributed, or internally contradictory outcomes; preserve explicit raw and
+  candle conflicts as rejected results. Add deterministic hostile-store tests and one downstream
+  recoverable-checkpoint non-advancement test.
+- **Files:** `src/wealth/application/ingestion.py`,
+  `tests/unit/test_historical_candle_persistence_evidence.py`,
+  `tests/integration/test_recoverable_collection.py`, `docs/contracts/MARKET_DATA.md`, plus the
+  coordinated governance files and governance tests.
+- **Constraints:** Do not change provider adapters, network requests, retry or pagination policy,
+  candle quality rules, raw bytes, digests, lineage, canonical serialization, storage schemas,
+  SQLite SQL or transactions, checkpoint transition rules, dependencies, order-flow ingestion,
+  operator paths, TASK-037 authority, migration, or Stage 3. Do not add post-write storage reads
+  or claim that returned outcome validation independently proves physical durability.
+
+Acceptance gates:
+
+1. A quality-passing result is accepted only when the raw write identifies the batch's exact raw
+   payload; `INSERTED` has no existing identity; and `DUPLICATE` identifies that same prior raw
+   identity. A raw `CONFLICT`, missing raw result, wrong raw ID, or contradictory identity
+   evidence is rejected.
+2. For a non-conflicting raw write, the candle-write tuple has exactly the batch-record length and
+   its ordered `incoming_record_id` sequence exactly equals the ordered batch candle IDs.
+   `INSERTED` writes identify no existing record; `DUPLICATE` and `CONFLICT` writes identify one.
+   Acceptance requires every candle status to be `INSERTED` or `DUPLICATE`.
+3. Empty, short, extra, reordered, duplicated, wrong-ID, and impossible status/identity evidence
+   from deterministic hostile stores all fail closed; an empty tuple cannot accept a non-empty
+   quality-passing batch.
+4. A recoverable collection receiving malformed persistence evidence records the existing
+   rejected page outcome and does not advance `next_window_start`, `pages_completed`, or
+   `candles_completed`, and does not request a later page.
+5. Existing valid in-memory and SQLite insert, restart, replay, duplicate, and conflict behavior
+   remains unchanged; no additional storage or network I/O occurs.
+6. Documentation states that acceptance validates the exact returned persistence evidence, not
+   an independent physical-durability readback. Formatting, lint, strict typing, complete tests,
+   lockfile verification, dependency audit, health slice, and CI pass.
+7. TASK-037 remains blocked and authorization remains denied; no operator data, path, database,
+   scanner, report, migration, or Stage 3 action occurs.
+
+## Blocked, Awaiting Owner-Supplied Restricted Inputs
 
 ### TASK-037 — Operator-preflight authorization package and project-owner decision
 
 - **Key:** `phase2.canonical_utc_preflight_operator_authorization_package_owner_decision`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 3 — PRODUCTION AFFECTING (authorization decision only)
-- **Status:** READY
+- **Status:** BLOCKED
 - **Human approval:** REQUIRED — project owner plus independent Risk and Security review.
+- **Blocking condition:** Owner-supplied exact restricted-package inputs are not available in a
+  Security-approved governance location; independent Risk and Security reviews and the
+  project-owner decision therefore remain unperformed. Authorization remains `DENIED`.
+- **Resume condition:** Return TASK-037 to `READY` only after the exact required inputs are
+  supplied through the approved restricted boundary; repository placeholders or TASK-038
+  completion cannot satisfy this condition.
 - **Preparation artifact:** The repository contains only the non-authorizing placeholder template
   at `docs/governance/TASK-037-operator-preflight-authorization-package.template.md`. It prohibits
   real deployment values and cannot satisfy any acceptance gate or approval requirement.
@@ -50,6 +114,20 @@ Acceptance gates:
    all repository gates pass.
 
 ## Recently Completed
+
+### TASK-038 — Public-provider payload failure-boundary hardening
+
+- **Key:** `phase2.public_provider_payload_failure_boundary_hardening`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Result:** Binance candles, Coinbase candles, and Binance aggregate trades now convert invalid
+  UTF-8, malformed JSON, excessive nesting, and decoder `ValueError` failures into each
+  provider's sanitized, non-retryable typed `INVALID_PAYLOAD` error. Deterministic no-network
+  tests pin every decoder cause, exact public detail, preserved cause type, and aggregate-trade
+  split semantics. Endpoints, queries, byte bounds, timeouts, HTTP retry behavior, valid-payload
+  canonicalization, raw-byte lineage, digests, provider schemas, storage, runtime wiring,
+  dependencies, operator paths, SQLite, TASK-037 authority, migration, and Stage 3 remain
+  unchanged.
 
 ### TASK-036 — Synthetic operator-preflight authorization-request contract foundation
 

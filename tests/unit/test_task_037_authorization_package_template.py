@@ -28,8 +28,8 @@ EXPECTED_FAMILY_ROWS = (
 EXPECTED_NORMALIZED_TEMPLATE_SHA256 = (
     "9a964bdd16c9b0f312ec18190608f8b70287957061cd15f1fb6b40c9eeffd8bb"
 )
-EXPECTED_NORMALIZED_NEXT_ACTION_SHA256 = (
-    "9de77cb9f91366e9b90807c1dd739ed488a8a72f18e50f5a2db60b8103d3afe6"
+EXPECTED_NORMALIZED_BLOCKED_TASK_SECTION_SHA256 = (
+    "2f9a110c518ae7d0837b9e0e265e738ee43366c5b7f48d24d0a53eba9a9e93f2"
 )
 
 
@@ -41,42 +41,53 @@ def _collapse_whitespace(value: str) -> str:
     return " ".join(value.split())
 
 
-def test_template_exists_but_backlog_keeps_task_037_ready_and_unapproved() -> None:
+def test_template_exists_but_backlog_keeps_task_037_blocked_and_unapproved() -> None:
     source = _template_text()
     backlog = BACKLOG_PATH.read_text(encoding="utf-8")
     project_state = json.loads(PROJECT_STATE_PATH.read_text(encoding="utf-8"))
-    next_action = backlog.split("## Next Action", maxsplit=1)[1].split(
+    blocked_task_section = backlog.split(
+        "## Blocked, Awaiting Owner-Supplied Restricted Inputs",
+        maxsplit=1,
+    )[1].split(
         "## Recently Completed",
         maxsplit=1,
     )[0]
 
     assert TEMPLATE_PATH.is_file()
-    assert "### TASK-037 " in next_action
-    assert "- **Risk tier:** RISK 3" in next_action
-    assert "- **Status:** READY" in next_action
-    assert "- **Human approval:** REQUIRED" in next_action
-    assert tuple(line for line in next_action.splitlines() if line.startswith("- **Status:**")) == (
-        "- **Status:** READY",
-    )
+    assert "### TASK-037 " in blocked_task_section
+    assert "- **Risk tier:** RISK 3" in blocked_task_section
+    assert "- **Status:** BLOCKED" in blocked_task_section
+    assert "- **Human approval:** REQUIRED" in blocked_task_section
     assert tuple(
-        line for line in next_action.splitlines() if line.startswith("- **Human approval:**")
+        line for line in blocked_task_section.splitlines() if line.startswith("- **Status:**")
+    ) == ("- **Status:** BLOCKED",)
+    assert tuple(
+        line
+        for line in blocked_task_section.splitlines()
+        if line.startswith("- **Human approval:**")
     ) == (
         "- **Human approval:** REQUIRED — project owner plus independent Risk and Security review.",
     )
     assert not any(
         line.startswith(("- **Owner decision:**", "- **Authorization disposition:**"))
-        for line in next_action.splitlines()
+        for line in blocked_task_section.splitlines()
     )
-    assert str(TEMPLATE_PATH.relative_to(REPOSITORY_ROOT)).replace("\\", "/") in next_action
-    assert "cannot satisfy any acceptance gate or approval requirement" in next_action
+    assert (
+        str(TEMPLATE_PATH.relative_to(REPOSITORY_ROOT)).replace("\\", "/") in blocked_task_section
+    )
+    assert "cannot satisfy any acceptance gate or approval requirement" in blocked_task_section
+    assert "Authorization remains `DENIED`" in blocked_task_section
+    assert "TASK-038 completion cannot satisfy this condition" in _collapse_whitespace(
+        blocked_task_section
+    )
     assert "Repository placeholder only — grants no authority." in source
     assert (
-        hashlib.sha256(next_action.replace("\r\n", "\n").encode("utf-8")).hexdigest()
-        == EXPECTED_NORMALIZED_NEXT_ACTION_SHA256
+        hashlib.sha256(blocked_task_section.replace("\r\n", "\n").encode("utf-8")).hexdigest()
+        == EXPECTED_NORMALIZED_BLOCKED_TASK_SECTION_SHA256
     )
     assert project_state["next_action"] == {
-        "task_id": "TASK-037",
-        "action": ("phase2.canonical_utc_preflight_operator_authorization_package_owner_decision"),
+        "task_id": "TASK-039",
+        "action": "phase2.exact_candle_persistence_evidence_validation",
     }
     assert project_state["open_tasks"] == [
         {
@@ -84,10 +95,22 @@ def test_template_exists_but_backlog_keeps_task_037_ready_and_unapproved() -> No
             "action": (
                 "phase2.canonical_utc_preflight_operator_authorization_package_owner_decision"
             ),
-            "status": "ready",
+            "status": "blocked",
             "risk_tier": 3,
             "requires_human_approval": True,
-        }
+        },
+        {
+            "task_id": "TASK-039",
+            "action": "phase2.exact_candle_persistence_evidence_validation",
+            "status": "ready",
+            "risk_tier": 1,
+            "requires_human_approval": False,
+        },
+    ]
+    assert project_state["blockers"] == [
+        "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance "
+        "location before independent Risk and Security review and the project-owner decision; "
+        "authorization remains denied."
     ]
     assert project_state["pending_approvals"] == [
         "TASK-037 project-owner decision plus independent Risk and Security reviews for the exact "

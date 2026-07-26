@@ -1,7 +1,8 @@
 """Tests for the public, read-only Binance aggregate-trade adapter."""
 
 import json
-from collections.abc import Mapping
+import sys
+from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 from hashlib import sha256
@@ -43,6 +44,21 @@ INVALID_CLOCK_VALUES = (
         id="named-zero-offset",
     ),
 )
+
+
+@pytest.fixture
+def fixed_json_decoder_limits() -> Iterator[None]:
+    """Pin and restore the interpreter-wide JSON decoder resource boundaries."""
+
+    previous_integer_limit = sys.get_int_max_str_digits()
+    previous_recursion_limit = sys.getrecursionlimit()
+    sys.set_int_max_str_digits(4_300)
+    sys.setrecursionlimit(1_000)
+    try:
+        yield
+    finally:
+        sys.setrecursionlimit(previous_recursion_limit)
+        sys.set_int_max_str_digits(previous_integer_limit)
 
 
 class SequenceClock:
@@ -340,6 +356,44 @@ def test_transport_failure_is_classified_without_network_details() -> None:
 
 
 @pytest.mark.parametrize(
+    ("body", "expected_cause"),
+    [
+        pytest.param(b"\xff", UnicodeDecodeError, id="invalid-utf8"),
+        pytest.param(b"not-json", json.JSONDecodeError, id="malformed-json"),
+        pytest.param(
+            b"[" + (b"1" * 5_000) + b"]",
+            ValueError,
+            id="integer-conversion-limit",
+        ),
+        pytest.param(
+            (b"[" * 10_000) + (b"]" * 10_000),
+            RecursionError,
+            id="excessive-nesting",
+        ),
+    ],
+)
+def test_decoder_failures_are_sanitized_and_fail_closed(
+    body: bytes,
+    expected_cause: type[Exception],
+    fixed_json_decoder_limits: None,
+) -> None:
+    http = StubHttpClient(HttpResponse(status_code=200, headers=(), body=body))
+
+    with pytest.raises(BinanceAggregateTradeError) as raised:
+        source(http).fetch(request())
+
+    assert raised.value.code is BinanceAggregateTradeErrorCode.INVALID_PAYLOAD
+    assert raised.value.retryable is False
+    assert raised.value.retry_after_seconds is None
+    assert raised.value.requires_smaller_window is False
+    assert type(raised.value.__cause__) is expected_cause
+    assert (
+        str(raised.value) == "invalid_payload: response could not be decoded as bounded UTF-8 JSON"
+    )
+    assert len(http.calls) == 1
+
+
+@pytest.mark.parametrize(
     "payload",
     [
         "not-an-array",
@@ -360,14 +414,8 @@ def test_transport_failure_is_classified_without_network_details() -> None:
     ],
 )
 def test_malformed_or_contradictory_rows_fail_closed(payload: object) -> None:
-    http_response = (
-        HttpResponse(status_code=200, headers=(), body=b"not-json")
-        if payload == "not-an-array"
-        else response(payload)
-    )
-
     with pytest.raises(BinanceAggregateTradeError) as raised:
-        source(StubHttpClient(http_response)).fetch(request())
+        source(StubHttpClient(response(payload))).fetch(request())
 
     assert raised.value.code is BinanceAggregateTradeErrorCode.INVALID_PAYLOAD
     assert raised.value.retryable is False
