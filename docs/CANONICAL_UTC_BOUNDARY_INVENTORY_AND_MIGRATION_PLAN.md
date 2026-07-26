@@ -504,15 +504,18 @@ forward version-2 path.
 ## Decisions and Approvals Required
 
 ADR 0027 accepts the target and staged plan, but not an incompatible cutover. TASK-027 through
-TASK-034 are complete. The canonical next action is the bounded RISK-1 TASK-035; it may add only a
-pure canonical-order bundle reconciliation over exactly eight valid TASK-034 generated-fixture
-family censuses. It may not open SQLite or a filesystem path, inspect stored projections, group
-rows, instants, or collisions, assign collision identities, serialize a report, quarantine or
-replace bytes, or inspect operator data. Department and agent reviews are validation evidence, not
-human approval.
+TASK-035 are complete. The canonical next action is the bounded RISK-1 TASK-036; it may add only a
+pure unused strict frozen proposal-only authorization-request envelope pinned to the exact
+TASK-035 bundle plan. Synthetic placeholders may represent proposed exact family/path entries,
+the immutable snapshot method, report destination, and evidence retention/disposal boundary. It
+may not check path existence, access SQLite, a filesystem, or operator data, scan data, invoke an
+adapter, create a report or manifest, serialize output, wire a runtime, migrate or repair data,
+alter a schema, or perform Stage 3. A structurally valid envelope is not human approval.
 
 Before Stage 3 accesses any operator database, the project owner must approve the exact read-only
-database/path list, snapshot method, report destination, and evidence retention/disposal boundary.
+database/path list, immutable snapshot method, report destination, and evidence
+retention/disposal boundary. The actual populated authorization and scanner remain separate later
+actions; department and agent reviews and contract validation are evidence, not human approval.
 
 Before changing a canonical truth source, the project owner and every affected contract owner
 must approve the exact compatibility, digest, identity-collision, and reconciliation evidence
@@ -535,24 +538,28 @@ failures, typed calendar overflow, retained duplicate instants separately, and p
 grouping, report, replacement, or runtime action. TASK-034 added only unused pure family-scoped
 census evidence; it retained every nested source, reconciled empty and populated columns through
 exact counts, bounded source-offset and precision frequencies, and projectable epoch extrema, and
-performed no I/O, grouping, report, replacement, or runtime action. Wiring any of these
-foundations into an existing runtime or advancing Stages 3 through 7 requires the stage-specific
-authorization and applicable approvals described here.
+performed no I/O, grouping, report, replacement, or runtime action. TASK-035 added only unused
+pure all-family bundle evidence; it retained the exact eight TASK-034 results unchanged,
+reconciled the reviewed 8-family, 20-table, 37-column shape through existing counts, frequencies,
+and projectable extrema, rejected invalid sources before aggregation, and performed no I/O,
+grouping, serialization, report, replacement, or runtime action. Wiring any of these foundations
+into an existing runtime or advancing Stages 3 through 7 requires the stage-specific authorization
+and applicable approvals described here.
 
-## TASK-035 Handoff
+## TASK-036 Handoff
 
 The next bounded action is
-`phase2.canonical_utc_preflight_timestamp_candidate_census_bundle_evidence_foundation`.
+`phase2.canonical_utc_preflight_operator_authorization_request_contract_foundation`.
 
-It is limited to unused strict frozen versioned bundle plans and one pure reconciliation result
-over exactly eight exact TASK-034 results, one per reviewed family in canonical order. Every input
-remains nested unchanged; the bundle must reconcile exactly eight families, 20 tables, and 37
-columns and may aggregate only existing total and exhaustive status counts, bounded sorted
-source-offset and fractional-precision frequencies, and projectable canonical epoch extrema. It
-may not open SQLite or a filesystem path, inspect JSON containers, compare stored-projection
-agreement, group rows, instants, or collisions, assign collision identities, deduplicate, merge,
-quarantine or replace data, inspect operator or discovered data, serialize or write a report or
-manifest, invoke an adapter, wire into an active runtime, migrate or repair data, alter a schema,
-or claim Stage 3 completion. Before any later operator database scan, the project owner must still
-approve the exact path list, immutable snapshot method, report destination, and evidence
-retention/disposal boundary.
+It is limited to unused strict frozen versioned proposal-only contracts pinned to the exact
+TASK-035 all-family bundle plan. Synthetic placeholders may represent proposed exact family/path
+entries in canonical order, an immutable snapshot method, a report destination, and the evidence
+retention/disposal boundary. The contracts must reject altered, missing, duplicate, reordered,
+unsupported, extra, or incorrectly linked proposal evidence without checking a path or performing
+I/O. A structurally valid envelope is not human approval, cannot authorize operator-data access,
+and cannot satisfy the Stage 3 approval gate. TASK-036 may not access a filesystem, SQLite, or
+operator data; scan data; invoke an adapter; create a report or manifest; serialize output; wire a
+runtime; migrate or repair data; alter a schema; or perform or claim Stage 3. The actual populated
+authorization and scanner remain separate later actions. Before either can access any operator
+database, the project owner must still approve the exact read-only path list, immutable snapshot
+method, report destination, and evidence retention/disposal boundary.

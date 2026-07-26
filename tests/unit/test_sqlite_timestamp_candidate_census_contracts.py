@@ -49,6 +49,9 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 CENSUS_MODULE_PATH = (
     REPOSITORY_ROOT / "src" / "wealth" / "domain" / "sqlite_timestamp_candidate_census.py"
 )
+BUNDLE_MODULE_PATH = (
+    REPOSITORY_ROOT / "src" / "wealth" / "domain" / "sqlite_timestamp_candidate_census_bundle.py"
+)
 
 
 def _cell(
@@ -780,7 +783,7 @@ def test_census_module_is_pure_and_has_no_runtime_consumer() -> None:
 
     consumers = []
     for path in (REPOSITORY_ROOT / "src" / "wealth").rglob("*.py"):
-        if path == CENSUS_MODULE_PATH:
+        if path in {CENSUS_MODULE_PATH, BUNDLE_MODULE_PATH}:
             continue
         if "sqlite_timestamp_candidate_census" in path.read_text(encoding="utf-8"):
             consumers.append(path)

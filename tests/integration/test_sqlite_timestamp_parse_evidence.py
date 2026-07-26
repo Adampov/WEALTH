@@ -1,4 +1,4 @@
-"""Synthetic-only integration coverage for pure TASK-032/033/034 timestamp evidence."""
+"""Synthetic-only integration coverage for pure TASK-032/033/034/035 timestamp evidence."""
 
 import sqlite3
 from collections.abc import Callable
@@ -28,6 +28,7 @@ from wealth.adapters.sqlite_rate_budget import SQLiteRateBudgetCoordinator
 from wealth.adapters.sqlite_reconciliation import SQLiteReconciliationHistoryStore
 from wealth.domain import sqlite_timestamp_candidate as timestamp_candidate
 from wealth.domain import sqlite_timestamp_candidate_census as timestamp_census
+from wealth.domain import sqlite_timestamp_candidate_census_bundle as timestamp_bundle
 from wealth.domain import sqlite_timestamp_parse as timestamp_parse
 from wealth.domain.sqlite_preflight import (
     SQLitePreflightRequest,
@@ -52,6 +53,12 @@ from wealth.domain.sqlite_timestamp_candidate_census import (
     SQLiteTimestampCandidateCensusResult,
     SQLiteTimestampCandidateColumnCensus,
     build_synthetic_sqlite_timestamp_candidate_census_evidence,
+)
+from wealth.domain.sqlite_timestamp_candidate_census_bundle import (
+    SQLITE_TIMESTAMP_CANDIDATE_CENSUS_BUNDLE_PLAN,
+    SQLiteTimestampCandidateCensusBundleError,
+    SQLiteTimestampCandidateCensusBundleErrorCode,
+    build_synthetic_sqlite_timestamp_candidate_census_bundle_evidence,
 )
 from wealth.domain.sqlite_timestamp_parse import (
     SQLITE_TIMESTAMP_PARSE_PLANS,
@@ -218,6 +225,20 @@ def _column_censuses_by_identity(
         ): summary
         for summary in result.columns
     }
+
+
+def _public_all_family_censuses(
+    tmp_path: Path,
+    *,
+    rows: int = 1,
+) -> tuple[SQLiteTimestampCandidateCensusResult, ...]:
+    results: list[SQLiteTimestampCandidateCensusResult] = []
+    for family, factory in FIXTURE_FACTORIES:
+        extracted = _source(tmp_path, family, factory, rows=rows)
+        parsed = parse_synthetic_sqlite_timestamp_evidence(extracted)
+        candidates = derive_synthetic_sqlite_timestamp_canonical_candidate_evidence(parsed)
+        results.append(build_synthetic_sqlite_timestamp_candidate_census_evidence(candidates))
+    return tuple(results)
 
 
 @pytest.mark.parametrize(
@@ -1086,3 +1107,183 @@ def test_pure_parse_candidate_and_census_pipeline_uses_no_io_after_task_031(
     assert result.source == source
     assert candidates.source == parsed
     assert census.source == candidates
+
+
+def test_all_family_bundle_reconciles_one_row_per_table_through_public_pipeline(
+    tmp_path: Path,
+) -> None:
+    sources = _public_all_family_censuses(tmp_path)
+
+    first = build_synthetic_sqlite_timestamp_candidate_census_bundle_evidence(sources)
+    second = build_synthetic_sqlite_timestamp_candidate_census_bundle_evidence(sources)
+
+    assert first == second
+    assert first.sources == sources
+    assert first.plan == SQLITE_TIMESTAMP_CANDIDATE_CENSUS_BUNDLE_PLAN
+    assert tuple(
+        source.plan.source_plan.source_plan.extraction_plan.family for source in first.sources
+    ) == tuple(family for family, _factory in FIXTURE_FACTORIES)
+    assert first.aggregate.family_count == 8
+    assert first.aggregate.table_count == 20
+    assert first.aggregate.column_count == 37
+    assert first.aggregate.total_candidate_count == 37
+    assert tuple((item.status, item.count) for item in first.aggregate.candidate_status_counts) == (
+        (SQLiteTimestampCanonicalCandidateStatus.PROJECTED_AWARE_TEXT, 35),
+        (SQLiteTimestampCanonicalCandidateStatus.PROJECTED_EPOCH_MICROSECONDS, 2),
+        (SQLiteTimestampCanonicalCandidateStatus.SOURCE_NOT_PROJECTABLE, 0),
+        (SQLiteTimestampCanonicalCandidateStatus.UTC_NORMALIZATION_OVERFLOW, 0),
+    )
+    assert tuple(
+        (item.status, item.count) for item in first.aggregate.source_parse_status_counts
+    ) == (
+        (SQLiteTimestampParseStatus.PARSED_AWARE_TEXT, 35),
+        (SQLiteTimestampParseStatus.PARSED_EPOCH_MICROSECONDS, 2),
+        (SQLiteTimestampParseStatus.DECLARED_ABSENT, 0),
+        (SQLiteTimestampParseStatus.NAIVE_TEXT, 0),
+        (SQLiteTimestampParseStatus.OFFSET_POLICY_MISMATCH, 0),
+        (SQLiteTimestampParseStatus.MALFORMED_UTF8, 0),
+        (SQLiteTimestampParseStatus.MALFORMED_TEXT, 0),
+        (SQLiteTimestampParseStatus.MALFORMED_EPOCH_BYTES, 0),
+        (SQLiteTimestampParseStatus.EPOCH_OUT_OF_RANGE, 0),
+        (SQLiteTimestampParseStatus.UNEXPECTED_STORAGE_CLASS, 0),
+    )
+    assert tuple(
+        (item.utc_offset_microseconds, item.count)
+        for item in first.aggregate.source_utc_offset_frequencies
+    ) == ((0, 35),)
+    assert tuple(
+        (item.fractional_precision, item.count)
+        for item in first.aggregate.source_fractional_precision_frequencies
+    ) == ((6, 35),)
+    assert first.aggregate.projectable_epoch_min == 1_700_000_000_000_000
+    assert first.aggregate.projectable_epoch_max == 1_767_225_600_000_001
+
+
+def test_all_family_bundle_retains_every_empty_family_and_emits_zero_aggregate(
+    tmp_path: Path,
+) -> None:
+    sources = _public_all_family_censuses(tmp_path, rows=0)
+
+    result = build_synthetic_sqlite_timestamp_candidate_census_bundle_evidence(sources)
+
+    assert result.sources == sources
+    assert len(result.sources) == 8
+    assert all(
+        column.total_candidate_count == 0 for source in result.sources for column in source.columns
+    )
+    assert result.aggregate.family_count == 8
+    assert result.aggregate.table_count == 20
+    assert result.aggregate.column_count == 37
+    assert result.aggregate.total_candidate_count == 0
+    assert (
+        tuple(item.status for item in result.aggregate.candidate_status_counts)
+        == result.plan.candidate_status_order
+    )
+    assert (
+        tuple(item.status for item in result.aggregate.source_parse_status_counts)
+        == result.plan.source_parse_status_order
+    )
+    assert all(item.count == 0 for item in result.aggregate.candidate_status_counts)
+    assert all(item.count == 0 for item in result.aggregate.source_parse_status_counts)
+    assert result.aggregate.source_utc_offset_frequencies == ()
+    assert result.aggregate.source_fractional_precision_frequencies == ()
+    assert result.aggregate.projectable_epoch_min is None
+    assert result.aggregate.projectable_epoch_max is None
+
+
+def test_all_family_bundle_rejects_hostile_order_and_duplicate_family(
+    tmp_path: Path,
+) -> None:
+    sources = _public_all_family_censuses(tmp_path)
+    hostile_sequences = (
+        (sources[1], sources[0], *sources[2:]),
+        (sources[0], sources[0], *sources[2:]),
+    )
+
+    for hostile in hostile_sequences:
+        with pytest.raises(SQLiteTimestampCandidateCensusBundleError) as caught:
+            build_synthetic_sqlite_timestamp_candidate_census_bundle_evidence(hostile)
+        assert caught.value.code is (
+            SQLiteTimestampCandidateCensusBundleErrorCode.INVALID_SOURCE_EVIDENCE
+        )
+
+
+def test_all_family_bundle_revalidates_deep_forgery_before_aggregation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sources = _public_all_family_censuses(tmp_path)
+    first_source = sources[0]
+    first_column = first_source.columns[0]
+    first_status = first_column.candidate_status_counts[0]
+    forged_status = first_status.model_copy(update={"count": first_status.count + 1})
+    forged_column = first_column.model_copy(
+        update={
+            "candidate_status_counts": (
+                forged_status,
+                *first_column.candidate_status_counts[1:],
+            )
+        }
+    )
+    forged_source = first_source.model_copy(
+        update={"columns": (forged_column, *first_source.columns[1:])}
+    )
+
+    def unexpected_aggregation(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("invalid TASK-034 evidence reached bundle aggregation")
+
+    monkeypatch.setattr(timestamp_bundle, "_aggregate_sources", unexpected_aggregation)
+    with pytest.raises(SQLiteTimestampCandidateCensusBundleError) as caught:
+        build_synthetic_sqlite_timestamp_candidate_census_bundle_evidence(
+            (forged_source, *sources[1:])
+        )
+    assert caught.value.code is (
+        SQLiteTimestampCandidateCensusBundleErrorCode.INVALID_SOURCE_EVIDENCE
+    )
+
+
+def test_all_family_bundle_uses_no_io_or_upstream_pipeline_after_task_034(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sources = _public_all_family_censuses(tmp_path)
+    snapshot_paths = {
+        source.source.source.source.preflight.observation.snapshot_path for source in sources
+    }
+    assert len(snapshot_paths) == 8
+    for snapshot_path in snapshot_paths:
+        snapshot_path.unlink()
+
+    def unexpected_io(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("TASK-035 must use only retained TASK-034 evidence")
+
+    monkeypatch.setattr(sqlite3, "connect", unexpected_io)
+    monkeypatch.setattr(
+        preflight_adapter,
+        "extract_synthetic_sqlite_timestamp_evidence",
+        unexpected_io,
+    )
+    monkeypatch.setattr(Path, "open", unexpected_io)
+    monkeypatch.setattr(Path, "read_bytes", unexpected_io)
+    monkeypatch.setattr(Path, "stat", unexpected_io)
+    monkeypatch.setattr(Path, "iterdir", unexpected_io)
+    monkeypatch.setattr(
+        timestamp_parse,
+        "parse_synthetic_sqlite_timestamp_evidence",
+        unexpected_io,
+    )
+    monkeypatch.setattr(
+        timestamp_candidate,
+        "derive_synthetic_sqlite_timestamp_canonical_candidate_evidence",
+        unexpected_io,
+    )
+    monkeypatch.setattr(
+        timestamp_census,
+        "build_synthetic_sqlite_timestamp_candidate_census_evidence",
+        unexpected_io,
+    )
+
+    result = build_synthetic_sqlite_timestamp_candidate_census_bundle_evidence(sources)
+
+    assert result.sources == sources
+    assert result.aggregate.total_candidate_count == 37
