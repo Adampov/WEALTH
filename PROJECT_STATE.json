@@ -43,7 +43,8 @@
     "public_trade_transition_history_reader",
     "sqlite_market_data_storage",
     "data_quality_and_reconciliation",
-    "collector_health_observability"
+    "collector_health_observability",
+    "public_provider_payload_failure_boundary_hardening"
   ],
   "active_integrations": [
     "github_actions_ci"
@@ -80,12 +81,21 @@
     {
       "task_id": "TASK-037",
       "action": "phase2.canonical_utc_preflight_operator_authorization_package_owner_decision",
-      "status": "ready",
+      "status": "blocked",
       "risk_tier": 3,
       "requires_human_approval": true
+    },
+    {
+      "task_id": "TASK-039",
+      "action": "phase2.exact_candle_persistence_evidence_validation",
+      "status": "ready",
+      "risk_tier": 1,
+      "requires_human_approval": false
     }
   ],
-  "blockers": [],
+  "blockers": [
+    "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance location before independent Risk and Security review and the project-owner decision; authorization remains denied."
+  ],
   "known_risks": [
     "RISK-001",
     "RISK-002",
@@ -114,8 +124,8 @@
     }
   ],
   "next_action": {
-    "task_id": "TASK-037",
-    "action": "phase2.canonical_utc_preflight_operator_authorization_package_owner_decision"
+    "task_id": "TASK-039",
+    "action": "phase2.exact_candle_persistence_evidence_validation"
   },
-  "last_updated_utc": "2026-07-26T06:16:08Z"
+  "last_updated_utc": "2026-07-26T20:10:19Z"
 }
