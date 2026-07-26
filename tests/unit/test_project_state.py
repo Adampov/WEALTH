@@ -71,23 +71,24 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     )
     assert "public_provider_payload_failure_boundary_hardening" in state.active_components
     assert "exact_candle_persistence_evidence_validation" in state.active_components
+    assert "exact_order_flow_persistence_evidence_validation" in state.active_components
     assert len(state.open_tasks) == 2
-    task_037, task_040 = state.open_tasks
+    task_037, task_041 = state.open_tasks
     assert task_037.task_id == "TASK-037"
     assert task_037.status == "blocked"
     assert task_037.risk_tier == 3
     assert task_037.requires_human_approval is True
-    assert task_040.task_id == "TASK-040"
-    assert task_040.status == "ready"
-    assert task_040.risk_tier == 1
-    assert task_040.requires_human_approval is False
+    assert task_041.task_id == "TASK-041"
+    assert task_041.status == "ready"
+    assert task_041.risk_tier == 1
+    assert task_041.requires_human_approval is False
     assert state.blockers == (
         "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance "
         "location before independent Risk and Security review and the project-owner decision; "
         "authorization remains denied.",
     )
-    assert state.next_action.task_id == "TASK-040"
-    assert state.next_action.action == "phase2.exact_order_flow_persistence_evidence_validation"
+    assert state.next_action.task_id == "TASK-041"
+    assert state.next_action.action == "phase2.finite_public_http_timeout_boundary_validation"
     assert any(decision.decision_id == "ADR-0027" for decision in state.recent_decisions)
 
 
@@ -138,20 +139,21 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_039_section = completed_section.split("### TASK-039 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
+    task_040_section = completed_section.split("### TASK-040 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    assert "OrderFlowIngestionResult.accepted" in next_action_section
-    assert "same-length misattributed evidence" in next_action_section
-    assert "exact ordered result count" in next_action_section
-    assert "valid zero-record batch" in next_action_section
-    assert "wrong-family" in next_action_section
-    assert "deterministic hostile-store tests" in next_action_section
-    assert "does not advance its durable cursor" in next_action_section
-    assert "independently proves physical durability" in next_action_section
+    assert "UrllibHttpClient" in next_action_section
+    assert "`NaN` and positive infinity" in next_action_section
+    assert "finite and positive" in next_action_section
+    assert "never reach `urlopen`" in next_action_section
+    assert "finite positive integer and fractional values" in next_action_section
+    assert "Do not add a network" in next_action_section
     assert "TASK-037 remains blocked and authorization remains denied" in next_action_section
     assert blocked_section.count("### TASK-") == 1
     assert "### TASK-037 " in blocked_section
@@ -216,6 +218,16 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "physically wrote the first page" in task_039_section
     assert "does not independently prove physical durability" in task_039_section
     assert "order-flow ingestion" in task_039_section
+    assert "- **Status:** COMPLETE" in task_040_section
+    assert "`phase2.exact_order_flow_persistence_evidence_validation`" in task_040_section
+    assert "`src/wealth/application/order_flow_ingestion.py`" in task_040_section
+    assert "`src/wealth/ports/order_flow.py`" in task_040_section
+    assert "`tests/unit/test_order_flow_persistence_evidence.py`" in task_040_section
+    assert "one ordered status-coherent outcome" in task_040_section
+    assert "wrong-family" in task_040_section
+    assert "valid zero-record" in task_040_section
+    assert "physically wrote the first window" in task_040_section
+    assert "independently prove physical durability" in task_040_section
 
 
 def test_project_state_forbids_unknown_fields() -> None:

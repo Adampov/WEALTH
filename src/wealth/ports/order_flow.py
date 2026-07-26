@@ -140,7 +140,14 @@ class OrderFlowStore(Protocol):
         """Insert once or return an explicit idempotency outcome."""
 
     def append_batch(self, batch: OrderFlowFetchBatch) -> OrderFlowBatchWriteResult:
-        """Persist exact raw evidence and its canonical records atomically."""
+        """Persist one batch atomically and return exact identity-bound outcomes.
+
+        The raw outcome identifies the batch payload. After an inserted or duplicate
+        raw outcome, return exactly one canonical outcome per batch record in the same
+        order, with its matching incoming ID and record family. A zero-record batch
+        returns no canonical outcomes. Inserted outcomes omit an existing ID; duplicate
+        and conflict outcomes identify the retained record.
+        """
 
     def records_for_stream(self, stream: OrderFlowStream) -> tuple[OrderFlowRecord, ...]:
         """Return an immutable, deterministically ordered stream snapshot."""

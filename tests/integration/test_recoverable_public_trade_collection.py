@@ -216,6 +216,24 @@ class InstrumentedOrderFlowStore:
         return self.delegate.conflicts_for_stream(stream)
 
 
+class WrongFamilySQLiteOrderFlowStore(SQLiteOrderFlowStore):
+    """Persist a batch but falsely identify its first canonical record family."""
+
+    def __init__(self, path: Path) -> None:
+        super().__init__(path)
+        self.appended_batches: list[OrderFlowFetchBatch] = []
+
+    def append_batch(self, batch: OrderFlowFetchBatch) -> OrderFlowBatchWriteResult:
+        self.appended_batches.append(batch)
+        result = super().append_batch(batch)
+        if not result.records:
+            raise AssertionError("hostile store fixture requires a non-empty batch")
+        wrong_first = result.records[0].model_copy(
+            update={"record_type": OrderFlowRecordType.TICKER}
+        )
+        return result.model_copy(update={"records": (wrong_first, *result.records[1:])})
+
+
 class InstrumentedCheckpointStore:
     """Delegate control writes with outcome-only crash and conflict seams."""
 
@@ -738,6 +756,74 @@ def test_quality_rejection_fails_without_persisting_ambiguous_evidence(
     assert budget_delegate.summary(BUDGET_KEY).reservation_count == 1
     assert len(http.calls) == 1
     assert "evidence" not in events
+    assert_budget_precedes_every_http(events)
+
+
+def test_malformed_persistence_evidence_never_advances_or_fetches_a_later_window(
+    tmp_path: Path,
+) -> None:
+    events: list[str] = []
+    evidence_path = tmp_path / "order-flow.sqlite3"
+    hostile_store = WrongFamilySQLiteOrderFlowStore(evidence_path)
+    evidence = InstrumentedOrderFlowStore(hostile_store, events)
+    control = InstrumentedCheckpointStore(
+        SQLitePublicTradeCollectionCheckpointStore(tmp_path / "control.sqlite3"),
+        events,
+    )
+    budget_delegate = SQLiteRateBudgetCoordinator(tmp_path / "budget.sqlite3")
+    budget = InstrumentedRateBudgetCoordinator(budget_delegate, events)
+    http = ScriptedHttpClient(
+        response(aggregate_trade(START, 1)),
+        response(aggregate_trade(START + timedelta(milliseconds=1), 2)),
+        events=events,
+    )
+    service = orchestrator(
+        http=http,
+        evidence_store=evidence,
+        checkpoint_store=control,
+        rate_budget=budget,
+        clock=MutableClock(),
+        ids=SequentialIds(),
+        policy=collection_policy(),
+    )
+    job = service.create_job(request(2), job_id=JOB_ID)
+
+    result = service.run(job.job_id)
+    health = control.health_for_job(job.job_id)
+
+    assert result.status is PublicTradeCollectionRunStatus.FAILED
+    assert result.checkpoint.status is CollectionJobStatus.FAILED
+    assert result.checkpoint.version == 3
+    assert result.checkpoint.next_window_start == START
+    assert result.checkpoint.pending_window_end_exclusive == (START + timedelta(milliseconds=1))
+    assert result.checkpoint.last_failure_code == (
+        PublicTradeCollectionFailureCode.EVIDENCE_ADMISSION_REJECTED.value
+    )
+    assert result.checkpoint.last_stop_reason == (
+        PublicTradeRangeStopReason.INGESTION_REJECTED.value
+    )
+    assert result.checkpoint.windows_completed == 0
+    assert result.checkpoint.records_completed == 0
+    assert result.checkpoint.source_requests == 1
+    assert result.checkpoint.window_traces == 1
+    assert len(health) == 1
+    assert health[0].accepted is False
+    assert health[0].status is SourceHealthStatus.DEGRADED
+    assert health[0].failure_code == (
+        PublicTradeCollectionFailureCode.EVIDENCE_ADMISSION_REJECTED.value
+    )
+    assert health[0].stop_reason == PublicTradeRangeStopReason.INGESTION_REJECTED.value
+    assert len(hostile_store.appended_batches) == 1
+    assert len(http.calls) == 1
+    assert budget_delegate.summary(BUDGET_KEY).reservation_count == 1
+    assert evidence_counts(evidence_path) == (1, 1, 0)
+    assert events == [
+        "control:claim",
+        "budget",
+        "http",
+        "evidence",
+        "control:outcome",
+    ]
     assert_budget_precedes_every_http(events)
 
 
