@@ -6,59 +6,62 @@ promoted through review.
 
 ## Next Action
 
-### TASK-039 — Exact candle persistence-evidence validation
+### TASK-040 — Exact order-flow persistence-evidence validation
 
-- **Key:** `phase2.exact_candle_persistence_evidence_validation`
+- **Key:** `phase2.exact_order_flow_persistence_evidence_validation`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
 - **Human approval:** NOT REQUIRED — bounded fail-closed development hardening under the owner's
   explicit authorization; no permission, deployment, or operator-data change.
-- **Context:** `HistoricalCandleIngestionResult.accepted` does not yet bind returned storage
-  evidence to the fetched batch's exact raw-payload identity or candle count, order, and record
-  identities. In particular, an empty write tuple satisfies `all(...)`; downstream recoverable
-  collection can therefore advance a checkpoint without evidence for every fetched candle.
-- **Goal:** Permit a quality-passing candle page to be accepted, and therefore eligible for
-  durable cursor advancement, only when the returned storage evidence exactly and coherently
-  accounts for the batch raw payload and every canonical candle.
-- **Scope:** Harden the historical-candle ingestion-result boundary. Validate the raw write's
-  incoming identity and status/existing-identity relationship; require one ordered candle-write
-  outcome per batch record with the exact incoming record ID; reject missing, extra, duplicated,
-  reordered, misattributed, or internally contradictory outcomes; preserve explicit raw and
-  candle conflicts as rejected results. Add deterministic hostile-store tests and one downstream
-  recoverable-checkpoint non-advancement test.
-- **Files:** `src/wealth/application/ingestion.py`,
-  `tests/unit/test_historical_candle_persistence_evidence.py`,
-  `tests/integration/test_recoverable_collection.py`, `docs/contracts/MARKET_DATA.md`, plus the
-  coordinated governance files and governance tests.
-- **Constraints:** Do not change provider adapters, network requests, retry or pagination policy,
-  candle quality rules, raw bytes, digests, lineage, canonical serialization, storage schemas,
-  SQLite SQL or transactions, checkpoint transition rules, dependencies, order-flow ingestion,
-  operator paths, TASK-037 authority, migration, or Stage 3. Do not add post-write storage reads
-  or claim that returned outcome validation independently proves physical durability.
+- **Context:** `OrderFlowIngestionResult.accepted` checks quality, result count, and conflicts but
+  does not bind the raw outcome to the batch raw payload or each ordered write outcome to the
+  corresponding record identity and family. A nonconforming store can therefore return
+  same-length misattributed evidence that appears accepted.
+- **Goal:** Accept a quality-passing order-flow batch only when the returned raw and canonical
+  write outcomes exactly and coherently correspond to that batch, while preserving legitimate
+  empty public-trade windows.
+- **Scope:** Harden the order-flow ingestion-result boundary. Bind raw identity and status
+  coherence; require exact ordered result count, incoming record IDs, and record-family types;
+  reject missing, extra, duplicated, reordered, misattributed, contradictory, or conflicting
+  outcomes; preserve a valid zero-record batch as accepted when its raw evidence is coherent.
+  Add deterministic hostile-store tests and downstream recoverable public-trade checkpoint
+  non-advancement evidence.
+- **Files:** `src/wealth/application/order_flow_ingestion.py`,
+  `src/wealth/ports/order_flow.py`,
+  `tests/unit/test_order_flow_persistence_evidence.py`,
+  `tests/integration/test_recoverable_public_trade_collection.py`,
+  `docs/contracts/MARKET_DATA.md`, plus coordinated governance files and governance tests.
+- **Constraints:** Do not change provider adapters, network requests, retry, splitting or range
+  policy, order-flow quality rules, raw bytes, digests, lineage, canonical serialization,
+  persistence-result model validators, store implementations, storage schemas, SQLite SQL or
+  transactions, checkpoint transition rules, dependencies, candle ingestion, operator paths,
+  TASK-037 authority, migration, or Stage 3. Do not add post-write storage reads or claim that
+  returned outcome validation independently proves physical durability.
 
 Acceptance gates:
 
-1. A quality-passing result is accepted only when the raw write identifies the batch's exact raw
+1. A quality-passing result is accepted only when the raw outcome identifies the batch's exact raw
    payload; `INSERTED` has no existing identity; and `DUPLICATE` identifies that same prior raw
-   identity. A raw `CONFLICT`, missing raw result, wrong raw ID, or contradictory identity
-   evidence is rejected.
-2. For a non-conflicting raw write, the candle-write tuple has exactly the batch-record length and
-   its ordered `incoming_record_id` sequence exactly equals the ordered batch candle IDs.
-   `INSERTED` writes identify no existing record; `DUPLICATE` and `CONFLICT` writes identify one.
-   Acceptance requires every candle status to be `INSERTED` or `DUPLICATE`.
-3. Empty, short, extra, reordered, duplicated, wrong-ID, and impossible status/identity evidence
-   from deterministic hostile stores all fail closed; an empty tuple cannot accept a non-empty
-   quality-passing batch.
-4. A recoverable collection receiving malformed persistence evidence records the existing
-   rejected page outcome and does not advance `next_window_start`, `pages_completed`, or
-   `candles_completed`, and does not request a later page.
-5. Existing valid in-memory and SQLite insert, restart, replay, duplicate, and conflict behavior
-   remains unchanged; no additional storage or network I/O occurs.
-6. Documentation states that acceptance validates the exact returned persistence evidence, not
-   an independent physical-durability readback. Formatting, lint, strict typing, complete tests,
-   lockfile verification, dependency audit, health slice, and CI pass.
-7. TASK-037 remains blocked and authorization remains denied; no operator data, path, database,
+   identity. A raw `CONFLICT`, missing result, wrong ID, or contradictory identity is rejected.
+2. After a non-conflicting raw outcome, the write tuple has exactly the batch-record length and
+   each ordered result has the matching `incoming_record_id` and exact
+   `OrderFlowRecordType`. Acceptance permits only `INSERTED` or `DUPLICATE` results and rejects
+   every conflict.
+3. For a non-empty batch, empty, short, extra, reordered, duplicated, wrong-ID, wrong-family, and
+   contradictory outcomes from deterministic hostile stores all fail closed without sorting,
+   repairing, or inventing evidence.
+4. A valid quality-passing zero-record batch with coherent non-conflicting raw evidence and an
+   empty write tuple remains accepted.
+5. Recoverable public-trade collection receiving malformed persistence evidence records the
+   existing rejected outcome, does not advance its durable cursor or completion counters, and
+   does not request later work.
+6. Existing valid in-memory and SQLite insert, empty-window, restart, replay, duplicate, and
+   conflict behavior remains unchanged; no additional storage or network I/O occurs.
+7. Documentation preserves the returned-evidence versus physical-durability limitation.
+   Formatting, lint, strict typing, complete tests, lockfile verification, dependency audit,
+   health slice, and CI pass.
+8. TASK-037 remains blocked and authorization remains denied; no operator data, path, database,
    scanner, report, migration, or Stage 3 action occurs.
 
 ## Blocked, Awaiting Owner-Supplied Restricted Inputs
@@ -114,6 +117,28 @@ Acceptance gates:
    all repository gates pass.
 
 ## Recently Completed
+
+### TASK-039 — Exact candle persistence-evidence validation
+
+- **Key:** `phase2.exact_candle_persistence_evidence_validation`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Files:** `src/wealth/application/ingestion.py`, `src/wealth/ports/market.py`,
+  `tests/unit/test_historical_candle_persistence_evidence.py`,
+  `tests/integration/test_recoverable_collection.py`, `docs/contracts/MARKET_DATA.md`, and the
+  coordinated governance files and governance tests.
+- **Result:** Historical candle admission now requires a passing quality report, an exact coherent
+  raw-write identity, and one ordered status-coherent write outcome per batch candle, each
+  matching its corresponding incoming ID. Missing, extra, duplicated, reordered, misattributed,
+  contradictory, and conflicting outcomes fail closed. Deterministic hostile-store tests cover
+  the full evidence matrix, and a recoverable collection test proves that incomplete returned
+  evidence leaves the durable cursor and completion counters unchanged and prevents a later page
+  even when the nonconforming store physically wrote the first page. The contract documentation
+  states that returned-outcome validation does not independently prove physical durability, undo
+  store mutations, or make the market and checkpoint databases atomic. Provider, retry,
+  pagination, quality, canonical records, raw bytes, digests, lineage, store implementations,
+  SQLite schemas and transactions, dependencies, order-flow ingestion, operator authority,
+  migration, and Stage 3 remain unchanged.
 
 ### TASK-038 — Public-provider payload failure-boundary hardening
 

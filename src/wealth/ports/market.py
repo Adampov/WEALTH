@@ -144,7 +144,13 @@ class CandleStore(Protocol):
         """Insert once or return an explicit idempotency outcome."""
 
     def append_batch(self, batch: CandleFetchBatch) -> MarketDataBatchWriteResult:
-        """Persist exact provider evidence and its canonical records."""
+        """Persist one batch and return exact identity-bound write outcomes.
+
+        The raw outcome must identify the batch raw payload. After a non-conflicting
+        raw outcome, return exactly one candle outcome per batch record, in the same
+        order and with the matching incoming record ID. Inserted outcomes omit an
+        existing ID; duplicate and conflict outcomes identify the retained record.
+        """
 
     def records_for_stream(self, stream: CandleStream) -> tuple[CanonicalCandle, ...]:
         """Return an immutable, market-time-ordered stream snapshot."""

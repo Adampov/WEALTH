@@ -278,6 +278,26 @@ provenance. Every canonical candle in the batch must reference that raw payload 
 The SQLite adapter is a replaceable Phase 2 local durability baseline. It is not yet the final
 high-volume operational or analytical storage design.
 
+`CandleStore.append_batch` returns typed outcomes bound to the attempted batch. The raw outcome's
+`incoming_record_id` must equal the batch raw-payload ID. `INSERTED` identifies no existing raw
+record; `DUPLICATE` identifies that same prior raw identity; and `CONFLICT` rejects admission.
+After a non-conflicting raw outcome, the candle outcomes must have exactly the batch-record count
+and order, with each `incoming_record_id` equal to the corresponding candle ID. An inserted candle
+identifies no existing record, while a duplicate or conflict identifies the previously retained
+canonical record.
+
+`HistoricalCandleIngestionResult.accepted` requires a passing quality report, coherent raw-write
+evidence, one exact ordered candle outcome per batch record, and only inserted or duplicate candle
+outcomes. Missing, extra, reordered, duplicated, misidentified, conflicting, or internally
+contradictory outcomes fail closed. The returned outcomes are preserved unchanged for diagnosis;
+the ingestion boundary does not sort, repair, or invent evidence.
+
+This validation establishes only the completeness and internal coherence of the typed outcomes
+returned by the configured store. It performs no post-write readback, does not independently
+verify filesystem synchronization or physical durability, cannot roll back mutations made by a
+nonconforming store, and does not make the market-evidence and checkpoint databases atomic
+together.
+
 ## Public Binance Historical Adapter
 
 `BinancePublicCandleSource` is the first real provider implementation of the historical-candle
@@ -328,6 +348,14 @@ Each passing page is quality-gated and stored transactionally before the next pa
 whole range is intentionally not one database transaction: completed pages remain durable after a
 later source failure, and replaying them is idempotent. No current entry point starts this flow
 automatically.
+
+`RecoverableHistoricalCandleCollector` advances page and candle progress only after
+`HistoricalCandleIngestionResult.accepted` is true. Malformed persistence evidence follows the
+existing `page_rejected` / `quality_or_storage_gate` path: the collector records a rejected health
+observation and a failed control transition, retains the prior `next_window_start`,
+`pages_completed`, and `candles_completed`, and does not request a later page. The failure
+transition may still update status, version, attempts, and diagnostic fields; no progress does not
+mean no control-state write.
 
 ## Current Limitations
 

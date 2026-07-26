@@ -70,23 +70,24 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
         in state.active_components
     )
     assert "public_provider_payload_failure_boundary_hardening" in state.active_components
+    assert "exact_candle_persistence_evidence_validation" in state.active_components
     assert len(state.open_tasks) == 2
-    task_037, task_039 = state.open_tasks
+    task_037, task_040 = state.open_tasks
     assert task_037.task_id == "TASK-037"
     assert task_037.status == "blocked"
     assert task_037.risk_tier == 3
     assert task_037.requires_human_approval is True
-    assert task_039.task_id == "TASK-039"
-    assert task_039.status == "ready"
-    assert task_039.risk_tier == 1
-    assert task_039.requires_human_approval is False
+    assert task_040.task_id == "TASK-040"
+    assert task_040.status == "ready"
+    assert task_040.risk_tier == 1
+    assert task_040.requires_human_approval is False
     assert state.blockers == (
         "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance "
         "location before independent Risk and Security review and the project-owner decision; "
         "authorization remains denied.",
     )
-    assert state.next_action.task_id == "TASK-039"
-    assert state.next_action.action == "phase2.exact_candle_persistence_evidence_validation"
+    assert state.next_action.task_id == "TASK-040"
+    assert state.next_action.action == "phase2.exact_order_flow_persistence_evidence_validation"
     assert any(decision.decision_id == "ADR-0027" for decision in state.recent_decisions)
 
 
@@ -134,17 +135,22 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_038_section = completed_section.split("### TASK-038 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
+    task_039_section = completed_section.split("### TASK-039 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    assert "HistoricalCandleIngestionResult.accepted" in next_action_section
-    assert "an empty write tuple satisfies `all(...)`" in next_action_section
-    assert "exact incoming record ID" in next_action_section
+    assert "OrderFlowIngestionResult.accepted" in next_action_section
+    assert "same-length misattributed evidence" in next_action_section
+    assert "exact ordered result count" in next_action_section
+    assert "valid zero-record batch" in next_action_section
+    assert "wrong-family" in next_action_section
     assert "deterministic hostile-store tests" in next_action_section
-    assert "does not advance `next_window_start`" in next_action_section
+    assert "does not advance its durable cursor" in next_action_section
     assert "independently proves physical durability" in next_action_section
     assert "TASK-037 remains blocked and authorization remains denied" in next_action_section
     assert blocked_section.count("### TASK-") == 1
@@ -200,6 +206,16 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "excessive nesting" in task_038_section
     assert "non-retryable typed `INVALID_PAYLOAD`" in task_038_section
     assert "TASK-037 authority" in task_038_section
+    assert "- **Status:** COMPLETE" in task_039_section
+    assert "`phase2.exact_candle_persistence_evidence_validation`" in task_039_section
+    assert "`src/wealth/application/ingestion.py`" in task_039_section
+    assert "`src/wealth/ports/market.py`" in task_039_section
+    assert "`tests/unit/test_historical_candle_persistence_evidence.py`" in task_039_section
+    assert "one ordered status-coherent" in task_039_section
+    assert "hostile-store tests" in task_039_section
+    assert "physically wrote the first page" in task_039_section
+    assert "does not independently prove physical durability" in task_039_section
+    assert "order-flow ingestion" in task_039_section
 
 
 def test_project_state_forbids_unknown_fields() -> None:
