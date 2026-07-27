@@ -6,74 +6,75 @@ promoted through review.
 
 ## Next Action
 
-### TASK-055 — Fail-closed bounded public-HTTP response-header projection
+### TASK-056 — Deterministic public-trade disconnect, sparse-window, and restart-recovery drill evidence
 
-- **Key:** `phase2.fail_closed_public_http_bounded_response_header_projection`
+- **Key:** `phase2.public_trade_disconnect_sparse_window_restart_recovery_drill`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
-- **Human approval:** NOT REQUIRED — bounded fail-closed development hardening under the owner's
-  explicit authorization; it constrains only the application-level projection of already acquired
-  public response metadata and changes no permission, deployment, endpoint, or operator-data
-  boundary.
-- **Context:** Successful and `HTTPError` bodies are byte-bounded, but each path still constructs
-  `tuple(headers.items())` without an adapter-level pair-count or cumulative character bound.
-  Standard-library header parsing occurs before the adapter receives the response; the residual is
-  the size and work of the `HttpResponse.headers` projection, not the wire parser itself.
-- **Goal:** Bound the shared client's projected response-header snapshot on both response paths
-  while preserving every accepted header pair exactly and retaining all body, failure, and cleanup
-  precedence.
-- **Scope:** After the existing one-byte-sentinel body read and body-size decision and before
-  constructing `HttpResponse`, take one header-item snapshot that accepts at most 100 pairs whose
-  cumulative name-plus-value length is at most 65,536 Python characters. Consume at most a 101st
-  yielded pair to prove count overflow; reject either limit with exact sanitized
-  `HttpTransportError("public HTTP response headers exceeded the configured limit")`; and add
-  deterministic success/`HTTPError`, count, volume, one-pass, preservation, failure-propagation,
-  resource-closure, and mutation tests.
-- **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
-  `docs/contracts/MARKET_DATA.md`, plus coordinated governance files and governance tests.
-- **Constraints:** Call `headers.items()` once, start its iterator once, and do not call
-  `len(headers)`, directly iterate the message object, start a second pass, or request a length
-  hint. Preserve accepted pair order, duplicate names, original casing, and every name and value
-  character exactly; do not normalize, unfold, combine, deduplicate, filter, reorder, redact, or
-  synthesize headers. Preserve the existing body read and oversize decisions before header
-  projection, caller-originated header-enumeration failures, success-context closure,
-  `HTTPError` one-cleanup-attempt behavior, and primary-failure precedence. This is only an
-  adapter-controlled projection bound: it does not bound wire bytes, standard-library parsing or
-  its prior allocations, total response or process memory, response time, or provider work. Do
-  not add a header allowlist, denylist, content-type, content-length, content-encoding, privacy, or
-  sensitive-data guarantee. Preserve status/body semantics, request headers, URL/query/User-Agent,
-  timeout/response limits, redirects, exceptions, retries, providers, endpoints, dependencies,
-  runtime wiring, credentials, permissions, hostname/provider allowlists, DNS/IP/public-routability
-  or SSRF policy, IDNA, TLS/proxy behavior, TASK-037 authority, migration, and Stage 3.
+- **Human approval:** NOT REQUIRED — bounded generated-fixture test and documentation evidence
+  under the owner's explicit authorization; it performs no external request, deployment,
+  operator-data access, schema change, or permission change.
+- **Context:** The restart-safe public-trade orchestrator has exact pending-leaf recovery,
+  evidence-first progress, shared durable rate-budget gating, two separately tested cross-database
+  crash seams, and a typed causally validated transition-history reader. `RISK-001`, `RISK-004`,
+  and the Phase 2 roadmap still require deterministic planned-disconnect, sparse-window, and
+  operational restart evidence. No single process-reopen drill currently composes all three
+  generated SQLite boundaries and verifies the complete durable audit chain.
+- **Goal:** Prove through one deterministic generated-fixture drill that an exhausted public-trade
+  transport disconnect can be recovered by a newly constructed process without skipping a pending
+  leaf, inventing sparse records, bypassing the shared budget, reusing lease authority, or losing
+  causal transition evidence.
+- **Scope:** Exercise one three-millisecond synthetic Binance Spot public-trade job with
+  one-millisecond initial windows. A first worker exhausts exactly two retryable synthetic
+  transport attempts. A second worker reopens newly constructed evidence, checkpoint, and
+  rate-budget adapters on the same three temporary SQLite files, claims a fresh UUID fence, and
+  consumes exact empty, one-valid-trade, and empty provider responses. Verify checkpoint, health,
+  transition, budget, sleep, raw-evidence, canonical-evidence, conflict, request-order, and
+  completed-rerun observations through public production boundaries.
+- **Files:** `tests/integration/test_recoverable_public_trade_collection.py`, `README.md`,
+  `docs/contracts/MARKET_DATA.md`, `docs/ROADMAP.md`, plus coordinated governance files and
+  governance tests.
+- **Constraints:** Test and documentation evidence only. Use generated `tmp_path` databases,
+  injected deterministic UTC clocks and UUIDs, scripted public responses and failures, and
+  recording sleepers; perform no real network call or wall-clock sleep. Do not change production
+  source, a SQLite schema, a public contract, a policy fingerprint, retry or pacing semantics,
+  provider behavior, runtime wiring, dependencies, credentials, permissions, or operating mode.
+  A discovered production defect fails this task and requires a separately scoped fix; the drill
+  cannot silently expand into one. Do not add a continuous collector, scheduler, daemon,
+  WebSocket, CLI, dashboard, automatic recovery, deployment, multi-host coordination, or
+  crash-durable per-job pre-request reservation. Do not claim cross-database atomicity, physical
+  durability from returned outcomes, Phase 2 exit, or readiness for continuous operation. Preserve
+  TASK-037 authority, migration, and Stage 3.
 
 Acceptance gates:
 
-1. Both the successful and `HTTPError` paths call `headers.items()` and create its iterator once,
-   consume no more than 101 yielded pairs, and accept zero through 100 pairs only when cumulative
-   name-plus-value length is at most 65,536 Python characters.
-2. A 101st pair fails before its name or value is inspected. A 65,537th cumulative character fails
-   immediately with exact sanitized
-   `HttpTransportError("public HTTP response headers exceeded the configured limit")`; no partial
-   `HttpResponse`, provider parsing, retry, second body read, or second header pass occurs.
-3. Empty, one-pair, exact-100-pair, and exact-65,536-character boundaries remain accepted.
-   Multi-byte Unicode is counted as Python characters. Accepted order, duplicates, casing, empty
-   strings, and all name/value content remain exact, including existing `Retry-After` behavior.
-4. Body-read failures and body oversize retain precedence without header enumeration. On a
-   successful response, a header-limit failure exits the existing response context once. On an
-   `HTTPError`, it follows the existing single body read and is followed by exactly one cleanup
-   attempt; cleanup failure cannot replace the header-limit primary failure.
-5. Exceptions raised by `headers.items()`, iterator creation, or any consumed pull remain the same
-   raw objects. Existing supported read/protocol mappings, direct causes, cleanup-only mappings,
-   redirect behavior, and primary-failure precedence remain unchanged.
-6. Deterministic mutation tests detect removed or changed count/character limits, a `>=`
-   off-by-one error, full or second-pass enumeration, inspection of the 101st pair, projection
-   before the body-size decision, success/error-path drift, and normalization or reordering.
-7. The result is only an adapter-level header-projection bound. It makes no wire-header,
-   standard-library parser/allocation, total-memory, total-wall-clock, privacy, redaction,
-   content-type/length/encoding, hostname/provider allowlist, DNS/IP/public-routability, or SSRF
-   guarantee and changes no retry, endpoint, dependency, runtime, credential, or permission
-   behavior.
+1. Worker A receives exactly two retryable `HttpTransportError` outcomes under a two-attempt
+   policy. Each attempt follows one granted durable budget reservation, exactly one configured
+   retry delay is recorded without sleeping, and no market evidence is written.
+2. The first run durably reaches `FAILED` at checkpoint version 3 with `UNAVAILABLE` health,
+   canonical failure code `provider_unavailable`, stop reason `attempts_exhausted`, two source
+   requests, one trace, one retry, the original cursor, and the exact first one-millisecond pending
+   leaf. Arbitrary synthetic provider-error detail does not become durable control text.
+3. Worker B uses newly constructed SQLite evidence, checkpoint, and budget adapters, the exact
+   original policy fingerprint, and a fresh never-reused UUID fencing token. It processes the
+   retained one-millisecond leaf first and then at most one remaining-range segment.
+4. The recovery responses are exactly empty, one valid trade, and empty in chronological
+   one-millisecond windows. Completion reaches checkpoint version 6 in two range invocations with
+   three raw captures, one canonical trade, zero conflicts, three completed windows, no invented
+   record, no skipped boundary, and no duplicate canonical evidence.
+5. The reopened typed transition reader returns exact contiguous versions 1 through 6 with
+   `PENDING`, `RUNNING`, `FAILED`, `RUNNING`, `RUNNING`, and `COMPLETED` status, correct worker-A
+   and worker-B actor authority, health only at versions 3, 5, and 6, and a final transition equal
+   to the current checkpoint.
+6. Across both processes, exactly five durable reservations precede exactly five provider
+   attempts. Retry and inter-segment/window pacing calls equal the configured deterministic
+   delays, and no extra request, reservation, transition, health record, evidence write, or sleep
+   occurs.
+7. A run after durable completion returns `COMPLETED` with zero range invocations and leaves
+   checkpoint, transition history, health, budget, HTTP, evidence, and sleep observations
+   unchanged. The drill makes no cross-database-atomicity, physical-durability, multi-host,
+   continuous-operation, automatic-recovery, or Phase 2 exit claim.
 8. TASK-037 remains blocked and authorization remains denied; no operator data, path, database,
    scanner, report, migration, or Stage 3 action occurs. Formatting, lint, strict typing, complete
    tests, lockfile verification, dependency audit, health slice, and CI pass.
@@ -131,6 +132,56 @@ Acceptance gates:
    all repository gates pass.
 
 ## Recently Completed
+
+### TASK-055 — Fail-closed bounded public-HTTP response-header projection
+
+- **Key:** `phase2.fail_closed_public_http_bounded_response_header_projection`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
+  `docs/contracts/MARKET_DATA.md`, plus the coordinated governance files and governance tests.
+- **Result:** After the existing one-byte-sentinel body read and body-size decision, successful and
+  `HTTPError` responses now use one shared bounded header snapshot before `HttpResponse`
+  construction. Each path calls `headers.items()` once, starts its iterator once, requests no
+  length hint, performs no direct message iteration or second pass, and pulls at most 101 times.
+  Zero through 100 yielded pairs are accepted only while cumulative
+  `len(name) + len(value)` is at most 65,536 Python characters. A yielded 101st pair fails before
+  the pair is unpacked or either component is inspected; a 65,537th cumulative character fails
+  immediately. Both limits raise exact sanitized
+  `HttpTransportError("public HTTP response headers exceeded the configured limit")` without a
+  partial response, retry, second body read, or later pull.
+
+  Accepted order, duplicate names, original casing, empty strings, leading and trailing content,
+  punctuation, Unicode, and `Retry-After` behavior remain exact. Body-read failure and body
+  oversize retain precedence without header access. A successful-response limit failure has no
+  direct cause or hidden context and exits its response context once. An `HTTPError` limit failure
+  retains the originating provider error as both direct cause and active context, then attempts
+  cleanup exactly once; a cleanup failure cannot replace it. Exceptions from `headers.items()`,
+  iterator creation, and consumed pulls remain the same raw objects. On `HTTPError`, such a raw
+  failure retains only the natural implicit provider-error context rather than being wrapped.
+  Existing acquisition/read/protocol mappings, subclass identity boundaries, redirect behavior,
+  cleanup-only mappings, and primary-failure precedence remain unchanged.
+
+  Forty-one new deterministic cases bring the focused adapter suite from 518 to 559 tests. They
+  cover zero, one, and 100 pairs; finite and endless 101st yields; pair-unpack poisoning; exact
+  65,536 and immediate 65,537 character boundaries across names, values, cumulative Unicode, and
+  multi-pair input; one-pass instrumentation; exact preservation; every header-origin seam; both
+  body-precedence outcomes; both response paths; cause/context identity; and cleanup precedence.
+  An isolated mutation audit killed all 24 of 24 mutants with zero survivors and zero harness
+  errors. It covered removed or changed count and character limits, 101st-pair guard ordering,
+  `>=` drift, omitted name or value volume, non-cumulative and UTF-8-byte counting, full
+  materialization, second or direct iteration, projection before body read or size decision,
+  success/error-path drift, normalization, reordering, wrong message or cause, cleanup replacing
+  the primary failure, raw-origin wrapping, and `HTTPError`/`OSError` subclass-identity bypass.
+  The complete suite passed 1,649 tests; lockfile, formatting, lint, strict typing, dependency
+  audit, and local health checks also passed.
+
+  This is only an adapter-controlled projection bound after standard-library parsing and prior
+  allocation. It does not bound wire-header bytes, parser work or memory, total response or process
+  memory, total wall-clock time, or provider work and adds no privacy, redaction,
+  content-type/length/encoding, allowlist, hostname, DNS, IP-routability, or SSRF guarantee. No
+  request, retry, endpoint, provider, dependency, runtime, credential, permission, TLS/proxy,
+  TASK-037 authority, migration, or Stage 3 behavior changed.
 
 ### TASK-054 — Fail-closed public-HTTP maximum timeout policy
 

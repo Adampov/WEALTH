@@ -16,7 +16,7 @@ from http.client import (
 from io import BytesIO
 from math import nextafter
 from types import TracebackType
-from typing import Self, cast
+from typing import Literal, Self, SupportsIndex, cast
 from urllib import request as urllib_request
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode as stdlib_urlencode
@@ -44,6 +44,7 @@ from wealth.adapters.http import (
 )
 from wealth.ports.http import (
     MAX_PUBLIC_HTTP_TIMEOUT_SECONDS,
+    HttpResponse,
     HttpTransportError,
 )
 
@@ -73,6 +74,10 @@ ACCEPTED_TIMEOUTS = (
     pytest.param(120, id="maximum-integer"),
     pytest.param(120.0, id="maximum-float"),
     pytest.param(FloatTimeoutSubclass(120.0), id="maximum-float-subclass"),
+)
+HEADER_RESPONSE_PATHS = (
+    pytest.param("success", id="success"),
+    pytest.param("http-error", id="http-error"),
 )
 INVALID_RESPONSE_LIMITS = (
     pytest.param(True, id="boolean-true"),
@@ -108,6 +113,7 @@ INVALID_QUERY_MESSAGE = (
 INVALID_USER_AGENT_MESSAGE = (
     "user_agent must be a built-in string of 1 to 256 visible ASCII characters"
 )
+HEADER_LIMIT_MESSAGE = "public HTTP response headers exceeded the configured limit"
 DEFAULT_USER_AGENT = "WEALTH/0.1 public-market-data"
 VISIBLE_ASCII_USER_AGENT = "".join(chr(code_point) for code_point in range(0x20, 0x7F))
 NONSTANDARD_TARGET_PORT_URLS = (
@@ -542,9 +548,16 @@ class StubUrlResponse:
 
     status = 200
 
-    def __init__(self, body: bytes = b'{"ok":true}') -> None:
+    def __init__(
+        self,
+        body: bytes = b'{"ok":true}',
+        *,
+        headers: Message | None = None,
+    ) -> None:
         self.body = body
-        self.headers = {"Content-Type": "application/json"}
+        self.headers: Message | dict[str, str] = (
+            {"Content-Type": "application/json"} if headers is None else headers
+        )
         self.read_limits: list[int] = []
         self.enter_calls = 0
         self.exit_calls = 0
@@ -676,8 +689,13 @@ class RaisingBytesIO(RecordingBytesIO):
 class RaisingUrlResponse(StubUrlResponse):
     """Raise one configured transport failure from a successful response read."""
 
-    def __init__(self, error: Exception) -> None:
-        super().__init__()
+    def __init__(
+        self,
+        error: Exception,
+        *,
+        headers: Message | None = None,
+    ) -> None:
+        super().__init__(headers=headers)
         self.error = error
 
     def read(self, limit: int) -> bytes:
@@ -726,6 +744,164 @@ class RaisingMessage(Message):
         raise self.error
 
 
+class HeaderOriginError(RuntimeError):
+    """Identify raw exceptions originating in caller-controlled header enumeration."""
+
+
+class ExplodingHeaderText(str):
+    """Fail if the count-overflow sentinel header text is inspected."""
+
+    def __init__(self, value: str) -> None:
+        del value
+        self.inspection_calls: list[str] = []
+
+    def __len__(self) -> int:
+        self.inspection_calls.append("len")
+        raise AssertionError("the 101st header text was measured")
+
+    def __str__(self) -> str:
+        self.inspection_calls.append("str")
+        raise AssertionError("the 101st header text was coerced")
+
+    def __iter__(self) -> Iterator[str]:
+        self.inspection_calls.append("iter")
+        raise AssertionError("the 101st header text was iterated")
+
+    def __getitem__(self, key: SupportsIndex | slice) -> str:
+        del key
+        self.inspection_calls.append("getitem")
+        raise AssertionError("the 101st header text was indexed")
+
+
+class ExplodingHeaderPair(tuple[str, str]):
+    """Fail if the 101st pair is unpacked before the count guard."""
+
+    def __new__(cls, name: str, value: str) -> Self:
+        return tuple.__new__(cls, (name, value))
+
+    def __init__(self, name: str, value: str) -> None:
+        del name, value
+        self.inspection_calls: list[str] = []
+
+    def __iter__(self) -> Iterator[str]:
+        self.inspection_calls.append("iter")
+        raise AssertionError("the 101st header pair was unpacked")
+
+
+class ScriptedHeaders(Message):
+    """Expose header projection as an exact, bounded, one-pass trace."""
+
+    def __init__(
+        self,
+        items: tuple[tuple[str, str], ...] = (),
+        *,
+        endless: bool = False,
+        endless_item: tuple[str, str] | None = None,
+        items_error: BaseException | None = None,
+        iterator_error: BaseException | None = None,
+        next_error: BaseException | None = None,
+        next_error_at: int | None = None,
+        maximum_next_calls: int | None = None,
+    ) -> None:
+        super().__init__()
+        self.scripted_items = items
+        self.endless = endless
+        self.endless_item = endless_item
+        self.items_error = items_error
+        self.iterator_error = iterator_error
+        self.next_error = next_error
+        self.next_error_at = next_error_at
+        self.maximum_next_calls = maximum_next_calls
+        self.items_calls = 0
+        self.message_iter_calls = 0
+        self.length_calls = 0
+        self.item_access_calls = 0
+        self.item_iter_calls = 0
+        self.item_length_hint_calls = 0
+        self.next_calls = 0
+        self.yielded_pairs = 0
+
+    def __getitem__(self, name: str) -> str | None:
+        self.item_access_calls += 1
+        raise AssertionError(f"bounded headers used direct item access for {name!r}")
+
+    def __iter__(self) -> Iterator[str]:
+        self.message_iter_calls += 1
+        raise AssertionError("bounded headers directly iterated the message")
+
+    def __len__(self) -> int:
+        self.length_calls += 1
+        raise AssertionError("bounded headers called len(headers)")
+
+    def items(self) -> list[tuple[str, str]]:
+        self.items_calls += 1
+        if self.items_calls > 1:
+            raise AssertionError("bounded headers called items() more than once")
+        if self.items_error is not None:
+            raise self.items_error
+        return cast(list[tuple[str, str]], ScriptedHeaderItems(self))
+
+
+class ScriptedHeaderItems(Iterator[tuple[str, str]]):
+    """Yield scripted header pairs while rejecting extra passes, hints, or pulls."""
+
+    def __init__(self, headers: ScriptedHeaders) -> None:
+        self.headers = headers
+        self.index = 0
+
+    def __iter__(self) -> Self:
+        self.headers.item_iter_calls += 1
+        if self.headers.item_iter_calls > 1:
+            raise AssertionError("bounded headers started a second item iteration")
+        if self.headers.iterator_error is not None:
+            raise self.headers.iterator_error
+        return self
+
+    def __next__(self) -> tuple[str, str]:
+        self.headers.next_calls += 1
+        next_call = self.headers.next_calls
+        if (
+            self.headers.maximum_next_calls is not None
+            and next_call > self.headers.maximum_next_calls
+        ):
+            raise AssertionError("bounded headers pulled more items than permitted")
+        if self.headers.next_error_at == next_call:
+            if self.headers.next_error is None:
+                raise AssertionError("scripted header next error is missing")
+            raise self.headers.next_error
+        if self.index < len(self.headers.scripted_items):
+            item = self.headers.scripted_items[self.index]
+            self.index += 1
+        elif self.headers.endless:
+            item = self.headers.endless_item or (f"X-Endless-{next_call}", "value")
+        else:
+            raise StopIteration
+        self.headers.yielded_pairs += 1
+        return item
+
+    def __length_hint__(self) -> int:
+        self.headers.item_length_hint_calls += 1
+        raise AssertionError("bounded headers requested an item-iterator length hint")
+
+
+def assert_one_header_items_pass(
+    headers: ScriptedHeaders,
+    *,
+    next_calls: int,
+    yielded_pairs: int,
+) -> None:
+    """Require the exact header-enumeration work allowed by TASK-055."""
+
+    assert headers.items_calls == 1
+    assert headers.item_iter_calls == 1
+    assert headers.next_calls == next_calls
+    assert headers.yielded_pairs == yielded_pairs
+    assert headers.message_iter_calls == 0
+    assert headers.length_calls == 0
+    assert headers.item_access_calls == 0
+    assert headers.item_length_hint_calls == 0
+
+
 class RecordingHTTPError(HTTPError):
     """Count each explicit close attempt on a real HTTP-error response."""
 
@@ -762,6 +938,98 @@ def http_error(
         headers,
         reader,
     )
+
+
+class HeaderProjectionTrace:
+    """Install and inspect one successful or HTTP-error header-projection path."""
+
+    def __init__(
+        self,
+        response_path: Literal["success", "http-error"],
+        headers: Message,
+        *,
+        body: bytes = b"ok",
+        close_error: BaseException | None = None,
+    ) -> None:
+        self.response_path = response_path
+        self.requests: list[Request] = []
+        self.response: StubUrlResponse | None = None
+        self.reader: RecordingBytesIO | None = None
+        self.provider_error: RecordingHTTPError | None = None
+        if response_path == "success":
+            self.response = StubUrlResponse(body, headers=headers)
+        else:
+            self.reader = RecordingBytesIO(body, close_error=close_error)
+            self.provider_error = http_error(self.reader, headers=headers)
+
+    def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Install the configured path without external network work."""
+
+        def transport(request: Request, *, timeout: float) -> StubUrlResponse:
+            del timeout
+            self.requests.append(request)
+            if self.provider_error is not None:
+                raise self.provider_error
+            if self.response is None:
+                raise AssertionError("header trace has no configured response")
+            return self.response
+
+        monkeypatch.setattr(http_adapter, "urlopen", transport)
+
+    def assert_body_read_and_cleanup(
+        self,
+        *,
+        read_limit: int,
+        close_succeeded: bool = True,
+    ) -> None:
+        """Require one body read and the path-specific single cleanup behavior."""
+
+        assert len(self.requests) == 1
+        if self.response_path == "success":
+            assert self.response is not None
+            assert self.response.read_limits == [read_limit]
+            assert self.response.enter_calls == 1
+            assert self.response.exit_calls == 1
+            assert self.reader is None
+            assert self.provider_error is None
+        else:
+            assert self.response is None
+            assert self.reader is not None
+            assert self.provider_error is not None
+            assert self.reader.read_limits == [read_limit]
+            assert self.provider_error.close_calls == 1
+            assert self.reader.close_calls == 1
+            assert self.reader.closed is close_succeeded
+
+
+def assert_header_limit_error(
+    error: BaseException,
+    trace: HeaderProjectionTrace,
+) -> None:
+    """Require the exact sanitized TASK-055 failure and established chaining."""
+
+    assert type(error) is HttpTransportError
+    assert str(error) == HEADER_LIMIT_MESSAGE
+    assert error.__cause__ is trace.provider_error
+    assert error.__context__ is trace.provider_error
+
+
+def project_headers(
+    monkeypatch: pytest.MonkeyPatch,
+    response_path: Literal["success", "http-error"],
+    headers: Message,
+) -> tuple[HttpResponse, HeaderProjectionTrace]:
+    """Materialize one bounded response through either shared-client path."""
+
+    trace = HeaderProjectionTrace(response_path, headers)
+    trace.install(monkeypatch)
+    result = UrllibPublicHttpClient(max_response_bytes=2).get(
+        url="https://example.test/public",
+        query={},
+        timeout_seconds=1,
+    )
+    trace.assert_body_read_and_cleanup(read_limit=3)
+    return result, trace
 
 
 def use_synthetic_private_opener(
@@ -3354,3 +3622,427 @@ def test_finite_positive_timeout_is_forwarded_unchanged(
     assert result.status_code == 200
     assert result.headers == (("Content-Type", "application/json"),)
     assert result.body == b'{"ok":true}'
+
+
+@pytest.mark.parametrize("response_path", HEADER_RESPONSE_PATHS)
+@pytest.mark.parametrize(
+    "header_count",
+    [
+        pytest.param(0, id="empty"),
+        pytest.param(1, id="one"),
+        pytest.param(100, id="exact-maximum"),
+    ],
+)
+def test_response_header_pair_count_accepts_exact_boundaries_in_one_pass(
+    monkeypatch: pytest.MonkeyPatch,
+    response_path: Literal["success", "http-error"],
+    header_count: int,
+) -> None:
+    pairs = tuple((f"X-Header-{index}", f"value-{index}") for index in range(header_count))
+    headers = ScriptedHeaders(pairs)
+
+    result, trace = project_headers(monkeypatch, response_path, headers)
+
+    assert result.status_code == (200 if response_path == "success" else 429)
+    assert result.headers == pairs
+    assert result.body == b"ok"
+    assert_one_header_items_pass(
+        headers,
+        next_calls=header_count + 1,
+        yielded_pairs=header_count,
+    )
+    assert len(trace.requests) == 1
+
+
+@pytest.mark.parametrize("response_path", HEADER_RESPONSE_PATHS)
+@pytest.mark.parametrize(
+    "sequence_kind",
+    [
+        pytest.param("finite", id="finite-101"),
+        pytest.param("endless", id="endless"),
+    ],
+)
+def test_response_header_pair_count_rejects_101st_before_inspection(
+    monkeypatch: pytest.MonkeyPatch,
+    response_path: Literal["success", "http-error"],
+    sequence_kind: Literal["finite", "endless"],
+) -> None:
+    first_hundred = tuple((f"X-Header-{index}", "v") for index in range(100))
+    sentinel_name = ExplodingHeaderText("X-Must-Not-Be-Inspected")
+    sentinel_value = ExplodingHeaderText("must-not-be-inspected")
+    sentinel = ExplodingHeaderPair(sentinel_name, sentinel_value)
+    headers = ScriptedHeaders(
+        first_hundred + (() if sequence_kind == "endless" else (sentinel,)),
+        endless=sequence_kind == "endless",
+        endless_item=sentinel,
+        maximum_next_calls=101,
+    )
+    trace = HeaderProjectionTrace(response_path, headers)
+    trace.install(monkeypatch)
+
+    with pytest.raises(HttpTransportError) as error:
+        UrllibPublicHttpClient(max_response_bytes=2).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert_header_limit_error(error.value, trace)
+    assert_one_header_items_pass(headers, next_calls=101, yielded_pairs=101)
+    assert sentinel.inspection_calls == []
+    assert sentinel_name.inspection_calls == []
+    assert sentinel_value.inspection_calls == []
+    trace.assert_body_read_and_cleanup(read_limit=3)
+
+
+@pytest.mark.parametrize("response_path", HEADER_RESPONSE_PATHS)
+def test_response_header_characters_accept_exact_unicode_maximum(
+    monkeypatch: pytest.MonkeyPatch,
+    response_path: Literal["success", "http-error"],
+) -> None:
+    pairs = (("名" * 32_768, "🙂" * 32_768),)
+    headers = ScriptedHeaders(pairs)
+
+    result, _trace = project_headers(monkeypatch, response_path, headers)
+
+    assert len(pairs[0][0]) + len(pairs[0][1]) == 65_536
+    assert result.headers == pairs
+    assert_one_header_items_pass(headers, next_calls=2, yielded_pairs=1)
+
+
+@pytest.mark.parametrize("response_path", HEADER_RESPONSE_PATHS)
+@pytest.mark.parametrize(
+    ("character_shape", "expected_pulls"),
+    [
+        pytest.param("key", 1, id="key"),
+        pytest.param("value", 1, id="value"),
+        pytest.param("cumulative-unicode", 2, id="cumulative-unicode"),
+    ],
+)
+def test_response_header_characters_reject_65537_immediately(
+    monkeypatch: pytest.MonkeyPatch,
+    response_path: Literal["success", "http-error"],
+    character_shape: Literal["key", "value", "cumulative-unicode"],
+    expected_pulls: int,
+) -> None:
+    pairs: tuple[tuple[str, str], ...]
+    if character_shape == "key":
+        pairs = (("K" * 65_537, ""), ("must", "not-be-pulled"))
+    elif character_shape == "value":
+        pairs = (("", "V" * 65_537), ("must", "not-be-pulled"))
+    else:
+        pairs = (
+            ("名" * 32_767, "値" * 32_768),
+            ("🪙", "x"),
+            ("must", "not-be-pulled"),
+        )
+    headers = ScriptedHeaders(pairs, maximum_next_calls=expected_pulls)
+    trace = HeaderProjectionTrace(response_path, headers)
+    trace.install(monkeypatch)
+
+    with pytest.raises(HttpTransportError) as error:
+        UrllibPublicHttpClient(max_response_bytes=2).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert_header_limit_error(error.value, trace)
+    assert_one_header_items_pass(
+        headers,
+        next_calls=expected_pulls,
+        yielded_pairs=expected_pulls,
+    )
+    trace.assert_body_read_and_cleanup(read_limit=3)
+
+
+@pytest.mark.parametrize("response_path", HEADER_RESPONSE_PATHS)
+def test_response_header_projection_preserves_every_accepted_pair_exactly(
+    monkeypatch: pytest.MonkeyPatch,
+    response_path: Literal["success", "http-error"],
+) -> None:
+    pairs = (
+        ("Retry-After", "1"),
+        ("X-Duplicate", " first\tvalue "),
+        ("x-duplicate", ""),
+        ("X-Duplicate", "second,third"),
+        ("", ""),
+        ("MiXeD", "Δ🙂"),
+    )
+    headers = ScriptedHeaders(pairs)
+
+    result, _trace = project_headers(monkeypatch, response_path, headers)
+
+    assert result.headers == pairs
+    assert result.header("retry-after") == "1"
+    assert_one_header_items_pass(headers, next_calls=7, yielded_pairs=6)
+
+
+@pytest.mark.parametrize("response_path", HEADER_RESPONSE_PATHS)
+@pytest.mark.parametrize(
+    "failure_stage",
+    [
+        pytest.param("items", id="items"),
+        pytest.param("iterator", id="iterator"),
+        pytest.param("next-public-error-collision", id="next-public-error-collision"),
+        pytest.param("next-after-two", id="next-after-two"),
+        pytest.param("next-101", id="next-101"),
+    ],
+)
+def test_raw_response_header_origin_failure_identity_is_preserved(
+    monkeypatch: pytest.MonkeyPatch,
+    response_path: Literal["success", "http-error"],
+    failure_stage: Literal[
+        "items",
+        "iterator",
+        "next-public-error-collision",
+        "next-after-two",
+        "next-101",
+    ],
+) -> None:
+    if failure_stage == "items":
+        origin_failure: BaseException = HeaderOriginError("items-origin-detail")
+        headers = ScriptedHeaders(items_error=origin_failure)
+        expected_iterator_calls = 0
+        expected_next_calls = 0
+        expected_yielded_pairs = 0
+    elif failure_stage == "iterator":
+        origin_failure = ValueError("iterator-origin-detail")
+        headers = ScriptedHeaders(iterator_error=origin_failure)
+        expected_iterator_calls = 1
+        expected_next_calls = 0
+        expected_yielded_pairs = 0
+    elif failure_stage == "next-public-error-collision":
+        origin_failure = HttpTransportError(HEADER_LIMIT_MESSAGE)
+        headers = ScriptedHeaders(
+            next_error=origin_failure,
+            next_error_at=1,
+        )
+        expected_iterator_calls = 1
+        expected_next_calls = 1
+        expected_yielded_pairs = 0
+    elif failure_stage == "next-after-two":
+        origin_failure = HeaderOriginError("later-next-origin-detail")
+        headers = ScriptedHeaders(
+            (("X-First", "1"), ("X-Second", "2")),
+            next_error=origin_failure,
+            next_error_at=3,
+        )
+        expected_iterator_calls = 1
+        expected_next_calls = 3
+        expected_yielded_pairs = 2
+    else:
+        origin_failure = HeaderOriginError("101st-next-origin-detail")
+        headers = ScriptedHeaders(
+            tuple((f"X-Header-{index}", "v") for index in range(100)),
+            next_error=origin_failure,
+            next_error_at=101,
+            maximum_next_calls=101,
+        )
+        expected_iterator_calls = 1
+        expected_next_calls = 101
+        expected_yielded_pairs = 100
+    trace = HeaderProjectionTrace(response_path, headers)
+    trace.install(monkeypatch)
+
+    with pytest.raises(type(origin_failure)) as error:
+        UrllibPublicHttpClient(max_response_bytes=2).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert error.value is origin_failure
+    assert origin_failure.__cause__ is None
+    assert origin_failure.__context__ is trace.provider_error
+    assert headers.items_calls == 1
+    assert headers.item_iter_calls == expected_iterator_calls
+    assert headers.next_calls == expected_next_calls
+    assert headers.yielded_pairs == expected_yielded_pairs
+    assert headers.message_iter_calls == 0
+    assert headers.length_calls == 0
+    assert headers.item_access_calls == 0
+    assert headers.item_length_hint_calls == 0
+    trace.assert_body_read_and_cleanup(read_limit=3)
+
+
+@pytest.mark.parametrize(
+    ("failure_stage", "origin_kind"),
+    [
+        pytest.param("items", "http-error", id="items-http-error"),
+        pytest.param("iterator", "http-error", id="iterator-http-error"),
+        pytest.param("next", "http-error", id="next-http-error"),
+        pytest.param("items", "os-error", id="items-os-error"),
+        pytest.param("iterator", "url-error", id="iterator-url-error"),
+        pytest.param("next", "timeout-error", id="next-timeout-error"),
+    ],
+)
+def test_success_header_origin_outer_handler_collision_remains_raw(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: Literal["items", "iterator", "next"],
+    origin_kind: Literal["http-error", "os-error", "url-error", "timeout-error"],
+) -> None:
+    origin_reader: RecordingBytesIO | None = None
+    if origin_kind == "http-error":
+        origin_reader = RecordingBytesIO(b"must-not-be-read")
+        origin_failure: BaseException = http_error(origin_reader)
+    elif origin_kind == "os-error":
+        origin_failure = OSError("header-origin-os-detail")
+    elif origin_kind == "url-error":
+        origin_failure = URLError("header-origin-url-detail")
+    else:
+        origin_failure = TimeoutError("header-origin-timeout-detail")
+    if failure_stage == "items":
+        headers = ScriptedHeaders(items_error=origin_failure)
+        expected_iterator_calls = 0
+        expected_next_calls = 0
+    elif failure_stage == "iterator":
+        headers = ScriptedHeaders(iterator_error=origin_failure)
+        expected_iterator_calls = 1
+        expected_next_calls = 0
+    else:
+        headers = ScriptedHeaders(
+            next_error=origin_failure,
+            next_error_at=1,
+        )
+        expected_iterator_calls = 1
+        expected_next_calls = 1
+    trace = HeaderProjectionTrace("success", headers)
+    trace.install(monkeypatch)
+
+    with pytest.raises(type(origin_failure)) as error:
+        UrllibPublicHttpClient(max_response_bytes=2).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert error.value is origin_failure
+    assert origin_failure.__cause__ is None
+    assert origin_failure.__context__ is None
+    if origin_reader is not None:
+        assert isinstance(origin_failure, RecordingHTTPError)
+        assert origin_failure.close_calls == 0
+        assert origin_reader.read_limits == []
+        assert origin_reader.close_calls == 0
+    assert headers.items_calls == 1
+    assert headers.item_iter_calls == expected_iterator_calls
+    assert headers.next_calls == expected_next_calls
+    assert headers.yielded_pairs == 0
+    assert headers.message_iter_calls == 0
+    assert headers.length_calls == 0
+    assert headers.item_access_calls == 0
+    assert headers.item_length_hint_calls == 0
+    trace.assert_body_read_and_cleanup(read_limit=3)
+
+
+@pytest.mark.parametrize("response_path", HEADER_RESPONSE_PATHS)
+@pytest.mark.parametrize(
+    "body_outcome",
+    [
+        pytest.param("read-failure", id="read-failure"),
+        pytest.param("oversize", id="oversize"),
+    ],
+)
+def test_body_decision_precedes_all_response_header_access(
+    monkeypatch: pytest.MonkeyPatch,
+    response_path: Literal["success", "http-error"],
+    body_outcome: Literal["read-failure", "oversize"],
+) -> None:
+    header_access_failure = AssertionError("body decision reached response headers")
+    headers = ScriptedHeaders(items_error=header_access_failure)
+    read_failure = OSError("provider-body-detail")
+
+    if body_outcome == "oversize":
+        trace = HeaderProjectionTrace(response_path, headers, body=b"bad")
+        trace.install(monkeypatch)
+    elif response_path == "success":
+        response = RaisingUrlResponse(read_failure, headers=headers)
+        trace = None
+
+        def raise_from_success_body(
+            request: Request,
+            *,
+            timeout: float,
+        ) -> StubUrlResponse:
+            del request, timeout
+            return response
+
+        monkeypatch.setattr(http_adapter, "urlopen", raise_from_success_body)
+    else:
+        reader = RaisingBytesIO(read_failure)
+        provider_error = http_error(reader, headers=headers)
+        trace = None
+
+        def raise_http_error(request: Request, *, timeout: float) -> StubUrlResponse:
+            del request, timeout
+            raise provider_error
+
+        monkeypatch.setattr(http_adapter, "urlopen", raise_http_error)
+
+    with pytest.raises(HttpTransportError) as error:
+        UrllibPublicHttpClient(max_response_bytes=2).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    if body_outcome == "read-failure":
+        assert str(error.value) == "public HTTP GET failed"
+        assert error.value.__cause__ is read_failure
+        if response_path == "success":
+            assert response.read_limits == [3]
+            assert response.enter_calls == 1
+            assert response.exit_calls == 1
+        else:
+            assert reader.read_limits == [3]
+            assert provider_error.close_calls == 1
+            assert reader.close_calls == 1
+            assert reader.closed is True
+    else:
+        assert trace is not None
+        expected_message = (
+            "public HTTP response exceeded the configured limit"
+            if response_path == "success"
+            else "public HTTP error response exceeded the configured limit"
+        )
+        assert str(error.value) == expected_message
+        assert error.value.__cause__ is (
+            None if response_path == "success" else trace.provider_error
+        )
+        trace.assert_body_read_and_cleanup(read_limit=3)
+    assert headers.items_calls == 0
+    assert headers.item_iter_calls == 0
+    assert headers.next_calls == 0
+    assert headers.message_iter_calls == 0
+    assert headers.length_calls == 0
+    assert headers.item_access_calls == 0
+    assert headers.item_length_hint_calls == 0
+
+
+def test_http_error_header_limit_remains_primary_when_cleanup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    headers = ScriptedHeaders(
+        tuple((f"X-Header-{index}", "v") for index in range(101)),
+        maximum_next_calls=101,
+    )
+    close_failure = OSError("secondary-close-detail")
+    trace = HeaderProjectionTrace(
+        "http-error",
+        headers,
+        close_error=close_failure,
+    )
+    trace.install(monkeypatch)
+
+    with pytest.raises(HttpTransportError) as error:
+        UrllibPublicHttpClient(max_response_bytes=2).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert_header_limit_error(error.value, trace)
+    assert str(close_failure) not in str(error.value)
+    assert_one_header_items_pass(headers, next_calls=101, yielded_pairs=101)
+    trace.assert_body_read_and_cleanup(read_limit=3, close_succeeded=False)

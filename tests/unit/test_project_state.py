@@ -90,26 +90,27 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert "fail_closed_public_http_initial_target_length_bound" in state.active_components
     assert "fail_closed_public_http_bounded_user_agent_validation" in state.active_components
     assert "fail_closed_public_http_maximum_timeout_policy" in state.active_components
+    assert "fail_closed_public_http_bounded_response_header_projection" in (state.active_components)
     assert len(state.open_tasks) == 2
-    task_037, task_055 = state.open_tasks
+    task_037, task_056 = state.open_tasks
     assert task_037.task_id == "TASK-037"
     assert task_037.status == "blocked"
     assert task_037.risk_tier == 3
     assert task_037.requires_human_approval is True
-    assert task_055.task_id == "TASK-055"
-    assert task_055.action == "phase2.fail_closed_public_http_bounded_response_header_projection"
-    assert task_055.status == "ready"
-    assert task_055.risk_tier == 1
-    assert task_055.requires_human_approval is False
+    assert task_056.task_id == "TASK-056"
+    assert task_056.action == "phase2.public_trade_disconnect_sparse_window_restart_recovery_drill"
+    assert task_056.status == "ready"
+    assert task_056.risk_tier == 1
+    assert task_056.requires_human_approval is False
     assert state.blockers == (
         "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance "
         "location before independent Risk and Security review and the project-owner decision; "
         "authorization remains denied.",
     )
-    assert state.next_action.task_id == "TASK-055"
+    assert state.next_action.task_id == "TASK-056"
     assert (
         state.next_action.action
-        == "phase2.fail_closed_public_http_bounded_response_header_projection"
+        == "phase2.public_trade_disconnect_sparse_window_restart_recovery_drill"
     )
     assert any(decision.decision_id == "ADR-0027" for decision in state.recent_decisions)
 
@@ -208,43 +209,61 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_054_section = completed_section.split("### TASK-054 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
+    task_055_section = completed_section.split("### TASK-055 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    assert "bounded public-HTTP response-header projection" in next_action_section
-    assert "`tuple(headers.items())`" in next_action_section
-    assert "without an adapter-level pair-count or cumulative character bound" in (
+    assert "Deterministic public-trade disconnect, sparse-window" in next_action_section
+    assert "restart-recovery drill evidence" in next_action_section
+    assert "`RISK-001`, `RISK-004`" in next_action_section
+    assert "No single process-reopen drill currently composes all three" in next_action_section
+    assert "generated SQLite boundaries" in next_action_section
+    assert "exhausted public-trade" in next_action_section
+    assert "transport disconnect" in next_action_section
+    assert "without skipping a pending" in next_action_section
+    assert "shared budget" in next_action_section
+    assert "reusing lease authority" in next_action_section
+    assert "three-millisecond synthetic Binance Spot" in next_action_section
+    assert "one-millisecond initial windows" in next_action_section
+    assert "exhausts exactly two retryable synthetic" in next_action_section
+    assert "newly constructed evidence, checkpoint, and" in next_action_section
+    assert "rate-budget adapters" in next_action_section
+    assert "fresh UUID fence" in next_action_section
+    assert "exact empty, one-valid-trade, and empty" in next_action_section
+    assert "`tests/integration/test_recoverable_public_trade_collection.py`" in (
         next_action_section
     )
-    assert "Standard-library header parsing occurs before" in next_action_section
-    assert "at most 100 pairs" in next_action_section
-    assert "65,536 Python characters" in next_action_section
-    assert "at most a 101st" in next_action_section
-    assert "`src/wealth/adapters/http.py`" in next_action_section
-    assert "`tests/unit/test_http_adapter.py`" in next_action_section
-    assert (
-        '`HttpTransportError("public HTTP response headers exceeded the configured limit")`'
-        in next_action_section
-    )
-    assert "Call `headers.items()` once" in next_action_section
-    assert "start its iterator once" in next_action_section
-    assert "do not call" in next_action_section
-    assert "`len(headers)`" in next_action_section
-    assert "Preserve accepted pair order, duplicate names, original casing" in next_action_section
-    assert "do not normalize, unfold, combine, deduplicate, filter, reorder" in next_action_section
-    assert "body read and oversize decisions before header" in next_action_section
-    assert "caller-originated header-enumeration failures" in next_action_section
-    assert "only an" in next_action_section
-    assert "adapter-controlled projection bound" in next_action_section
-    assert "does not bound wire bytes, standard-library parsing" in next_action_section
-    assert "header allowlist, denylist, content-type" in next_action_section
-    assert "privacy, or" in next_action_section
-    assert "sensitive-data guarantee" in next_action_section
-    assert "hostname/provider allowlists" in next_action_section
-    assert "SSRF" in next_action_section
+    assert "`README.md`" in next_action_section
+    assert "`docs/contracts/MARKET_DATA.md`" in next_action_section
+    assert "`docs/ROADMAP.md`" in next_action_section
+    assert "Test and documentation evidence only" in next_action_section
+    assert "generated `tmp_path` databases" in next_action_section
+    assert "perform no real network call or wall-clock sleep" in next_action_section
+    assert "Do not change production" in next_action_section
+    assert "A discovered production defect fails this task" in next_action_section
+    assert "continuous collector, scheduler, daemon" in next_action_section
+    assert "crash-durable per-job pre-request reservation" in next_action_section
+    assert "Do not claim cross-database atomicity" in next_action_section
+    assert "exactly two retryable `HttpTransportError` outcomes" in next_action_section
+    assert "no market evidence is written" in next_action_section
+    assert "`FAILED` at checkpoint version 3" in next_action_section
+    assert "`UNAVAILABLE` health" in next_action_section
+    assert "canonical failure code `provider_unavailable`" in next_action_section
+    assert "stop reason `attempts_exhausted`" in next_action_section
+    assert "fresh never-reused UUID fencing token" in next_action_section
+    assert "Completion reaches checkpoint version 6" in next_action_section
+    assert "three raw captures, one canonical trade, zero conflicts" in next_action_section
+    assert "exact contiguous versions 1 through 6" in next_action_section
+    assert "health only at versions 3, 5, and 6" in next_action_section
+    assert "exactly five durable reservations" in next_action_section
+    assert "A run after durable completion" in next_action_section
+    assert "zero range invocations" in next_action_section
+    assert "no cross-database-atomicity, physical-durability" in next_action_section
     assert "TASK-037 remains blocked and authorization remains denied" in next_action_section
     assert blocked_section.count("### TASK-") == 1
     assert "### TASK-037 " in blocked_section
@@ -647,6 +666,66 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "still has no adapter-level pair-count" in task_054_section
     assert "TASK-055 governs that" in task_054_section
     assert "residual response-metadata risk" in task_054_section
+    assert "- **Status:** COMPLETE" in task_055_section
+    assert "`phase2.fail_closed_public_http_bounded_response_header_projection`" in task_055_section
+    assert "`src/wealth/adapters/http.py`" in task_055_section
+    assert "`tests/unit/test_http_adapter.py`" in task_055_section
+    assert "`docs/contracts/MARKET_DATA.md`" in task_055_section
+    assert "one-byte-sentinel body read and body-size decision" in task_055_section
+    assert "one shared bounded header snapshot" in task_055_section
+    assert "calls `headers.items()` once" in task_055_section
+    assert "starts its iterator once" in task_055_section
+    assert "requests no" in task_055_section
+    assert "length hint" in task_055_section
+    assert "no direct message iteration or second pass" in task_055_section
+    assert "pulls at most 101 times" in task_055_section
+    assert "Zero through 100 yielded pairs" in task_055_section
+    assert "`len(name) + len(value)`" in task_055_section
+    assert "65,536 Python characters" in task_055_section
+    assert "101st pair fails before" in task_055_section
+    assert "pair is unpacked or either component is inspected" in task_055_section
+    assert "65,537th cumulative character fails" in task_055_section
+    assert (
+        '`HttpTransportError("public HTTP response headers exceeded the configured limit")`'
+        in task_055_section
+    )
+    assert "Accepted order, duplicate names, original casing" in task_055_section
+    assert "`Retry-After` behavior remain exact" in task_055_section
+    assert "Body-read failure and body" in task_055_section
+    assert "oversize retain precedence without header access" in task_055_section
+    assert "has no" in task_055_section
+    assert "direct cause or hidden context" in task_055_section
+    assert "originating provider error as both direct cause and active context" in task_055_section
+    assert "cleanup exactly once" in task_055_section
+    assert "cleanup failure cannot replace it" in task_055_section
+    assert "same raw objects" in task_055_section
+    assert "natural implicit provider-error context" in task_055_section
+    assert "Forty-one new deterministic cases" in task_055_section
+    assert "from 518 to 559 tests" in task_055_section
+    assert "finite and endless 101st yields" in task_055_section
+    assert "pair-unpack poisoning" in task_055_section
+    assert "cumulative Unicode" in task_055_section
+    assert "An isolated mutation audit killed all 24 of 24 mutants" in task_055_section
+    assert "zero survivors and zero harness" in task_055_section
+    assert "errors" in task_055_section
+    assert "101st-pair guard ordering" in task_055_section
+    assert "`>=` drift" in task_055_section
+    assert "omitted name or value volume" in task_055_section
+    assert "non-cumulative and UTF-8-byte counting" in task_055_section
+    assert "projection before body read or size decision" in task_055_section
+    assert "normalization, reordering, wrong message or cause" in task_055_section
+    assert "cleanup replacing" in task_055_section
+    assert "raw-origin wrapping" in task_055_section
+    assert "`HTTPError`/`OSError` subclass-identity bypass" in task_055_section
+    assert "complete suite passed 1,649 tests" in task_055_section
+    assert "lockfile, formatting, lint, strict typing, dependency" in task_055_section
+    assert "local health checks also passed" in task_055_section
+    assert "only an adapter-controlled projection bound" in task_055_section
+    assert "after standard-library parsing and prior" in task_055_section
+    assert "allocation" in task_055_section
+    assert "does not bound wire-header bytes" in task_055_section
+    assert "adds no privacy, redaction" in task_055_section
+    assert "TASK-037 authority" in task_055_section
     assert "private urllib opener with a no-follow redirect handler" in market_data_contract
     assert "performs no body" in market_data_contract
     assert "read or cleanup" in market_data_contract
@@ -702,14 +781,42 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "float subclass at exactly 120" in market_data_contract
     assert "identity because no exact numeric-type policy was added" in market_data_contract
     assert "not separately bound DNS, multiple operations" in market_data_contract
-    assert "currently projects every pair returned by" in market_data_contract
-    assert "`headers.items()`" in market_data_contract
-    assert "TASK-055 governs an application-level snapshot" in market_data_contract
-    assert "at most 100 pairs and 65,536 cumulative" in market_data_contract
-    assert "name-plus-value Python characters" in market_data_contract
-    assert "projection" in market_data_contract
-    assert "bound only" in market_data_contract
-    assert "no wire-header, parser, total-response-memory, privacy" in market_data_contract
+    assert "After either bounded body read and its body-size decision" in market_data_contract
+    assert "one bounded" in market_data_contract
+    assert "response-header snapshot before constructing `HttpResponse`" in market_data_contract
+    assert "call `headers.items()` once" in market_data_contract
+    assert "start its iterator once" in market_data_contract
+    assert "perform no direct message iteration or" in market_data_contract
+    assert "second pass" in market_data_contract
+    assert "pull at most 101 times" in market_data_contract
+    assert "Zero through 100 yielded pairs" in market_data_contract
+    assert "`len(name) + len(value)`" in market_data_contract
+    assert "65,536 Python characters" in market_data_contract
+    assert "101st pair fails before unpacking or inspecting it" in market_data_contract
+    assert "65,537th cumulative character" in market_data_contract
+    assert (
+        '`HttpTransportError("public HTTP response headers exceeded the configured limit")`'
+        in market_data_contract
+    )
+    assert "Accepted pair order, duplicate names, original casing" in market_data_contract
+    assert "`Retry-After` behavior" in market_data_contract
+    assert "Body-read failures and body" in market_data_contract
+    assert "oversize retain precedence without header enumeration" in market_data_contract
+    assert "no direct cause or hidden context" in market_data_contract
+    assert "originating provider error is the header-limit failure's direct cause" in (
+        market_data_contract
+    )
+    assert "cleanup attempt whose failure cannot replace" in market_data_contract
+    assert "same raw objects" in market_data_contract
+    assert "natural implicit provider-error" in market_data_contract
+    assert "adapter-controlled projection bound after standard-library parsing" in (
+        market_data_contract
+    )
+    assert "does not bound wire-header bytes, parser work or memory" in market_data_contract
+    assert "no privacy, redaction" in market_data_contract
+    assert "composed generated-fixture" in market_data_contract
+    assert "exhausted disconnect, sparse windows" in market_data_contract
+    assert "remains pending under TASK-056" in market_data_contract
     assert "After preserving `max_response_bytes` validation" in market_data_contract
     assert "exact built-in `str` of 1 through 256 Python characters" in market_data_contract
     assert "U+0020 through U+007E" in market_data_contract
@@ -753,11 +860,25 @@ def test_project_state_references_existing_governance_artifacts() -> None:
         "Finite-positive public-HTTP timeouts now also share a 120-second maximum" in risk_register
     )
     assert "without changing their standard per-operation semantics" in risk_register
-    assert "every pair returned by `headers.items()` is still projected" in risk_register
-    assert "without an adapter-level pair-count or cumulative-character limit" in risk_register
-    assert "Add an application-level successful/HTTP-error header snapshot" in risk_register
-    assert "100 pairs and 65,536 cumulative name-plus-value Python characters" in risk_register
-    assert "do not claim a wire-header, parser-allocation, total-memory" in risk_register
+    assert "After the bounded body-size decision" in risk_register
+    assert "successful and HTTP-error response headers now use one adapter-bounded snapshot" in (
+        risk_register
+    )
+    assert "calls `headers.items()` and starts its iterator once" in risk_register
+    assert "pulls at most 101 times" in risk_register
+    assert "accepts at most 100 pairs and 65,536 cumulative" in risk_register
+    assert "fails a yielded 101st pair before unpacking or inspection" in risk_register
+    assert "Accepted order, duplicates, casing, and content remain exact" in risk_register
+    assert "raw header-origin failures are preserved" in risk_register
+    assert "Standard-library parsing and prior allocations occur before" in risk_register
+    assert "no wire-header, parser-allocation, total-memory" in risk_register
+    assert "Run TASK-056's generated-fixture public-trade drill" in risk_register
+    assert "exhausted transport disconnect, sparse windows" in risk_register
+    assert "do not infer continuous-operation readiness" in risk_register
+    assert "Run TASK-056's generated-fixture restart drill" in risk_register
+    assert "newly constructed evidence, control, and rate-budget SQLite adapters" in risk_register
+    assert "Keep cross-database atomicity open" in risk_register
+    assert "do not infer physical durability" in risk_register
     assert "Within the canonical UTC migration track" in roadmap
     assert "TASK-037 remains" in roadmap
     assert "blocked and authorization remains denied" in roadmap
