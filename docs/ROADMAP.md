@@ -188,9 +188,46 @@ eligible epoch-aligned closed boundary or the finite catch-up cap. These are val
 repository persists them, no runtime imports the module, and no job or stream is created,
 attached, claimed, started, invoked, scheduled, paused, resumed, or recovered. No SQLite/schema,
 network, service, deployment, operator data, permission, automatic action, capacity evidence,
-multi-host guarantee, or readiness claim was added. TASK-060 is therefore limited to a
-design-only persistence-contract decision before any repository or schema proposal. ADR-0028 and
-the current explicitly invoked bounded public-trade flow remain unchanged.
+multi-host guarantee, or readiness claim was added. TASK-060 was therefore limited to a design-only
+persistence-contract decision before any repository or schema proposal. That decision is now
+complete: TASK-060 records
+[ADR-0029](decisions/0029-continuous-public-trade-stream-persistence-contract.md). The decision
+pins the exact TASK-059 checkpoint as future durable current state, keeps planning, service,
+fencing, child, evidence, health, and budget domains separate, and defines fail-closed conceptual
+create, exact-identity load, and versioned compare-and-swap semantics. It requires a new exact
+canonical `child_creation_payload` for the complete deterministic pristine child plus
+stream/request binding to commit with an attachment because the TASK-059 creation fingerprint alone
+is not reversible; that payload does not redefine the existing bounded-child store serializer. It
+also keeps the continuous-stream and bounded-child policy fingerprints distinct. Exact transition
+authority and completed-child evidence remain separate bounded references rather than being
+inferred from a pause reason or child ID.
+
+ADR-0029 fixes the canonical serialization profile and six distinct child, stream-envelope,
+stream-creation, transition-record, evidence-scope, and rolling-history-root digest contracts.
+Separate stream-creation and append-only transition records retain immutable
+successor-envelope bytes for causal revalidation, and an immutable complete stream-policy
+projection for field-level drift checks even when a caller reuses a fingerprint. It defines every
+attach, child-create, evidence, checkpoint, completion, stream-advance, hold, and resume crash
+disposition without treating separate stores as atomic. ATTACH authority binds exact prior
+version/digest/history root, successor version, candidate child, and effective child-policy
+fingerprint before trusted time sampling; the finalized transition/root binds the resulting exact
+successor. An in-flight response may cross a concurrent hold only under explicit non-integrity
+classification, while drift, invalid payload, quality/evidence failure, corruption, or ambiguity
+stops canonical admission/progress. The decision specifies version compatibility, typed quarantine,
+migration and restore prerequisites, causal retention, and
+disable-to-current-bounded-flow rollback before a physical repository is selected. TASK-059 epoch
+milliseconds remain exact; attachment fails before commit if the existing bounded-child model
+cannot represent the required datetime, while a later physical projection must fail closed if
+ADR-0027 signed epoch microseconds cannot represent the value. No code, codec, port, repository,
+SQLite/DDL/schema, migration, runtime, provider, operator data, permission, automatic action,
+capacity, physical-durability, multi-host, recovery, deployment, readiness, or Phase 2 claim was
+added.
+
+TASK-061 is therefore the next bounded RISK-1 increment: pure, unused versioned persistence-record
+and canonical-codec contracts with deterministic hostile and golden-byte tests only. It may not
+add a port, repository, SQLite/schema, migration execution, runtime import, network path,
+scheduler, service, operator data, permission, or automatic action. ADR-0028 and the current
+explicitly invoked bounded public-trade flow remain unchanged.
 `RISK-005` remains open: the accepted plan selects Python
 datetimes in the fixed `datetime.UTC` zone, fixed microsecond RFC 3339 `Z` text, and derived
 epoch-microsecond SQL projections. New injected clock values are fixed-UTC, and the isolated pure
