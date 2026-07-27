@@ -6,60 +6,67 @@ promoted through review.
 
 ## Next Action
 
-### TASK-050 — Fail-closed public-HTTP standard HTTPS target-port policy
+### TASK-051 — Fail-closed public-HTTP bounded query serialization
 
-- **Key:** `phase2.fail_closed_public_http_standard_https_target_port_policy`
+- **Key:** `phase2.fail_closed_public_http_bounded_query_serialization`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
 - **Human approval:** NOT REQUIRED — bounded fail-closed development hardening under the owner's
-  explicit authorization; it narrows public-network behavior and changes no permission,
-  deployment, provider, or operator-data boundary.
-- **Context:** TASK-049 now rejects structurally invalid or ambiguous initial targets, but it
-  deliberately accepts every parsed explicit target port from 1 through 65,535. Every active
-  provider default uses implicit HTTPS port 443. A different otherwise valid target port can
-  select another TLS service even though the URL remains HTTPS; this policy concerns the caller's
-  target authority only and does not constrain a configured proxy peer.
-- **Goal:** Permit only an omitted target port or numeric target port 443 before query or request
-  work, while preserving the exact original text of an accepted target.
-- **Scope:** Extend the private initial-target validator after TASK-049 structural validation;
-  reject a structurally valid explicit non-443 target port with exact
-  `ValueError("url must use the standard HTTPS target port")`; and add deterministic no-work,
-  precedence, preservation, and active-provider-default tests.
+  explicit authorization; it limits adapter-controlled public-request work and changes no
+  permission, deployment, provider, or operator-data boundary.
+- **Context:** TASK-050 now constrains the caller's initial target to the standard HTTPS port, but
+  the shared client still fully materializes and sorts `query.items()` before encoding it.
+  A custom mapping can yield an unbounded number of items, and otherwise valid strings can impose
+  unbounded adapter-controlled serialization work. Every active provider request uses an ordinary
+  built-in-string mapping with no more than six pairs.
+- **Goal:** Bound one query snapshot before sorting, encoding, or request construction while
+  preserving the exact serialized form of every accepted query.
+- **Scope:** Add explicit limits of 32 query pairs and 8,192 total key-plus-value characters;
+  consume at most 33 yielded items from one `items()` iterator without calling `len(query)` or
+  iterating twice; accept only exact two-element tuples whose key and value are built-in `str`;
+  reject every shape, type, count, or character-volume violation with exact
+  `ValueError("query must contain at most 32 built-in string pairs totaling at most 8192 characters")`;
+  and add deterministic finite-iteration, no-work, boundary, preservation, and active-provider
+  tests.
 - **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
   `docs/contracts/MARKET_DATA.md`, plus coordinated governance files and governance tests.
-- **Constraints:** Preserve TASK-049's structural error and precedence for malformed, encoded,
-  empty, non-numeric, signed, Unicode-digit, zero, or out-of-range ports. Do not normalize,
-  rewrite, resolve, or contact a rejected target. Do not add a provider or hostname allowlist, DNS
-  lookup, IP or public-routability policy, SSRF guarantee, IDNA policy, certificate pinning, custom
-  TLS context, proxy change, credential, redirect permission, retry, dependency, endpoint change,
-  or provider-specific exception. Preserve accepted target text, sorted query construction,
-  headers, timeouts, response caps, no-follow behavior, TASK-041 through TASK-049 exception and
-  cleanup semantics, provider parsing, canonicalization, quality, storage, schemas, runtime
-  wiring, TASK-037 authority, migration, and Stage 3.
+- **Constraints:** Preserve timeout, TASK-049 structural-target, and TASK-050 target-port
+  precedence before any query access. Mapping-originated exceptions remain unchanged; the new
+  bound does not claim a total wall-clock limit on caller code. Do not add a query-character
+  policy, normalization, repair, list or multi-value contract, initial URL/path length cap,
+  provider or hostname allowlist, DNS lookup, IP or public-routability policy, SSRF guarantee,
+  IDNA policy, certificate pinning, custom TLS context, proxy change, credential, redirect
+  permission, retry, dependency, endpoint change, or provider-specific exception. Preserve sorted
+  query encoding, accepted URL text, headers, timeouts, response caps, no-follow behavior,
+  TASK-041 through TASK-050 exception and cleanup semantics, provider parsing, canonicalization,
+  quality, storage, schemas, runtime wiring, TASK-037 authority, migration, and Stage 3.
 
 Acceptance gates:
 
-1. With a valid timeout and otherwise valid target, explicit ports 1, 80, 442, 444, and 65,535
-   raise exactly `ValueError("url must use the standard HTTPS target port")`, with no direct or
-   displayed parser cause. Malformed, percent-encoded, empty, non-numeric, signed, Unicode-digit,
-   zero, and greater-than-65,535 ports retain TASK-049's exact structural error and precedence.
-2. Every rejected non-443 target fails before the query mapping is accessed or serialized and
-   before `Request`, the private opener, DNS, or any network or filesystem handler is invoked. No
-   target is normalized, repaired, retried, or partially opened.
-3. An implicit target port and explicit numeric port 443, including a zero-padded representation
-   parsed as 443, retain their exact original URL text; the separately supplied sorted query is
-   appended exactly once, and the existing GET method, `Accept`, `User-Agent`, and finite-positive
-   timeout are forwarded unchanged.
-4. Every active provider default URL remains unchanged and accepted. Non-redirect success,
-   HTTP-error behavior, TASK-048 redirect rejection, and every TASK-041 through TASK-049 mapping,
-   exclusion, direct cause, cleanup rule, and primary-failure precedence remain unchanged.
-5. No provider or hostname allowlist, DNS lookup or resolution, IP/public-routability policy, SSRF
-   guarantee, IDNA policy, certificate pin, TLS/proxy customization, endpoint, dependency, or
-   provider-specific behavior is introduced. The policy constrains only the caller target port;
-   a configured proxy may itself use a non-443 peer. Formatting, lint, strict typing, complete
-   tests, lockfile verification, dependency audit, health slice, and CI pass.
-6. TASK-037 remains blocked and authorization remains denied; no operator data, path, database,
+1. Timeout validation retains first precedence, followed by TASK-049 structural-target validation
+   and TASK-050 target-port validation; every rejection at those boundaries performs zero query
+   access and retains its exact existing error, cause, and context behavior.
+2. One query snapshot accepts zero through 32 exact two-element built-in-string tuples whose
+   combined key-plus-value length is at most 8,192 characters. A 33rd item, malformed pair,
+   non-string or string-subclass component, or 8,193rd character raises exactly
+   `ValueError("query must contain at most 32 built-in string pairs totaling at most 8192 characters")`
+   with no direct cause or hidden context.
+3. The client calls `items()` once, never calls `len(query)`, never starts a second iteration, and
+   requests at most 33 yielded items even from a synthetic unbounded mapping. A mapping-originated
+   exception remains raw and is not converted into the query-boundary error.
+4. Every query-boundary rejection occurs before `urlencode`, `Request`, the private opener, DNS,
+   network, or filesystem-handler work; no rejected query is partially serialized, normalized,
+   repaired, retried, or opened.
+5. Empty, one-pair, 32-pair, and exact-8,192-character boundaries retain the existing single
+   sorted `urlencode` call and exact request text. Every active provider query remains accepted
+   unchanged, and GET, `Accept`, `User-Agent`, timeout, response-limit, HTTP-error, redirect,
+   cleanup, and direct-cause behavior remain unchanged.
+6. No query-content policy, URL/path cap, provider or hostname allowlist, DNS/IP/public-routability
+   or SSRF claim, IDNA, certificate, TLS/proxy, endpoint, dependency, runtime, or provider-specific
+   behavior is introduced. Formatting, lint, strict typing, complete tests, lockfile verification,
+   dependency audit, health slice, and CI pass.
+7. TASK-037 remains blocked and authorization remains denied; no operator data, path, database,
    scanner, report, migration, or Stage 3 action occurs.
 
 ## Blocked, Awaiting Owner-Supplied Restricted Inputs
@@ -115,6 +122,33 @@ Acceptance gates:
    all repository gates pass.
 
 ## Recently Completed
+
+### TASK-050 — Fail-closed public-HTTP standard HTTPS target-port policy
+
+- **Key:** `phase2.fail_closed_public_http_standard_https_target_port_policy`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
+  `docs/contracts/MARKET_DATA.md`, plus the coordinated governance files and governance tests.
+- **Result:** After TASK-049 structural validation and before any query-mapping operation, the
+  shared client now accepts only an omitted caller target port or an explicit numeric port that
+  parses as 443. Structurally valid explicit ports 1, 80, 442, 444, 8,443, and 65,535, a
+  zero-padded nonstandard port, and nonstandard IPv6 and IPvFuture ports raise the exact
+  `ValueError("url must use the standard HTTPS target port")` with no direct cause or hidden
+  context. They perform no query access or serialization, `Request` construction, private-opener
+  work, DNS lookup, network access, or filesystem-handler work. Because the policy follows the
+  complete structural validator, malformed, percent-encoded, empty, non-numeric, signed,
+  Unicode-digit, zero, and greater-than-65,535 ports retain TASK-049's exact structural error and
+  precedence. Implicit port 443 and explicit numeric 443, including zero-padded, mixed-case,
+  IPv6, and IPvFuture forms, preserve the exact original URL text, sorted query, GET method,
+  `Accept`, `User-Agent`, finite-positive timeout, one bounded read, and one acquisition. Tests
+  also prove all five active provider default endpoints remain accepted. The policy constrains
+  only the caller's target authority: a configured proxy peer may use a non-443 port, and default
+  proxy and TLS behavior remains unchanged. No provider or hostname allowlist, DNS resolution,
+  IP/public-routability or SSRF guarantee, IDNA policy, certificate pin, endpoint, dependency,
+  provider behavior, response mapping, cleanup rule, runtime wiring, TASK-037 authority,
+  migration, or Stage 3 behavior changed. Query serialization remains unbounded in item count and
+  string volume; TASK-051 governs that residual finite-work risk.
 
 ### TASK-049 — Fail-closed public-HTTP initial request-target validation
 

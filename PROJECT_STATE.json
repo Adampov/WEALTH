@@ -55,7 +55,8 @@
     "typed_public_http_pre_response_incomplete_read_failure_mapping",
     "typed_public_http_response_protocol_failure_mapping",
     "fail_closed_public_http_automatic_redirect_rejection",
-    "fail_closed_public_http_initial_request_target_validation"
+    "fail_closed_public_http_initial_request_target_validation",
+    "fail_closed_public_http_standard_https_target_port_policy"
   ],
   "active_integrations": [
     "github_actions_ci"
@@ -97,8 +98,8 @@
       "requires_human_approval": true
     },
     {
-      "task_id": "TASK-050",
-      "action": "phase2.fail_closed_public_http_standard_https_target_port_policy",
+      "task_id": "TASK-051",
+      "action": "phase2.fail_closed_public_http_bounded_query_serialization",
       "status": "ready",
       "risk_tier": 1,
       "requires_human_approval": false
@@ -135,8 +136,8 @@
     }
   ],
   "next_action": {
-    "task_id": "TASK-050",
-    "action": "phase2.fail_closed_public_http_standard_https_target_port_policy"
+    "task_id": "TASK-051",
+    "action": "phase2.fail_closed_public_http_bounded_query_serialization"
   },
-  "last_updated_utc": "2026-07-27T07:05:15Z"
+  "last_updated_utc": "2026-07-27T07:41:59Z"
 }

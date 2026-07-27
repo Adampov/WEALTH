@@ -85,27 +85,25 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert "typed_public_http_response_protocol_failure_mapping" in state.active_components
     assert "fail_closed_public_http_automatic_redirect_rejection" in state.active_components
     assert "fail_closed_public_http_initial_request_target_validation" in state.active_components
+    assert "fail_closed_public_http_standard_https_target_port_policy" in state.active_components
     assert len(state.open_tasks) == 2
-    task_037, task_050 = state.open_tasks
+    task_037, task_051 = state.open_tasks
     assert task_037.task_id == "TASK-037"
     assert task_037.status == "blocked"
     assert task_037.risk_tier == 3
     assert task_037.requires_human_approval is True
-    assert task_050.task_id == "TASK-050"
-    assert task_050.action == "phase2.fail_closed_public_http_standard_https_target_port_policy"
-    assert task_050.status == "ready"
-    assert task_050.risk_tier == 1
-    assert task_050.requires_human_approval is False
+    assert task_051.task_id == "TASK-051"
+    assert task_051.action == "phase2.fail_closed_public_http_bounded_query_serialization"
+    assert task_051.status == "ready"
+    assert task_051.risk_tier == 1
+    assert task_051.requires_human_approval is False
     assert state.blockers == (
         "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance "
         "location before independent Risk and Security review and the project-owner decision; "
         "authorization remains denied.",
     )
-    assert state.next_action.task_id == "TASK-050"
-    assert (
-        state.next_action.action
-        == "phase2.fail_closed_public_http_standard_https_target_port_policy"
-    )
+    assert state.next_action.task_id == "TASK-051"
+    assert state.next_action.action == "phase2.fail_closed_public_http_bounded_query_serialization"
     assert any(decision.decision_id == "ADR-0027" for decision in state.recent_decisions)
 
 
@@ -188,25 +186,34 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_049_section = completed_section.split("### TASK-049 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
+    task_050_section = completed_section.split("### TASK-050 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    assert "standard HTTPS target-port policy" in next_action_section
-    assert "parsed explicit target port from 1 through 65,535" in next_action_section
-    assert "policy concerns the caller's" in next_action_section
-    assert "target authority only and does not constrain" in next_action_section
-    assert "does not constrain a configured proxy peer" in next_action_section
-    assert "omitted target port or numeric target port 443" in next_action_section
-    assert '`ValueError("url must use the standard HTTPS target port")`' in next_action_section
-    assert "structural error and precedence" in next_action_section
-    assert "before the query mapping is accessed or serialized" in next_action_section
-    assert "zero-padded representation" in next_action_section
-    assert "Every active provider default URL remains unchanged and accepted" in next_action_section
-    assert "No provider or hostname allowlist" in next_action_section
-    assert "DNS lookup or resolution" in next_action_section
+    assert "bounded query serialization" in next_action_section
+    assert "fully materializes and sorts `query.items()`" in next_action_section
+    assert "no more than six pairs" in next_action_section
+    assert "32 query pairs and 8,192 total key-plus-value characters" in next_action_section
+    assert "at most 33 yielded items from one `items()` iterator" in next_action_section
+    assert "without calling `len(query)`" in next_action_section
+    assert "exact two-element tuples" in next_action_section
+    assert "built-in `str`" in next_action_section
+    assert (
+        '`ValueError("query must contain at most 32 built-in string pairs totaling at most 8192 '
+        'characters")`' in next_action_section
+    )
+    assert "TASK-049 structural-target, and TASK-050 target-port" in next_action_section
+    assert "Mapping-originated exceptions remain unchanged" in next_action_section
+    assert "does not claim a total wall-clock limit" in next_action_section
+    assert "Do not add a query-character" in next_action_section
+    assert "initial URL/path length cap" in next_action_section
+    assert "provider or hostname allowlist" in next_action_section
+    assert "DNS lookup" in next_action_section
     assert "SSRF" in next_action_section
     assert "TASK-037 remains blocked and authorization remains denied" in next_action_section
     assert blocked_section.count("### TASK-") == 1
@@ -425,6 +432,30 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "not a hostname, DNS, IP-routability, or SSRF guarantee" in task_049_section
     assert "explicit ports 1 through 65,535 remain accepted" in task_049_section
     assert "TASK-050 governs the remaining target-port" in task_049_section
+    assert "- **Status:** COMPLETE" in task_050_section
+    assert "`phase2.fail_closed_public_http_standard_https_target_port_policy`" in task_050_section
+    assert "`src/wealth/adapters/http.py`" in task_050_section
+    assert "`tests/unit/test_http_adapter.py`" in task_050_section
+    assert "After TASK-049 structural validation" in task_050_section
+    assert "before any query-mapping operation" in task_050_section
+    assert "omitted caller target port" in task_050_section
+    assert "parses as 443" in task_050_section
+    assert "ports 1, 80, 442, 444, 8,443, and 65,535" in task_050_section
+    assert "zero-padded nonstandard port" in task_050_section
+    assert "nonstandard IPv6 and IPvFuture ports" in task_050_section
+    assert '`ValueError("url must use the standard HTTPS target port")`' in task_050_section
+    assert "no direct cause or hidden" in task_050_section
+    assert "no query access or serialization" in task_050_section
+    assert "`Request` construction, private-opener" in task_050_section
+    assert "malformed, percent-encoded, empty, non-numeric, signed" in task_050_section
+    assert "greater-than-65,535 ports retain TASK-049's exact structural error" in task_050_section
+    assert "Implicit port 443 and explicit numeric 443" in task_050_section
+    assert "preserve the exact original URL text" in task_050_section
+    assert "all five active provider default endpoints remain accepted" in task_050_section
+    assert "configured proxy peer may use a non-443 port" in task_050_section
+    assert "No provider or hostname allowlist" in task_050_section
+    assert "Query serialization remains unbounded" in task_050_section
+    assert "TASK-051 governs that residual finite-work risk" in task_050_section
     assert "private urllib opener with a no-follow redirect handler" in market_data_contract
     assert "performs no body" in market_data_contract
     assert "read or cleanup" in market_data_contract
@@ -439,17 +470,34 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "accepted URL itself is never normalized" in market_data_contract
     assert "A rejected target performs" in market_data_contract
     assert "no query iteration or serialization" in market_data_contract
-    assert "This boundary is structural, not a hostname or SSRF policy" in market_data_contract
-    assert "every syntactically valid explicit port from 1 through 65,535" in market_data_contract
-    assert "TASK-050 governs" in market_data_contract
+    assert "caller target" in market_data_contract
+    assert "must be omitted or parse as numeric 443" in market_data_contract
+    assert '`ValueError("url must use the standard HTTPS target port")`' in market_data_contract
+    assert "without query access, serialization, request construction" in market_data_contract
+    assert "ports retain the earlier exact" in market_data_contract
+    assert "structural error and precedence" in market_data_contract
+    assert "accepted implicit, explicit, or zero-padded 443 target retains" in market_data_contract
+    assert "structural and caller-authority policies, not hostname or SSRF" in market_data_contract
+    assert "configured proxy" in market_data_contract
+    assert "peer may use a non-443 port" in market_data_contract
+    assert "Query" in market_data_contract
+    assert "serialization is not yet bounded" in market_data_contract
+    assert "TASK-051 governs that residual" in market_data_contract
     assert "Automatic 301, 302, 303, 307, and 308 redirects are rejected" in risk_register
     assert "process-global opener is untouched" in risk_register
     assert "original initial target must be an absolute credential-free HTTPS URL" in risk_register
     assert "lone surrogate" in risk_register
     assert "NFKC authority ambiguity" in risk_register
     assert "accepted target is never reconstructed or normalized" in risk_register
+    assert "target port must be omitted or parse as numeric 443" in risk_register
+    assert "structurally valid nonstandard target port fails" in risk_register
+    assert (
+        "accepted implicit, explicit, and zero-padded 443 text remains unchanged" in risk_register
+    )
+    assert "does not constrain a configured proxy peer" in risk_register
     assert "performs no hostname allowlisting, DNS resolution" in risk_register
-    assert "omitted or numeric-443 port" in risk_register
+    assert "Bound adapter-controlled query enumeration" in risk_register
+    assert "before sorting, encoding, or request construction" in risk_register
     assert "Within the canonical UTC migration track" in roadmap
     assert "TASK-037 remains" in roadmap
     assert "blocked and authorization remains denied" in roadmap
