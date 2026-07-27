@@ -18,6 +18,7 @@ from types import TracebackType
 from typing import Self, cast
 from urllib import request as urllib_request
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode as stdlib_urlencode
 from urllib.request import (
     BaseHandler,
     HTTPRedirectHandler,
@@ -76,6 +77,9 @@ INVALID_INITIAL_URL_MESSAGE = (
     "url must be an absolute credential-free HTTPS endpoint without query or fragment"
 )
 INVALID_TARGET_PORT_MESSAGE = "url must use the standard HTTPS target port"
+INVALID_QUERY_MESSAGE = (
+    "query must contain at most 32 built-in string pairs totaling at most 8192 characters"
+)
 NONSTANDARD_TARGET_PORT_URLS = (
     pytest.param("https://example.test:1/public", id="minimum"),
     pytest.param("https://example.test:80/public", id="http-default"),
@@ -270,6 +274,119 @@ class IntegerSubclass(int):
     """Represent an integer whose runtime type is not the built-in type."""
 
 
+class StringSubclass(str):
+    """Represent text whose runtime type is not the built-in type."""
+
+
+class PairTupleSubclass(tuple[str, str]):
+    """Represent a pair whose runtime type is not the built-in tuple type."""
+
+
+class QueryOriginError(RuntimeError):
+    """Identify exceptions that must escape from caller-controlled mapping work."""
+
+
+class ScriptedQuery(Mapping[str, str]):
+    """Expose query work as an exact, finite, mutation-resistant trace."""
+
+    def __init__(
+        self,
+        items: tuple[object, ...] = (),
+        *,
+        endless: bool = False,
+        items_error: BaseException | None = None,
+        iter_error: BaseException | None = None,
+        next_error: BaseException | None = None,
+        next_error_at: int | None = None,
+        maximum_next_calls: int | None = None,
+    ) -> None:
+        self.scripted_items = items
+        self.endless = endless
+        self.items_error = items_error
+        self.iter_error = iter_error
+        self.next_error = next_error
+        self.next_error_at = next_error_at
+        self.maximum_next_calls = maximum_next_calls
+        self.items_calls = 0
+        self.mapping_iter_calls = 0
+        self.length_calls = 0
+        self.item_iter_calls = 0
+        self.item_length_hint_calls = 0
+        self.next_calls = 0
+        self.yielded_items = 0
+
+    def __getitem__(self, key: str) -> str:
+        raise AssertionError(f"bounded query used mapping item access for {key!r}")
+
+    def __iter__(self) -> Iterator[str]:
+        self.mapping_iter_calls += 1
+        raise AssertionError("bounded query started direct mapping iteration")
+
+    def __len__(self) -> int:
+        self.length_calls += 1
+        raise AssertionError("bounded query called len(query)")
+
+    def items(self) -> ItemsView[str, str]:
+        self.items_calls += 1
+        if self.items_calls > 1:
+            raise AssertionError("bounded query called items() more than once")
+        if self.items_error is not None:
+            raise self.items_error
+        return cast(ItemsView[str, str], ScriptedQueryItems(self))
+
+
+class ScriptedQueryItems(Iterator[object]):
+    """Yield scripted items while rejecting extra passes, hints, or pulls."""
+
+    def __init__(self, query: ScriptedQuery) -> None:
+        self.query = query
+        self.index = 0
+
+    def __iter__(self) -> Self:
+        self.query.item_iter_calls += 1
+        if self.query.item_iter_calls > 1:
+            raise AssertionError("bounded query started a second item iteration")
+        if self.query.iter_error is not None:
+            raise self.query.iter_error
+        return self
+
+    def __next__(self) -> object:
+        self.query.next_calls += 1
+        next_call = self.query.next_calls
+        if self.query.maximum_next_calls is not None and next_call > self.query.maximum_next_calls:
+            raise AssertionError("bounded query pulled more items than permitted")
+        if self.query.next_error_at == next_call:
+            if self.query.next_error is None:
+                raise AssertionError("scripted next error is missing")
+            raise self.query.next_error
+        if self.index < len(self.query.scripted_items):
+            item = self.query.scripted_items[self.index]
+            self.index += 1
+        elif self.query.endless:
+            item = (f"key-{next_call:02d}", f"value-{next_call:02d}")
+        else:
+            raise StopIteration
+        self.query.yielded_items += 1
+        return item
+
+    def __length_hint__(self) -> int:
+        self.query.item_length_hint_calls += 1
+        raise AssertionError("bounded query requested an item-iterator length hint")
+
+
+INVALID_QUERY_PAIRS = (
+    pytest.param(["key", "value"], id="list-pair"),
+    pytest.param(PairTupleSubclass(("key", "value")), id="tuple-subclass"),
+    pytest.param((), id="empty-tuple"),
+    pytest.param(("key",), id="one-element-tuple"),
+    pytest.param(("key", "value", "extra"), id="three-element-tuple"),
+    pytest.param((1, "value"), id="non-string-key"),
+    pytest.param(("key", 1), id="non-string-value"),
+    pytest.param((StringSubclass("key"), "value"), id="string-subclass-key"),
+    pytest.param(("key", StringSubclass("value")), id="string-subclass-value"),
+)
+
+
 class ExplodingQuery(Mapping[str, str]):
     """Fail if an invalid URL reaches any query-mapping operation."""
 
@@ -291,6 +408,36 @@ class ExplodingQuery(Mapping[str, str]):
     def items(self) -> ItemsView[str, str]:
         self.calls.append("items")
         raise AssertionError("invalid URL reached query serialization")
+
+
+def forbid_query_downstream_work(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Replace every post-query seam with one observable failure."""
+
+    calls: list[str] = []
+
+    def unexpected_downstream_call(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        calls.append("called")
+        raise AssertionError("invalid query reached downstream work")
+
+    class UnexpectedOpener:
+        def open(self, *args: object, **kwargs: object) -> object:
+            return unexpected_downstream_call(*args, **kwargs)
+
+    monkeypatch.setattr(http_adapter, "urlencode", unexpected_downstream_call)
+    monkeypatch.setattr(http_adapter, "Request", unexpected_downstream_call)
+    monkeypatch.setattr(http_adapter, "urlopen", unexpected_downstream_call)
+    monkeypatch.setattr(http_adapter, "_NO_REDIRECT_OPENER", UnexpectedOpener())
+    return calls
+
+
+def assert_query_boundary_error(error: BaseException) -> None:
+    """Require the exact context-free TASK-051 boundary failure."""
+
+    assert type(error) is ValueError
+    assert str(error) == INVALID_QUERY_MESSAGE
+    assert error.__cause__ is None
+    assert error.__context__ is None
 
 
 class StubUrlResponse:
@@ -812,6 +959,524 @@ def test_zero_padded_standard_port_on_ipvfuture_is_preserved(
     )
 
     assert [request.full_url for request in requests] == ["https://[v1.example]:00443/public?a=1"]
+    assert result.body == b"ok"
+
+
+@pytest.mark.parametrize(
+    "pair_count",
+    [
+        pytest.param(0, id="empty"),
+        pytest.param(1, id="one"),
+        pytest.param(32, id="maximum"),
+    ],
+)
+def test_query_pair_count_boundaries_are_snapshotted_once_and_preserved(
+    monkeypatch: pytest.MonkeyPatch,
+    pair_count: int,
+) -> None:
+    pairs = tuple(
+        (f"key-{index:02d}", f"value-{index:02d}") for index in reversed(range(pair_count))
+    )
+    query = ScriptedQuery(pairs)
+    response = StubUrlResponse(b"ok")
+    requests: list[Request] = []
+
+    def stub_urlopen(request: Request, *, timeout: float) -> StubUrlResponse:
+        assert timeout == 0.25
+        requests.append(request)
+        return response
+
+    monkeypatch.setattr(http_adapter, "urlopen", stub_urlopen)
+
+    result = UrllibPublicHttpClient(max_response_bytes=2).get(
+        url="https://example.test/public",
+        query=query,
+        timeout_seconds=0.25,
+    )
+
+    assert [request.full_url for request in requests] == [
+        f"https://example.test/public?{stdlib_urlencode(sorted(pairs))}"
+    ]
+    assert query.items_calls == 1
+    assert query.mapping_iter_calls == 0
+    assert query.length_calls == 0
+    assert query.item_iter_calls == 1
+    assert query.item_length_hint_calls == 0
+    assert query.next_calls == pair_count + 1
+    assert query.yielded_items == pair_count
+    assert result.body == b"ok"
+
+
+@pytest.mark.parametrize(
+    "endless",
+    [
+        pytest.param(False, id="finite-thirty-three"),
+        pytest.param(True, id="synthetic-endless"),
+    ],
+)
+def test_query_pair_limit_rejects_the_thirty_third_pull_without_a_thirty_fourth(
+    monkeypatch: pytest.MonkeyPatch,
+    endless: bool,
+) -> None:
+    finite_items = tuple((f"key-{index:02d}", "v") for index in range(33))
+    query = ScriptedQuery(
+        () if endless else finite_items,
+        endless=endless,
+        maximum_next_calls=33,
+    )
+    downstream_calls = forbid_query_downstream_work(monkeypatch)
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient().get(
+            url="https://example.test/public",
+            query=query,
+            timeout_seconds=1,
+        )
+
+    assert_query_boundary_error(error.value)
+    assert query.items_calls == 1
+    assert query.mapping_iter_calls == 0
+    assert query.length_calls == 0
+    assert query.item_iter_calls == 1
+    assert query.item_length_hint_calls == 0
+    assert query.next_calls == 33
+    assert query.yielded_items == 33
+    assert downstream_calls == []
+
+
+def test_query_pair_limit_rejects_the_thirty_third_item_before_inspecting_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    thirty_third_item = ("must-not", "be-inspected")
+    query = ScriptedQuery(
+        (
+            *(("key", str(index)) for index in range(32)),
+            thirty_third_item,
+        ),
+        maximum_next_calls=33,
+    )
+    downstream_calls = forbid_query_downstream_work(monkeypatch)
+    builtin_type = type
+
+    def guarded_type(value: object) -> type[object]:
+        if value is thirty_third_item:
+            raise AssertionError("bounded query inspected the thirty-third item")
+        return builtin_type(value)
+
+    monkeypatch.setattr(http_adapter, "type", guarded_type, raising=False)
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient().get(
+            url="https://example.test/public",
+            query=query,
+            timeout_seconds=1,
+        )
+
+    assert_query_boundary_error(error.value)
+    assert query.next_calls == 33
+    assert query.yielded_items == 33
+    assert downstream_calls == []
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param("cumulative", id="cumulative"),
+        pytest.param("key-only", id="key-only"),
+        pytest.param("value-only", id="value-only"),
+        pytest.param("unicode-characters", id="unicode-characters"),
+    ],
+)
+def test_query_character_limit_accepts_exactly_8192_characters_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    pairs: tuple[tuple[str, str], ...]
+    if case == "cumulative":
+        pairs = (("a", "x" * 4095), ("b", "y" * 4095))
+    elif case == "key-only":
+        pairs = (("k" * 8192, ""),)
+    elif case == "value-only":
+        pairs = (("", "v" * 8192),)
+    else:
+        pairs = (("", "💰" * 8192),)
+    assert sum(len(key) + len(value) for key, value in pairs) == 8192
+    query = ScriptedQuery(cast(tuple[object, ...], pairs))
+    response = StubUrlResponse(b"ok")
+    requests: list[Request] = []
+
+    def stub_urlopen(request: Request, *, timeout: float) -> StubUrlResponse:
+        assert timeout == 1
+        requests.append(request)
+        return response
+
+    monkeypatch.setattr(http_adapter, "urlopen", stub_urlopen)
+
+    result = UrllibPublicHttpClient(max_response_bytes=2).get(
+        url="https://example.test/public",
+        query=query,
+        timeout_seconds=1,
+    )
+
+    assert [request.full_url for request in requests] == [
+        f"https://example.test/public?{stdlib_urlencode(sorted(pairs))}"
+    ]
+    assert query.items_calls == 1
+    assert query.length_calls == 0
+    assert query.item_iter_calls == 1
+    assert query.item_length_hint_calls == 0
+    assert query.next_calls == len(pairs) + 1
+    assert query.yielded_items == len(pairs)
+    assert result.body == b"ok"
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param("cumulative", id="cumulative"),
+        pytest.param("key-only", id="key-only"),
+        pytest.param("value-only", id="value-only"),
+        pytest.param("unicode-characters", id="unicode-characters"),
+    ],
+)
+def test_query_character_limit_rejects_the_8193rd_character_immediately(
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    violating_pairs: tuple[tuple[str, str], ...]
+    if case == "cumulative":
+        violating_pairs = (("a", "x" * 4095), ("b", "y" * 4096))
+    elif case == "key-only":
+        violating_pairs = (("k" * 8193, ""),)
+    elif case == "value-only":
+        violating_pairs = (("", "v" * 8193),)
+    else:
+        violating_pairs = (("", "💰" * 8193),)
+    assert sum(len(key) + len(value) for key, value in violating_pairs) == 8193
+    query = ScriptedQuery(
+        (*cast(tuple[object, ...], violating_pairs), ("poison", "must-not-be-pulled")),
+        maximum_next_calls=len(violating_pairs),
+    )
+    downstream_calls = forbid_query_downstream_work(monkeypatch)
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient().get(
+            url="https://example.test/public",
+            query=query,
+            timeout_seconds=1,
+        )
+
+    assert_query_boundary_error(error.value)
+    assert query.items_calls == 1
+    assert query.mapping_iter_calls == 0
+    assert query.length_calls == 0
+    assert query.item_iter_calls == 1
+    assert query.item_length_hint_calls == 0
+    assert query.next_calls == len(violating_pairs)
+    assert query.yielded_items == len(violating_pairs)
+    assert downstream_calls == []
+
+
+@pytest.mark.parametrize("invalid_pair", INVALID_QUERY_PAIRS)
+def test_query_requires_exact_builtin_tuple_and_string_types_and_stops_immediately(
+    monkeypatch: pytest.MonkeyPatch,
+    invalid_pair: object,
+) -> None:
+    query = ScriptedQuery(
+        (invalid_pair, ("poison", "must-not-be-pulled")),
+        maximum_next_calls=1,
+    )
+    downstream_calls = forbid_query_downstream_work(monkeypatch)
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient().get(
+            url="https://example.test/public",
+            query=query,
+            timeout_seconds=1,
+        )
+
+    assert_query_boundary_error(error.value)
+    assert query.items_calls == 1
+    assert query.mapping_iter_calls == 0
+    assert query.length_calls == 0
+    assert query.item_iter_calls == 1
+    assert query.item_length_hint_calls == 0
+    assert query.next_calls == 1
+    assert query.yielded_items == 1
+    assert downstream_calls == []
+
+
+@pytest.mark.parametrize(
+    "stage",
+    [
+        pytest.param("items", id="items-call"),
+        pytest.param("iter", id="item-iterator-start"),
+        pytest.param("next-first", id="first-pull"),
+        pytest.param("next-after-two", id="pull-after-two-valid-items"),
+        pytest.param("next-thirty-three", id="thirty-third-pull"),
+    ],
+)
+@pytest.mark.parametrize(
+    "origin_error_type",
+    [
+        pytest.param(QueryOriginError, id="runtime-error"),
+        pytest.param(ValueError, id="value-error-collision"),
+    ],
+)
+def test_query_mapping_origin_exception_remains_the_same_raw_object(
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+    origin_error_type: type[Exception],
+) -> None:
+    origin_error = origin_error_type(
+        INVALID_QUERY_MESSAGE if origin_error_type is ValueError else f"origin-{stage}"
+    )
+    if stage == "items":
+        query = ScriptedQuery(items_error=origin_error)
+        expected_iter_calls = 0
+        expected_next_calls = 0
+        expected_yields = 0
+    elif stage == "iter":
+        query = ScriptedQuery(iter_error=origin_error)
+        expected_iter_calls = 1
+        expected_next_calls = 0
+        expected_yields = 0
+    elif stage == "next-first":
+        query = ScriptedQuery(
+            next_error=origin_error,
+            next_error_at=1,
+            maximum_next_calls=1,
+        )
+        expected_iter_calls = 1
+        expected_next_calls = 1
+        expected_yields = 0
+    elif stage == "next-after-two":
+        query = ScriptedQuery(
+            (("a", "1"), ("b", "2")),
+            next_error=origin_error,
+            next_error_at=3,
+            maximum_next_calls=3,
+        )
+        expected_iter_calls = 1
+        expected_next_calls = 3
+        expected_yields = 2
+    else:
+        query = ScriptedQuery(
+            tuple((f"key-{index:02d}", "v") for index in range(32)),
+            next_error=origin_error,
+            next_error_at=33,
+            maximum_next_calls=33,
+        )
+        expected_iter_calls = 1
+        expected_next_calls = 33
+        expected_yields = 32
+    downstream_calls = forbid_query_downstream_work(monkeypatch)
+
+    with pytest.raises(origin_error_type) as captured:
+        UrllibPublicHttpClient().get(
+            url="https://example.test/public",
+            query=query,
+            timeout_seconds=1,
+        )
+
+    assert captured.value is origin_error
+    assert query.items_calls == 1
+    assert query.mapping_iter_calls == 0
+    assert query.length_calls == 0
+    assert query.item_iter_calls == expected_iter_calls
+    assert query.item_length_hint_calls == 0
+    assert query.next_calls == expected_next_calls
+    assert query.yielded_items == expected_yields
+    assert downstream_calls == []
+
+
+@pytest.mark.parametrize(
+    ("url", "timeout_seconds", "expected_message"),
+    [
+        pytest.param(
+            "https://example.test/public",
+            float("nan"),
+            "timeout_seconds must be finite and positive",
+            id="timeout-first",
+        ),
+        pytest.param(
+            "http://example.test/public",
+            1,
+            INVALID_INITIAL_URL_MESSAGE,
+            id="structural-target-second",
+        ),
+        pytest.param(
+            "https://example.test:444/public",
+            1,
+            INVALID_TARGET_PORT_MESSAGE,
+            id="target-port-third",
+        ),
+    ],
+)
+def test_timeout_target_structure_and_port_precede_all_query_access(
+    url: str,
+    timeout_seconds: float,
+    expected_message: str,
+) -> None:
+    query = ScriptedQuery(items_error=AssertionError("query boundary ran out of order"))
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient().get(
+            url=url,
+            query=query,
+            timeout_seconds=timeout_seconds,
+        )
+
+    assert type(error.value) is ValueError
+    assert str(error.value) == expected_message
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
+    assert query.items_calls == 0
+    assert query.mapping_iter_calls == 0
+    assert query.length_calls == 0
+    assert query.item_iter_calls == 0
+    assert query.next_calls == 0
+
+
+def test_valid_query_snapshot_is_sorted_encoded_once_without_normalization_or_deduplication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pairs = (
+        ("b", "space value"),
+        ("a", "x/y?"),
+        ("a", "alpha"),
+        ("é", "💰"),
+        ("empty", ""),
+    )
+    query = ScriptedQuery(cast(tuple[object, ...], pairs))
+    response = StubUrlResponse(b"ok")
+    requests: list[Request] = []
+    urlencode_calls: list[list[tuple[str, str]]] = []
+
+    def recording_urlencode(items: object) -> str:
+        bounded_items = cast(list[tuple[str, str]], items)
+        urlencode_calls.append(bounded_items.copy())
+        return stdlib_urlencode(bounded_items)
+
+    def stub_urlopen(request: Request, *, timeout: float) -> StubUrlResponse:
+        assert timeout == 0.25
+        requests.append(request)
+        return response
+
+    monkeypatch.setattr(http_adapter, "urlencode", recording_urlencode)
+    monkeypatch.setattr(http_adapter, "urlopen", stub_urlopen)
+
+    result = UrllibPublicHttpClient(
+        user_agent="WEALTH/test bounded query",
+        max_response_bytes=2,
+    ).get(
+        url="https://example.test/public",
+        query=query,
+        timeout_seconds=0.25,
+    )
+
+    sorted_pairs = sorted(pairs)
+    assert urlencode_calls == [sorted_pairs]
+    assert [request.full_url for request in requests] == [
+        f"https://example.test/public?{stdlib_urlencode(sorted_pairs)}"
+    ]
+    assert [request.get_method() for request in requests] == ["GET"]
+    assert [request.get_header("Accept") for request in requests] == ["application/json"]
+    assert [request.get_header("User-agent") for request in requests] == [
+        "WEALTH/test bounded query"
+    ]
+    assert query.items_calls == 1
+    assert query.mapping_iter_calls == 0
+    assert query.length_calls == 0
+    assert query.item_iter_calls == 1
+    assert query.item_length_hint_calls == 0
+    assert query.next_calls == len(pairs) + 1
+    assert query.yielded_items == len(pairs)
+    assert response.read_limits == [3]
+    assert result.body == b"ok"
+
+
+@pytest.mark.parametrize(
+    ("url", "query"),
+    [
+        pytest.param(
+            "https://data-api.binance.vision/api/v3/klines",
+            {
+                "symbol": "BTCUSDT",
+                "interval": "1m",
+                "startTime": "1767225600000",
+                "endTime": "1767225659999",
+                "limit": "1",
+                "timeZone": "0",
+            },
+            id="binance-spot-candles",
+        ),
+        pytest.param(
+            "https://fapi.binance.com/fapi/v1/klines",
+            {
+                "symbol": "BTCUSDT",
+                "interval": "1m",
+                "startTime": "1767225600000",
+                "endTime": "1767225659999",
+                "limit": "1",
+            },
+            id="binance-usdm-candles",
+        ),
+        pytest.param(
+            "https://api.exchange.coinbase.com/products/BTC-USD/candles",
+            {
+                "start": "2026-01-01T00:00:00Z",
+                "end": "2026-01-01T00:01:00Z",
+                "granularity": "60",
+            },
+            id="coinbase-spot-candles",
+        ),
+        pytest.param(
+            "https://data-api.binance.vision/api/v3/aggTrades",
+            {
+                "symbol": "BTCUSDT",
+                "startTime": "1767225600000",
+                "endTime": "1767225659999",
+                "limit": "1000",
+            },
+            id="binance-spot-aggregate-trades",
+        ),
+        pytest.param(
+            "https://fapi.binance.com/fapi/v1/aggTrades",
+            {
+                "symbol": "BTCUSDT",
+                "startTime": "1767225600000",
+                "endTime": "1767225659999",
+                "limit": "1000",
+            },
+            id="binance-usdm-aggregate-trades",
+        ),
+    ],
+)
+def test_representative_active_provider_query_is_accepted_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+    url: str,
+    query: dict[str, str],
+) -> None:
+    response = StubUrlResponse(b"ok")
+    requests: list[Request] = []
+
+    def stub_urlopen(request: Request, *, timeout: float) -> StubUrlResponse:
+        assert timeout == 1
+        requests.append(request)
+        return response
+
+    monkeypatch.setattr(http_adapter, "urlopen", stub_urlopen)
+
+    result = UrllibPublicHttpClient(max_response_bytes=2).get(
+        url=url,
+        query=query,
+        timeout_seconds=1,
+    )
+
+    assert [request.full_url for request in requests] == [
+        f"{url}?{stdlib_urlencode(sorted(query.items()))}"
+    ]
     assert result.body == b"ok"
 
 

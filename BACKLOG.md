@@ -6,66 +6,64 @@ promoted through review.
 
 ## Next Action
 
-### TASK-051 — Fail-closed public-HTTP bounded query serialization
+### TASK-052 — Fail-closed public-HTTP initial-target length bound
 
-- **Key:** `phase2.fail_closed_public_http_bounded_query_serialization`
+- **Key:** `phase2.fail_closed_public_http_initial_target_length_bound`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
 - **Human approval:** NOT REQUIRED — bounded fail-closed development hardening under the owner's
   explicit authorization; it limits adapter-controlled public-request work and changes no
   permission, deployment, provider, or operator-data boundary.
-- **Context:** TASK-050 now constrains the caller's initial target to the standard HTTPS port, but
-  the shared client still fully materializes and sorts `query.items()` before encoding it.
-  A custom mapping can yield an unbounded number of items, and otherwise valid strings can impose
-  unbounded adapter-controlled serialization work. Every active provider request uses an ordinary
-  built-in-string mapping with no more than six pairs.
-- **Goal:** Bound one query snapshot before sorting, encoding, or request construction while
-  preserving the exact serialized form of every accepted query.
-- **Scope:** Add explicit limits of 32 query pairs and 8,192 total key-plus-value characters;
-  consume at most 33 yielded items from one `items()` iterator without calling `len(query)` or
-  iterating twice; accept only exact two-element tuples whose key and value are built-in `str`;
-  reject every shape, type, count, or character-volume violation with exact
-  `ValueError("query must contain at most 32 built-in string pairs totaling at most 8192 characters")`;
-  and add deterministic finite-iteration, no-work, boundary, preservation, and active-provider
-  tests.
+- **Context:** TASK-051 now bounds query enumeration and raw string volume, but the original
+  caller-supplied URL still has no configured size limit before TASK-049 scans it, `urlsplit`
+  parses it, the authority is inspected under NFKC, and `Request` consumes it. Every active
+  provider default is only 39 through 48 characters, so a generous explicit cap can bound this
+  remaining target-text work without changing any endpoint.
+- **Goal:** Reject an oversized original initial target before all content-dependent URL, query,
+  or request work while preserving every character of an accepted target.
+- **Scope:** Add a private 8,192-character initial-target limit at the first line of the existing
+  private URL validator, after timeout validation at the caller; reject a longer target with exact
+  `ValueError("url must contain at most 8192 characters")`; and add deterministic precedence,
+  early-no-work, exact-boundary, preservation, and active-provider-default tests.
 - **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
   `docs/contracts/MARKET_DATA.md`, plus coordinated governance files and governance tests.
-- **Constraints:** Preserve timeout, TASK-049 structural-target, and TASK-050 target-port
-  precedence before any query access. Mapping-originated exceptions remain unchanged; the new
-  bound does not claim a total wall-clock limit on caller code. Do not add a query-character
-  policy, normalization, repair, list or multi-value contract, initial URL/path length cap,
-  provider or hostname allowlist, DNS lookup, IP or public-routability policy, SSRF guarantee,
-  IDNA policy, certificate pinning, custom TLS context, proxy change, credential, redirect
-  permission, retry, dependency, endpoint change, or provider-specific exception. Preserve sorted
-  query encoding, accepted URL text, headers, timeouts, response caps, no-follow behavior,
-  TASK-041 through TASK-050 exception and cleanup semantics, provider parsing, canonicalization,
-  quality, storage, schemas, runtime wiring, TASK-037 authority, migration, and Stage 3.
+- **Constraints:** Count Python characters in the original supplied string, not encoded bytes, and
+  do not claim an HTTP provider or server request-line compatibility limit or a total wall-clock
+  bound on caller code. Preserve invalid-timeout precedence before URL length; length rejection
+  intentionally precedes TASK-049 structural scanning, TASK-050 port validation, and TASK-051
+  query access. Do not truncate, normalize, repair, retry, or replace a target. Do not add a URL
+  character policy, user-agent policy, query-content or multi-value policy, provider or hostname
+  allowlist, DNS lookup, IP or public-routability policy, SSRF guarantee, IDNA policy, certificate
+  pinning, custom TLS context, proxy change, credential, redirect permission, retry, dependency,
+  endpoint change, or provider-specific exception. Preserve accepted URL text, bounded sorted
+  query encoding, headers, timeouts, response caps, no-follow behavior, TASK-041 through TASK-051
+  exception and cleanup semantics, provider parsing, canonicalization, quality, storage, schemas,
+  runtime wiring, TASK-037 authority, migration, and Stage 3.
 
 Acceptance gates:
 
-1. Timeout validation retains first precedence, followed by TASK-049 structural-target validation
-   and TASK-050 target-port validation; every rejection at those boundaries performs zero query
-   access and retains its exact existing error, cause, and context behavior.
-2. One query snapshot accepts zero through 32 exact two-element built-in-string tuples whose
-   combined key-plus-value length is at most 8,192 characters. A 33rd item, malformed pair,
-   non-string or string-subclass component, or 8,193rd character raises exactly
-   `ValueError("query must contain at most 32 built-in string pairs totaling at most 8192 characters")`
-   with no direct cause or hidden context.
-3. The client calls `items()` once, never calls `len(query)`, never starts a second iteration, and
-   requests at most 33 yielded items even from a synthetic unbounded mapping. A mapping-originated
-   exception remains raw and is not converted into the query-boundary error.
-4. Every query-boundary rejection occurs before `urlencode`, `Request`, the private opener, DNS,
-   network, or filesystem-handler work; no rejected query is partially serialized, normalized,
-   repaired, retried, or opened.
-5. Empty, one-pair, 32-pair, and exact-8,192-character boundaries retain the existing single
-   sorted `urlencode` call and exact request text. Every active provider query remains accepted
-   unchanged, and GET, `Accept`, `User-Agent`, timeout, response-limit, HTTP-error, redirect,
-   cleanup, and direct-cause behavior remain unchanged.
-6. No query-content policy, URL/path cap, provider or hostname allowlist, DNS/IP/public-routability
-   or SSRF claim, IDNA, certificate, TLS/proxy, endpoint, dependency, runtime, or provider-specific
-   behavior is introduced. Formatting, lint, strict typing, complete tests, lockfile verification,
-   dependency audit, health slice, and CI pass.
+1. Invalid timeout retains first precedence and performs no URL-length, content, parser, query, or
+   request work. With a valid timeout, a target longer than 8,192 characters raises exactly
+   `ValueError("url must contain at most 8192 characters")` with no direct cause or hidden context.
+2. Length rejection occurs before literal membership or character scanning, `urlsplit`, hostname,
+   username, port, or NFKC inspection, query access or serialization, `Request`, the private
+   opener, DNS, network, or filesystem-handler work. An oversized exploding string subclass and
+   patched downstream seams prove that order.
+3. Length has intentional precedence for an oversized target that also contains TASK-049
+   forbidden content or a TASK-050 nonstandard port. At 8,192 characters or fewer, TASK-049
+   structure, TASK-050 port, and TASK-051 query validation retain their exact order, errors,
+   causes, contexts, and no-work behavior.
+4. A structurally valid target of exactly 8,192 characters retains its exact original text before
+   the bounded sorted query is appended once; an otherwise identical 8,193-character target
+   fails. Every 39-through-48-character active provider default remains unchanged and accepted.
+5. No target is truncated, normalized, repaired, retried, replaced, partially opened, or sent to
+   an alternate destination. Existing GET, `Accept`, `User-Agent`, timeout, response-limit,
+   HTTP-error, redirect, cleanup, and direct-cause behavior remains unchanged.
+6. No URL-content or user-agent policy, query-contract change, provider or hostname allowlist,
+   DNS/IP/public-routability or SSRF claim, IDNA, certificate, TLS/proxy, endpoint, dependency,
+   runtime, or provider-specific behavior is introduced. Formatting, lint, strict typing, complete
+   tests, lockfile verification, dependency audit, health slice, and CI pass.
 7. TASK-037 remains blocked and authorization remains denied; no operator data, path, database,
    scanner, report, migration, or Stage 3 action occurs.
 
@@ -122,6 +120,40 @@ Acceptance gates:
    all repository gates pass.
 
 ## Recently Completed
+
+### TASK-051 — Fail-closed public-HTTP bounded query serialization
+
+- **Key:** `phase2.fail_closed_public_http_bounded_query_serialization`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
+  `docs/contracts/MARKET_DATA.md`, plus the coordinated governance files and governance tests.
+- **Result:** After timeout, TASK-049 structural-target, and TASK-050 target-port validation and
+  before `urlencode`, the shared client now takes one bounded query snapshot. It calls `items()`
+  and starts its iterator once; it does not call `len(query)`, directly iterate the mapping, start
+  a second item pass, or request a length hint, and it pulls at most 33 yielded items. It accepts zero
+  through 32 exact built-in tuple pairs whose keys and values are exact built-in strings and whose
+  combined key-plus-value length is at most 8,192 Python characters. A 33rd item, invalid pair
+  shape or tuple subclass, non-string or string-subclass component, or 8,193rd character raises
+  the exact context- and cause-free
+  `ValueError("query must contain at most 32 built-in string pairs totaling at most 8192 characters")`.
+  Rejection performs no `urlencode`, `Request`, private-opener, handler, DNS, network, or
+  filesystem work and never partially serializes, repairs, or retries a query. Caller-originated
+  failures, including `ValueError`, from `items()`, iterator creation, and the first, later, or
+  33rd pull remain the same raw objects. Forty-two new deterministic cases within the 424-test
+  adapter suite cover zero, one, and 32 pairs; finite and synthetic-unbounded 33rd items;
+  count rejection before 33rd-item inspection;
+  cumulative, key-only, value-only, and Unicode exact-8,192 and 8,193 character boundaries; nine
+  invalid pair/type forms; five mapping-failure seams with both a custom runtime error and raw
+  `ValueError`; all three earlier precedence boundaries; duplicate and content preservation
+  through one sorted standard-library encoding; and all five active provider request variants
+  with three through six pairs. Accepted request text, GET, `Accept`, `User-Agent`,
+  timeout, response limit, HTTP-error, redirect, cleanup, and direct-cause behavior remains
+  unchanged. The boundary adds no query-content, normalization, or multi-value policy and makes no
+  total-wall-clock, hostname, DNS, IP-routability, or SSRF claim. The original initial URL text
+  still has no configured size bound; TASK-052 governs that residual finite-work risk. Provider
+  endpoints, dependencies, runtime wiring, TASK-037 authority, migration, and Stage 3 remain
+  unchanged.
 
 ### TASK-050 — Fail-closed public-HTTP standard HTTPS target-port policy
 
