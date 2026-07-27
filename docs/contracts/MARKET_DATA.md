@@ -33,8 +33,16 @@ detail is absent from the public message.
 A real `IncompleteRead` raised specifically by either response-body read follows that same typed
 failure boundary. Its partial provider bytes and expected-byte count are never accepted or
 returned, the body is attempted once with the configured sentinel, and the original
-`IncompleteRead` remains the direct cause. An `IncompleteRead` raised before body access is outside
-this mapping and retains its prior behavior.
+`IncompleteRead` remains the direct cause. An `IncompleteRead` raised by response entry or exit is
+outside this body-read mapping.
+
+A real `IncompleteRead` raised directly by `urlopen` before a response handle reaches the adapter
+follows the same sanitized typed boundary. The acquisition is attempted once, no adapter body read
+or cleanup occurs without a handle, and no partial bytes or expected-byte count enters the public
+message. Response entry and exit remain outside this acquisition mapping, and a direct base
+`HTTPException` remains outside it. This failure mapping does not bound a redirect body read performed
+inside the standard library or constrain a redirect destination before a response handle reaches
+the adapter; default redirect behavior remains enabled pending a separately governed policy.
 
 Every `HTTPError` path makes one explicit cleanup attempt after at most one bounded body read.
 When cleanup succeeds, the error-response resource is closed before a response or primary failure

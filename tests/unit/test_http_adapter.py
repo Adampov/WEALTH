@@ -1,7 +1,7 @@
 """Tests for the bounded standard-library public HTTP adapter."""
 
 from email.message import Message
-from http.client import IncompleteRead
+from http.client import HTTPException, IncompleteRead
 from io import BytesIO
 from types import TracebackType
 from typing import Self
@@ -118,6 +118,34 @@ class RaisingUrlResponse(StubUrlResponse):
     def read(self, limit: int) -> bytes:
         self.read_limits.append(limit)
         raise self.error
+
+
+class ContextFailureUrlResponse(StubUrlResponse):
+    """Raise one configured incomplete read at response entry or exit."""
+
+    def __init__(self, *, stage: str, error: IncompleteRead) -> None:
+        super().__init__(b"err")
+        self.stage = stage
+        self.error = error
+        self.enter_calls = 0
+        self.exit_calls = 0
+
+    def __enter__(self) -> Self:
+        self.enter_calls += 1
+        if self.stage == "enter":
+            raise self.error
+        return self
+
+    def __exit__(
+        self,
+        exception_type: type[BaseException] | None,
+        exception: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        del exception_type, exception, traceback
+        self.exit_calls += 1
+        if self.stage == "exit":
+            raise self.error
 
 
 class RaisingMessage(Message):
@@ -707,10 +735,11 @@ def test_same_http_error_raised_during_processing_remains_primary_on_close_failu
     assert reader.closed is False
 
 
-def test_incomplete_read_raised_before_body_read_remains_unmapped(
+def test_incomplete_read_raised_directly_by_urlopen_is_sanitized_typed_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    transport_failure = IncompleteRead(b"non-body-partial", 77)
+    partial_body = b"pre-response-partial-secret"
+    transport_failure = IncompleteRead(partial_body, 77)
     urlopen_calls: list[Request] = []
 
     def raise_before_response(request: Request, *, timeout: float) -> StubUrlResponse:
@@ -719,6 +748,62 @@ def test_incomplete_read_raised_before_body_read_remains_unmapped(
         raise transport_failure
 
     monkeypatch.setattr(http_adapter, "urlopen", raise_before_response)
+
+    with pytest.raises(HttpTransportError) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert str(error.value) == "public HTTP GET failed"
+    assert error.value.__cause__ is transport_failure
+    assert transport_failure.partial == partial_body
+    assert transport_failure.expected == 77
+    assert partial_body.decode() not in str(error.value)
+    assert str(transport_failure.expected) not in str(error.value)
+    assert len(urlopen_calls) == 1
+
+
+def test_other_http_exception_raised_directly_by_urlopen_remains_unmapped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport_failure = HTTPException("protocol-detail")
+    urlopen_calls: list[Request] = []
+
+    def raise_before_response(request: Request, *, timeout: float) -> StubUrlResponse:
+        del timeout
+        urlopen_calls.append(request)
+        raise transport_failure
+
+    monkeypatch.setattr(http_adapter, "urlopen", raise_before_response)
+
+    with pytest.raises(HTTPException) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert error.value is transport_failure
+    assert len(urlopen_calls) == 1
+
+
+@pytest.mark.parametrize("stage", ["enter", "exit"])
+def test_incomplete_read_from_response_context_remains_unmapped(
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+) -> None:
+    transport_failure = IncompleteRead(f"{stage}-partial".encode(), 88)
+    response = ContextFailureUrlResponse(stage=stage, error=transport_failure)
+    urlopen_calls: list[Request] = []
+
+    def stub_urlopen(request: Request, *, timeout: float) -> StubUrlResponse:
+        del timeout
+        urlopen_calls.append(request)
+        return response
+
+    monkeypatch.setattr(http_adapter, "urlopen", stub_urlopen)
 
     with pytest.raises(IncompleteRead) as error:
         UrllibPublicHttpClient(max_response_bytes=3).get(
@@ -729,6 +814,9 @@ def test_incomplete_read_raised_before_body_read_remains_unmapped(
 
     assert error.value is transport_failure
     assert len(urlopen_calls) == 1
+    assert response.enter_calls == 1
+    assert response.exit_calls == (1 if stage == "exit" else 0)
+    assert response.read_limits == ([4] if stage == "exit" else [])
 
 
 @pytest.mark.parametrize("timeout_seconds", INVALID_TIMEOUTS)

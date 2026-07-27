@@ -6,40 +6,41 @@ promoted through review.
 
 ## Next Action
 
-### TASK-046 — Typed pre-response public-HTTP incomplete-read mapping
+### TASK-047 — Typed public-HTTP response-protocol failure mapping
 
-- **Key:** `phase2.typed_public_http_pre_response_incomplete_read_failure_mapping`
+- **Key:** `phase2.typed_public_http_response_protocol_failure_mapping`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
 - **Human approval:** NOT REQUIRED — bounded fail-closed development hardening under the owner's
   explicit authorization; no permission, deployment, or operator-data change.
-- **Context:** TASK-044 deliberately scoped `IncompleteRead` mapping to body reads and pinned a
-  pre-response `urlopen` failure as raw. The standard redirect handler can read a redirect body
-  inside `urlopen`, so a truncated redirect can reach this seam with partial-byte metadata before
-  the adapter receives a response handle.
-- **Goal:** Convert only pre-response `IncompleteRead` from `urlopen` into the shared sanitized
-  typed transport failure without accepting partial bytes or broadening later response boundaries.
-- **Scope:** Add a narrow acquisition-call boundary around `urlopen`, preserve the real
-  `IncompleteRead` as direct cause, and add deterministic adjacent-boundary tests.
+- **Context:** A malformed provider status or header line can make `http.client.BadStatusLine`,
+  `LineTooLong`, or `UnknownProtocol` escape raw from response acquisition or a body-read seam.
+  `BadStatusLine` can include the provider-supplied line in its public text.
+- **Goal:** Convert only these three provider-response protocol failures at acquisition and body
+  reads into the shared sanitized typed transport failure.
+- **Scope:** Add one explicit protocol-failure tuple at the direct `urlopen`, successful-body read,
+  and `HTTPError`-body read boundaries, preserving each original exception as direct cause.
 - **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
   `docs/contracts/MARKET_DATA.md`, plus coordinated governance files and governance tests.
 - **Constraints:** Do not change response-size limits, timeout behavior, endpoints, queries,
-  headers, retries, response-body reads, response entry/exit behavior, TASK-045 closure, any other
+  headers, retries, number of reads, response entry/exit behavior, TASK-045 closure, any other
   exception mapping, provider parsing, canonicalization, quality, storage, schemas, dependencies,
-  runtime wiring, operator paths, TASK-037 authority, migration, or Stage 3. Do not include partial
-  provider bytes, expected counts, or exception text in the public message.
+  runtime wiring, operator paths, TASK-037 authority, migration, or Stage 3. Do not broadly catch
+  `HTTPException` or include provider protocol text in the public message.
 
 Acceptance gates:
 
-1. A real `IncompleteRead` raised directly by `urlopen` becomes
-   `HttpTransportError("public HTTP GET failed")`; the original exception is the direct cause.
-2. Its partial bytes, expected-byte count, and untrusted detail are absent from the public message;
-   no response handle, body, status, headers, or partial `HttpResponse` is accepted or returned.
-3. `urlopen` is called exactly once and no adapter body read, response entry, retry, or cleanup
-   attempt occurs because no response handle was received.
-4. An `IncompleteRead` raised by response entry or exit remains outside this acquisition boundary;
-   TASK-044 body mappings and TASK-045 HTTP-error cleanup remain unchanged.
+1. Each real `BadStatusLine`, `LineTooLong`, and `UnknownProtocol` raised directly by `urlopen`, a
+   successful-response body read, or an `HTTPError` body read becomes
+   `HttpTransportError("public HTTP GET failed")` with the original exception as direct cause.
+2. Provider status/header-line text and untrusted exception detail are absent from the public
+   message; no partial response is returned.
+3. Acquisition performs one `urlopen` and no adapter body read or cleanup without a handle. Each
+   body path performs one `max_response_bytes + 1` read; the HTTP-error path retains one cleanup
+   attempt. No retry or second read occurs.
+4. Base `HTTPException`, `InvalidURL`, and protocol failures raised by response entry or exit remain
+   outside this mapping. TASK-044 through TASK-046 mappings and TASK-045 cleanup remain unchanged.
 5. Response limits, finite-positive timeouts, endpoints, queries, headers, provider behavior, and
    all other transport mappings remain unchanged. Formatting, lint, strict typing, complete tests,
    lockfile verification, dependency audit, health slice, and CI pass.
@@ -100,6 +101,26 @@ Acceptance gates:
 
 ## Recently Completed
 
+### TASK-046 — Typed pre-response public-HTTP incomplete-read mapping
+
+- **Key:** `phase2.typed_public_http_pre_response_incomplete_read_failure_mapping`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
+  `docs/contracts/MARKET_DATA.md`, and the coordinated governance files and governance tests.
+- **Result:** A real `IncompleteRead` raised directly by `urlopen` now becomes the exact sanitized
+  `HttpTransportError("public HTTP GET failed")`, with the original exception as direct cause.
+  Deterministic tests prove one acquisition call, no response handle or adapter body read, no
+  retry, and absence of partial provider bytes and the expected-byte count from the public
+  message. Adjacent-boundary tests prove `IncompleteRead` from response entry or exit and a direct
+  base `HTTPException` remain raw, preventing a broad protocol catch. Existing body-read mappings,
+  HTTP-error cleanup, response limits, timeouts, endpoints, queries, headers, retries, provider
+  behavior, parsing, quality, storage, schemas, dependencies, runtime wiring, operator authority,
+  migration, and Stage 3 remain unchanged. This task sanitizes only the resulting failure: default
+  redirects remain enabled, the standard library may read a redirect body outside the adapter's
+  response cap and follow a changed destination before returning a handle, and a separate
+  governed redirect-policy task is still required.
+
 ### TASK-045 — Deterministic public-HTTP error-response resource closure
 
 - **Key:** `phase2.deterministic_public_http_error_response_resource_closure`
@@ -134,7 +155,8 @@ Acceptance gates:
   Deterministic path-symmetric tests prove one `cap + 1` read and one `urlopen` call, no retry or
   partial response, and absence of partial provider bytes and the expected-byte count from the
   public message. The successful-path handler is scoped only around `response.read`; a separate
-  regression test proves an `IncompleteRead` raised before body access remains unmapped. Existing
+  regression test proves an `IncompleteRead` raised during response-context entry remains
+  unmapped. Existing
   TASK-043 mappings, exact-limit and oversize behavior, response limits, timeouts, endpoints,
   queries, headers, retries, resource closure, provider behavior, parsing, quality, storage,
   schemas, dependencies, runtime wiring, operator authority, migration, and Stage 3 remain
