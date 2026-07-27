@@ -20,10 +20,15 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from wealth.ports.http import HttpResponse, HttpTransportError
 
 MAX_PUBLIC_HTTP_RESPONSE_BYTES = 2_000_000
+_MAX_QUERY_PAIRS = 32
+_MAX_QUERY_CHARACTERS = 8_192
 _INVALID_INITIAL_URL_MESSAGE = (
     "url must be an absolute credential-free HTTPS endpoint without query or fragment"
 )
 _INVALID_TARGET_PORT_MESSAGE = "url must use the standard HTTPS target port"
+_INVALID_QUERY_MESSAGE = (
+    "query must contain at most 32 built-in string pairs totaling at most 8192 characters"
+)
 
 
 def _validate_initial_url(url: str) -> None:
@@ -66,6 +71,31 @@ def _validate_initial_url(url: str) -> None:
         raise ValueError(_INVALID_INITIAL_URL_MESSAGE)
     if port not in (None, 443):
         raise ValueError(_INVALID_TARGET_PORT_MESSAGE)
+
+
+def _snapshot_query(query: Mapping[str, str]) -> list[tuple[str, str]]:
+    """Return one bounded, exact query-item snapshot."""
+
+    items_iterator = iter(query.items())
+    snapshot: list[tuple[str, str]] = []
+    total_characters = 0
+    for index in range(_MAX_QUERY_PAIRS + 1):
+        try:
+            item = next(items_iterator)
+        except StopIteration:
+            return snapshot
+        if index == _MAX_QUERY_PAIRS:
+            raise ValueError(_INVALID_QUERY_MESSAGE)
+        if type(item) is not tuple or len(item) != 2:
+            raise ValueError(_INVALID_QUERY_MESSAGE)
+        key, value = item
+        if type(key) is not str or type(value) is not str:
+            raise ValueError(_INVALID_QUERY_MESSAGE)
+        total_characters += len(key) + len(value)
+        if total_characters > _MAX_QUERY_CHARACTERS:
+            raise ValueError(_INVALID_QUERY_MESSAGE)
+        snapshot.append(item)
+    return snapshot
 
 
 class _NoRedirectHandler(HTTPRedirectHandler):
@@ -126,7 +156,8 @@ class UrllibPublicHttpClient:
         ):
             raise ValueError("timeout_seconds must be finite and positive")
         _validate_initial_url(url)
-        query_string = urlencode(sorted(query.items()))
+        query_snapshot = _snapshot_query(query)
+        query_string = urlencode(sorted(query_snapshot))
         request = Request(
             f"{url}?{query_string}",
             headers={

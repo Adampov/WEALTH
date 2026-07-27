@@ -86,24 +86,25 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert "fail_closed_public_http_automatic_redirect_rejection" in state.active_components
     assert "fail_closed_public_http_initial_request_target_validation" in state.active_components
     assert "fail_closed_public_http_standard_https_target_port_policy" in state.active_components
+    assert "fail_closed_public_http_bounded_query_serialization" in state.active_components
     assert len(state.open_tasks) == 2
-    task_037, task_051 = state.open_tasks
+    task_037, task_052 = state.open_tasks
     assert task_037.task_id == "TASK-037"
     assert task_037.status == "blocked"
     assert task_037.risk_tier == 3
     assert task_037.requires_human_approval is True
-    assert task_051.task_id == "TASK-051"
-    assert task_051.action == "phase2.fail_closed_public_http_bounded_query_serialization"
-    assert task_051.status == "ready"
-    assert task_051.risk_tier == 1
-    assert task_051.requires_human_approval is False
+    assert task_052.task_id == "TASK-052"
+    assert task_052.action == "phase2.fail_closed_public_http_initial_target_length_bound"
+    assert task_052.status == "ready"
+    assert task_052.risk_tier == 1
+    assert task_052.requires_human_approval is False
     assert state.blockers == (
         "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance "
         "location before independent Risk and Security review and the project-owner decision; "
         "authorization remains denied.",
     )
-    assert state.next_action.task_id == "TASK-051"
-    assert state.next_action.action == "phase2.fail_closed_public_http_bounded_query_serialization"
+    assert state.next_action.task_id == "TASK-052"
+    assert state.next_action.action == "phase2.fail_closed_public_http_initial_target_length_bound"
     assert any(decision.decision_id == "ADR-0027" for decision in state.recent_decisions)
 
 
@@ -189,29 +190,34 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_050_section = completed_section.split("### TASK-050 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
+    task_051_section = completed_section.split("### TASK-051 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    assert "bounded query serialization" in next_action_section
-    assert "fully materializes and sorts `query.items()`" in next_action_section
-    assert "no more than six pairs" in next_action_section
-    assert "32 query pairs and 8,192 total key-plus-value characters" in next_action_section
-    assert "at most 33 yielded items from one `items()` iterator" in next_action_section
-    assert "without calling `len(query)`" in next_action_section
-    assert "exact two-element tuples" in next_action_section
-    assert "built-in `str`" in next_action_section
-    assert (
-        '`ValueError("query must contain at most 32 built-in string pairs totaling at most 8192 '
-        'characters")`' in next_action_section
-    )
-    assert "TASK-049 structural-target, and TASK-050 target-port" in next_action_section
-    assert "Mapping-originated exceptions remain unchanged" in next_action_section
-    assert "does not claim a total wall-clock limit" in next_action_section
-    assert "Do not add a query-character" in next_action_section
-    assert "initial URL/path length cap" in next_action_section
+    assert "initial-target length bound" in next_action_section
+    assert "original" in next_action_section
+    assert "caller-supplied URL still has no configured size limit" in next_action_section
+    assert "`urlsplit`" in next_action_section
+    assert "inspected under NFKC" in next_action_section
+    assert "39 through 48 characters" in next_action_section
+    assert "private 8,192-character initial-target limit" in next_action_section
+    assert '`ValueError("url must contain at most 8192 characters")`' in next_action_section
+    assert "first line of the existing" in next_action_section
+    assert "private URL validator" in next_action_section
+    assert "Count Python characters" in next_action_section
+    assert "not encoded bytes" in next_action_section
+    assert "invalid-timeout precedence" in next_action_section
+    assert "length rejection" in next_action_section
+    assert "precedes TASK-049 structural scanning" in next_action_section
+    assert "TASK-050 port validation" in next_action_section
+    assert "TASK-051" in next_action_section
+    assert "Do not truncate, normalize, repair, retry, or replace" in next_action_section
+    assert "user-agent policy" in next_action_section
     assert "provider or hostname allowlist" in next_action_section
     assert "DNS lookup" in next_action_section
     assert "SSRF" in next_action_section
@@ -456,6 +462,48 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "No provider or hostname allowlist" in task_050_section
     assert "Query serialization remains unbounded" in task_050_section
     assert "TASK-051 governs that residual finite-work risk" in task_050_section
+    assert "- **Status:** COMPLETE" in task_051_section
+    assert "`phase2.fail_closed_public_http_bounded_query_serialization`" in task_051_section
+    assert "`src/wealth/adapters/http.py`" in task_051_section
+    assert "`tests/unit/test_http_adapter.py`" in task_051_section
+    assert "After timeout, TASK-049 structural-target" in task_051_section
+    assert "TASK-050 target-port validation" in task_051_section
+    assert "before `urlencode`" in task_051_section
+    assert "one bounded query snapshot" in task_051_section
+    assert "calls `items()`" in task_051_section
+    assert "starts its iterator once" in task_051_section
+    assert "does not call `len(query)`" in task_051_section
+    assert "directly iterate the mapping" in task_051_section
+    assert "second item pass" in task_051_section
+    assert "length hint" in task_051_section
+    assert "at most 33 yielded items" in task_051_section
+    assert "zero" in task_051_section
+    assert "through 32 exact built-in tuple pairs" in task_051_section
+    assert "8,192 Python characters" in task_051_section
+    assert "tuple subclass" in task_051_section
+    assert "string-subclass component" in task_051_section
+    assert (
+        '`ValueError("query must contain at most 32 built-in string pairs totaling at most 8192 '
+        'characters")`' in task_051_section
+    )
+    assert "no `urlencode`, `Request`, private-opener" in task_051_section
+    assert "including `ValueError`" in task_051_section
+    assert "same raw objects" in task_051_section
+    assert "Forty-two new deterministic cases" in task_051_section
+    assert "424-test" in task_051_section
+    assert "count rejection before 33rd-item inspection" in task_051_section
+    assert "finite and synthetic-unbounded 33rd items" in task_051_section
+    assert "Unicode exact-8,192 and 8,193 character boundaries" in task_051_section
+    assert "nine" in task_051_section
+    assert "invalid pair/type forms" in task_051_section
+    assert "five" in task_051_section
+    assert "mapping-failure seams" in task_051_section
+    assert "custom runtime error and raw" in task_051_section
+    assert "all five active provider request" in task_051_section
+    assert "three through six pairs" in task_051_section
+    assert "no query-content, normalization, or multi-value policy" in task_051_section
+    assert "no configured size bound" in task_051_section
+    assert "TASK-052 governs that residual finite-work risk" in task_051_section
     assert "private urllib opener with a no-follow redirect handler" in market_data_contract
     assert "performs no body" in market_data_contract
     assert "read or cleanup" in market_data_contract
@@ -480,9 +528,23 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "structural and caller-authority policies, not hostname or SSRF" in market_data_contract
     assert "configured proxy" in market_data_contract
     assert "peer may use a non-443 port" in market_data_contract
-    assert "Query" in market_data_contract
-    assert "serialization is not yet bounded" in market_data_contract
-    assert "TASK-051 governs that residual" in market_data_contract
+    assert "one bounded query snapshot" in market_data_contract
+    assert "calls `items()` and starts its iterator once" in market_data_contract
+    assert "does" in market_data_contract
+    assert "not call `len(query)`" in market_data_contract
+    assert "at most 33 yielded items" in market_data_contract
+    assert "Zero through 32 exact built-in tuple" in market_data_contract
+    assert "8,192 Python characters" in market_data_contract
+    assert (
+        '`ValueError("query must contain at most 32 built-in string pairs totaling at most 8192 '
+        'characters")`' in market_data_contract
+    )
+    assert "Mapping-originated" in market_data_contract
+    assert "including `ValueError`, remain the same raw objects" in market_data_contract
+    assert "duplicates and empty or Unicode content" in market_data_contract
+    assert "not a total wall-clock bound" in market_data_contract
+    assert "no configured character limit" in market_data_contract
+    assert "TASK-052 governs an 8,192-character" in market_data_contract
     assert "Automatic 301, 302, 303, 307, and 308 redirects are rejected" in risk_register
     assert "process-global opener is untouched" in risk_register
     assert "original initial target must be an absolute credential-free HTTPS URL" in risk_register
@@ -496,8 +558,14 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     )
     assert "does not constrain a configured proxy peer" in risk_register
     assert "performs no hostname allowlisting, DNS resolution" in risk_register
-    assert "Bound adapter-controlled query enumeration" in risk_register
-    assert "before sorting, encoding, or request construction" in risk_register
+    assert "Query serialization now takes one adapter-bounded snapshot" in risk_register
+    assert "32 exact built-in-string pairs" in risk_register
+    assert "8,192 cumulative key-plus-value characters" in risk_register
+    assert "33 yielded items" in risk_register
+    assert "mapping-originated failures remain raw" in risk_register
+    assert "no configured size limit" in risk_register
+    assert "Bound the original initial target to 8,192 Python characters" in risk_register
+    assert "before content scanning, parsing, query access" in risk_register
     assert "Within the canonical UTC migration track" in roadmap
     assert "TASK-037 remains" in roadmap
     assert "blocked and authorization remains denied" in roadmap

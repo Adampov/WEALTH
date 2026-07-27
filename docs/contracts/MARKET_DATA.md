@@ -90,9 +90,28 @@ These initial-target controls are structural and caller-authority policies, not 
 policies. They still permit localhost, IPv4, IPv6, CPython-parser-accepted IPvFuture and DNS-label
 forms, Unicode hostnames, and trailing-dot hostnames. They perform no DNS resolution,
 IP/public-routability check, provider or hostname allowlist, or SSRF guarantee. A configured proxy
-peer may use a non-443 port, and standard TLS and proxy behavior remains unchanged. Query
-serialization is not yet bounded in item count or string volume; TASK-051 governs that residual
-adapter-controlled finite-work risk without adding hostname, DNS, IP, or SSRF policy.
+peer may use a non-443 port, and standard TLS and proxy behavior remains unchanged.
+
+After timeout, structural-target, and target-port validation and before `urlencode`, the shared
+client takes one bounded query snapshot. It calls `items()` and starts its iterator once; it does
+not call `len(query)`, directly iterate the mapping, start a second item pass, or request an
+iterator length hint, and it pulls at most 33 yielded items. Zero through 32 exact built-in tuple
+pairs are accepted only when both components are exact built-in strings and their cumulative
+key-plus-value length is at most 8,192 Python characters. A 33rd item, invalid pair shape or tuple
+subclass, non-string or string-subclass component, or 8,193rd character fails with exact
+`ValueError("query must contain at most 32 built-in string pairs totaling at most 8192 characters")`
+and no direct cause or hidden context. Rejection occurs before encoding, request construction,
+opener or handler work, DNS lookup, network access, or filesystem access. Mapping-originated
+exceptions, including `ValueError`, remain the same raw objects rather than becoming the boundary
+error. Accepted pairs retain their existing single sorted standard-library encoding, including
+duplicates and empty or Unicode content. This is an adapter-controlled enumeration and raw-string
+volume bound, not a total wall-clock bound on caller mapping code or a new query-content,
+normalization, or multi-value policy.
+
+The original initial URL remains finite as a Python string but has no configured character limit
+before structural scanning, parsing, or request construction. TASK-052 governs an 8,192-character
+initial-target bound without adding provider or hostname allowlisting, DNS or IP policy, or an SSRF
+guarantee.
 
 Every `HTTPError` path makes one explicit cleanup attempt after at most one bounded body read.
 When cleanup succeeds, the error-response resource is closed before a response or primary failure
