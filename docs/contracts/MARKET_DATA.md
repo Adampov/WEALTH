@@ -451,6 +451,53 @@ proven. Settlement lag is not proof against late provider events; pause cannot c
 work; dense one-millisecond windows, separate-database commit seams, crash-uncommitted request
 counts, physical durability, and cooperating-single-host-only coordination remain residual risks.
 
+## Pure Continuous Public-Trade Planning Boundary
+
+`wealth.domain.continuous_public_trade` is an unused, provider-independent, side-effect-free
+contract boundary beneath ADR-0028. Its frozen `ContinuousPublicTradePolicy`,
+`ContinuousPublicTradeAttachment`, `ContinuousPublicTradeStreamCheckpoint`, and
+`ContinuousPublicTradePlan` models and explicit stream, service, plan, and transition enums model
+inputs and results only. `plan_continuous_public_trade_window` and the two transition validators
+are pure. Runtime composition does not import the module, and the module has no repository,
+adapter, clock, network, or service dependency.
+
+The policy accepts exact built-in integer millisecond values only. Window and finite catch-up
+bounds must be positive; settlement lag is explicit and non-negative. Booleans, polymorphic
+integers, non-integer values, invalid identity or fingerprint data, unknown lifecycle values,
+inconsistent versions, malformed pause evidence, and cursor/attachment range contradictions fail
+closed without normalization.
+
+The pure closed-window planner receives a validated checkpoint and one explicit fixed-UTC `now`.
+It returns exactly one immutable result:
+
+- `HELD` for a paused stream, retaining its cursor and optional attachment unchanged;
+- `ATTACHED_JOB` for an active stream with an existing child, retaining that child's exact
+  identity, policy fingerprint, and half-open `[start, end)` range;
+- `WAITING` when the active unowned cursor is at or beyond the latest fully closed eligible
+  epoch-aligned boundary; or
+- `ATTACHED_JOB` with one candidate value starting exactly at the cursor and ending at
+  `min(latest_eligible_end, cursor + max_catchup_span)` when bounded work is due.
+
+Settlement lag is subtracted before flooring to the exact epoch window grid. The planner cannot
+include an open or future window, round the cursor forward, overlap earlier work, skip a gap,
+replan an existing attachment, or exceed the finite catch-up bound. A candidate is not durable
+state or authority: returning it does not create or attach the bounded job, acquire a fence,
+reserve rate budget, invoke a provider, write evidence, advance a cursor, or schedule a later
+cycle.
+
+Pure stream transition validation permits only `RETAIN`, `ATTACH`, `CHILD_COMPLETED`,
+`MANUAL_HOLD`, and `MANUAL_RESUME` while preserving immutable stream and market identity, the
+request variant, complete policy fingerprint, monotonic one-step versioning, cursor monotonicity,
+exact attachment causality, and explicit manual hold semantics. Pure service transition
+validation permits only `STARTING`, then `RUNNING`, then exactly one terminal `STOPPED`, `PAUSED`,
+`FAILED`, or `RUN_LIMIT` status. Neither validator grants persistence or runtime behavior. The
+slice adds no SQLite/schema, port/repository, provider access, wait/retry/budget behavior,
+scheduler, trigger, daemon, service runner, CLI, deployment, operator data, permission, automatic
+pause/resume/restart/recovery, capacity evidence, multi-host exclusivity, or readiness claim.
+TASK-060 is a separate design-only persistence-contract decision; until later work is governed and
+evidenced, the existing explicitly invoked bounded public-trade path remains the only
+implementation.
+
 ## Canonical Candle
 
 `CanonicalCandle` represents one final OHLCV interval. Every record includes:

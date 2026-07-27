@@ -64,7 +64,8 @@
     "fail_closed_public_http_bounded_response_header_projection",
     "public_trade_disconnect_sparse_window_restart_recovery_drill",
     "versioned_public_provider_schema_fixture_contract_and_drift_runbook",
-    "continuous_public_trade_collection_operating_contract"
+    "continuous_public_trade_collection_operating_contract",
+    "continuous_public_trade_closed_window_planner_contracts"
   ],
   "active_integrations": [
     "github_actions_ci"
@@ -106,8 +107,8 @@
       "requires_human_approval": true
     },
     {
-      "task_id": "TASK-059",
-      "action": "phase2.continuous_public_trade_closed_window_planner_contracts",
+      "task_id": "TASK-060",
+      "action": "phase2.continuous_public_trade_stream_persistence_contract_decision",
       "status": "ready",
       "risk_tier": 1,
       "requires_human_approval": false
@@ -149,8 +150,8 @@
     }
   ],
   "next_action": {
-    "task_id": "TASK-059",
-    "action": "phase2.continuous_public_trade_closed_window_planner_contracts"
+    "task_id": "TASK-060",
+    "action": "phase2.continuous_public_trade_stream_persistence_contract_decision"
   },
-  "last_updated_utc": "2026-07-27T11:26:33Z"
+  "last_updated_utc": "2026-07-27T11:55:14Z"
 }
