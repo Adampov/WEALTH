@@ -86,8 +86,8 @@ def test_template_exists_but_backlog_keeps_task_037_blocked_and_unapproved() -> 
         == EXPECTED_NORMALIZED_BLOCKED_TASK_SECTION_SHA256
     )
     assert project_state["next_action"] == {
-        "task_id": "TASK-056",
-        "action": "phase2.public_trade_disconnect_sparse_window_restart_recovery_drill",
+        "task_id": "TASK-057",
+        "action": "phase2.versioned_public_provider_schema_fixtures_and_drift_runbook",
     }
     assert project_state["open_tasks"] == [
         {
@@ -100,8 +100,8 @@ def test_template_exists_but_backlog_keeps_task_037_blocked_and_unapproved() -> 
             "requires_human_approval": True,
         },
         {
-            "task_id": "TASK-056",
-            "action": "phase2.public_trade_disconnect_sparse_window_restart_recovery_drill",
+            "task_id": "TASK-057",
+            "action": "phase2.versioned_public_provider_schema_fixtures_and_drift_runbook",
             "status": "ready",
             "risk_tier": 1,
             "requires_human_approval": False,

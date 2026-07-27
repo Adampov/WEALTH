@@ -551,9 +551,15 @@ mean no control-state write.
   made before a crash; that reservation design remains future work. Health history is available
   only through bounded checkpoint-version pages. Actor transition history now has a separate
   typed bounded read port, but neither history has an operator CLI, dashboard, repair endpoint, or
-  external audit export. The individual crash seams are tested, but one composed generated-fixture
-  drill across an exhausted disconnect, sparse windows, newly constructed process boundaries, and
-  the typed audit chain remains pending under TASK-056.
+  external audit export. One composed generated-fixture drill now exercises an exhausted
+  disconnect, sparse one-millisecond windows, newly constructed evidence, checkpoint, and shared
+  rate-budget SQLite adapters, fresh fencing authority, and the typed audit chain. It proves exact
+  pending-leaf recovery from failed checkpoint version 3 through completed version 6, five
+  budgeted requests, one retry, two pacing waits, three raw captures, one canonical trade, zero
+  conflicts, and a no-work completed rerun. It does not prove cross-database atomicity, physical
+  durability, continuous operation, or automatic recovery. Versioned synthetic fixtures for the
+  five active provider payload variants and an operator-visible schema-drift response runbook
+  remain pending under TASK-057.
 - Each Binance provider request remains bounded to one already-closed window of at most 1,000
   candles; the application composes multiple requests into a bounded range.
 - No operating-system-managed scheduling, deployment, adaptive pacing, retry jitter, or live
