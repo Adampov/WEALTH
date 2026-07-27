@@ -109,6 +109,22 @@ timeframes with at most 300 candles per provider request. Documented pre-window 
 from the requested canonical batch, while missing in-window buckets remain explicit quality
 failures rather than invented candles.
 
+## Public-Provider Schema Review and Drift Response
+
+An offline, versioned corpus records the reviewed synthetic payload shape for the five active
+public request variants: Binance Spot and USD-M candles, Coinbase Exchange Spot candles, and
+Binance Spot and USD-M aggregate trades. Its strict
+[manifest](tests/fixtures/public_provider_schema/v1/manifest.json) binds every minimal fixture to
+one request identity, exact-byte SHA-256, shape contract, current official reference, and UTC
+review date. Deterministic stubs feed those exact bytes through the existing production adapters;
+no fixture test contacts a provider or refreshes itself from a live response.
+
+The [public-provider schema-drift runbook](docs/runbooks/PUBLIC_PROVIDER_SCHEMA_DRIFT.md) defines
+manual signals, containment, safe evidence handling, official-document re-review, append-only
+fixture versioning, regression, escalation, resume gates, and rollback. Fixture review does not
+detect upstream drift automatically, make provider documentation immutable, or authorize an
+adapter, endpoint, runtime, deployment, or continuous-collection change.
+
 ## Cross-Source Candle Reconciliation
 
 Selected candle windows from two distinct sources can be compared after each source passes the
@@ -313,6 +329,8 @@ Included:
   actor-authority validation, restart replay, and fail-closed corruption detection.
 - Generated-fixture public-trade disconnect, sparse-window, and process-style reopen recovery evidence
   across the local evidence, control, and shared rate-budget SQLite boundaries.
+- A strict versioned synthetic fixture corpus for all five active public-provider payload variants,
+  with offline adapter/drift regression and a manual schema-drift response runbook.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:
@@ -322,8 +340,8 @@ Not included:
 - Automatic aggregate-trade scheduling, continuous collection, live WebSockets, provider gap
   recovery, an operator transition-history CLI or dashboard, or crash-durable per-job pre-request
   attempt reservations.
-- A versioned synthetic public-provider schema-fixture corpus, automatic schema-drift detection,
-  and an operator-visible provider schema-drift response runbook.
+- Automatic public-provider schema-drift detection, online fixture refresh, automatic
+  pause/remediation/resume, or continuous-readiness evidence.
 - Automatic historical collection scheduling.
 - Multi-host request-budget coordination.
 - Automatic source ranking, price blending, or cross-quote conversion.

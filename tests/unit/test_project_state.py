@@ -92,26 +92,32 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert "fail_closed_public_http_maximum_timeout_policy" in state.active_components
     assert "fail_closed_public_http_bounded_response_header_projection" in (state.active_components)
     assert "public_trade_disconnect_sparse_window_restart_recovery_drill" in state.active_components
+    assert (
+        "versioned_public_provider_schema_fixture_contract_and_drift_runbook"
+        in state.active_components
+    )
     assert len(state.open_tasks) == 2
-    task_037, task_057 = state.open_tasks
+    task_037, task_058 = state.open_tasks
     assert task_037.task_id == "TASK-037"
     assert task_037.status == "blocked"
     assert task_037.risk_tier == 3
     assert task_037.requires_human_approval is True
-    assert task_057.task_id == "TASK-057"
-    assert task_057.action == "phase2.versioned_public_provider_schema_fixtures_and_drift_runbook"
-    assert task_057.status == "ready"
-    assert task_057.risk_tier == 1
-    assert task_057.requires_human_approval is False
+    assert task_058.task_id == "TASK-058"
+    assert (
+        task_058.action == "phase2.continuous_public_trade_collection_operating_contract_decision"
+    )
+    assert task_058.status == "ready"
+    assert task_058.risk_tier == 1
+    assert task_058.requires_human_approval is False
     assert state.blockers == (
         "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance "
         "location before independent Risk and Security review and the project-owner decision; "
         "authorization remains denied.",
     )
-    assert state.next_action.task_id == "TASK-057"
+    assert state.next_action.task_id == "TASK-058"
     assert (
         state.next_action.action
-        == "phase2.versioned_public_provider_schema_fixtures_and_drift_runbook"
+        == "phase2.continuous_public_trade_collection_operating_contract_decision"
     )
     assert any(decision.decision_id == "ADR-0027" for decision in state.recent_decisions)
 
@@ -216,48 +222,47 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_056_section = completed_section.split("### TASK-056 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
+    task_057_section = completed_section.split("### TASK-057 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    assert "Versioned public-provider schema fixtures" in next_action_section
-    assert "drift-response runbook" in next_action_section
-    assert "`RISK-002` remains open" in next_action_section
-    assert "five active public request variants" in next_action_section
-    assert "Binance Spot and" in next_action_section
-    assert "USD-M candles" in next_action_section
-    assert "Coinbase Exchange candles" in next_action_section
-    assert "Binance Spot and USD-M aggregate trades" in next_action_section
-    assert "without widening them" in next_action_section
-    assert "`tests/fixtures/public_provider_schema/v1/manifest.json`" in next_action_section
-    assert "exact-byte SHA-256" in next_action_section
-    assert "official public-contract reference" in next_action_section
-    assert "`tests/unit/test_public_provider_schema_fixtures.py`" in next_action_section
-    assert "`docs/runbooks/PUBLIC_PROVIDER_SCHEMA_DRIFT.md`" in next_action_section
+    assert "Continuous public-trade collection operating-contract decision" in next_action_section
+    assert "bounded ADR, operating-contract documentation" in next_action_section
+    assert "TASK-057 now supplies a reviewed exact-byte fixture corpus" in next_action_section
+    assert "finite, explicitly invoked composition" in next_action_section
+    assert "no approved continuous lifecycle" in next_action_section
+    assert "one bounded single-host operating contract" in next_action_section
+    assert "lifecycle, scheduling, fencing, restart, drift-pause" in next_action_section
+    assert "`docs/decisions/0028-continuous-public-trade-collection-operating-contract.md`" in (
+        next_action_section
+    )
+    assert "`docs/decisions/README.md`" in next_action_section
     assert "`README.md`" in next_action_section
     assert "`docs/contracts/MARKET_DATA.md`" in next_action_section
-    assert "minimal, synthetic, secret-free, and bounded" in next_action_section
-    assert "do not copy a live" in next_action_section
-    assert "perform no network call, wall-clock sleep, online snapshot" in next_action_section
-    assert "Do not change production source" in next_action_section
-    assert "aggregate-trade rule rejects unknown fields" in next_action_section
-    assert "does not detect upstream drift automatically" in next_action_section
-    assert "Do not add an operator CLI, dashboard, alert delivery" in next_action_section
-    assert "A parser or provider-contract behavior change" in next_action_section
-    assert "one-to-one to one exact committed fixture" in next_action_section
-    assert "exactly the five active request variants" in next_action_section
-    assert "exactly 12 positional values" in next_action_section
-    assert "Coinbase candle rows exactly six" in next_action_section
-    assert "exact raw-byte lineage" in next_action_section
-    assert "non-retryable typed `INVALID_PAYLOAD`" in next_action_section
-    assert "no" in next_action_section
-    assert "partial canonical or raw evidence" in next_action_section
-    assert "immediate pause and containment" in next_action_section
-    assert "without overwriting an old" in next_action_section
-    assert "must not be pasted into logs or issues" in next_action_section
-    assert "fixture review never authorizes an adapter, parser, endpoint" in next_action_section
+    assert "Design and documentation only" in next_action_section
+    assert "Do not add or change production source, runtime" in next_action_section
+    assert "scheduler, daemon, service" in next_action_section
+    assert "Do not start collection" in next_action_section
+    assert "fabricate deployment values" in next_action_section
+    assert "authorize automatic recovery, drift detection" in next_action_section
+    assert "must not claim continuous-operation, capacity, recovery" in next_action_section
+    assert "It does not present a component as implemented" in next_action_section
+    assert "UTC closed-window" in next_action_section
+    assert "existing immutable job identity and policy fingerprint" in next_action_section
+    assert "evidence-first checkpoint advancement" in next_action_section
+    assert "claim cross-database atomicity" in next_action_section
+    assert "TASK-057 runbook" in next_action_section
+    assert "no detector, automatic pause, remediation" in next_action_section
+    assert "Capacity and failure sections identify" in next_action_section
+    assert "No deployment value or adequacy" in next_action_section
+    assert "future continuous path disabled" in next_action_section
+    assert "A future implementation requires a separate bounded task" in next_action_section
+    assert "ADR acceptance alone grants no" in next_action_section
     assert "TASK-037" in next_action_section
     assert "authorization remains denied" in next_action_section
     assert blocked_section.count("### TASK-") == 1
@@ -721,6 +726,58 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "does not bound wire-header bytes" in task_055_section
     assert "adds no privacy, redaction" in task_055_section
     assert "TASK-037 authority" in task_055_section
+    assert "- **Status:** COMPLETE" in task_057_section
+    assert "`phase2.versioned_public_provider_schema_fixtures_and_drift_runbook`" in (
+        task_057_section
+    )
+    assert "`tests/fixtures/public_provider_schema/v1/manifest.json`" in task_057_section
+    assert "exactly five synthetic JSON" in task_057_section
+    assert "`tests/unit/test_public_provider_schema_fixtures.py`" in task_057_section
+    assert "`docs/runbooks/PUBLIC_PROVIDER_SCHEMA_DRIFT.md`" in task_057_section
+    assert "One strict version-1 manifest" in task_057_section
+    assert "one-to-one to five minimal, bounded, secret-free synthetic fixture files" in (
+        task_057_section
+    )
+    assert "exact-byte SHA-256" in task_057_section
+    assert "1,024-byte per-fixture maximum" in task_057_section
+    assert "Binance Spot and USD-M 12-position candle rows" in task_057_section
+    assert "Coinbase Exchange Spot six-position" in task_057_section
+    assert "shared parser contract" in task_057_section
+    assert "required fields are exactly `T`, `a`, `f`, `l`, `m`, `p`" in task_057_section
+    assert "optional fields are exactly `M` and `nq`" in task_057_section
+    assert "Spot fixture contains `M`" in task_057_section
+    assert "USD-M fixture contains `nq`" in task_057_section
+    assert "does not invent a market-specific parser rule" in task_057_section
+    assert "unknown fields remain rejected" in task_057_section
+    assert "Offline deterministic HTTP stubs and fixed UTC clocks" in task_057_section
+    assert "exact bytes through" in task_057_section
+    assert "active existing production adapter and request path" in task_057_section
+    assert "exact raw-byte lineage without" in task_057_section
+    assert "a network call" in task_057_section
+    assert "Strict manifest tests reject unknown or missing keys" in task_057_section
+    assert "absolute/traversing/mislocated paths" in task_057_section
+    assert "digest mismatch, and oversized fixtures" in task_057_section
+    assert "Representative detectable adapter drift" in task_057_section
+    assert "selected detectable reorder" in task_057_section
+    assert "wrong numeric types" in task_057_section
+    assert "invalid decimal values" in task_057_section
+    assert "invalid present optional-field values" in task_057_section
+    assert "non-retryable `INVALID_PAYLOAD`" in task_057_section
+    assert "without partial" in task_057_section
+    assert "raw or canonical evidence" in task_057_section
+    assert "Decimal precision alone has no adapter-level bound" in task_057_section
+    assert "some same-typed semantic positional" in task_057_section
+    assert "reorder can remain canonically valid" in task_057_section
+    assert "parser acceptance is not compatibility evidence" in task_057_section
+    assert "requires fail-closed pause and official-contract review" in task_057_section
+    assert "manual pause and containment" in task_057_section
+    assert "without overwriting old versions" in task_057_section
+    assert "not copied into repository files, logs, issues, or fixtures" in task_057_section
+    assert "adds no production source, network, runtime" in task_057_section
+    assert "automatic detection/pause/" in task_057_section
+    assert "continuous collector, deployment, or readiness claim" in task_057_section
+    assert "TASK-037 remains" in task_057_section
+    assert "blocked and authorization remains denied" in task_057_section
     assert "- **Status:** COMPLETE" in task_056_section
     assert (
         "`phase2.public_trade_disconnect_sparse_window_restart_recovery_drill`" in task_056_section
@@ -867,9 +924,22 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "three raw captures, one canonical trade, zero" in market_data_contract
     assert "conflicts, and a no-work completed rerun" in market_data_contract
     assert "does not prove cross-database atomicity, physical" in market_data_contract
+    assert "## Versioned Public-Provider Schema Fixtures" in market_data_contract
+    assert "contains exactly one minimal payload" in market_data_contract
+    assert "strict manifest binds every unique identity" in market_data_contract
+    assert "both aggregate-trade variants require exactly" in market_data_contract
+    assert "shared parser's optional set is exactly `M` and `nq`" in market_data_contract
+    assert "Fixture presence does not create a market-specific parser" in market_data_contract
+    assert "selected detectable positional reorder" in market_data_contract
+    assert "Decimal precision alone is not adapter-bounded" in market_data_contract
+    assert "positional reorder can remain canonically valid" in market_data_contract
+    assert "semantic drift that requires pause and contract review" in market_data_contract
     assert "five active provider payload variants" in market_data_contract
     assert "schema-drift response runbook" in market_data_contract
-    assert "remain pending under TASK-057" in market_data_contract
+    assert "Versioned synthetic fixtures now cover" in market_data_contract
+    assert "Neither supplies automatic detection, pause, remediation, resume" in (
+        market_data_contract
+    )
     assert "After preserving `max_response_bytes` validation" in market_data_contract
     assert "exact built-in `str` of 1 through 256 Python characters" in market_data_contract
     assert "U+0020 through U+007E" in market_data_contract
@@ -931,11 +1001,22 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "Five durable reservations precede five requests" in risk_register
     assert "completed rerun performs no work" in risk_register
     assert "Preserve the TASK-056 disconnect and sparse-recovery evidence" in risk_register
-    assert "TASK-057 adds an exact-byte, SHA-256-pinned" in risk_register
-    assert "all five active public-provider request variants" in risk_register
-    assert "offline tests through the existing production adapters" in risk_register
-    assert "operator-visible containment/review/resume runbook" in risk_register
-    assert "may not fetch or refresh fixtures online" in risk_register
+    assert "TASK-057 adds one strict exact-byte, SHA-256-pinned version-1 manifest" in risk_register
+    assert "five bounded synthetic fixtures" in risk_register
+    assert "shared exact required set" in risk_register
+    assert "optional set `M`, `nq`" in risk_register
+    assert "do not create market-specific parser rules" in risk_register
+    assert "Representative detectable width, selected detectable reorder" in risk_register
+    assert "Decimal precision alone and some same-typed semantic reorder may still parse" in (
+        risk_register
+    )
+    assert "acceptance is not compatibility proof" in risk_register
+    assert "manual pause/review/resume procedure" in risk_register
+    assert "adds no automatic detector" in risk_register
+    assert "TASK-058 is limited to a design-only ADR and operating contract" in risk_register
+    assert "possible future single-host continuous public-trade lifecycle" in risk_register
+    assert "may not add code, runtime, network, deployment" in risk_register
+    assert "implementation remains separately governed" in risk_register
     assert "TASK-056 adds one composed generated-fixture drill" in risk_register
     assert "newly constructed evidence, checkpoint, and rate-budget SQLite adapters" in (
         risk_register
@@ -954,11 +1035,18 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "failed checkpoint version 3 through completed version 6" in roadmap
     assert "does not" in roadmap
     assert "establish cross-database atomicity, physical durability" in roadmap
-    assert "current RISK-1 next action, TASK-057" in roadmap
+    assert "TASK-057 now supplies one strict manifest" in roadmap
     assert "all five active provider payload variants" in roadmap
-    assert "operator-visible schema-drift response runbook" in roadmap
-    assert "Continuous public-trade collection remains a" in roadmap
-    assert "separately scoped future decision" in roadmap
+    assert "manual schema-drift containment/review/resume runbook" in roadmap
+    assert "shared optional parser set `M`, `nq`" in roadmap
+    assert "precision-only changes and some same-typed semantic reorder may parse" in roadmap
+    assert "manual pause and contract review" in roadmap
+    assert "current" in roadmap
+    assert "RISK-1 next action, TASK-058" in roadmap
+    assert "design-only ADR and operating contract" in roadmap
+    assert "single-host continuous public-trade lifecycle" in roadmap
+    assert "cannot add production" in roadmap
+    assert "implementation remains a separately governed future task" in roadmap
     assert "The canonical next action is TASK-037" not in roadmap
 
 

@@ -142,10 +142,19 @@ fencing authority without mutating control state. TASK-056 now supplies one comp
 recovery drill from failed checkpoint version 3 through completed version 6, with exact sparse
 evidence, budget, retry, pacing, transition, health, and no-work rerun assertions. It does not
 establish cross-database atomicity, physical durability, automatic recovery, or continuous
-operation. The current RISK-1 next action, TASK-057, is limited to versioned synthetic fixtures
-for all five active provider payload variants, offline production-adapter drift tests, and an
-operator-visible schema-drift response runbook. Continuous public-trade collection remains a
-separately scoped future decision. `RISK-005` remains open: the accepted plan selects Python
+operation. TASK-057 now supplies one strict manifest and five exact-byte, versioned synthetic
+fixtures for all five active provider payload variants, offline deterministic production-adapter
+tests, and a manual schema-drift containment/review/resume runbook. Both Binance aggregate
+variants retain the shared optional parser set `M`, `nq`; fixture presence differs without
+creating a market-specific parser rule. Representative detectable drift fails closed, while
+precision-only changes and some same-typed semantic reorder may parse and therefore require
+manual pause and contract review rather than serving as compatibility evidence. The current
+RISK-1 next action, TASK-058, is a design-only ADR and operating contract for a possible future
+single-host continuous public-trade lifecycle, scheduling/cadence, fencing/restart, drift-pause,
+health, capacity, failure, escalation, resume, and rollback boundary. It cannot add production
+code, runtime, network, scheduler, daemon, deployment, automatic recovery/resume, operator data,
+or a continuous-readiness claim; implementation remains a separately governed future task.
+`RISK-005` remains open: the accepted plan selects Python
 datetimes in the fixed `datetime.UTC` zone, fixed microsecond RFC 3339 `Z` text, and derived
 epoch-microsecond SQL projections. New injected clock values are fixed-UTC, and the isolated pure
 module now provides the complete unused Stage 2 primitive foundation: strict validation, explicit

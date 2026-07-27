@@ -6,84 +6,82 @@ promoted through review.
 
 ## Next Action
 
-### TASK-057 — Versioned public-provider schema fixtures and drift-response runbook
+### TASK-058 — Continuous public-trade collection operating-contract decision
 
-- **Key:** `phase2.versioned_public_provider_schema_fixtures_and_drift_runbook`
+- **Key:** `phase2.continuous_public_trade_collection_operating_contract_decision`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
-- **Human approval:** NOT REQUIRED — bounded synthetic fixtures, offline tests, documentation,
-  and governance only; no network, operator-data access, production behavior, schema, deployment,
-  credential, permission, or operating-mode change.
-- **Context:** `RISK-002` remains open because the active provider payload contracts are exercised
-  through inline test values but have no independently versioned fixture corpus or operator-visible
-  schema-drift response procedure. The five active public request variants are Binance Spot and
-  USD-M candles, Coinbase Exchange candles, and Binance Spot and USD-M aggregate trades. Their
-  existing adapters already fail closed on exact positional widths, required and optional fields,
-  value types, and canonical-domain validation. This task records and tests those current
-  boundaries without widening them.
-- **Goal:** Establish a small, deterministic, versioned synthetic fixture corpus for every active
-  public-provider payload shape, prove the existing production adapters accept the reviewed
-  versions and reject representative drift, and give operators an exact containment and review
-  runbook before any continuous public-trade collection is considered.
-- **Scope:** Add `tests/fixtures/public_provider_schema/v1/manifest.json` plus exactly five
-  synthetic JSON fixtures: Binance Spot candle, Binance USD-M candle, Coinbase candle, Binance
-  Spot aggregate trade, and Binance USD-M aggregate trade. The manifest records schema version,
-  exact relative path, exact-byte SHA-256, provider, dataset, market/request variant, expected
-  positional width or required/optional field set, official public-contract reference, review UTC
-  date, and review status. Add one offline unit-test module that loads exact fixture bytes through
-  the existing production adapters with deterministic HTTP stubs and UTC clocks, verifies
-  canonical values and raw-byte lineage, and derives bounded synthetic drift cases. Add
-  `docs/runbooks/PUBLIC_PROVIDER_SCHEMA_DRIFT.md` and link it from the market-data contract and
-  README.
-- **Files:** `tests/fixtures/public_provider_schema/v1/manifest.json`, five versioned JSON fixture
-  files in that directory, `tests/unit/test_public_provider_schema_fixtures.py`,
-  `docs/runbooks/PUBLIC_PROVIDER_SCHEMA_DRIFT.md`, `README.md`,
-  `docs/contracts/MARKET_DATA.md`, plus coordinated governance files and governance tests.
-- **Constraints:** Fixtures are minimal, synthetic, secret-free, and bounded; do not copy a live
-  response or operator evidence. Tests perform no network call, wall-clock sleep, online snapshot,
-  or automatic fixture refresh. Do not change production source, adapter acceptance, endpoint,
-  query, row limit, precision, ordering, retry, pacing, canonical model, persistence, SQLite
-  schema, runtime wiring, dependency, credential, permission, or operating mode. The current
-  aggregate-trade rule rejects unknown fields and must not be relabeled as additive-compatible.
-  Fixture or runbook completion does not detect upstream drift automatically and does not claim
-  upstream documentation is immutable. Do not add an operator CLI, dashboard, alert delivery,
-  automatic pause, malformed-response evidence store, collector, scheduler, daemon, WebSocket,
-  deployment, or multi-host coordination. A parser or provider-contract behavior change requires
-  a separately governed task. Preserve TASK-037 authority, migration, and Stage 3.
+- **Human approval:** NOT REQUIRED — bounded ADR, operating-contract documentation, governance,
+  and governance tests only; no production code, runtime, network, deployment, permission,
+  operator-data, or operating-mode change.
+- **Context:** TASK-057 now supplies a reviewed exact-byte fixture corpus and a manual
+  schema-drift containment and resume procedure for all five active public-provider request
+  variants. The existing public-trade path remains a finite, explicitly invoked composition with
+  durable evidence, checkpoint, transition, health, and shared single-host rate-budget
+  boundaries. It has no approved continuous lifecycle, scheduling owner, cadence, supervised
+  restart policy, drift-pause composition, operational capacity envelope, or deployment contract.
+- **Goal:** Select and record one bounded single-host operating contract for a possible future
+  continuous public-trade collector, so lifecycle, scheduling, fencing, restart, drift-pause,
+  health, capacity, failure, escalation, resume, and rollback invariants are explicit before any
+  implementation task can be proposed.
+- **Scope:** Add `docs/decisions/0028-continuous-public-trade-collection-operating-contract.md` and
+  update the decision index, market-data contract, README, roadmap, state, risk register, backlog,
+  and governance tests. The decision must define the future component boundary and ownership;
+  explicit lifecycle states and transitions; UTC closed-window cadence and catch-up rules;
+  single-host scheduling/exclusivity; existing UUID fencing, checkpoint, evidence-first progress,
+  idempotent refetch, and shared durable rate-budget composition; manual schema-drift pause and
+  governed resume; source and service health; finite work and capacity inputs; failure,
+  escalation, rollback, and future implementation evidence.
+- **Files:** `docs/decisions/0028-continuous-public-trade-collection-operating-contract.md`,
+  `docs/decisions/README.md`, `README.md`, `docs/contracts/MARKET_DATA.md`, `docs/ROADMAP.md`,
+  `PROJECT_STATE.json`, `BACKLOG.md`, `RISK_REGISTER.md`, and governance tests only.
+- **Constraints:** Design and documentation only. Do not add or change production source, runtime
+  wiring, network access, endpoint, adapter, parser, request, scheduler, daemon, service,
+  deployment, WebSocket, persistence or SQLite schema, dependency or lockfile, operator path or
+  data, credential, permission, notification, or operating mode. Do not start collection,
+  schedule work, inspect a database, reserve capacity, or fabricate deployment values. Do not
+  authorize automatic recovery, drift detection, pause, resume, remediation, failover, or
+  multi-host coordination. The decision must not claim continuous-operation, capacity, recovery,
+  deployment, or Phase 2 readiness. Any implementation remains a separately governed future
+  task. Preserve TASK-037 authority, migration, and Stage 3.
 
 Acceptance gates:
 
-1. Manifest parsing fails closed on unknown or missing keys, invalid version/status/type values,
-   duplicate identities or paths, absolute paths, traversal, wrong directory, extra or missing
-   corpus files, digest mismatch, and a fixture above the explicit byte bound. Every manifest
-   entry maps one-to-one to one exact committed fixture.
-2. The corpus contains exactly the five active request variants. Binance candle rows retain
-   exactly 12 positional values, Coinbase candle rows exactly six, and aggregate-trade objects
-   declare the current exact required and optional field sets, including the documented USD-M
-   optional fields, without suggesting unknown-field tolerance.
-3. Deterministic stubs feed each fixture's exact bytes through its existing production adapter and
-   active request path. Tests verify request variant, canonical values, provider identifiers,
-   UTC/event-time behavior, and exact raw-byte lineage without a real request.
-4. Bounded drift derivations cover positional width minus/plus one, positional reorder or wrong
-   type, missing and unknown aggregate fields, required-versus-optional drift, and numeric
-   precision/type drift. Existing boundaries return non-retryable typed `INVALID_PAYLOAD` and no
-   partial canonical or raw evidence is admitted.
-5. The runbook defines signals and classification, immediate pause and containment, safe evidence
-   handling, official-document re-review, synthetic fixture versioning without overwriting an old
-   version, regression commands, escalation, resume gates, and rollback. Provider payload content
-   is untrusted and must not be pasted into logs or issues; any real evidence requires an approved
-   handling location and must contain no secret.
-6. The runbook states that a fixture review never authorizes an adapter, parser, endpoint,
-   runtime, or deployment change, and that collection resumes only after the exact affected
-   contract is reviewed, synthetic evidence passes, required change governance is complete, and
-   rollback is available. It makes no automatic detection, immutable-upstream, or continuous
-   readiness claim.
-7. No production file, runtime behavior, serialized contract, dependency, lockfile, SQLite schema,
+1. ADR-0028 records one selected single-host conceptual composition, its alternatives, invariants,
+   consequences, explicit non-goals, review triggers, and the exact evidence a separately approved
+   implementation task would need. It does not present a component as implemented.
+2. The operating contract defines explicit lifecycle ownership and states, UTC closed-window
+   cadence, settlement lag, bounded catch-up, overlap prevention, finite per-invocation work, clean
+   stop, pause, failure, and shutdown semantics without selecting or starting a scheduler.
+3. The design preserves the existing immutable job identity and policy fingerprint, fresh UUID
+   fencing, exact pending-leaf restart, evidence-first checkpoint advancement, idempotent refetch,
+   causal transition/health evidence, and shared durable single-host request-budget gate. It does
+   not claim cross-database atomicity, crash-durable per-job attempt reservations, physical
+   durability, automatic recovery, or multi-host exclusivity.
+4. Schema drift routes the exact affected request variant into a fail-closed manual hold under the
+   TASK-057 runbook. Resume requires exact contract re-review, synthetic evidence, completed
+   governance for any required change, complete regression, rollback, and applicable authority;
+   no detector, automatic pause, remediation, or automatic resume is implied.
+5. The contract defines the future source/service health observations, stale/degraded/failed
+   distinctions, bounded internal alert evidence, operator decision points, escalation path, and
+   audit correlation without implementing a CLI, dashboard, external delivery, or restart action.
+6. Capacity and failure sections identify the explicit configuration and measurement inputs
+   required before implementation: provider request weights and limits, cadence, range and record
+   bounds, retry/pacing budgets, shared-budget capacity, storage growth/retention, checkpoint and
+   health volume, outage/catch-up limits, and tested rollback. No deployment value or adequacy
+   claim is invented.
+7. Rollback keeps the future continuous path disabled or returns to the current explicitly invoked
+   bounded flow; it never discards evidence, advances a checkpoint without accepted evidence, or
+   weakens adapter, drift, budget, lease, or audit controls.
+8. A future implementation requires a separate bounded task with production code, deterministic
+   lifecycle/scheduling/fencing/restart/drift/capacity/failure tests, operational review,
+   deployment and rollback evidence, and applicable approval. ADR acceptance alone grants no
+   runtime, deployment, continuous-operation, or higher-mode authority.
+9. No production file, runtime behavior, serialized contract, dependency, lockfile, SQLite schema,
    operator path, operator data, credential, permission, or external system changes. TASK-037
-   remains blocked and authorization remains denied.
-8. Formatting, lint, strict typing, focused and complete tests, lockfile verification, dependency
-   audit, health slice, and CI pass.
+   remains blocked and authorization remains denied; formatting, lint, strict typing, focused and
+   complete tests, lockfile verification, dependency audit, health slice, and CI pass.
 
 ## Blocked, Awaiting Owner-Supplied Restricted Inputs
 
@@ -138,6 +136,61 @@ Acceptance gates:
    all repository gates pass.
 
 ## Recently Completed
+
+### TASK-057 — Versioned public-provider schema fixtures and drift-response runbook
+
+- **Key:** `phase2.versioned_public_provider_schema_fixtures_and_drift_runbook`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Files:** `tests/fixtures/public_provider_schema/v1/manifest.json`, exactly five synthetic JSON
+  fixtures in that directory, `tests/unit/test_public_provider_schema_fixtures.py`,
+  `docs/runbooks/PUBLIC_PROVIDER_SCHEMA_DRIFT.md`, `README.md`,
+  `docs/contracts/MARKET_DATA.md`, plus coordinated governance files and governance tests.
+- **Result:** One strict version-1 manifest maps exactly five unique active request identities
+  one-to-one to five minimal, bounded, secret-free synthetic fixture files with relative paths,
+  exact-byte SHA-256, a 1,024-byte per-fixture maximum, provider/dataset/market/request identity,
+  shape metadata, official contract reference, UTC review date, and reviewed status. The corpus
+  covers Binance Spot and USD-M 12-position candle rows, Coinbase Exchange Spot six-position
+  candle rows, and Binance Spot and USD-M aggregate-trade objects. Both aggregate variants use
+  the existing shared parser contract: required fields are exactly `T`, `a`, `f`, `l`, `m`, `p`,
+  and `q`, and optional fields are exactly `M` and `nq`; the Spot fixture contains `M`, while the
+  USD-M fixture contains `nq`. Fixture presence does not invent a market-specific parser rule,
+  and unknown fields remain rejected.
+
+  Offline deterministic HTTP stubs and fixed UTC clocks feed every fixture's exact bytes through
+  its active existing production adapter and request path. Tests pin the request variant,
+  canonical values, provider identity, UTC/event-time behavior, and exact raw-byte lineage without
+  a network call. Strict manifest tests reject unknown or missing keys, invalid versions/statuses
+  or types, duplicate identities/paths, absolute/traversing/mislocated paths, extra or missing
+  corpus files, digest mismatch, and oversized fixtures. Representative detectable adapter drift
+  covers positional width minus/plus one, selected detectable reorder, wrong numeric types,
+  invalid decimal values, missing required fields, invalid present optional-field values, and
+  unknown fields through the existing non-retryable `INVALID_PAYLOAD` boundary without partial
+  raw or canonical evidence.
+
+  Decimal precision alone has no adapter-level bound, and some same-typed semantic positional
+  reorder can remain canonically valid; either may be accepted. The tests and documentation retain
+  that limitation explicitly: parser acceptance is not compatibility evidence, and either
+  unreviewed change requires fail-closed pause and official-contract review. No rounding,
+  normalization, parser widening, or provider-contract change was added.
+
+  The new fixture module passes 54 tests; the focused fixture-plus-adapter regression passes 216,
+  and the governance slice passes 20. An initial independent 42-mutant audit killed 25, classified
+  nine as equivalent because exact metadata and redundant guards already rejected the mutation,
+  and exposed eight real test gaps. After adding isolated entry-count, symlink, valid-oversize,
+  non-finite fixture, corpus-shape, and cross-variant optional-field evidence, a targeted re-audit
+  killed all 15 of 15 gap and sanity mutants with zero survivors or harness errors. The complete
+  suite passes 1,704 tests; lockfile, formatting, lint, strict typing, dependency audit, and local
+  health checks also pass.
+
+  The linked runbook defines signals/classification, manual pause and containment, safe evidence
+  handling, official-document re-review, synthetic versioning without overwriting old versions,
+  regression commands, escalation, governed resume gates, and rollback. Real payload content is
+  not copied into repository files, logs, issues, or fixtures; any real evidence requires an
+  approved secret-free handling boundary. The work adds no production source, network, runtime,
+  schema, dependency, operator path/data, credential, permission, automatic detection/pause/
+  remediation/resume, continuous collector, deployment, or readiness claim. TASK-037 remains
+  blocked and authorization remains denied.
 
 ### TASK-056 — Deterministic public-trade disconnect, sparse-window, and restart-recovery drill evidence
 
@@ -861,8 +914,9 @@ Acceptance gates:
 
 ## Queued, Not Yet Approved
 
-- Design continuous public-trade collection only after TASK-057's fixture/version review and
-  schema-drift runbook are complete and a separately scoped task is approved.
+- Implement continuous public-trade collection only after TASK-058's design-only operating
+  contract is accepted and a separate production task with required evidence and approvals is
+  promoted.
 
 ## Backlog Rules
 
