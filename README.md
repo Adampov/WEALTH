@@ -327,6 +327,43 @@ events; pause cannot cancel in-flight work; one-millisecond density, separate-da
 seams, crash-uncommitted request counts, physical durability, and cooperating-single-host-only
 coordination remain residual risks.
 
+## Continuous Public-Trade Pure Planning Contracts (Unused)
+
+`src/wealth/domain/continuous_public_trade.py` now adds the first implementation boundary beneath
+ADR-0028. It exposes frozen `ContinuousPublicTradePolicy`,
+`ContinuousPublicTradeAttachment`, `ContinuousPublicTradeStreamCheckpoint`, and
+`ContinuousPublicTradePlan` values; explicit stream, service, plan, and transition enums;
+`plan_continuous_public_trade_window`; and pure stream and service transition validators. The
+module is not imported by runtime composition. It receives the checkpoint, policy, and `now`
+explicitly, performs no I/O, and returns data only.
+
+The planner requires `now.tzinfo is datetime.UTC` and works in exact whole epoch milliseconds.
+For a paused checkpoint it returns `HELD`, preserving the cursor and any existing attachment. For
+an active checkpoint that already owns an immutable bounded-job attachment it returns
+`ATTACHED_JOB` with that attachment unchanged. If the durable cursor has reached the latest
+epoch-aligned boundary that is fully closed after the configured non-negative settlement lag, it
+returns `WAITING`. Otherwise it proposes one `ATTACHED_JOB` candidate whose half-open range starts
+exactly at the cursor and ends at
+`min(latest_eligible_end, cursor + max_catchup_span)`. The candidate is only a value: no child is
+created, attached, persisted, claimed, started, or invoked.
+
+Pure transition validators preserve immutable stream and market identity, the request variant,
+complete policy fingerprint, monotonic one-step versioning, exact cursor and attachment causality,
+explicit manual hold state, and finite policy bounds. Stream transitions are only `RETAIN`,
+`ATTACH`, `CHILD_COMPLETED`, `MANUAL_HOLD`, or `MANUAL_RESUME`; service status can only move from
+`STARTING` to `RUNNING` and then once to a terminal status. Invalid or unknown values fail before
+a result; the contracts never normalize a cursor, infer a clock, acquire authority, write
+evidence, advance storage, or authorize pause, resume, restart, recovery, or scheduling.
+
+This slice adds no repository, adapter, SQLite or schema, provider/network access, request-budget
+or retry behavior, wait/sleep, scheduler, trigger, daemon, service runner, CLI, dashboard,
+deployment, configuration loading, operator path/data, credential, permission, notification,
+dependency, lockfile, or automatic action. It does not establish persistence, cross-database
+atomicity, physical durability, capacity adequacy, multi-host exclusivity, continuous operation,
+recovery, deployment, or Phase 2 readiness. TASK-060 is limited to a design-only decision for a
+possible future persistence contract; ADR-0028 and the current explicitly invoked bounded
+public-trade flow remain unchanged.
+
 Operators and monitoring tools can read the separate candle collector-service state through a
 dedicated JSON command:
 

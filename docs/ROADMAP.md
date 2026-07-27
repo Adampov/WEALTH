@@ -110,6 +110,11 @@ Completed Phase 2 slices include:
   capacity-evidence; failure; escalation; resume; and rollback requirements that a separately
   governed future implementation must satisfy. This is neither process-manager nor multi-host
   exclusivity.
+- Unused frozen continuous public-trade policy, attachment, checkpoint, plan, and lifecycle
+  transition contracts plus a pure fixed-UTC closed-window planner. It returns only `HELD`,
+  `WAITING`, or `ATTACHED_JOB` data, preserves an existing immutable attachment, and bounds one due
+  candidate exactly from the durable cursor without I/O, persistence, authority, runtime wiring,
+  scheduling, provider access, or a continuous-operation claim.
 - An evidence-backed canonical UTC boundary inventory covering every discovered model, clock,
   provider edge, JSON/text representation, SQLite projection, order, index, cursor, and test path,
   with an accepted staged compatibility, quarantine, backup, rollback, and migration plan. No
@@ -172,6 +177,20 @@ outage envelope, or settlement-lag adequacy is selected or proven. Settlement la
 against late provider events; pause cannot cancel in-flight work; dense one-millisecond windows,
 separate-database commit seams, crash-uncommitted request counts, physical durability, and
 cooperating-single-host-only coordination remain residual risks.
+TASK-059 now adds only the unused provider-independent domain boundary described by that decision.
+Strict frozen values validate finite whole-millisecond policy, immutable stream and market
+identity, complete policy fingerprints, exact fixed-UTC cursors, version and lifecycle causality,
+manual hold state, and an optional immutable bounded-job attachment. The pure planner receives
+`now` explicitly. A paused stream yields only `HELD`; an existing attachment is returned unchanged
+as `ATTACHED_JOB`; a caught-up stream yields `WAITING`; and due work yields one `ATTACHED_JOB`
+candidate whose exact half-open range starts at the cursor and ends at the earlier of the latest
+eligible epoch-aligned closed boundary or the finite catch-up cap. These are values only: no
+repository persists them, no runtime imports the module, and no job or stream is created,
+attached, claimed, started, invoked, scheduled, paused, resumed, or recovered. No SQLite/schema,
+network, service, deployment, operator data, permission, automatic action, capacity evidence,
+multi-host guarantee, or readiness claim was added. TASK-060 is therefore limited to a
+design-only persistence-contract decision before any repository or schema proposal. ADR-0028 and
+the current explicitly invoked bounded public-trade flow remain unchanged.
 `RISK-005` remains open: the accepted plan selects Python
 datetimes in the fixed `datetime.UTC` zone, fixed microsecond RFC 3339 `Z` text, and derived
 epoch-microsecond SQL projections. New injected clock values are fixed-UTC, and the isolated pure
