@@ -15,7 +15,9 @@ Coinbase candle, and Binance aggregate-trade sources enforce the same rule when 
 URL/request construction or provider HTTP work. Finite positive integer and fractional values are
 forwarded unchanged. No boundary coerces an invalid value, substitutes a fallback, or adds a retry;
 the timeout retains the standard transport semantics rather than claiming a total wall-clock
-deadline.
+deadline. Finite positive timeouts currently have no configured upper bound. TASK-054 governs one
+shared 120-second maximum at the transport and all three provider construction boundaries without
+adding an exact numeric-type policy or changing retries, waits, pacing, or rate budgets.
 
 The shared transport also accepts only a built-in integer response limit from 1 through 2,000,000
 bytes. Booleans, integer subclasses, floats, non-finite values, non-positive values, and larger
@@ -120,10 +122,20 @@ port, and query rule retains its order and behavior. Exact-limit ASCII and multi
 targets retain every original character. The limit counts Python characters, not encoded bytes,
 and is not a provider request-line compatibility or total-wall-clock guarantee.
 
-The configured User-Agent remains without an exact runtime type, character policy, or size limit.
-TASK-053 governs an exact built-in visible-ASCII value of 1 through 256 characters during client
-construction. It does not add normalization, replacement, redaction or privacy guarantees,
-provider or hostname allowlisting, DNS or IP policy, or an SSRF guarantee.
+After preserving `max_response_bytes` validation and its first precedence, client construction
+requires `user_agent` to be an exact built-in `str` of 1 through 256 Python characters, all in the
+inclusive visible-ASCII range U+0020 through U+007E. A wrong type, empty or oversized value, C0 or
+DEL control, non-ASCII code point, or lone surrogate fails with exact context- and cause-free
+`ValueError("user_agent must be a built-in string of 1 to 256 visible ASCII characters")`.
+Exact-type validation precedes length and character inspection, and an oversized exact string
+fails before scanning its characters. Every rejection occurs during construction before URL,
+query, encoding, request, opener, handler, DNS, network, or filesystem work. Accepted text,
+including leading or trailing spaces and punctuation, is forwarded unchanged exactly once as the
+sole `User-Agent` header; the exact default remains the 29-character
+`"WEALTH/0.1 public-market-data"`. The boundary performs no normalization, trimming, truncation,
+repair, fallback, replacement, redaction, or synthesis. It makes no privacy or
+total-header-block guarantee and adds no provider or hostname allowlist, DNS or IP policy, or SSRF
+guarantee.
 
 Every `HTTPError` path makes one explicit cleanup attempt after at most one bounded body read.
 When cleanup succeeds, the error-response resource is closed before a response or primary failure

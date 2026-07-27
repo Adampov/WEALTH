@@ -21,6 +21,7 @@ from wealth.ports.http import HttpResponse, HttpTransportError
 
 MAX_PUBLIC_HTTP_RESPONSE_BYTES = 2_000_000
 _MAX_INITIAL_URL_CHARACTERS = 8_192
+_MAX_USER_AGENT_CHARACTERS = 256
 _MAX_QUERY_PAIRS = 32
 _MAX_QUERY_CHARACTERS = 8_192
 _INVALID_INITIAL_URL_LENGTH_MESSAGE = "url must contain at most 8192 characters"
@@ -30,6 +31,9 @@ _INVALID_INITIAL_URL_MESSAGE = (
 _INVALID_TARGET_PORT_MESSAGE = "url must use the standard HTTPS target port"
 _INVALID_QUERY_MESSAGE = (
     "query must contain at most 32 built-in string pairs totaling at most 8192 characters"
+)
+_INVALID_USER_AGENT_MESSAGE = (
+    "user_agent must be a built-in string of 1 to 256 visible ASCII characters"
 )
 
 
@@ -145,6 +149,12 @@ class UrllibPublicHttpClient:
             or self.max_response_bytes > MAX_PUBLIC_HTTP_RESPONSE_BYTES
         ):
             raise ValueError("max_response_bytes must be an integer between 1 and 2000000")
+        if type(self.user_agent) is not str:
+            raise ValueError(_INVALID_USER_AGENT_MESSAGE)
+        if not 1 <= len(self.user_agent) <= _MAX_USER_AGENT_CHARACTERS:
+            raise ValueError(_INVALID_USER_AGENT_MESSAGE)
+        if any(ord(character) < 0x20 or ord(character) > 0x7E for character in self.user_agent):
+            raise ValueError(_INVALID_USER_AGENT_MESSAGE)
 
     def get(
         self,
