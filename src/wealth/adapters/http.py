@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from http.client import IncompleteRead
 from math import isfinite
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -51,7 +52,10 @@ class UrllibPublicHttpClient:
         )
         try:
             with urlopen(request, timeout=timeout_seconds) as response:
-                body = response.read(self.max_response_bytes + 1)
+                try:
+                    body = response.read(self.max_response_bytes + 1)
+                except IncompleteRead as read_error:
+                    raise HttpTransportError("public HTTP GET failed") from read_error
                 if len(body) > self.max_response_bytes:
                     raise HttpTransportError("public HTTP response exceeded the configured limit")
                 return HttpResponse(
@@ -62,7 +66,7 @@ class UrllibPublicHttpClient:
         except HTTPError as error:
             try:
                 body = error.read(self.max_response_bytes + 1)
-            except (URLError, TimeoutError, OSError) as read_error:
+            except (URLError, TimeoutError, OSError, IncompleteRead) as read_error:
                 raise HttpTransportError("public HTTP GET failed") from read_error
             if len(body) > self.max_response_bytes:
                 raise HttpTransportError(

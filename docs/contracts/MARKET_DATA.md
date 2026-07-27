@@ -30,6 +30,12 @@ for supported successful-body read failures. The body is attempted once with the
 one-byte sentinel, no retry is added, the read failure remains the direct cause, and its untrusted
 detail is absent from the public message.
 
+A real `IncompleteRead` raised specifically by either response-body read follows that same typed
+failure boundary. Its partial provider bytes and expected-byte count are never accepted or
+returned, the body is attempted once with the configured sentinel, and the original
+`IncompleteRead` remains the direct cause. An `IncompleteRead` raised before body access is outside
+this mapping and retains its prior behavior.
+
 ## Canonical Order-Flow Foundation
 
 `CanonicalTrade`, `CanonicalTicker`, and `CanonicalBestBidAsk` establish the provider-independent
