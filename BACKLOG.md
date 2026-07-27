@@ -6,44 +6,59 @@ promoted through review.
 
 ## Next Action
 
-### TASK-047 — Typed public-HTTP response-protocol failure mapping
+### TASK-048 — Fail-closed public-HTTP automatic redirect rejection
 
-- **Key:** `phase2.typed_public_http_response_protocol_failure_mapping`
+- **Key:** `phase2.fail_closed_public_http_automatic_redirect_rejection`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
 - **Human approval:** NOT REQUIRED — bounded fail-closed development hardening under the owner's
-  explicit authorization; no permission, deployment, or operator-data change.
-- **Context:** A malformed provider status or header line can make `http.client.BadStatusLine`,
-  `LineTooLong`, or `UnknownProtocol` escape raw from response acquisition or a body-read seam.
-  `BadStatusLine` can include the provider-supplied line in its public text.
-- **Goal:** Convert only these three provider-response protocol failures at acquisition and body
-  reads into the shared sanitized typed transport failure.
-- **Scope:** Add one explicit protocol-failure tuple at the direct `urlopen`, successful-body read,
-  and `HTTPError`-body read boundaries, preserving each original exception as direct cause.
+  explicit authorization; it narrows public-network behavior and changes no permission,
+  deployment, or operator-data boundary.
+- **Context:** Python 3.13's default `HTTPRedirectHandler` automatically follows public GET
+  responses with status 301, 302, 303, 307, or 308. Before opening the redirected request it
+  drains the redirect body with an unbounded `fp.read()`, and it permits relative or absolute
+  `http`, `https`, and `ftp` destinations. That work occurs inside `urlopen`, before the adapter
+  receives a response handle, so the adapter's response-byte limit and the provider constructors'
+  initial HTTPS endpoint checks do not bound the redirect body or the second destination.
+- **Goal:** Reject every automatic redirect before any redirect-body drain or second-destination
+  request, and return the original 3xx response through the existing bounded `HTTPError` response
+  path.
+- **Scope:** Give `UrllibPublicHttpClient` an explicit private no-follow urllib opener/handler;
+  retain the original 3xx status, headers, and bounded body as one `HttpResponse`; and add
+  deterministic real-handler and adapter-boundary tests proving no follow, one bounded read, and
+  one cleanup attempt.
 - **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
   `docs/contracts/MARKET_DATA.md`, plus coordinated governance files and governance tests.
-- **Constraints:** Do not change response-size limits, timeout behavior, endpoints, queries,
-  headers, retries, number of reads, response entry/exit behavior, TASK-045 closure, any other
-  exception mapping, provider parsing, canonicalization, quality, storage, schemas, dependencies,
-  runtime wiring, operator paths, TASK-037 authority, migration, or Stage 3. Do not broadly catch
-  `HTTPException` or include provider protocol text in the public message.
+- **Constraints:** Do not permit same-origin, same-host, relative, allowlisted, HTTPS-to-HTTPS,
+  downgrade, or FTP redirects. Do not add a redirect count, destination resolver, DNS/IP policy,
+  retry, dependency, credential, endpoint change, provider-specific exception, or process-global
+  opener mutation. Preserve request construction, query ordering, headers, finite-positive
+  timeout semantics, response caps, all TASK-043 through TASK-047 exception mappings, TASK-045
+  cleanup precedence, provider parsing, canonicalization, quality, storage, schemas, runtime
+  wiring, TASK-037 authority, migration, and Stage 3.
 
 Acceptance gates:
 
-1. Each real `BadStatusLine`, `LineTooLong`, and `UnknownProtocol` raised directly by `urlopen`, a
-   successful-response body read, or an `HTTPError` body read becomes
-   `HttpTransportError("public HTTP GET failed")` with the original exception as direct cause.
-2. Provider status/header-line text and untrusted exception detail are absent from the public
-   message; no partial response is returned.
-3. Acquisition performs one `urlopen` and no adapter body read or cleanup without a handle. Each
-   body path performs one `max_response_bytes + 1` read; the HTTP-error path retains one cleanup
-   attempt. No retry or second read occurs.
-4. Base `HTTPException`, `InvalidURL`, and protocol failures raised by response entry or exit remain
-   outside this mapping. TASK-044 through TASK-046 mappings and TASK-045 cleanup remain unchanged.
-5. Response limits, finite-positive timeouts, endpoints, queries, headers, provider behavior, and
-   all other transport mappings remain unchanged. Formatting, lint, strict typing, complete tests,
-   lockfile verification, dependency audit, health slice, and CI pass.
+1. Each 301, 302, 303, 307, and 308 received for the public GET is not followed, regardless of
+   whether `Location` or `URI` is absent, relative, same-origin, cross-origin, an HTTPS-to-HTTP
+   downgrade, or FTP; exactly the original request is opened and no second destination is
+   contacted.
+2. The original 3xx enters the existing `HTTPError` materialization path. An exact-limit body
+   returns one `HttpResponse` with the original status, headers, and exact body; a one-byte-oversize
+   body raises the existing
+   `HttpTransportError("public HTTP error response exceeded the configured limit")` without
+   returning truncated evidence.
+3. The redirect handler performs no body read or cleanup. The adapter performs exactly one
+   `max_response_bytes + 1` body read and one cleanup attempt, with one acquisition call, no retry,
+   no second read, and no process-global `install_opener` or equivalent mutation.
+4. Supported 3xx-body read and cleanup failures retain the existing sanitized typed mapping,
+   direct-cause, and primary-failure precedence. TASK-047 protocol mappings, base
+   `HTTPException`/`InvalidURL` exclusions, and response-entry/exit behavior remain unchanged.
+5. Non-redirect success and HTTP-error behavior, proxy/TLS defaults, timeouts, limits, endpoints,
+   queries, headers, provider behavior, and all other mappings remain unchanged. Formatting, lint,
+   strict typing, complete tests, lockfile verification, dependency audit, health slice, and CI
+   pass.
 6. TASK-037 remains blocked and authorization remains denied; no operator data, path, database,
    scanner, report, migration, or Stage 3 action occurs.
 
@@ -100,6 +115,29 @@ Acceptance gates:
    all repository gates pass.
 
 ## Recently Completed
+
+### TASK-047 — Typed public-HTTP response-protocol failure mapping
+
+- **Key:** `phase2.typed_public_http_response_protocol_failure_mapping`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
+  `docs/contracts/MARKET_DATA.md`, and the coordinated governance files and governance tests.
+- **Result:** The shared public transport now converts each real `BadStatusLine`, `LineTooLong`,
+  and `UnknownProtocol` raised directly by `urlopen`, a successful-response body read, or an
+  `HTTPError` body read into the exact sanitized
+  `HttpTransportError("public HTTP GET failed")`, with the original exception as direct cause. A
+  deterministic three-exception-by-three-seam matrix proves one acquisition, one configured
+  sentinel read on each body path, one cleanup attempt on the HTTP-error path, no retry or partial
+  response, and no provider protocol detail in the public message. Adjacent-boundary tests prove
+  direct base `HTTPException` and `InvalidURL` remain raw at all three seams, the three mapped
+  protocol failures remain raw when raised by response entry or exit, and the same failures remain
+  raw when raised only by HTTP-error cleanup. TASK-043 through TASK-046 mappings, TASK-045 cleanup
+  and primary-failure precedence, response limits, timeouts, endpoints, queries, headers, provider
+  behavior, parsing, quality, storage, schemas, dependencies, runtime wiring, operator authority,
+  migration, and Stage 3 remain unchanged. Default redirects remain enabled: urllib may still
+  drain a redirect body outside the adapter cap and contact a changed destination before returning
+  a handle; TASK-048 governs that residual risk.
 
 ### TASK-046 — Typed pre-response public-HTTP incomplete-read mapping
 

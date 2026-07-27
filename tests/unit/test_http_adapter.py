@@ -1,7 +1,14 @@
 """Tests for the bounded standard-library public HTTP adapter."""
 
 from email.message import Message
-from http.client import HTTPException, IncompleteRead
+from http.client import (
+    BadStatusLine,
+    HTTPException,
+    IncompleteRead,
+    InvalidURL,
+    LineTooLong,
+    UnknownProtocol,
+)
 from io import BytesIO
 from types import TracebackType
 from typing import Self
@@ -37,6 +44,15 @@ INVALID_RESPONSE_LIMITS = (
     pytest.param(MAX_PUBLIC_HTTP_RESPONSE_BYTES + 1, id="above-maximum"),
     pytest.param(10**1_000, id="huge-integer"),
 )
+PROTOCOL_FAILURE_TYPES = (
+    pytest.param(BadStatusLine, id="bad-status-line"),
+    pytest.param(LineTooLong, id="line-too-long"),
+    pytest.param(UnknownProtocol, id="unknown-protocol"),
+)
+UNMAPPED_HTTP_EXCEPTION_TYPES = (
+    pytest.param(HTTPException, id="base-http-exception"),
+    pytest.param(InvalidURL, id="invalid-url"),
+)
 
 
 class IntegerSubclass(int):
@@ -52,8 +68,11 @@ class StubUrlResponse:
         self.body = body
         self.headers = {"Content-Type": "application/json"}
         self.read_limits: list[int] = []
+        self.enter_calls = 0
+        self.exit_calls = 0
 
     def __enter__(self) -> Self:
+        self.enter_calls += 1
         return self
 
     def __exit__(
@@ -63,6 +82,7 @@ class StubUrlResponse:
         traceback: TracebackType | None,
     ) -> None:
         del exception_type, exception, traceback
+        self.exit_calls += 1
 
     def read(self, limit: int) -> bytes:
         self.read_limits.append(limit)
@@ -121,9 +141,9 @@ class RaisingUrlResponse(StubUrlResponse):
 
 
 class ContextFailureUrlResponse(StubUrlResponse):
-    """Raise one configured incomplete read at response entry or exit."""
+    """Raise one configured failure at response entry or exit."""
 
-    def __init__(self, *, stage: str, error: IncompleteRead) -> None:
+    def __init__(self, *, stage: str, error: Exception) -> None:
         super().__init__(b"err")
         self.stage = stage
         self.error = error
@@ -477,6 +497,68 @@ def test_success_response_incomplete_read_is_sanitized_without_partial_body(
     assert len(urlopen_calls) == 1
 
 
+@pytest.mark.parametrize("protocol_failure_type", PROTOCOL_FAILURE_TYPES)
+def test_success_response_protocol_failure_is_sanitized_typed_transport_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    protocol_failure_type: type[HTTPException],
+) -> None:
+    provider_detail = "success-body-provider-protocol-secret"
+    read_failure = protocol_failure_type(provider_detail)
+    assert provider_detail in str(read_failure)
+    response = RaisingUrlResponse(read_failure)
+    urlopen_calls: list[Request] = []
+
+    def stub_urlopen(request: Request, *, timeout: float) -> StubUrlResponse:
+        del timeout
+        urlopen_calls.append(request)
+        return response
+
+    monkeypatch.setattr(http_adapter, "urlopen", stub_urlopen)
+
+    with pytest.raises(HttpTransportError) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert str(error.value) == "public HTTP GET failed"
+    assert error.value.__cause__ is read_failure
+    assert provider_detail not in str(error.value)
+    assert response.enter_calls == 1
+    assert response.exit_calls == 1
+    assert response.read_limits == [4]
+    assert len(urlopen_calls) == 1
+
+
+@pytest.mark.parametrize("unmapped_failure_type", UNMAPPED_HTTP_EXCEPTION_TYPES)
+def test_other_success_response_http_exception_remains_unmapped(
+    monkeypatch: pytest.MonkeyPatch,
+    unmapped_failure_type: type[HTTPException],
+) -> None:
+    read_failure = unmapped_failure_type("success-body-unmapped-detail")
+    response = RaisingUrlResponse(read_failure)
+    urlopen_calls: list[Request] = []
+
+    def stub_urlopen(request: Request, *, timeout: float) -> StubUrlResponse:
+        del timeout
+        urlopen_calls.append(request)
+        return response
+
+    monkeypatch.setattr(http_adapter, "urlopen", stub_urlopen)
+
+    with pytest.raises(unmapped_failure_type) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert error.value is read_failure
+    assert response.read_limits == [4]
+    assert len(urlopen_calls) == 1
+
+
 def test_http_error_body_incomplete_read_is_sanitized_without_partial_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -506,6 +588,74 @@ def test_http_error_body_incomplete_read_is_sanitized_without_partial_response(
     assert error.value.__cause__ is read_failure
     assert partial_body.decode() not in str(error.value)
     assert str(read_failure.expected) not in str(error.value)
+    assert reader.read_limits == [4]
+    assert provider_error.close_calls == 1
+    assert reader.close_calls == 1
+    assert reader.closed is True
+    assert len(urlopen_calls) == 1
+
+
+@pytest.mark.parametrize("protocol_failure_type", PROTOCOL_FAILURE_TYPES)
+def test_http_error_body_protocol_failure_is_sanitized_typed_transport_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    protocol_failure_type: type[HTTPException],
+) -> None:
+    provider_detail = "http-error-body-provider-protocol-secret"
+    read_failure = protocol_failure_type(provider_detail)
+    assert provider_detail in str(read_failure)
+    reader = RaisingBytesIO(read_failure)
+    provider_error = http_error(reader)
+    urlopen_calls: list[Request] = []
+
+    def raise_http_error(request: Request, *, timeout: float) -> StubUrlResponse:
+        del timeout
+        urlopen_calls.append(request)
+        raise provider_error
+
+    monkeypatch.setattr(http_adapter, "urlopen", raise_http_error)
+
+    with pytest.raises(HttpTransportError) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert str(error.value) == "public HTTP GET failed"
+    assert error.value.__cause__ is read_failure
+    assert provider_detail not in str(error.value)
+    assert reader.read_limits == [4]
+    assert provider_error.close_calls == 1
+    assert reader.close_calls == 1
+    assert reader.closed is True
+    assert len(urlopen_calls) == 1
+
+
+@pytest.mark.parametrize("unmapped_failure_type", UNMAPPED_HTTP_EXCEPTION_TYPES)
+def test_other_http_error_body_http_exception_remains_unmapped(
+    monkeypatch: pytest.MonkeyPatch,
+    unmapped_failure_type: type[HTTPException],
+) -> None:
+    read_failure = unmapped_failure_type("http-error-body-unmapped-detail")
+    reader = RaisingBytesIO(read_failure)
+    provider_error = http_error(reader)
+    urlopen_calls: list[Request] = []
+
+    def raise_http_error(request: Request, *, timeout: float) -> StubUrlResponse:
+        del timeout
+        urlopen_calls.append(request)
+        raise provider_error
+
+    monkeypatch.setattr(http_adapter, "urlopen", raise_http_error)
+
+    with pytest.raises(unmapped_failure_type) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert error.value is read_failure
     assert reader.read_limits == [4]
     assert provider_error.close_calls == 1
     assert reader.close_calls == 1
@@ -608,6 +758,38 @@ def test_non_os_close_failure_remains_unmapped(
     assert provider_error.close_calls == 1
     assert reader.close_calls == 1
     assert reader.closed is False
+
+
+@pytest.mark.parametrize("protocol_failure_type", PROTOCOL_FAILURE_TYPES)
+def test_protocol_close_failure_remains_unmapped(
+    monkeypatch: pytest.MonkeyPatch,
+    protocol_failure_type: type[HTTPException],
+) -> None:
+    close_failure = protocol_failure_type("close-provider-protocol-detail")
+    reader = RecordingBytesIO(b"err", close_error=close_failure)
+    provider_error = http_error(reader)
+    urlopen_calls: list[Request] = []
+
+    def raise_http_error(request: Request, *, timeout: float) -> StubUrlResponse:
+        del timeout
+        urlopen_calls.append(request)
+        raise provider_error
+
+    monkeypatch.setattr(http_adapter, "urlopen", raise_http_error)
+
+    with pytest.raises(protocol_failure_type) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert error.value is close_failure
+    assert reader.read_limits == [4]
+    assert provider_error.close_calls == 1
+    assert reader.close_calls == 1
+    assert reader.closed is False
+    assert len(urlopen_calls) == 1
 
 
 @pytest.mark.parametrize(
@@ -765,10 +947,14 @@ def test_incomplete_read_raised_directly_by_urlopen_is_sanitized_typed_failure(
     assert len(urlopen_calls) == 1
 
 
-def test_other_http_exception_raised_directly_by_urlopen_remains_unmapped(
+@pytest.mark.parametrize("protocol_failure_type", PROTOCOL_FAILURE_TYPES)
+def test_protocol_failure_raised_directly_by_urlopen_is_sanitized_typed_failure(
     monkeypatch: pytest.MonkeyPatch,
+    protocol_failure_type: type[HTTPException],
 ) -> None:
-    transport_failure = HTTPException("protocol-detail")
+    provider_detail = "acquisition-provider-protocol-secret"
+    transport_failure = protocol_failure_type(provider_detail)
+    assert provider_detail in str(transport_failure)
     urlopen_calls: list[Request] = []
 
     def raise_before_response(request: Request, *, timeout: float) -> StubUrlResponse:
@@ -778,7 +964,35 @@ def test_other_http_exception_raised_directly_by_urlopen_remains_unmapped(
 
     monkeypatch.setattr(http_adapter, "urlopen", raise_before_response)
 
-    with pytest.raises(HTTPException) as error:
+    with pytest.raises(HttpTransportError) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert str(error.value) == "public HTTP GET failed"
+    assert error.value.__cause__ is transport_failure
+    assert provider_detail not in str(error.value)
+    assert len(urlopen_calls) == 1
+
+
+@pytest.mark.parametrize("unmapped_failure_type", UNMAPPED_HTTP_EXCEPTION_TYPES)
+def test_other_http_exception_raised_directly_by_urlopen_remains_unmapped(
+    monkeypatch: pytest.MonkeyPatch,
+    unmapped_failure_type: type[HTTPException],
+) -> None:
+    transport_failure = unmapped_failure_type("acquisition-unmapped-detail")
+    urlopen_calls: list[Request] = []
+
+    def raise_before_response(request: Request, *, timeout: float) -> StubUrlResponse:
+        del timeout
+        urlopen_calls.append(request)
+        raise transport_failure
+
+    monkeypatch.setattr(http_adapter, "urlopen", raise_before_response)
+
+    with pytest.raises(unmapped_failure_type) as error:
         UrllibPublicHttpClient(max_response_bytes=3).get(
             url="https://example.test/public",
             query={},
@@ -806,6 +1020,38 @@ def test_incomplete_read_from_response_context_remains_unmapped(
     monkeypatch.setattr(http_adapter, "urlopen", stub_urlopen)
 
     with pytest.raises(IncompleteRead) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert error.value is transport_failure
+    assert len(urlopen_calls) == 1
+    assert response.enter_calls == 1
+    assert response.exit_calls == (1 if stage == "exit" else 0)
+    assert response.read_limits == ([4] if stage == "exit" else [])
+
+
+@pytest.mark.parametrize("protocol_failure_type", PROTOCOL_FAILURE_TYPES)
+@pytest.mark.parametrize("stage", ["enter", "exit"])
+def test_protocol_failure_from_response_context_remains_unmapped(
+    monkeypatch: pytest.MonkeyPatch,
+    protocol_failure_type: type[HTTPException],
+    stage: str,
+) -> None:
+    transport_failure = protocol_failure_type(f"{stage}-provider-protocol-secret")
+    response = ContextFailureUrlResponse(stage=stage, error=transport_failure)
+    urlopen_calls: list[Request] = []
+
+    def stub_urlopen(request: Request, *, timeout: float) -> StubUrlResponse:
+        del timeout
+        urlopen_calls.append(request)
+        return response
+
+    monkeypatch.setattr(http_adapter, "urlopen", stub_urlopen)
+
+    with pytest.raises(protocol_failure_type) as error:
         UrllibPublicHttpClient(max_response_bytes=3).get(
             url="https://example.test/public",
             query={},
