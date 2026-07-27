@@ -1,33 +1,53 @@
 # Repository Guidance for Codex
 
+## Governing Operating Prompt
+
+`docs/QUANT_ORG_OS.md` is the durable operating constitution for this project. Read it before
+starting or resuming any task in this repository and follow its hybrid multi-agent workflow when
+parallel work materially improves speed or quality.
+
+This prompt does not replace current project truth. `PROJECT_STATE.json`, approved policies,
+accepted ADRs, and the active task contract control current capabilities and restrictions. Chat
+history is context, not durable authority.
+
+For parallel work:
+
+- keep the root agent responsible for scope, integration, validation, and the final report;
+- assign one writable owner per file and use an isolated branch/worktree for each writer;
+- parallelize read-only analysis and disjoint implementation, but serialize shared contracts,
+  schemas, migrations, lockfiles, governance state, and branch integration;
+- exchange work through exact commits and evidence packets, never assumed filesystem state; and
+- use cloud work only from a pushed commit with no local-only files, restricted data, or secrets.
+
 ## Project
 
 WEALTH is an AI-assisted cryptocurrency research and trading platform designed as a corporation of independent analytical, control, execution, assurance, and engineering agents.
 
 The system is intended to support cryptocurrency spot and futures markets, multiple assets, multiple exchanges, continuous operation, progressive autonomy, and controlled self-improvement.
 
-The current project phase is **Phase 2 — Reliable Market Data Platform**. The repository contains
-an approved, tested engineering foundation, provider-independent candle and replay contracts, a
-bounded public Binance candle adapter, application-level historical pagination and retry policy,
-and local durable market-data storage. It has no private exchange or account access and does not
-support trading decisions or orders.
+Never hardcode current phase, capability, approval, or risk state in this durable guidance. Read
+those facts from `PROJECT_STATE.json` and the active governed task at the start of every task.
 
 ## Source of Truth
 
-Read these artifacts before proposing or implementing a material change:
+Always read the applicable `AGENTS.md`, `docs/QUANT_ORG_OS.md`, `PROJECT_STATE.json`, and the active
+task contract. Use this routing order for additional authoritative context, reading only what the
+task needs:
 
-1. `PROJECT_STATE.json` — validated current phase, active capabilities, controls, risks, and the
-   single canonical `next_action`.
-2. `docs/PROJECT_CHARTER.md` — vision, scope, objectives, and operating modes.
-3. `docs/ARCHITECTURE.md` — logical architecture, invariants, control flow, and Codex role.
-4. `docs/ORGANIZATION.md` and `docs/AI_DEPARTMENTS.md` — current activation and complete
-   responsibility and authority boundaries.
-5. `docs/POLICIES.md`, `docs/SECURITY_POLICY.md`, `docs/RISK_POLICY.md`, and
-   `docs/EXECUTION_POLICY.md` — approvals and fail-closed operating rules.
-6. `BACKLOG.md` and `RISK_REGISTER.md` — accepted work order and known risk treatment.
-7. `docs/ROADMAP.md` — phase order, deliverables, and promotion gates.
-8. `docs/DATA_CONTRACTS.md` and `docs/DATA_CATALOG.md` — active typed boundaries and approved
-   data inventory.
+1. `PROJECT_STATE.json` — validated current phase, capabilities, controls, risks, and canonical
+   `next_action`.
+2. Approved policies, accepted ADRs, and the active task contract — current constraints and exact
+   authority.
+3. `docs/QUANT_ORG_OS.md` and applicable `AGENTS.md` — durable operating, safety, evidence,
+   efficiency, and hybrid multi-agent rules.
+4. `docs/PROJECT_CHARTER.md` — vision, scope, objectives, and operating modes.
+5. `docs/ARCHITECTURE.md` — logical architecture, invariants, control flow, and Codex role.
+6. `docs/ORGANIZATION.md` and `docs/AI_DEPARTMENTS.md` — activation, responsibility, and authority
+   boundaries.
+7. `BACKLOG.md` and `RISK_REGISTER.md` — accepted work order and known risk treatment.
+8. `docs/ROADMAP.md` — phase order, deliverables, and promotion gates.
+9. `docs/DATA_CONTRACTS.md` and `docs/DATA_CATALOG.md` — active typed boundaries and approved data
+   inventory.
 
 If a task conflicts with these documents, identify the conflict before changing code. Do not silently redefine approved architecture.
 
@@ -39,7 +59,8 @@ Do not modify an approved foundation document unless the active task explicitly 
 
 ## Working Method
 
-- Work on one approved task at a time.
+- Work on one canonical approved task at a time; several agents may work concurrently inside its
+  frozen contract and non-overlapping ownership.
 - Keep each task small, bounded, and independently reviewable.
 - State the intended files and acceptance criteria before broad changes.
 - Use a dedicated branch named `agent/<short-description>` when starting from `main`.
@@ -48,9 +69,12 @@ Do not modify an approved foundation document unless the active task explicitly 
 - Review the final diff before committing.
 - Use concise commit messages that describe the completed change.
 - Publish changes for review on the task branch.
-- Do not merge or push directly to `main` without explicit user approval.
+- Do not merge or push directly to `main` without current explicit user approval for the exact pull
+  request and head commit.
 - After approval, prefer a clean fast-forward merge when possible.
-- Do not start the next task until the current task is accepted, unless the user explicitly asks to continue.
+- Do not start a dependent task until the current task is complete as defined in
+  `docs/QUANT_ORG_OS.md`. A separately authorized independent task may proceed only when it cannot
+  consume or change unmerged outputs.
 
 ## Task Contract
 
@@ -151,9 +175,9 @@ Use these repository commands after running `uv sync --all-groups`:
 
 Do not substitute or skip a command silently. If a command is unavailable, report it as not run.
 
-## Definition of Done
+## Review-Ready Definition
 
-A task is complete only when:
+A task is `Review-ready`, not `Complete`, when:
 
 - The approved scope is implemented and adjacent scope remains unchanged.
 - Architecture and safety boundaries are preserved.
@@ -161,8 +185,11 @@ A task is complete only when:
 - Failure behavior and rollback are addressed when relevant.
 - Secrets and unrelated files are absent from the diff.
 - Documentation is updated when behavior, contracts, operations, or decisions change.
-- The task branch and commit are ready for user review.
+- The exact task commit is published and ready for user review.
 - Known limitations, failed checks, and follow-up work are stated clearly.
+
+Use the lifecycle in `docs/QUANT_ORG_OS.md`: `Complete` requires accepted merge, verified target
+commit and CI, and synchronized governance truth.
 
 ## Codex Self-Improvement Boundary
 
