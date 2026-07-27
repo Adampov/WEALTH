@@ -73,23 +73,26 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert "exact_candle_persistence_evidence_validation" in state.active_components
     assert "exact_order_flow_persistence_evidence_validation" in state.active_components
     assert "finite_public_http_timeout_boundary_validation" in state.active_components
+    assert "strict_public_http_response_byte_limit_validation" in state.active_components
     assert len(state.open_tasks) == 2
-    task_037, task_042 = state.open_tasks
+    task_037, task_043 = state.open_tasks
     assert task_037.task_id == "TASK-037"
     assert task_037.status == "blocked"
     assert task_037.risk_tier == 3
     assert task_037.requires_human_approval is True
-    assert task_042.task_id == "TASK-042"
-    assert task_042.status == "ready"
-    assert task_042.risk_tier == 1
-    assert task_042.requires_human_approval is False
+    assert task_043.task_id == "TASK-043"
+    assert task_043.status == "ready"
+    assert task_043.risk_tier == 1
+    assert task_043.requires_human_approval is False
     assert state.blockers == (
         "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance "
         "location before independent Risk and Security review and the project-owner decision; "
         "authorization remains denied.",
     )
-    assert state.next_action.task_id == "TASK-042"
-    assert state.next_action.action == "phase2.strict_public_http_response_byte_limit_validation"
+    assert state.next_action.task_id == "TASK-043"
+    assert state.next_action.action == (
+        "phase2.typed_public_http_error_response_read_failure_mapping"
+    )
     assert any(decision.decision_id == "ADR-0027" for decision in state.recent_decisions)
 
 
@@ -146,19 +149,22 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_041_section = completed_section.split("### TASK-041 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
+    task_042_section = completed_section.split("### TASK-042 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    assert "UrllibPublicHttpClient.__post_init__" in next_action_section
-    assert "booleans, positive fractions" in next_action_section
-    assert "2,000,000-byte safety ceiling" in next_action_section
-    assert "`type(max_response_bytes) is int`" in next_action_section
-    assert "integer subclasses" in next_action_section
-    assert "`cap + 1`" in next_action_section
-    assert "Do not stream, truncate, coerce" in next_action_section
+    assert "`HTTPError`" in next_action_section
+    assert "`HTTPError.read`" in next_action_section
+    assert "escapes raw" in next_action_section
+    assert '`HttpTransportError("public HTTP GET failed")`' in next_action_section
+    assert "direct cause" in next_action_section
+    assert "read exactly once" in next_action_section
+    assert "Do not expose provider exception text" in next_action_section
     assert "TASK-037 remains blocked and authorization remains denied" in next_action_section
     assert blocked_section.count("### TASK-") == 1
     assert "### TASK-037 " in blocked_section
@@ -242,6 +248,16 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "literal integer and" in task_041_section
     assert "total wall-clock deadline" in task_041_section
     assert "runtime wiring" in task_041_section
+    assert "- **Status:** COMPLETE" in task_042_section
+    assert "`phase2.strict_public_http_response_byte_limit_validation`" in task_042_section
+    assert "`src/wealth/adapters/http.py`" in task_042_section
+    assert "`tests/unit/test_http_adapter.py`" in task_042_section
+    assert "built-in integer response limit" in task_042_section
+    assert "current/default hard ceiling" in task_042_section
+    assert "integer subclasses" in task_042_section
+    assert "`cap + 1`" in task_042_section
+    assert "real `HTTPError` paths" in task_042_section
+    assert "not a total wall-clock" in task_042_section
 
 
 def test_project_state_forbids_unknown_fields() -> None:

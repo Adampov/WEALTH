@@ -47,7 +47,8 @@
     "public_provider_payload_failure_boundary_hardening",
     "exact_candle_persistence_evidence_validation",
     "exact_order_flow_persistence_evidence_validation",
-    "finite_public_http_timeout_boundary_validation"
+    "finite_public_http_timeout_boundary_validation",
+    "strict_public_http_response_byte_limit_validation"
   ],
   "active_integrations": [
     "github_actions_ci"
@@ -89,8 +90,8 @@
       "requires_human_approval": true
     },
     {
-      "task_id": "TASK-042",
-      "action": "phase2.strict_public_http_response_byte_limit_validation",
+      "task_id": "TASK-043",
+      "action": "phase2.typed_public_http_error_response_read_failure_mapping",
       "status": "ready",
       "risk_tier": 1,
       "requires_human_approval": false
@@ -127,8 +128,8 @@
     }
   ],
   "next_action": {
-    "task_id": "TASK-042",
-    "action": "phase2.strict_public_http_response_byte_limit_validation"
+    "task_id": "TASK-043",
+    "action": "phase2.typed_public_http_error_response_read_failure_mapping"
   },
-  "last_updated_utc": "2026-07-26T21:23:38Z"
+  "last_updated_utc": "2026-07-26T21:42:53Z"
 }

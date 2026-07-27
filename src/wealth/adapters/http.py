@@ -9,17 +9,23 @@ from urllib.request import Request, urlopen
 
 from wealth.ports.http import HttpResponse, HttpTransportError
 
+MAX_PUBLIC_HTTP_RESPONSE_BYTES = 2_000_000
+
 
 @dataclass(frozen=True, slots=True)
 class UrllibPublicHttpClient:
     """Issue public GET requests without credentials or implicit retries."""
 
     user_agent: str = "WEALTH/0.1 public-market-data"
-    max_response_bytes: int = 2_000_000
+    max_response_bytes: int = MAX_PUBLIC_HTTP_RESPONSE_BYTES
 
     def __post_init__(self) -> None:
-        if self.max_response_bytes <= 0:
-            raise ValueError("max_response_bytes must be positive")
+        if (
+            type(self.max_response_bytes) is not int
+            or self.max_response_bytes < 1
+            or self.max_response_bytes > MAX_PUBLIC_HTTP_RESPONSE_BYTES
+        ):
+            raise ValueError("max_response_bytes must be an integer between 1 and 2000000")
 
     def get(
         self,
