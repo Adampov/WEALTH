@@ -51,7 +51,11 @@ class UrllibPublicHttpClient:
             method="GET",
         )
         try:
-            with urlopen(request, timeout=timeout_seconds) as response:
+            try:
+                response_context = urlopen(request, timeout=timeout_seconds)
+            except IncompleteRead as acquisition_error:
+                raise HttpTransportError("public HTTP GET failed") from acquisition_error
+            with response_context as response:
                 try:
                     body = response.read(self.max_response_bytes + 1)
                 except IncompleteRead as read_error:
