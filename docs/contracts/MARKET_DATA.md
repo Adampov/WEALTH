@@ -39,10 +39,19 @@ outside this body-read mapping.
 A real `IncompleteRead` raised directly by `urlopen` before a response handle reaches the adapter
 follows the same sanitized typed boundary. The acquisition is attempted once, no adapter body read
 or cleanup occurs without a handle, and no partial bytes or expected-byte count enters the public
-message. Response entry and exit remain outside this acquisition mapping, and a direct base
-`HTTPException` remains outside it. This failure mapping does not bound a redirect body read performed
-inside the standard library or constrain a redirect destination before a response handle reaches
-the adapter; default redirect behavior remains enabled pending a separately governed policy.
+message. Response entry and exit remain outside this acquisition mapping.
+
+Only `BadStatusLine`, `LineTooLong`, and `UnknownProtocol` raised directly by `urlopen` or by either
+response-body read follow the same sanitized typed failure boundary. The original protocol
+exception remains the direct cause, provider status/header-line detail is absent from the public
+message, acquisition is attempted once, and each body seam retains its single configured
+one-byte-sentinel read. A direct base `HTTPException`, `InvalidURL`, or one of those three failures
+raised by response entry, response exit, or HTTP-error cleanup remains outside this mapping.
+`RemoteDisconnected` retains its pre-existing `OSError`-family typed outcome; the explicit protocol
+tuple does not create a broad `HTTPException` catch. This mapping does not change default redirect
+behavior: urllib may still drain a redirect body outside the adapter response cap and contact a
+changed `http`, `https`, or `ftp` destination before a handle reaches the adapter; TASK-048 governs
+fail-closed redirect rejection.
 
 Every `HTTPError` path makes one explicit cleanup attempt after at most one bounded body read.
 When cleanup succeeds, the error-response resource is closed before a response or primary failure

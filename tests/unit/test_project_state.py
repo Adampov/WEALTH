@@ -80,23 +80,24 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert "typed_public_http_pre_response_incomplete_read_failure_mapping" in (
         state.active_components
     )
+    assert "typed_public_http_response_protocol_failure_mapping" in state.active_components
     assert len(state.open_tasks) == 2
-    task_037, task_047 = state.open_tasks
+    task_037, task_048 = state.open_tasks
     assert task_037.task_id == "TASK-037"
     assert task_037.status == "blocked"
     assert task_037.risk_tier == 3
     assert task_037.requires_human_approval is True
-    assert task_047.task_id == "TASK-047"
-    assert task_047.status == "ready"
-    assert task_047.risk_tier == 1
-    assert task_047.requires_human_approval is False
+    assert task_048.task_id == "TASK-048"
+    assert task_048.status == "ready"
+    assert task_048.risk_tier == 1
+    assert task_048.requires_human_approval is False
     assert state.blockers == (
         "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance "
         "location before independent Risk and Security review and the project-owner decision; "
         "authorization remains denied.",
     )
-    assert state.next_action.task_id == "TASK-047"
-    assert state.next_action.action == "phase2.typed_public_http_response_protocol_failure_mapping"
+    assert state.next_action.task_id == "TASK-048"
+    assert state.next_action.action == "phase2.fail_closed_public_http_automatic_redirect_rejection"
     assert any(decision.decision_id == "ADR-0027" for decision in state.recent_decisions)
 
 
@@ -168,21 +169,30 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_046_section = completed_section.split("### TASK-046 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
+    task_047_section = completed_section.split("### TASK-047 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    assert "`http.client.BadStatusLine`" in next_action_section
-    assert "`LineTooLong`" in next_action_section
-    assert "`UnknownProtocol`" in next_action_section
-    assert "provider-supplied line" in next_action_section
-    assert '`HttpTransportError("public HTTP GET failed")`' in next_action_section
-    assert "original exception as direct cause" in next_action_section
-    assert "one `max_response_bytes + 1` read" in next_action_section
-    assert "Base `HTTPException`, `InvalidURL`" in next_action_section
-    assert "Do not broadly catch" in next_action_section
+    for status_code in (301, 302, 303, 307, 308):
+        assert str(status_code) in next_action_section
+    assert "unbounded `fp.read()`" in next_action_section
+    assert "`http`, `https`, and `ftp` destinations" in next_action_section
+    assert "before any redirect-body drain or second-destination" in next_action_section
+    assert "original 3xx response" in next_action_section
+    assert "private no-follow urllib opener/handler" in next_action_section
+    assert "same-origin, same-host, relative, allowlisted" in next_action_section
+    assert "no second destination is" in next_action_section
+    assert "performs exactly one" in next_action_section
+    assert "`max_response_bytes + 1` body read and one cleanup attempt" in next_action_section
+    assert "one cleanup attempt" in next_action_section
+    assert "no process-global `install_opener`" in next_action_section
+    assert "TASK-047 protocol mappings" in next_action_section
+    assert "`HTTPException`/`InvalidURL` exclusions" in next_action_section
     assert "TASK-037 remains blocked and authorization remains denied" in next_action_section
     assert blocked_section.count("### TASK-") == 1
     assert "### TASK-037 " in blocked_section
@@ -327,6 +337,29 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "response cap" in task_046_section
     assert "changed destination" in task_046_section
     assert "governed redirect-policy task" in task_046_section
+    assert "- **Status:** COMPLETE" in task_047_section
+    assert "`phase2.typed_public_http_response_protocol_failure_mapping`" in task_047_section
+    assert "`src/wealth/adapters/http.py`" in task_047_section
+    assert "`tests/unit/test_http_adapter.py`" in task_047_section
+    assert "`BadStatusLine`, `LineTooLong`" in task_047_section
+    assert "`UnknownProtocol`" in task_047_section
+    assert "directly by `urlopen`" in task_047_section
+    assert "successful-response body read" in task_047_section
+    assert "`HTTPError` body read" in task_047_section
+    assert '`HttpTransportError("public HTTP GET failed")`' in task_047_section
+    assert "original exception as direct cause" in task_047_section
+    assert "three-exception-by-three-seam matrix" in task_047_section
+    assert "one configured" in task_047_section
+    assert "one cleanup attempt" in task_047_section
+    assert "no retry or partial" in task_047_section
+    assert "no provider protocol detail" in task_047_section
+    assert "base `HTTPException` and `InvalidURL` remain raw at all three seams" in task_047_section
+    assert "response entry or exit" in task_047_section
+    assert "HTTP-error cleanup" in task_047_section
+    assert "Default redirects remain enabled" in task_047_section
+    assert "outside the adapter cap" in task_047_section
+    assert "changed destination" in task_047_section
+    assert "TASK-048 governs" in task_047_section
 
 
 def test_project_state_forbids_unknown_fields() -> None:

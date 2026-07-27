@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from http.client import IncompleteRead
+from http.client import BadStatusLine, IncompleteRead, LineTooLong, UnknownProtocol
 from math import isfinite
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -53,12 +53,22 @@ class UrllibPublicHttpClient:
         try:
             try:
                 response_context = urlopen(request, timeout=timeout_seconds)
-            except IncompleteRead as acquisition_error:
+            except (
+                IncompleteRead,
+                BadStatusLine,
+                LineTooLong,
+                UnknownProtocol,
+            ) as acquisition_error:
                 raise HttpTransportError("public HTTP GET failed") from acquisition_error
             with response_context as response:
                 try:
                     body = response.read(self.max_response_bytes + 1)
-                except IncompleteRead as read_error:
+                except (
+                    IncompleteRead,
+                    BadStatusLine,
+                    LineTooLong,
+                    UnknownProtocol,
+                ) as read_error:
                     raise HttpTransportError("public HTTP GET failed") from read_error
                 if len(body) > self.max_response_bytes:
                     raise HttpTransportError("public HTTP response exceeded the configured limit")
@@ -72,7 +82,15 @@ class UrllibPublicHttpClient:
             try:
                 try:
                     body = error.read(self.max_response_bytes + 1)
-                except (URLError, TimeoutError, OSError, IncompleteRead) as read_error:
+                except (
+                    URLError,
+                    TimeoutError,
+                    OSError,
+                    IncompleteRead,
+                    BadStatusLine,
+                    LineTooLong,
+                    UnknownProtocol,
+                ) as read_error:
                     raise HttpTransportError("public HTTP GET failed") from read_error
                 if len(body) > self.max_response_bytes:
                     raise HttpTransportError(
