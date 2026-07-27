@@ -6,82 +6,76 @@ promoted through review.
 
 ## Next Action
 
-### TASK-058 — Continuous public-trade collection operating-contract decision
+### TASK-059 — Pure continuous public-trade closed-window planner and lifecycle contracts
 
-- **Key:** `phase2.continuous_public_trade_collection_operating_contract_decision`
+- **Key:** `phase2.continuous_public_trade_closed_window_planner_contracts`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
-- **Human approval:** NOT REQUIRED — bounded ADR, operating-contract documentation, governance,
-  and governance tests only; no production code, runtime, network, deployment, permission,
-  operator-data, or operating-mode change.
-- **Context:** TASK-057 now supplies a reviewed exact-byte fixture corpus and a manual
-  schema-drift containment and resume procedure for all five active public-provider request
-  variants. The existing public-trade path remains a finite, explicitly invoked composition with
-  durable evidence, checkpoint, transition, health, and shared single-host rate-budget
-  boundaries. It has no approved continuous lifecycle, scheduling owner, cadence, supervised
-  restart policy, drift-pause composition, operational capacity envelope, or deployment contract.
-- **Goal:** Select and record one bounded single-host operating contract for a possible future
-  continuous public-trade collector, so lifecycle, scheduling, fencing, restart, drift-pause,
-  health, capacity, failure, escalation, resume, and rollback invariants are explicit before any
-  implementation task can be proposed.
-- **Scope:** Add `docs/decisions/0028-continuous-public-trade-collection-operating-contract.md` and
-  update the decision index, market-data contract, README, roadmap, state, risk register, backlog,
-  and governance tests. The decision must define the future component boundary and ownership;
-  explicit lifecycle states and transitions; UTC closed-window cadence and catch-up rules;
-  single-host scheduling/exclusivity; existing UUID fencing, checkpoint, evidence-first progress,
-  idempotent refetch, and shared durable rate-budget composition; manual schema-drift pause and
-  governed resume; source and service health; finite work and capacity inputs; failure,
-  escalation, rollback, and future implementation evidence.
-- **Files:** `docs/decisions/0028-continuous-public-trade-collection-operating-contract.md`,
-  `docs/decisions/README.md`, `README.md`, `docs/contracts/MARKET_DATA.md`, `docs/ROADMAP.md`,
-  `PROJECT_STATE.json`, `BACKLOG.md`, `RISK_REGISTER.md`, and governance tests only.
-- **Constraints:** Design and documentation only. Do not add or change production source, runtime
-  wiring, network access, endpoint, adapter, parser, request, scheduler, daemon, service,
-  deployment, WebSocket, persistence or SQLite schema, dependency or lockfile, operator path or
-  data, credential, permission, notification, or operating mode. Do not start collection,
-  schedule work, inspect a database, reserve capacity, or fabricate deployment values. Do not
-  authorize automatic recovery, drift detection, pause, resume, remediation, failover, or
-  multi-host coordination. The decision must not claim continuous-operation, capacity, recovery,
-  deployment, or Phase 2 readiness. Any implementation remains a separately governed future
-  task. Preserve TASK-037 authority, migration, and Stage 3.
+- **Human approval:** NOT REQUIRED — additive, provider-independent, unused pure contracts,
+  deterministic tests, and coordinated governance documentation only; no runtime, network,
+  persistence, deployment, permission, operator-data, or operating-mode change.
+- **Context:** ADR-0028 now records the conceptual single-host operating contract for a possible
+  future continuous public-trade collector. It deliberately implements and enables nothing. The
+  current public-trade path remains finite and explicitly invoked, so its first implementation
+  increment must be a pure, side-effect-free contract boundary that can be reviewed independently
+  of storage, triggering, provider access, and process supervision.
+- **Goal:** Add strict frozen domain policy, stream checkpoint and transition validation, and a
+  pure closed-window planner that turns explicit validated durable inputs and one injected
+  canonical UTC instant into only `HELD`, `WAITING`, or `ATTACHED_JOB` without performing an
+  action.
+- **Scope:** Add one provider-independent domain module and deterministic unit/property tests. The
+  contracts must validate finite whole-millisecond policy bounds, immutable stream and bounded-job
+  identities, complete policy fingerprints, stream version and lifecycle transitions, an existing
+  immutable child attachment, manual hold state, and an explicit canonical UTC `now`. The pure
+  planner must use epoch-aligned half-open `[start, end)` UTC millisecond windows, a non-negative
+  settlement lag, and
+  `target_end = min(latest_eligible_end, cursor + max_catchup_span)`. It must return the existing
+  attachment unchanged before proposing new work, return `HELD` for a validated hold, return
+  `WAITING` when no closed interval is eligible, or return one immutable bounded-job attachment
+  beginning exactly at the durable cursor. Update state, risk, backlog, roadmap, contract, README,
+  and governance tests without changing the ADR-0028 decision.
+- **Files:** One new module under `src/wealth/domain/`, its focused unit/property test module,
+  `README.md`, `docs/contracts/MARKET_DATA.md`, `docs/ROADMAP.md`, `PROJECT_STATE.json`,
+  `BACKLOG.md`, `RISK_REGISTER.md`, and governance tests only.
+- **Constraints:** Pure and unused contracts only. Do not add or change SQLite, a schema,
+  repository or adapter, network or provider access, waits or sleeps, retry or budget behavior,
+  scheduler, trigger, daemon, service runner, CLI, dashboard, deployment, configuration loading,
+  operator path or data, credential, permission, automatic hold/resume/recovery/restart, or
+  operating mode. Do not start, attach, persist, invoke, schedule, or recover a real job. Do not
+  claim continuous-operation, recovery, capacity, deployment, or Phase 2 readiness. Preserve
+  TASK-037 authority, canonical-UTC migration limits, and Stage 3.
 
 Acceptance gates:
 
-1. ADR-0028 records one selected single-host conceptual composition, its alternatives, invariants,
-   consequences, explicit non-goals, review triggers, and the exact evidence a separately approved
-   implementation task would need. It does not present a component as implemented.
-2. The operating contract defines explicit lifecycle ownership and states, UTC closed-window
-   cadence, settlement lag, bounded catch-up, overlap prevention, finite per-invocation work, clean
-   stop, pause, failure, and shutdown semantics without selecting or starting a scheduler.
-3. The design preserves the existing immutable job identity and policy fingerprint, fresh UUID
-   fencing, exact pending-leaf restart, evidence-first checkpoint advancement, idempotent refetch,
-   causal transition/health evidence, and shared durable single-host request-budget gate. It does
-   not claim cross-database atomicity, crash-durable per-job attempt reservations, physical
-   durability, automatic recovery, or multi-host exclusivity.
-4. Schema drift routes the exact affected request variant into a fail-closed manual hold under the
-   TASK-057 runbook. Resume requires exact contract re-review, synthetic evidence, completed
-   governance for any required change, complete regression, rollback, and applicable authority;
-   no detector, automatic pause, remediation, or automatic resume is implied.
-5. The contract defines the future source/service health observations, stale/degraded/failed
-   distinctions, bounded internal alert evidence, operator decision points, escalation path, and
-   audit correlation without implementing a CLI, dashboard, external delivery, or restart action.
-6. Capacity and failure sections identify the explicit configuration and measurement inputs
-   required before implementation: provider request weights and limits, cadence, range and record
-   bounds, retry/pacing budgets, shared-budget capacity, storage growth/retention, checkpoint and
-   health volume, outage/catch-up limits, and tested rollback. No deployment value or adequacy
-   claim is invented.
-7. Rollback keeps the future continuous path disabled or returns to the current explicitly invoked
-   bounded flow; it never discards evidence, advances a checkpoint without accepted evidence, or
-   weakens adapter, drift, budget, lease, or audit controls.
-8. A future implementation requires a separate bounded task with production code, deterministic
-   lifecycle/scheduling/fencing/restart/drift/capacity/failure tests, operational review,
-   deployment and rollback evidence, and applicable approval. ADR acceptance alone grants no
-   runtime, deployment, continuous-operation, or higher-mode authority.
-9. No production file, runtime behavior, serialized contract, dependency, lockfile, SQLite schema,
-   operator path, operator data, credential, permission, or external system changes. TASK-037
-   remains blocked and authorization remains denied; formatting, lint, strict typing, focused and
-   complete tests, lockfile verification, dependency audit, health slice, and CI pass.
+1. Strict frozen policy and stream models reject booleans, non-built-in or non-integer millisecond
+   inputs, non-positive or unbounded work limits, unknown lifecycle values, malformed identity or
+   fingerprint data, invalid cursor/attachment ranges, and inconsistent versions without
+   normalization or side effects.
+2. The planner accepts `now` explicitly and rejects every non-`datetime.UTC` instant. It computes
+   the latest eligible boundary on an epoch-aligned UTC millisecond grid after the exact
+   non-negative settlement lag and never includes the open or a future window.
+3. A validated manual hold returns only `HELD`, preserves the durable cursor and attachment, and
+   creates no job. An existing attachment returns only `ATTACHED_JOB` with the same immutable
+   identity, policy fingerprint, and exact `[start, end)` range.
+4. With no hold or attachment, a cursor at or beyond the latest eligible boundary returns only
+   `WAITING`. Otherwise one proposed immutable attachment begins exactly at the cursor and ends at
+   `min(latest_eligible_end, cursor + max_catchup_span)`; the result cannot overlap, skip a gap,
+   round the cursor forward, or exceed a finite bound.
+5. Transition validation is pure and explicit. It preserves monotonic versioning, immutable stream
+   identity and policy fingerprint, attachment consistency, and fail-closed terminal/hold
+   semantics without acquiring a lease, writing evidence, advancing storage, or authorizing an
+   automatic action.
+6. Deterministic boundary and property tests cover exact pre/at/post eligibility, settlement lag,
+   epoch alignment, cursor equality and lag, finite catch-up truncation, existing attachment,
+   manual hold, invalid identity/policy/version/transition cases, and no open-window, overlap, gap,
+   or range-widening outcome.
+7. The new module is not imported by runtime composition and adds no SQLite/schema, adapter,
+   network, sleep, scheduler, service runner, CLI, deployment, operator data, dependency, or
+   lockfile change. ADR-0028 remains a conceptual decision and TASK-037 remains blocked with
+   authorization denied.
+8. Formatting, lint, strict typing, focused and complete tests, lockfile verification, dependency
+   audit, health slice, and CI pass.
 
 ## Blocked, Awaiting Owner-Supplied Restricted Inputs
 
@@ -136,6 +130,59 @@ Acceptance gates:
    all repository gates pass.
 
 ## Recently Completed
+
+### TASK-058 — Continuous public-trade collection operating-contract decision
+
+- **Key:** `phase2.continuous_public_trade_collection_operating_contract_decision`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Files:** `docs/decisions/0028-continuous-public-trade-collection-operating-contract.md`,
+  `docs/decisions/README.md`, `README.md`, `docs/contracts/MARKET_DATA.md`, `docs/ROADMAP.md`,
+  `PROJECT_STATE.json`, `BACKLOG.md`, `RISK_REGISTER.md`, and governance tests only.
+- **Result:** ADR-0028 accepts one conceptual single-host composition for a possible future
+  continuous public-trade collector: an unselected external trigger may invoke a finite-run
+  coordinator around the existing explicitly invoked bounded orchestrator only after separately
+  governed implementation and deployment. The future coordinator would own continuous stream
+  selection, an immutable attached child, and an outer fresh-UUID fence; the existing child keeps
+  its independent fence, exact pending leaf, evidence-first checkpoint, idempotent refetch,
+  causal transition/source-health evidence, adaptive finite work, and the one shared durable
+  single-host request-budget gate.
+
+  The decision separates three conceptual layers without adding serialized state. Durable stream
+  control is `ACTIVE` or `PAUSED`; schema drift is a scoped pause reason, while enablement remains
+  an external disabled-by-default posture. A finite service run moves from `STARTING` to `RUNNING`
+  and exactly one of `STOPPED`, `PAUSED`, `FAILED`, or `RUN_LIMIT`. The existing bounded job keeps
+  `PENDING`, `RUNNING`, `PAUSED`, `FAILED`, and `COMPLETED`; `waiting`, `caught_up`, and
+  `work_limit_reached` are outcomes rather than lifecycle states. A clean bounded-job `PAUSED` keeps the
+  stream `ACTIVE` and its exact attachment, while bounded-job failure, conflict, lost lease,
+  corruption, or drift fails the service and requires a manual stream pause. A clean service stop
+  leaves stream state, cursor, and attachment unchanged.
+
+  The contract requires closed epoch-aligned half-open UTC windows, explicit settlement lag, a
+  durable cursor, bounded catch-up and per-invocation work, no overlap or gap, cooperative clean
+  stop and shutdown checks, and no self-scheduling state. A reopen must use fresh outer and child
+  authority, retain the immutable child, finish its exact pending leaf first, and advance the
+  continuous cursor only after accepted evidence and exact child completion.
+  It does not claim cross-database atomicity, crash-durable per-job attempt reservations, physical
+  durability, automatic recovery, or multi-host exclusivity.
+
+  Suspected schema drift remains a manual exact-variant or inseparable-parser hold under the
+  TASK-057 runbook. Governed resume requires contract review, synthetic evidence, complete
+  regressions, rollback, and applicable authority; no detector, automatic pause, remediation, or
+  resume was added. Source health remains causal to bounded child work, while future service
+  health would separately distinguish waiting/caught-up, stale, paused, drift-held, work-limited,
+  stopped, and failed observations with bounded audit correlation. The ADR identifies operator
+  decisions, escalation, finite internal-alert evidence, complete provider/cadence/backlog/range/
+  shared-budget/storage/control/recovery capacity inputs and measurements, failure dispositions,
+  disable-to-current-bounded-flow rollback, review triggers, and the deterministic, operational,
+  deployment, and rollback evidence required before implementation.
+
+  This work changes documentation and governance only. It adds no production source, runtime,
+  scheduler, service, network, persistence or SQLite schema, dependency or lockfile, deployment,
+  operator path/data, credential, permission, notification, automatic action, or readiness claim.
+  The selected future component is not implemented, enabled, deployed, scheduled, monitored, or
+  capacity-approved. TASK-059 is a separately governed pure-contract increment; TASK-037 remains
+  blocked and authorization remains denied.
 
 ### TASK-057 — Versioned public-provider schema fixtures and drift-response runbook
 

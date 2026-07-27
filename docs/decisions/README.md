@@ -40,3 +40,4 @@ Each ADR records the context, decision, consequences, alternatives, and follow-u
 - `0025-bounded-public-trade-checkpoint-orchestration.md`
 - `0026-typed-public-trade-transition-history.md`
 - `0027-canonical-utc-boundary-and-migration-plan.md`
+- `0028-continuous-public-trade-collection-operating-contract.md`
