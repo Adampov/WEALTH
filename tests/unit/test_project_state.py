@@ -13,6 +13,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_STATE_PATH = REPOSITORY_ROOT / "PROJECT_STATE.json"
 RISK_REGISTER_PATH = REPOSITORY_ROOT / "RISK_REGISTER.md"
 BACKLOG_PATH = REPOSITORY_ROOT / "BACKLOG.md"
+MARKET_DATA_CONTRACT_PATH = REPOSITORY_ROOT / "docs" / "contracts" / "MARKET_DATA.md"
 
 
 def load_payload() -> dict[str, Any]:
@@ -81,23 +82,28 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
         state.active_components
     )
     assert "typed_public_http_response_protocol_failure_mapping" in state.active_components
+    assert "fail_closed_public_http_automatic_redirect_rejection" in state.active_components
     assert len(state.open_tasks) == 2
-    task_037, task_048 = state.open_tasks
+    task_037, task_049 = state.open_tasks
     assert task_037.task_id == "TASK-037"
     assert task_037.status == "blocked"
     assert task_037.risk_tier == 3
     assert task_037.requires_human_approval is True
-    assert task_048.task_id == "TASK-048"
-    assert task_048.status == "ready"
-    assert task_048.risk_tier == 1
-    assert task_048.requires_human_approval is False
+    assert task_049.task_id == "TASK-049"
+    assert task_049.action == "phase2.fail_closed_public_http_initial_request_target_validation"
+    assert task_049.status == "ready"
+    assert task_049.risk_tier == 1
+    assert task_049.requires_human_approval is False
     assert state.blockers == (
         "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance "
         "location before independent Risk and Security review and the project-owner decision; "
         "authorization remains denied.",
     )
-    assert state.next_action.task_id == "TASK-048"
-    assert state.next_action.action == "phase2.fail_closed_public_http_automatic_redirect_rejection"
+    assert state.next_action.task_id == "TASK-049"
+    assert (
+        state.next_action.action
+        == "phase2.fail_closed_public_http_initial_request_target_validation"
+    )
     assert any(decision.decision_id == "ADR-0027" for decision in state.recent_decisions)
 
 
@@ -105,6 +111,7 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     state = load_project_state(PROJECT_STATE_PATH)
     risk_register = RISK_REGISTER_PATH.read_text(encoding="utf-8")
     backlog = BACKLOG_PATH.read_text(encoding="utf-8")
+    market_data_contract = MARKET_DATA_CONTRACT_PATH.read_text(encoding="utf-8")
 
     for decision in state.recent_decisions:
         assert (REPOSITORY_ROOT / decision.artifact).is_file()
@@ -172,27 +179,31 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_047_section = completed_section.split("### TASK-047 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
+    task_048_section = completed_section.split("### TASK-048 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    for status_code in (301, 302, 303, 307, 308):
-        assert str(status_code) in next_action_section
-    assert "unbounded `fp.read()`" in next_action_section
-    assert "`http`, `https`, and `ftp` destinations" in next_action_section
-    assert "before any redirect-body drain or second-destination" in next_action_section
-    assert "original 3xx response" in next_action_section
-    assert "private no-follow urllib opener/handler" in next_action_section
-    assert "same-origin, same-host, relative, allowlisted" in next_action_section
-    assert "no second destination is" in next_action_section
-    assert "performs exactly one" in next_action_section
-    assert "`max_response_bytes + 1` body read and one cleanup attempt" in next_action_section
-    assert "one cleanup attempt" in next_action_section
-    assert "no process-global `install_opener`" in next_action_section
-    assert "TASK-047 protocol mappings" in next_action_section
-    assert "`HTTPException`/`InvalidURL` exclusions" in next_action_section
+    assert "initial request-target validation" in next_action_section
+    assert "`HTTPHandler`, `FTPHandler`, `FileHandler`, `DataHandler`" in next_action_section
+    assert "prefix-level HTTPS check" in next_action_section
+    assert "before query serialization" in next_action_section
+    assert "absolute credential-free HTTPS endpoint" in next_action_section
+    assert "pre-existing `?` or" in next_action_section
+    assert "`#` delimiter" in next_action_section
+    assert "no username or password" in next_action_section
+    assert "zero, or out-of-range explicit port" in next_action_section
+    assert (
+        '`ValueError("url must be an absolute credential-free HTTPS endpoint without query or '
+        'fragment")`' in next_action_section
+    )
+    assert "before the query mapping is iterated or serialized" in next_action_section
+    assert "provider or hostname allowlist" in next_action_section
+    assert "DNS/IP policy" in next_action_section
     assert "TASK-037 remains blocked and authorization remains denied" in next_action_section
     assert blocked_section.count("### TASK-") == 1
     assert "### TASK-037 " in blocked_section
@@ -360,6 +371,38 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "outside the adapter cap" in task_047_section
     assert "changed destination" in task_047_section
     assert "TASK-048 governs" in task_047_section
+    assert "- **Status:** COMPLETE" in task_048_section
+    assert "`phase2.fail_closed_public_http_automatic_redirect_rejection`" in task_048_section
+    assert "`src/wealth/adapters/http.py`" in task_048_section
+    assert "`tests/unit/test_http_adapter.py`" in task_048_section
+    for status_code in (301, 302, 303, 307, 308):
+        assert str(status_code) in task_048_section
+    assert "before parsing `Location` or" in task_048_section
+    assert "`URI`, reading or closing the redirect body" in task_048_section
+    assert "unsupported-scheme, and" in task_048_section
+    assert "malformed targets" in task_048_section
+    assert "five-status-by-fifteen-target real-opener matrix" in task_048_section
+    assert "one original GET" in task_048_section
+    assert "one `max_response_bytes + 1` read" in task_048_section
+    assert "one cleanup attempt" in task_048_section
+    assert "no retry, no second" in task_048_section
+    assert "primary-failure precedence" in task_048_section
+    assert "proxy/TLS handler defaults" in task_048_section
+    assert "process-global urllib opener is neither installed nor mutated" in task_048_section
+    assert "Initial request-target validation remains incomplete" in task_048_section
+    assert "non-HTTPS scheme handlers" in task_048_section
+    assert "TASK-049 governs that residual risk" in task_048_section
+    assert "private urllib opener with a no-follow redirect handler" in market_data_contract
+    assert "performs no body" in market_data_contract
+    assert "read or cleanup" in market_data_contract
+    assert "No process-global opener is installed or" in market_data_contract
+    assert "mutated" in market_data_contract
+    assert "Initial request-target validation remains incomplete" in market_data_contract
+    assert "TASK-049 governs" in market_data_contract
+    assert "Automatic 301, 302, 303, 307, and 308 redirects are rejected" in risk_register
+    assert "process-global opener is untouched" in risk_register
+    assert "Initial request-target validation remains incomplete" in risk_register
+    assert "Require an exact absolute credential-free HTTPS initial request target" in risk_register
 
 
 def test_project_state_forbids_unknown_fields() -> None:

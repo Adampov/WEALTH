@@ -6,59 +6,62 @@ promoted through review.
 
 ## Next Action
 
-### TASK-048 — Fail-closed public-HTTP automatic redirect rejection
+### TASK-049 — Fail-closed public-HTTP initial request-target validation
 
-- **Key:** `phase2.fail_closed_public_http_automatic_redirect_rejection`
+- **Key:** `phase2.fail_closed_public_http_initial_request_target_validation`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
 - **Human approval:** NOT REQUIRED — bounded fail-closed development hardening under the owner's
   explicit authorization; it narrows public-network behavior and changes no permission,
-  deployment, or operator-data boundary.
-- **Context:** Python 3.13's default `HTTPRedirectHandler` automatically follows public GET
-  responses with status 301, 302, 303, 307, or 308. Before opening the redirected request it
-  drains the redirect body with an unbounded `fp.read()`, and it permits relative or absolute
-  `http`, `https`, and `ftp` destinations. That work occurs inside `urlopen`, before the adapter
-  receives a response handle, so the adapter's response-byte limit and the provider constructors'
-  initial HTTPS endpoint checks do not bound the redirect body or the second destination.
-- **Goal:** Reject every automatic redirect before any redirect-body drain or second-destination
-  request, and return the original 3xx response through the existing bounded `HTTPError` response
-  path.
-- **Scope:** Give `UrllibPublicHttpClient` an explicit private no-follow urllib opener/handler;
-  retain the original 3xx status, headers, and bounded body as one `HttpResponse`; and add
-  deterministic real-handler and adapter-boundary tests proving no follow, one bounded read, and
-  one cleanup attempt.
+  deployment, provider, or operator-data boundary.
+- **Context:** TASK-048 rejects every automatic redirect, but the initial caller-supplied target
+  still reaches request construction without one exact shared validation boundary. The private
+  standard-library opener retains `HTTPHandler`, `FTPHandler`, `FileHandler`, `DataHandler`, and
+  `HTTPSHandler`; direct shared-client use can therefore select a non-HTTPS handler. The active
+  provider constructors use only a prefix-level HTTPS check, which does not reject an empty or
+  malformed authority, embedded credentials, a pre-existing query or fragment, control
+  characters, or an invalid explicit port.
+- **Goal:** Reject every non-absolute, non-HTTPS, credential-bearing, or structurally ambiguous
+  initial request target before query serialization, `Request` construction, or opener work,
+  while forwarding a valid credential-free HTTPS endpoint unchanged.
+- **Scope:** Add one private pure initial-target validator to `UrllibPublicHttpClient`; require an
+  absolute HTTPS URL with a non-empty parseable hostname, no username or password, no pre-existing
+  query or fragment, no whitespace, control character, or backslash, and no empty, non-numeric,
+  zero, or out-of-range explicit port; and add deterministic boundary tests proving invalid
+  targets perform no downstream work.
 - **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
   `docs/contracts/MARKET_DATA.md`, plus coordinated governance files and governance tests.
-- **Constraints:** Do not permit same-origin, same-host, relative, allowlisted, HTTPS-to-HTTPS,
-  downgrade, or FTP redirects. Do not add a redirect count, destination resolver, DNS/IP policy,
-  retry, dependency, credential, endpoint change, provider-specific exception, or process-global
-  opener mutation. Preserve request construction, query ordering, headers, finite-positive
-  timeout semantics, response caps, all TASK-043 through TASK-047 exception mappings, TASK-045
-  cleanup precedence, provider parsing, canonicalization, quality, storage, schemas, runtime
+- **Constraints:** Do not normalize, rewrite, resolve, or contact an invalid target. Do not add a
+  provider or hostname allowlist, DNS lookup, IP or public-routability policy, certificate pinning,
+  custom TLS context, proxy change, credential, redirect permission, retry, dependency, endpoint
+  change, or provider-specific exception. Preserve valid endpoint text, sorted query construction,
+  headers, timeouts, response caps, no-follow behavior, TASK-043 through TASK-048 exception and
+  cleanup semantics, provider parsing, canonicalization, quality, storage, schemas, runtime
   wiring, TASK-037 authority, migration, and Stage 3.
 
 Acceptance gates:
 
-1. Each 301, 302, 303, 307, and 308 received for the public GET is not followed, regardless of
-   whether `Location` or `URI` is absent, relative, same-origin, cross-origin, an HTTPS-to-HTTP
-   downgrade, or FTP; exactly the original request is opened and no second destination is
-   contacted.
-2. The original 3xx enters the existing `HTTPError` materialization path. An exact-limit body
-   returns one `HttpResponse` with the original status, headers, and exact body; a one-byte-oversize
-   body raises the existing
-   `HttpTransportError("public HTTP error response exceeded the configured limit")` without
-   returning truncated evidence.
-3. The redirect handler performs no body read or cleanup. The adapter performs exactly one
-   `max_response_bytes + 1` body read and one cleanup attempt, with one acquisition call, no retry,
-   no second read, and no process-global `install_opener` or equivalent mutation.
-4. Supported 3xx-body read and cleanup failures retain the existing sanitized typed mapping,
-   direct-cause, and primary-failure precedence. TASK-047 protocol mappings, base
-   `HTTPException`/`InvalidURL` exclusions, and response-entry/exit behavior remain unchanged.
-5. Non-redirect success and HTTP-error behavior, proxy/TLS defaults, timeouts, limits, endpoints,
-   queries, headers, provider behavior, and all other mappings remain unchanged. Formatting, lint,
-   strict typing, complete tests, lockfile verification, dependency audit, health slice, and CI
-   pass.
+1. With a valid timeout, each `http`, `ftp`, `file`, and `data` target; relative and
+   scheme-relative target; missing or empty hostname; username or password; pre-existing `?` or
+   `#` delimiter; whitespace, C0/DEL control character, or backslash; malformed authority; and
+   empty, non-numeric, zero, or greater-than-65535 explicit port raises exactly
+   `ValueError("url must be an absolute credential-free HTTPS endpoint without query or fragment")`.
+2. Every rejected target fails before the query mapping is iterated or serialized and before
+   `Request`, the private opener, DNS, or any network or filesystem handler is invoked. No target
+   is normalized, repaired, retried, or partially opened.
+3. A valid absolute credential-free HTTPS endpoint with a hostname, optional valid explicit port,
+   and optional path is retained unchanged; the separately supplied sorted query is appended
+   exactly once, and the existing method, `Accept`, `User-Agent`, and finite-positive timeout are
+   forwarded unchanged.
+4. Non-redirect success and HTTP-error behavior and TASK-048 redirect rejection remain unchanged:
+   one original acquisition, one bounded body read, the applicable cleanup behavior, no retry,
+   and no second destination. All TASK-043 through TASK-047 mappings, exclusions, direct causes,
+   and primary-failure precedence remain intact.
+5. No provider or hostname allowlist, DNS/IP policy, resolver, certificate pin, TLS/proxy
+   customization, credential, endpoint change, dependency, provider-specific behavior, or
+   process-global opener mutation is introduced. Formatting, lint, strict typing, complete tests,
+   lockfile verification, dependency audit, health slice, and CI pass.
 6. TASK-037 remains blocked and authorization remains denied; no operator data, path, database,
    scanner, report, migration, or Stage 3 action occurs.
 
@@ -115,6 +118,34 @@ Acceptance gates:
    all repository gates pass.
 
 ## Recently Completed
+
+### TASK-048 — Fail-closed public-HTTP automatic redirect rejection
+
+- **Key:** `phase2.fail_closed_public_http_automatic_redirect_rejection`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
+  `docs/contracts/MARKET_DATA.md`, and the coordinated governance files and governance tests.
+- **Result:** The shared public transport now uses one private urllib opener whose no-follow
+  handler rejects original 301, 302, 303, 307, and 308 responses before parsing `Location` or
+  `URI`, reading or closing the redirect body, or opening another destination. Missing, empty,
+  relative, same-origin, cross-origin, HTTPS-to-HTTP downgrade, FTP, unsupported-scheme, and
+  malformed targets all remain the original response. The original 3xx enters the existing
+  bounded `HTTPError` materialization path; an exact-limit body returns its original status,
+  headers, and exact bytes, while a one-byte-oversize body raises
+  `HttpTransportError("public HTTP error response exceeded the configured limit")` without
+  truncated evidence. A deterministic five-status-by-fifteen-target real-opener matrix proves
+  one original GET, one `max_response_bytes + 1` read, one cleanup attempt, no retry, no second
+  read, and no follow. Additional tests preserve sanitized redirect-body read and cleanup
+  mappings, direct causes, and primary-failure precedence; prove successful and non-redirect
+  HTTP-error behavior, query, method, headers, timeout, proxy/TLS handler defaults; and prove in a
+  fresh process that the process-global urllib opener is neither installed nor mutated. Response
+  limits, endpoints, TASK-043 through TASK-047 mappings and exclusions, provider behavior,
+  parsing, quality, storage, schemas, dependencies, runtime wiring, TASK-037 authority, migration,
+  and Stage 3 remain unchanged. Initial request-target validation remains incomplete: the shared
+  client does not yet parse and constrain its caller-supplied initial URL before request
+  construction, and its private standard-library opener retains non-HTTPS scheme handlers;
+  TASK-049 governs that residual risk.
 
 ### TASK-047 — Typed public-HTTP response-protocol failure mapping
 

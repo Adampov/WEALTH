@@ -2,15 +2,52 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from http.client import BadStatusLine, IncompleteRead, LineTooLong, UnknownProtocol
+from http.client import (
+    BadStatusLine,
+    HTTPMessage,
+    HTTPResponse,
+    IncompleteRead,
+    LineTooLong,
+    UnknownProtocol,
+)
 from math import isfinite
+from typing import IO, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from wealth.ports.http import HttpResponse, HttpTransportError
 
 MAX_PUBLIC_HTTP_RESPONSE_BYTES = 2_000_000
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    """Reject automatic redirects before urllib drains or follows them."""
+
+    def http_error_302(
+        self,
+        req: Request,
+        fp: IO[bytes],
+        code: int,
+        msg: str,
+        headers: HTTPMessage,
+    ) -> None:
+        del req, fp, code, msg, headers
+        return None
+
+    http_error_301 = http_error_302
+    http_error_303 = http_error_302
+    http_error_307 = http_error_302
+    http_error_308 = http_error_302
+
+
+_NO_REDIRECT_OPENER = build_opener(_NoRedirectHandler())
+
+
+def urlopen(request: Request, *, timeout: float) -> HTTPResponse:
+    """Open one public URL without process-global or automatic redirect behavior."""
+
+    return cast(HTTPResponse, _NO_REDIRECT_OPENER.open(request, timeout=timeout))
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,13 +133,13 @@ class UrllibPublicHttpClient:
                     raise HttpTransportError(
                         "public HTTP error response exceeded the configured limit"
                     ) from error
-                response = HttpResponse(
+                materialized_response = HttpResponse(
                     status_code=error.code,
                     headers=tuple(error.headers.items()),
                     body=body,
                 )
                 response_materialized = True
-                return response
+                return materialized_response
             finally:
                 try:
                     error.close()
