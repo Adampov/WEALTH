@@ -49,7 +49,8 @@
     "exact_order_flow_persistence_evidence_validation",
     "finite_public_http_timeout_boundary_validation",
     "strict_public_http_response_byte_limit_validation",
-    "typed_public_http_error_response_read_failure_mapping"
+    "typed_public_http_error_response_read_failure_mapping",
+    "typed_public_http_incomplete_body_read_failure_mapping"
   ],
   "active_integrations": [
     "github_actions_ci"
@@ -91,8 +92,8 @@
       "requires_human_approval": true
     },
     {
-      "task_id": "TASK-044",
-      "action": "phase2.typed_public_http_incomplete_body_read_failure_mapping",
+      "task_id": "TASK-045",
+      "action": "phase2.deterministic_public_http_error_response_resource_closure",
       "status": "ready",
       "risk_tier": 1,
       "requires_human_approval": false
@@ -129,8 +130,8 @@
     }
   ],
   "next_action": {
-    "task_id": "TASK-044",
-    "action": "phase2.typed_public_http_incomplete_body_read_failure_mapping"
+    "task_id": "TASK-045",
+    "action": "phase2.deterministic_public_http_error_response_resource_closure"
   },
-  "last_updated_utc": "2026-07-27T04:21:56Z"
+  "last_updated_utc": "2026-07-27T04:38:54Z"
 }

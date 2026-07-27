@@ -1,6 +1,7 @@
 """Tests for the bounded standard-library public HTTP adapter."""
 
 from email.message import Message
+from http.client import IncompleteRead
 from io import BytesIO
 from types import TracebackType
 from typing import Self
@@ -83,7 +84,7 @@ class RecordingBytesIO(BytesIO):
 class RaisingBytesIO(RecordingBytesIO):
     """Raise one configured transport failure while recording the read."""
 
-    def __init__(self, error: OSError) -> None:
+    def __init__(self, error: Exception) -> None:
         super().__init__(b"partial-provider-detail")
         self.error = error
 
@@ -95,7 +96,7 @@ class RaisingBytesIO(RecordingBytesIO):
 class RaisingUrlResponse(StubUrlResponse):
     """Raise one configured transport failure from a successful response read."""
 
-    def __init__(self, error: OSError) -> None:
+    def __init__(self, error: Exception) -> None:
         super().__init__()
         self.error = error
 
@@ -317,6 +318,95 @@ def test_success_response_body_os_error_retains_typed_transport_mapping(
     assert error.value.__cause__ is read_failure
     assert str(read_failure) not in str(error.value)
     assert response.read_limits == [4]
+    assert len(urlopen_calls) == 1
+
+
+def test_success_response_incomplete_read_is_sanitized_without_partial_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    partial_body = b"partial-provider-secret"
+    read_failure = IncompleteRead(partial_body, 99)
+    response = RaisingUrlResponse(read_failure)
+    urlopen_calls: list[Request] = []
+
+    def stub_urlopen(request: Request, *, timeout: float) -> StubUrlResponse:
+        del timeout
+        urlopen_calls.append(request)
+        return response
+
+    monkeypatch.setattr(http_adapter, "urlopen", stub_urlopen)
+
+    with pytest.raises(HttpTransportError) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert read_failure.partial == partial_body
+    assert read_failure.expected == 99
+    assert str(error.value) == "public HTTP GET failed"
+    assert error.value.__cause__ is read_failure
+    assert partial_body.decode() not in str(error.value)
+    assert str(read_failure.expected) not in str(error.value)
+    assert response.read_limits == [4]
+    assert len(urlopen_calls) == 1
+
+
+def test_http_error_body_incomplete_read_is_sanitized_without_partial_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    partial_body = b"partial-http-error-secret"
+    read_failure = IncompleteRead(partial_body, 123)
+    reader = RaisingBytesIO(read_failure)
+    provider_error = http_error(reader)
+    urlopen_calls: list[Request] = []
+
+    def raise_http_error(request: Request, *, timeout: float) -> StubUrlResponse:
+        del timeout
+        urlopen_calls.append(request)
+        raise provider_error
+
+    monkeypatch.setattr(http_adapter, "urlopen", raise_http_error)
+
+    with pytest.raises(HttpTransportError) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert read_failure.partial == partial_body
+    assert read_failure.expected == 123
+    assert str(error.value) == "public HTTP GET failed"
+    assert error.value.__cause__ is read_failure
+    assert partial_body.decode() not in str(error.value)
+    assert str(read_failure.expected) not in str(error.value)
+    assert reader.read_limits == [4]
+    assert len(urlopen_calls) == 1
+
+
+def test_incomplete_read_raised_before_body_read_remains_unmapped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport_failure = IncompleteRead(b"non-body-partial", 77)
+    urlopen_calls: list[Request] = []
+
+    def raise_before_response(request: Request, *, timeout: float) -> StubUrlResponse:
+        del timeout
+        urlopen_calls.append(request)
+        raise transport_failure
+
+    monkeypatch.setattr(http_adapter, "urlopen", raise_before_response)
+
+    with pytest.raises(IncompleteRead) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert error.value is transport_failure
     assert len(urlopen_calls) == 1
 
 
