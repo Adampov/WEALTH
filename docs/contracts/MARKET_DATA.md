@@ -17,6 +17,13 @@ forwarded unchanged. No boundary coerces an invalid value, substitutes a fallbac
 the timeout retains the standard transport semantics rather than claiming a total wall-clock
 deadline.
 
+The shared transport also accepts only a built-in integer response limit from 1 through 2,000,000
+bytes. Booleans, integer subclasses, floats, non-finite values, non-positive values, and larger
+integers fail during client construction. Both successful and HTTP-error response paths request
+exactly one byte beyond the configured limit and fail explicitly when that sentinel proves the
+body is oversized; no truncated body is returned as evidence. Valid smaller limits and the
+2,000,000-byte default and maximum remain exact configuration values.
+
 ## Canonical Order-Flow Foundation
 
 `CanonicalTrade`, `CanonicalTicker`, and `CanonicalBestBidAsk` establish the provider-independent
