@@ -30,13 +30,29 @@ exactly one byte beyond the configured limit and fail explicitly when that senti
 body is oversized; no truncated body is returned as evidence. Valid smaller limits and the
 2,000,000-byte default and maximum remain exact configuration values.
 
-After either bounded body path, the shared client currently projects every pair returned by
-`headers.items()` into `HttpResponse.headers` without its own pair-count or cumulative-character
-limit. TASK-055 governs an application-level snapshot of at most 100 pairs and 65,536 cumulative
-name-plus-value Python characters on both successful and `HTTPError` responses. That task preserves
-order, duplicates, casing, content, body-first precedence, and cleanup rules. It is a projection
-bound only: standard-library parsing and prior allocations occur before this boundary, so it makes
-no wire-header, parser, total-response-memory, privacy, or redaction guarantee.
+After either bounded body read and its body-size decision, the shared client takes one bounded
+response-header snapshot before constructing `HttpResponse`. Both the successful and `HTTPError`
+paths call `headers.items()` once, start its iterator once, perform no direct message iteration or
+second pass, request no length hint, and pull at most 101 times. Zero through 100 yielded pairs are
+accepted only while cumulative `len(name) + len(value)` is at most 65,536 Python characters. A
+yielded 101st pair fails before unpacking or inspecting it, and a 65,537th cumulative character
+fails immediately with exact sanitized
+`HttpTransportError("public HTTP response headers exceeded the configured limit")`.
+
+Accepted pair order, duplicate names, original casing, empty strings, and all name and value
+content remain exact, including existing `Retry-After` behavior. Body-read failures and body
+oversize retain precedence without header enumeration. On a successful response, a header-limit
+failure has no direct cause or hidden context and exits the response context once. On an
+`HTTPError`, the originating provider error is the header-limit failure's direct cause and active
+context, followed by exactly one cleanup attempt whose failure cannot replace that primary
+outcome. Exceptions raised by `headers.items()`, iterator creation, or a consumed pull remain the
+same raw objects; on the `HTTPError` path they retain only their natural implicit provider-error
+context.
+
+This is an adapter-controlled projection bound after standard-library parsing and prior
+allocation. It does not bound wire-header bytes, parser work or memory, total response or process
+memory, response time, or provider work and makes no privacy, redaction,
+content-type/length/encoding, hostname/provider-allowlist, DNS/IP-routability, or SSRF guarantee.
 
 If reading an HTTP-error response body raises `URLError`, `TimeoutError`, or `OSError`, the shared
 transport returns no partial response and raises the same sanitized typed transport failure used
@@ -535,7 +551,9 @@ mean no control-state write.
   made before a crash; that reservation design remains future work. Health history is available
   only through bounded checkpoint-version pages. Actor transition history now has a separate
   typed bounded read port, but neither history has an operator CLI, dashboard, repair endpoint, or
-  external audit export.
+  external audit export. The individual crash seams are tested, but one composed generated-fixture
+  drill across an exhausted disconnect, sparse windows, newly constructed process boundaries, and
+  the typed audit chain remains pending under TASK-056.
 - Each Binance provider request remains bounded to one already-closed window of at most 1,000
   candles; the application composes multiple requests into a bounded range.
 - No operating-system-managed scheduling, deployment, adaptive pacing, retry jitter, or live
