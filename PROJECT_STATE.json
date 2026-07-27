@@ -66,7 +66,8 @@
     "versioned_public_provider_schema_fixture_contract_and_drift_runbook",
     "continuous_public_trade_collection_operating_contract",
     "continuous_public_trade_closed_window_planner_contracts",
-    "continuous_public_trade_stream_persistence_contract"
+    "continuous_public_trade_stream_persistence_contract",
+    "continuous_public_trade_stream_persistence_codec_contracts"
   ],
   "active_integrations": [
     "github_actions_ci"
@@ -108,8 +109,8 @@
       "requires_human_approval": true
     },
     {
-      "task_id": "TASK-061",
-      "action": "phase2.continuous_public_trade_stream_persistence_codec_contracts",
+      "task_id": "TASK-062",
+      "action": "phase2.continuous_public_trade_stream_store_port_contracts",
       "status": "ready",
       "risk_tier": 1,
       "requires_human_approval": false
@@ -156,8 +157,8 @@
     }
   ],
   "next_action": {
-    "task_id": "TASK-061",
-    "action": "phase2.continuous_public_trade_stream_persistence_codec_contracts"
+    "task_id": "TASK-062",
+    "action": "phase2.continuous_public_trade_stream_store_port_contracts"
   },
-  "last_updated_utc": "2026-07-27T17:09:58Z"
+  "last_updated_utc": "2026-07-27T20:06:50Z"
 }

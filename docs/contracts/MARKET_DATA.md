@@ -497,11 +497,15 @@ pause/resume/restart/recovery, capacity evidence, multi-host exclusivity, or rea
 Until later work is governed and evidenced, the existing explicitly invoked bounded public-trade
 path remains the only implementation.
 
-## Continuous Public-Trade Stream Persistence Contract (Design Only)
+## Continuous Public-Trade Persistence Records and Codecs (Unused)
 
 [ADR-0029](../decisions/0029-continuous-public-trade-stream-persistence-contract.md) accepts one
-logical persistence contract for a possible future single-host stream checkpoint. It creates no
-serialized model, codec, port, repository, database, SQLite/DDL/schema, migration, or runtime.
+logical persistence contract for a possible future single-host stream checkpoint. TASK-061 now
+implements one pure domain module containing strict version-one child-creation payload,
+stream-envelope, stream-creation, stream-transition, evidence-reference/evidence-scope, and
+complete stream-policy projection values. The module is unused by runtime composition and creates
+no port, repository, adapter, database, SQLite/DDL/schema, migration, I/O, network path, authority,
+action, capacity, durability, or readiness.
 
 The exact durable TASK-059 current record consists of:
 
@@ -608,16 +612,21 @@ ambiguous classification stops canonical admission/progress and permits only a s
 quarantine/attention path. No exception starts a new attempt/request or mutates the stream.
 
 The canonical profile separates record type, serialization version, TASK-059 model version,
-causal version, and a future physical-store schema version. Version-one bytes are compact
-sorted-key UTF-8 JSON with no BOM, newline, duplicate or unknown keys; exact UUIDs/enums and JSON
-integers; explicit nulls; no coercion or normalization; and domain-separated SHA-256 creation
-fingerprints. A strict reader reproduces exact bytes, and unknown/noncanonical content fails
-closed. Six distinct digest contracts cover child creation, stream envelope, stream creation,
-transition record, evidence scope, and rolling history root; the external evidence-body digest
-remains supplied by its own domain. TASK-059 epoch milliseconds are preserved exactly. Because its
-accepted range is wider than signed-64-bit epoch microseconds and Python's calendar, a later
-projection must prove representability or separately tighten the contract; it must never truncate
-or overflow.
+causal version, and a future physical-store schema version. TASK-061 implements compact sorted-key
+UTF-8 JSON codecs with no BOM, newline, duplicate or unknown keys; exact UUIDs/enums and JSON
+integers; explicit nulls; and no coercion or normalization. Exact limits are 65,536 raw record
+bytes, 8,192 child-creation bytes, 16,384 envelope bytes, 32,768 successor-envelope hex
+characters, 8,192 lexical bytes per string, depth 16, 128 object members, 64 UTF-8 bytes per key,
+and 19 integer digits. A strict reader reproduces exact canonical bytes, and content at each
+limit-plus-one boundary fails closed. Six distinct domain-separated contracts cover the
+child-creation fingerprint, stream-envelope digest, stream-creation digest, stream-transition
+digest, evidence-scope digest, and initial/continued rolling history root; the external
+evidence-body digest remains supplied by its own domain. TASK-059 epoch milliseconds are preserved
+exactly. Because their accepted range is wider than signed-64-bit epoch microseconds and Python's
+calendar, child material must be exactly representable by the existing fixed-UTC child model, and
+a later physical projection must prove representability or separately tighten the contract; it
+must never truncate or overflow.
+
 Every datetime in the new child creation payload uses exact fixed-UTC six-fractional-digit `Z`
 text, and attachment epoch milliseconds must round-trip to it without rounding. These rules do not
 change the existing bounded-child store serializer.
@@ -663,11 +672,25 @@ proven lossless reverse converter.
 
 Rollback disables the continuous trigger/deployment and uses the existing explicitly invoked
 bounded flow without moving a cursor, clearing a hold, deleting/replacing a child, resetting a
-budget, reusing a fence, deleting evidence, or downgrading an unknown store. The decision does not
-implement persistence, automatic recovery, scheduling, provider access, capacity, physical
-durability, multi-host exclusivity, continuous operation, deployment, or Phase 2 readiness.
-TASK-061 is a separate pure, unused persistence-record and canonical-codec task. TASK-037 remains
-blocked and authorization remains denied.
+budget, reusing a fence, deleting evidence, or downgrading an unknown store.
+
+TASK-061 is complete only as the unused pure domain increment. Its pure two-pass attachment
+finalizer uses one fixed trusted time, provisional then real child fingerprint, and exact
+non-fingerprint plan comparison without changing TASK-059. Load validation binds full effective
+stream policy field by field, immutable stream identity and version-one creation evidence, and the
+effective child-policy fingerprint while attached. Separate validators enforce exact create scope,
+kind-specific transition-authority and child-completion scopes, evidence validity, predecessor and
+successor envelope digests/versions, recorded-time monotonicity, and rolling-root causal links.
+Deterministic golden-byte, hostile-input, every-transition, exact-boundary, and property tests
+exercise these pure contracts.
+
+No port, repository, adapter, SQLite/database/schema, migration, I/O, runtime/network path,
+authority, action, capacity, physical durability, multi-host exclusivity, automatic recovery,
+continuous operation, deployment, or Phase 2 readiness was added. TASK-059 behavior and the
+existing explicitly invoked bounded public-trade flow remain unchanged. TASK-062 is the next safe
+bounded direction: pure, unused logical stream-store port, command, and outcome contracts plus a
+narrow ADR-0029 consistency review, before any physical store decision. TASK-037 remains blocked
+and authorization remains denied.
 
 ## Canonical Candle
 

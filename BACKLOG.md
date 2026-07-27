@@ -6,117 +6,67 @@ promoted through review.
 
 ## Next Action
 
-### TASK-061 — Pure versioned continuous public-trade persistence-record and canonical-codec contracts
+### TASK-062 — Pure continuous public-trade logical stream-store port and outcome contracts
 
-- **Key:** `phase2.continuous_public_trade_stream_persistence_codec_contracts`
+- **Key:** `phase2.continuous_public_trade_stream_store_port_contracts`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
-- **Human approval:** NOT REQUIRED — pure unused domain values, deterministic codecs, tests, and
-  coordinated documentation/governance only; no storage, schema, runtime, operator-data,
-  permission, or operating-mode change.
-- **Context:** ADR-0029 defines a conceptual persistence boundary but intentionally selects no
-  repository or physical schema. TASK-059's attachment fingerprint cannot reconstruct the exact
-  deterministic pristine child after a crash between stream attachment and child creation, so a
-  later store will need complete canonical child-creation material rather than a digest alone.
-- **Goal:** Add strict, versioned, side-effect-free persistence-record and canonical-codec
-  contracts that can represent ADR-0029's exact checkpoint envelope and companion child-creation
-  record without performing or enabling persistence.
-- **Scope:** Add one unused pure domain module and focused tests. Model the complete deterministic
-  pristine-child creation payload, including an explicit fixed-UTC `created_at`, immutable
-  stream/market/request identity, exact half-open attachment range, and the distinct continuous
-  and bounded-child policy fingerprints. Model the versioned stream checkpoint envelope, separate
-  version-one stream-creation evidence with the exact complete stream-policy projection, and
-  immutable transition records with canonical successor envelope bytes plus exactly one bounded
-  transition-authority reference on every stream mutation and, for `CHILD_COMPLETED`, one accepted
-  child-completion-evidence reference.
-  Define canonical UTF-8 JSON codecs and six distinct domain-separated SHA-256 contracts for child
-  creation, stream envelope, stream creation, transition record, evidence scope, and rolling
-  history root. The supplied external evidence-body digest is not recomputed by this module. Add
-  strict encode/decode validation, exact round trips, and typed fail-closed outcomes for unknown
-  versions or malformed, duplicate, missing, extra, inconsistent, or non-canonical input.
-- **Files:** `src/wealth/domain/continuous_public_trade_persistence.py`,
-  `tests/unit/test_continuous_public_trade_persistence_contracts.py`, `README.md`,
+- **Human approval:** NOT REQUIRED — narrow design review, unused storage-agnostic protocols,
+  frozen commands/results, pure fakes, tests, and coordinated governance only; no store, schema,
+  runtime, operator data, permission, or operating-mode change.
+- **Context:** TASK-061 now freezes ADR-0029's exact persistence records, canonical bytes, digests,
+  history roots, and pure load/link validation, but no callable storage boundary exists. ADR-0029
+  requires review before selecting a port. Freezing the logical interface before any physical
+  technology decision keeps SQLite layout, epoch projection, retention, migration, backup,
+  capacity, and crash-evidence questions explicit rather than embedding them in an adapter.
+- **Goal:** Review ADR-0029 narrowly and add one strict, provider-independent, side-effect-free,
+  unused logical stream-store port with closed command/query/outcome contracts for conceptual
+  create, exact-identity current load, versioned compare-and-swap, and bounded history paging.
+- **Scope:** Add the narrow decision update, one unused port module, focused pure-contract tests,
+  and coordinated documentation/governance. Commands and results must bind the complete immutable
+  stream identity, effective stream policy, attached child-policy fingerprint when applicable,
+  exact TASK-061 records/bytes/digests, expected version, prior envelope digest, rolling history
+  root, typed evidence scopes, and bounded audit continuation. Freeze explicit create duplicate and
+  conflict semantics; distinct absence, identity conflict, unsupported-version, corruption, and
+  unavailable-storage outcomes; one-winner compare-and-swap conflict semantics; and audit pages of
+  1 through 100 new records with at most one predecessor overlap. The port grants no authority and
+  performs no work by itself.
+- **Files:** `docs/decisions/0030-continuous-public-trade-stream-store-port-contract.md`,
+  `docs/decisions/README.md`, `src/wealth/ports/continuous_public_trade_stream_store.py`,
+  `tests/unit/test_continuous_public_trade_stream_store_port_contracts.py`, `README.md`,
   `docs/contracts/MARKET_DATA.md`, `docs/ROADMAP.md`, `PROJECT_STATE.json`, `BACKLOG.md`,
   `RISK_REGISTER.md`, and governance tests only.
-- **Constraints:** Pure records and codecs only. Do not add a port, repository, adapter, SQLite,
-  DDL, migration execution, physical schema, filesystem state, network/provider access, runtime
-  import, scheduler, trigger, daemon, service runner, CLI, configuration, deployment, operator
-  path/data, credential, permission, notification, automatic pause/resume/recovery/restart, or
-  operating-mode change. Do not reserve or spend request budget, create or advance a job/stream,
-  inspect evidence, infer authorization, or claim cross-database atomicity, physical durability,
-  capacity adequacy, continuous-operation readiness, multi-host exclusivity, recovery, or Phase 2
-  completion. Preserve ADR-0028, ADR-0029, TASK-059's unused status, TASK-037 authority,
-  canonical-UTC migration limits, and Stage 3.
+- **Constraints:** No adapter, repository implementation, SQLite/DDL/schema/index/migration,
+  physical path or configuration, filesystem/network/provider I/O, runtime composition/import,
+  scheduler/service/CLI/deployment, clock sampling, evidence-body access, outer fence/lease,
+  request-budget use, retry/automatic recovery, child or stream action, operator data, credential,
+  permission, notification, retention/compaction decision, capacity value, durability/recovery,
+  multi-host, readiness, or Phase 2 claim. Do not alter TASK-059 behavior or TASK-061 canonical
+  bytes. Preserve ADR-0027's full-range issue, ADR-0028, TASK-037 denial, and Stage 3.
 
 Acceptance gates:
 
-1. The new values are frozen, provider-independent, unused, and side-effect-free. Construction
-   and decoding reject booleans, polymorphic scalar subclasses, invalid fixed-UTC timestamps,
-   malformed digests/identifiers, inconsistent attachment ranges, and any identity or policy
-   mismatch without normalization or fallback.
-2. The companion child-creation record contains every deterministic pristine-child input needed
-   after reopen, including one explicit canonical `created_at`; its domain-separated digest is
-   computed from the exact canonical bytes. The stream and child policy fingerprints remain
-   distinct and are both bound explicitly.
-3. Record/model and serialization versions are explicit. Canonical output is compact,
-   key-sorted, duplicate-free UTF-8 JSON with no BOM or trailing newline and with deterministic
-   six-fractional-digit fixed-UTC and integer encoding. Embedded envelope bytes use even-length
-   lowercase hexadecimal only; exact decoded canonical bytes and all six domain-separated
-   digests round-trip unchanged.
-4. Decoding rejects an outer record over 65,536 bytes before UTF-8/JSON work. Canonical
-   `child_creation_payload` and decoded stream envelopes are capped at 8,192 and 16,384 bytes;
-   `successor_envelope_hex` is even lowercase ASCII capped at 32,768 characters. Other canonical
-   escaped JSON string tokens are capped at 8,192 lexical bytes. Each document permits at most 16
-   nesting levels, 128 total object members, fixed ASCII keys of at most 64 characters, and 19
-   decimal digits per integer token. These are parser-safety limits, not operational-capacity
-   evidence. Maximal valid current model values, including control and maximal astral identifiers
-   plus a maximal attached envelope, must fit without contract narrowing; exact-limit and
-   limit-plus-one fixtures are required for every byte bound. Raw decode/depth failures map to one
-   typed sanitized boundary, and unknown versions, duplicate keys, missing or extra keys, invalid
-   UTF-8/JSON, non-canonical bytes, unsupported numeric forms, and cross-record inconsistencies
-   fail before an accepted value is produced.
-5. The checkpoint envelope preserves ADR-0029's exact stream identity, policy identity, monotonic
-   version, exact epoch-millisecond cursor, optional immutable attachment, and complete creation
-   material only. A separate stream-creation record retains exact version-one envelope bytes, the
-   complete validated stream-policy projection including its caller-supplied fingerprint, and the
-   governed-create reference. Decode/load validation rejects any field-level policy disagreement
-   even when a caller reuses the same fingerprint. Each immutable transition record binds the
-   prior digest and rolling history root, exact canonical successor-envelope bytes and digest,
-   fixed-UTC command time, and typed bounded authority/completion references whose exact
-   kind-specific scope digest binds the transition. Every stream mutation requires exactly one
-   `STREAM_TRANSITION_AUTHORITY` reference; `CHILD_COMPLETED` additionally requires exactly one
-   `CHILD_COMPLETION` reference. Create scope additionally binds the complete stream-policy
-   projection; transition scope requires it to be null. To avoid a pre-time digest cycle, ATTACH
-   transition authority binds exact prior version, envelope digest, accepted history root,
-   successor version, candidate child UUID, and effective child-policy fingerprint while successor
-   digest and child-creation fingerprint are exactly null. The finalized transition/root binds the
-   resulting exact bytes; every other transition authority binds the exact prior history root and
-   successor digest, and child-completion scope binds that root plus the exact child ID, policy, and
-   creation fingerprints. Canonical reason scope is required for `RETAIN` and `MANUAL_HOLD`, equals
-   the held checkpoint reason for `MANUAL_HOLD`, and is null for every other transition. Creation
-   and chained-transition history
-   roots must reproduce exactly. Historical validity is evaluated at the recorded command time;
-   later expiry grants no new authority. Neither a pause reason nor completed child ID alone is
-   authority or proof.
-6. Golden-byte, exact-digest, round-trip, boundary, hostile, mutation, and property tests are
-   deterministic, offline, secret-free, and prove rejection without I/O. TASK-059 behavior and
-   every existing bounded-job contract remain unchanged. Full-range unattached TASK-059 epoch
-   milliseconds round-trip exactly, while an attachment whose exact child payload is outside the
-   existing bounded-child datetime range fails closed without silently tightening TASK-059. A
-   pure two-pass planner proof uses one identical fixed-UTC instant as planner `now`, child
-   `created_at`/`updated_at`, and transition `recorded_at`, starts only with a fixed in-memory
-   all-zero provisional fingerprint, recomputes with the real child-payload digest, and requires
-   exact non-fingerprint plan equality; the provisional value is never persisted or used for
-   action and is not claimed to be outside the real digest space. Tests also reject cross-domain
-   digest substitution, illegal ATTACH/non-ATTACH scope nullability or transplant, reason-scope
-   mismatch, evidence kind/outcome/scope mismatch, equal/reversed validity intervals, history-root
-   substitution, regressing record time, and an ATTACH child time unequal to its transition time.
-   The pure module carries recorded time but makes no trusted-clock or authority claim.
-7. The diff adds no port/repository/adapter, SQLite/DDL/migration execution/physical schema,
-   runtime or network path, dependency or lockfile, scheduler/service/deployment, operator data,
-   credential, permission, automatic action, capacity value, or readiness claim. TASK-037 remains
-   blocked and authorization remains denied.
+1. ADR-0030 records the narrow ADR-0029 port review and freezes only logical ownership, commands,
+   queries, results, retry classification, and exclusions; it selects no physical store.
+2. Every value is frozen, strict, bounded, provider-independent, and fail closed. Booleans,
+   polymorphic or coerced scalars, undeclared fields, incomplete identity/policy, malformed
+   digests, illegal limits, and cross-command disagreement are rejected without normalization.
+3. Create, current-load, compare-and-swap, and audit contracts preserve ADR-0029's exact
+   distinctions and consume TASK-061 values without reserializing or weakening their byte rules.
+   Absence is never inferred from corruption, unsupported versions, conflicts, or unavailability.
+4. Mutation contracts require exact prior version, envelope digest, accepted history root, one
+   explicit transition, and the applicable bounded evidence references. They neither sample time
+   nor let a caller bypass the trusted future mutation boundary with an alternate successor.
+5. Audit queries allow only 1 through 100 new records, an exact continuation/root anchor, and at
+   most one predecessor overlap. No method exposes an unbounded history read or replay.
+6. Deterministic pure fake/spy, hostile, mutation, and property tests cover every closed outcome,
+   exact retry versus conflict, stale compare-and-swap, policy reuse with field drift, bounded page
+   edges, model bypass attempts, and method signatures without filesystem, network, clock, or
+   database work.
+7. The module remains unused by runtime composition and adds no dependency, lockfile, physical
+   persistence, authority, automatic action, capacity, durability, recovery, or readiness claim.
+   TASK-037 remains blocked and authorization remains denied.
 8. Documentation, governance assertions, formatting, lint, strict typing, focused and complete
    tests, lockfile verification, dependency audit, health slice, and CI pass.
 
@@ -173,6 +123,48 @@ Acceptance gates:
    all repository gates pass.
 
 ## Recently Completed
+
+### TASK-061 — Pure versioned continuous public-trade persistence-record and canonical-codec contracts
+
+- **Key:** `phase2.continuous_public_trade_stream_persistence_codec_contracts`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Files:** `src/wealth/domain/continuous_public_trade_persistence.py`,
+  `tests/unit/test_continuous_public_trade_persistence_contracts.py`, `README.md`,
+  `docs/contracts/MARKET_DATA.md`, `docs/ROADMAP.md`, `PROJECT_STATE.json`, `BACKLOG.md`,
+  `RISK_REGISTER.md`, and governance tests only.
+- **Result:** One unused, provider-independent, side-effect-free domain module now freezes
+  ADR-0029's version-one stream-policy projection, complete pristine bounded-child creation
+  payload, exact checkpoint envelope, stream-creation record, typed evidence references and
+  scopes, and immutable transition record. Strict construction and public boundaries reject
+  coercion, booleans, polymorphic scalars, bypass-constructed hidden fields, malformed canonical
+  values, policy/identity drift, invalid attachment material, and cross-record disagreement.
+
+  Five canonical UTF-8 JSON codecs retain compact sorted keys, explicit nulls, exact lowercase
+  UUID/digest/hex values, fixed six-fractional-digit UTC timestamps, and exact integer tokens.
+  Typed sanitized decoding rejects malformed UTF-8/JSON, duplicate/missing/extra keys, unsupported
+  versions, noncanonical bytes, floats/exponents, and bounded parser abuse. The frozen caps are
+  65,536 raw record bytes, 8,192 child-payload bytes, 16,384 decoded envelope bytes, 32,768
+  successor-hex characters, 8,192 other string-token bytes, 16 object levels, 128 members,
+  64-byte ASCII keys, and 19 integer digits.
+
+  Six distinct SHA-256 domains bind child creation, stream envelopes, stream creation, transitions,
+  evidence scopes, and initial/chained rolling history roots. Pure validators bind complete
+  effective stream policy field by field even when a fingerprint is reused, immutable load
+  identity, attached child-policy identity, exact version-one creation bytes, transition scopes,
+  predecessor/successor envelopes, TASK-059 transition causality, non-regressing record time, and
+  history-root continuation. The two-pass finalizer plans with one in-memory all-zero provisional
+  fingerprint, builds the exact pristine child with one fixed UTC instant, replans with the real
+  payload digest, and requires exact non-fingerprint equality without persisting or acting on the
+  provisional value.
+
+  Deterministic golden, round-trip, hostile, boundary, mutation, property, and transition tests
+  remain offline and secret-free while preserving full-range unattached TASK-059 epoch
+  milliseconds and failing closed on unrepresentable attached child material. TASK-059 behavior
+  and every bounded-job contract remain unchanged. No port, repository, adapter, SQLite/DDL/schema,
+  migration, filesystem/network I/O, runtime import, dependency, operator data, authority,
+  automatic action, capacity, durability, recovery, multi-host, continuous-operation, deployment,
+  readiness, or Phase 2 claim was added. TASK-037 remains blocked and authorization remains denied.
 
 ### TASK-060 — Continuous public-trade stream persistence-contract decision
 
@@ -1105,9 +1097,12 @@ Acceptance gates:
 
 ## Queued, Not Yet Approved
 
-- Implement continuous public-trade collection only after TASK-058's design-only operating
-  contract is accepted and a separate production task with required evidence and approvals is
-  promoted.
+- Select or implement a physical continuous public-trade stream store only after TASK-062 freezes
+  and verifies the unused logical port/outcome boundary and a separate task resolves epoch
+  representation, schema/indexes, retention, migration, backup/restore, crash evidence, and
+  capacity with the required reviews and approvals.
+- Implement continuous public-trade runtime collection only through a separately promoted task
+  with the complete ADR-0028/0029 operational evidence and approvals.
 
 ## Backlog Rules
 

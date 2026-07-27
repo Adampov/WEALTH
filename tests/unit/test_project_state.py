@@ -113,27 +113,25 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert "continuous_public_trade_collection_operating_contract" in state.active_components
     assert "continuous_public_trade_closed_window_planner_contracts" in state.active_components
     assert "continuous_public_trade_stream_persistence_contract" in state.active_components
+    assert "continuous_public_trade_stream_persistence_codec_contracts" in state.active_components
     assert len(state.open_tasks) == 2
-    task_037, task_061 = state.open_tasks
+    task_037, task_062 = state.open_tasks
     assert task_037.task_id == "TASK-037"
     assert task_037.status == "blocked"
     assert task_037.risk_tier == 3
     assert task_037.requires_human_approval is True
-    assert task_061.task_id == "TASK-061"
-    assert task_061.action == "phase2.continuous_public_trade_stream_persistence_codec_contracts"
-    assert task_061.status == "ready"
-    assert task_061.risk_tier == 1
-    assert task_061.requires_human_approval is False
+    assert task_062.task_id == "TASK-062"
+    assert task_062.action == "phase2.continuous_public_trade_stream_store_port_contracts"
+    assert task_062.status == "ready"
+    assert task_062.risk_tier == 1
+    assert task_062.requires_human_approval is False
     assert state.blockers == (
         "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance "
         "location before independent Risk and Security review and the project-owner decision; "
         "authorization remains denied.",
     )
-    assert state.next_action.task_id == "TASK-061"
-    assert (
-        state.next_action.action
-        == "phase2.continuous_public_trade_stream_persistence_codec_contracts"
-    )
+    assert state.next_action.task_id == "TASK-062"
+    assert state.next_action.action == "phase2.continuous_public_trade_stream_store_port_contracts"
     assert any(decision.decision_id == "ADR-0029" for decision in state.recent_decisions)
 
 
@@ -252,8 +250,12 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_060_section = completed_section.split("### TASK-060 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
+    task_061_section = completed_section.split("### TASK-061 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
     next_action_prose = collapse_whitespace(next_action_section)
     task_060_prose = collapse_whitespace(task_060_section)
+    task_061_prose = collapse_whitespace(task_061_section)
     root_readme_prose = collapse_whitespace(root_readme)
     market_data_prose = collapse_whitespace(market_data_contract)
     risk_register_prose = collapse_whitespace(risk_register)
@@ -265,54 +267,38 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    assert "Pure versioned continuous public-trade persistence-record" in next_action_prose
-    assert "ADR-0029 defines a conceptual persistence boundary" in next_action_prose
-    assert "complete canonical child-creation material" in next_action_prose
-    assert "strict, versioned, side-effect-free persistence-record" in next_action_prose
-    assert "complete deterministic pristine-child creation payload" in next_action_prose
-    assert "explicit fixed-UTC `created_at`" in next_action_prose
-    assert "continuous and bounded-child policy fingerprints" in next_action_prose
-    assert "canonical UTF-8 JSON codecs" in next_action_prose
-    assert "six distinct domain-separated SHA-256 contracts" in next_action_prose
-    assert "evidence scope, and rolling history root" in next_action_prose
-    assert "Pure records and codecs only" in next_action_prose
-    assert "Do not add a port, repository, adapter, SQLite" in next_action_prose
-    assert "runtime import" in next_action_prose
-    assert "automatic pause/resume/recovery/restart" in next_action_prose
-    assert "Do not reserve or spend request budget" in next_action_prose
-    assert "claim cross-database atomicity, physical durability" in next_action_prose
-    assert "Preserve" in next_action_prose
+    assert "Pure continuous public-trade logical stream-store port" in next_action_prose
+    assert "TASK-061 now freezes ADR-0029's exact persistence records" in next_action_prose
+    assert "requires review before selecting a port" in next_action_prose
+    assert "before any physical technology decision" in next_action_prose
+    assert "side-effect-free, unused logical stream-store port" in next_action_prose
+    assert "create, exact-identity current load, versioned compare-and-swap" in next_action_prose
+    assert "effective stream policy" in next_action_prose
+    assert "attached child-policy fingerprint" in next_action_prose
+    assert "audit pages of 1 through 100 new records" in next_action_prose
+    assert "No adapter, repository implementation, SQLite/DDL/schema" in next_action_prose
+    assert "filesystem/network/provider I/O" in next_action_prose
+    assert "clock sampling" in next_action_prose
+    assert "request-budget use" in next_action_prose
+    assert "retention/compaction decision" in next_action_prose
+    assert "Do not alter TASK-059 behavior or TASK-061 canonical bytes" in next_action_prose
+    assert "ADR-0027" in next_action_prose
     assert "ADR-0028" in next_action_prose
-    assert "ADR-0029" in next_action_prose
-    assert "TASK-059's unused status" in next_action_prose
     assert "TASK-037" in next_action_prose
     assert "authorization remains denied" in next_action_prose
-    assert "rejects an outer record over 65,536 bytes before UTF-8/JSON work" in next_action_prose
-    assert "decoded stream envelopes are capped at 8,192 and 16,384 bytes" in next_action_prose
-    assert "`successor_envelope_hex` is even lowercase ASCII capped at 32,768" in next_action_prose
-    assert "Other canonical escaped JSON string tokens" in next_action_prose
-    assert "at most 16 nesting levels, 128 total object members" in next_action_prose
-    assert "control and maximal astral identifiers" in next_action_prose
-    assert "separate stream-creation record retains exact version-one envelope bytes" in (
-        next_action_prose
-    )
-    assert "complete validated stream-policy projection" in next_action_prose
-    assert "field-level policy disagreement" in next_action_prose
-    assert "prior digest and rolling history root" in next_action_prose
-    assert "Create scope additionally binds the complete stream-policy projection" in (
-        next_action_prose
-    )
-    assert "Every stream mutation requires exactly one" in next_action_prose
-    assert "`STREAM_TRANSITION_AUTHORITY` reference" in next_action_prose
-    assert "`CHILD_COMPLETED` additionally requires exactly one" in next_action_prose
-    assert "cross-domain digest substitution" in next_action_prose
-    assert "Canonical reason scope is required for `RETAIN` and `MANUAL_HOLD`" in next_action_prose
-    assert "Full-range unattached TASK-059 epoch milliseconds round-trip exactly" in (
-        next_action_prose
-    )
-    assert "pure two-pass planner proof" in next_action_prose
-    assert "one identical fixed-UTC instant as planner `now`" in next_action_prose
-    assert "pure module carries recorded time but makes no trusted-clock" in next_action_prose
+    assert "Absence is never inferred from corruption" in next_action_prose
+    assert "exact prior version, envelope digest, accepted history root" in next_action_prose
+    assert "No method exposes an unbounded history read" in next_action_prose
+    assert "module remains unused by runtime composition" in next_action_prose
+    assert "- **Status:** COMPLETE" in task_061_section
+    assert "`phase2.continuous_public_trade_stream_persistence_codec_contracts`" in task_061_section
+    assert "side-effect-free domain module" in task_061_prose
+    assert "Five canonical UTF-8 JSON codecs" in task_061_prose
+    assert "Six distinct SHA-256 domains" in task_061_prose
+    assert "field by field even when a fingerprint is reused" in task_061_prose
+    assert "two-pass finalizer" in task_061_prose
+    assert "full-range unattached TASK-059 epoch milliseconds" in task_061_prose
+    assert "No port, repository, adapter, SQLite/DDL/schema" in task_061_prose
     assert blocked_section.count("### TASK-") == 1
     assert "### TASK-037 " in blocked_section
     assert "- **Status:** BLOCKED" in blocked_section
@@ -1129,8 +1115,8 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "no privacy or" in market_data_contract
     assert "total-header-block guarantee" in market_data_contract
     assert "0029-continuous-public-trade-stream-persistence-contract.md" in decision_index
-    assert (
-        "## Continuous Public-Trade Stream Persistence Contract (Design Only)" in root_readme_prose
+    assert "## Continuous Public-Trade Persistence Records and Codecs (Unused)" in (
+        root_readme_prose
     )
     assert "TASK-059 attachment's `creation_fingerprint` is non-invertible" in root_readme_prose
     assert "canonical `child_creation_payload`" in root_readme_prose
@@ -1143,7 +1129,9 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     )
     assert "complete canonical stream-policy projection" in root_readme_prose
     assert "domain-separated rolling history root" in root_readme_prose
-    assert "Six distinct digest contracts cover child creation" in root_readme_prose
+    assert "Six distinct domain-separated contracts cover the child-creation fingerprint" in (
+        root_readme_prose
+    )
     assert "current load/planning alone grants no action" in root_readme_prose
     assert "ATTACH authority is intentionally time-independent" in root_readme_prose
     assert "accepted history root, successor version, candidate" in root_readme_prose
@@ -1155,12 +1143,16 @@ def test_project_state_references_existing_governance_artifacts() -> None:
         root_readme_prose
     )
     assert "Compare-and-swap is not the outer UUID fence" in root_readme_prose
-    assert "TASK-061 is" in root_readme_prose
-    assert "pure, unused persistence-record and canonical-codec contract increment" in (
+    assert "TASK-061 is implemented only as that unused pure domain increment" in (
         root_readme_prose
     )
-    assert (
-        "## Continuous Public-Trade Stream Persistence Contract (Design Only)" in market_data_prose
+    assert "Deterministic golden-byte, hostile-input, transition-matrix" in root_readme_prose
+    assert "The next safe bounded direction is TASK-062" in root_readme_prose
+    assert "pure, unused logical stream-store port, command, and outcome contracts" in (
+        root_readme_prose
+    )
+    assert "## Continuous Public-Trade Persistence Records and Codecs (Unused)" in (
+        market_data_prose
     )
     assert "creation fingerprint is not reversible" in market_data_prose
     assert "companion canonical `child_creation_payload`" in market_data_prose
@@ -1171,7 +1163,9 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "exact canonical successor-envelope bytes/digest" in market_data_prose
     assert "complete canonical projection of every stream-policy field" in market_data_prose
     assert "prior domain-separated rolling history root" in market_data_prose
-    assert "Six distinct digest contracts cover child creation" in market_data_prose
+    assert "Six distinct domain-separated contracts cover the child-creation fingerprint" in (
+        market_data_prose
+    )
     assert "current load and planning alone grant no action" in market_data_prose
     assert "ATTACH transition authority binds exact prior version" in market_data_prose
     assert "accepted history root, successor version, candidate child UUID" in market_data_prose
@@ -1179,7 +1173,11 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "Canonical reason scope is required for `RETAIN` and `MANUAL_HOLD`" in market_data_prose
     assert "pure two-pass proof" in market_data_prose
     assert "trusted instant is the planner's `now`" in market_data_prose
-    assert "TASK-061 is a separate pure, unused persistence-record" in market_data_prose
+    assert "TASK-061 is complete only as the unused pure domain increment" in market_data_prose
+    assert "TASK-062 is the next safe bounded direction" in market_data_prose
+    assert "pure, unused logical stream-store port, command, and outcome contracts" in (
+        market_data_prose
+    )
     assert "# ADR 0029: Continuous Public-Trade Stream Persistence Contract" in adr_0029
     assert "- **Status:** Accepted" in adr_0029
     assert "### Exact durable TASK-059 stream state" in adr_0029
@@ -1324,7 +1322,12 @@ def test_project_state_references_existing_governance_artifacts() -> None:
         risk_register_prose
     )
     assert "a fingerprint alone is not reconstructable" in risk_register_prose
-    assert "TASK-061 may add only pure unused persistence-record" in risk_register_prose
+    assert "TASK-061 now implements only an unused persistence-record" in risk_register_prose
+    assert "five canonical JSON codecs" in risk_register_prose
+    assert "six domain-separated digest/history contracts" in risk_register_prose
+    assert "TASK-062 is the next proposed pure unused logical stream-store port" in (
+        risk_register_prose
+    )
     assert "A pause reason alone is not authorization" in risk_register_prose
     assert "stream attachment and compare-and-swap grant no capacity" in risk_register_prose
     assert "complete immutable stream-policy projection in creation evidence" in (
@@ -1386,8 +1389,12 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "complete stream-policy projection for field-level drift checks" in roadmap_prose
     assert "ATTACH authority binds exact prior version/digest/history root" in roadmap_prose
     assert "explicit non-integrity classification" in roadmap_prose
-    assert "TASK-061 is therefore the next bounded RISK-1 increment" in roadmap_prose
-    assert "pure, unused versioned persistence-record" in roadmap_prose
+    assert "TASK-061 is complete as one pure, unused RISK-1 domain increment" in roadmap_prose
+    assert "strict version-one child-creation payload, stream-envelope, stream-creation" in (
+        roadmap_prose
+    )
+    assert "TASK-062 is the next safe bounded direction" in roadmap_prose
+    assert "unused logical stream-store port, command, and outcome contracts" in roadmap_prose
     assert "The canonical next action is TASK-037" not in roadmap
 
 
