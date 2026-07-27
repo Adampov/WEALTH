@@ -6,44 +6,42 @@ promoted through review.
 
 ## Next Action
 
-### TASK-043 — Typed public-HTTP error-body read-failure mapping
+### TASK-044 — Typed public-HTTP incomplete-body read-failure mapping
 
-- **Key:** `phase2.typed_public_http_error_response_read_failure_mapping`
+- **Key:** `phase2.typed_public_http_incomplete_body_read_failure_mapping`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
 - **Human approval:** NOT REQUIRED — bounded fail-closed development hardening under the owner's
   explicit authorization; no permission, deployment, or operator-data change.
-- **Context:** `UrllibPublicHttpClient.get` catches an initial `HTTPError`, then reads its body
-  inside that exception handler. A `URLError`, `TimeoutError`, or `OSError` raised by
-  `HTTPError.read` escapes raw because sibling `except` clauses do not catch failures raised from
-  inside an earlier handler.
-- **Goal:** Convert every supported HTTP-error-body read failure into one sanitized typed transport
-  failure without a retry, second read, or partial response.
-- **Scope:** Add a narrow read-failure boundary inside the existing `HTTPError` handler and
-  deterministic tests for each supported transport exception. Preserve the original exception as
-  the cause, the exact-limit and oversize paths, and existing success-body failure mapping.
+- **Context:** `http.client.IncompleteRead` is not an `OSError`, so an incomplete successful or
+  HTTP-error body can escape the shared transport as a raw standard-library exception carrying
+  partial provider bytes and an expected-byte count.
+- **Goal:** Convert incomplete response-body reads on both shared transport paths into one
+  sanitized typed failure without accepting or returning partial bytes.
+- **Scope:** Map only `IncompleteRead` from successful and HTTP-error response-body reads, preserve
+  the original exception as the direct cause, and add deterministic path-symmetric tests.
 - **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
   `docs/contracts/MARKET_DATA.md`, plus coordinated governance files and governance tests.
 - **Constraints:** Do not change response-size limits, timeout behavior, endpoints, queries,
-  headers, retries, number of reads, successful or complete HTTP-error bodies, provider parsing,
-  canonicalization, quality, storage, schemas, dependencies, runtime wiring, operator paths,
-  TASK-037 authority, migration, or Stage 3. Do not expose provider exception text.
+  headers, retries, number of reads, complete bodies, any other exception mapping, response
+  resource closure, provider parsing, canonicalization, quality, storage, schemas, dependencies,
+  runtime wiring, operator paths, TASK-037 authority, migration, or Stage 3. Do not expose partial
+  provider bytes or exception text.
 
 Acceptance gates:
 
-1. `HTTPError.read` raising `URLError`, `TimeoutError`, or `OSError` becomes
-   `HttpTransportError("public HTTP GET failed")`; the original exception is the
-   direct cause and its untrusted detail is absent from the public message.
-2. Each failing body is read exactly once with `max_response_bytes + 1`; no retry, second read,
-   body, status, headers, or partial `HttpResponse` is returned.
-3. A success-response body raising `OSError` retains the existing
-   `HttpTransportError("public HTTP GET failed")` mapping and direct cause.
-4. Complete HTTP-error bodies at the exact limit still return their status, headers, and bytes;
-   one-byte-oversize success and HTTP-error bodies retain their existing typed failures.
-5. Response limits, finite-positive timeouts, endpoints, queries, headers, provider behavior, and
-   all other transport mappings remain unchanged. Formatting, lint, strict typing, complete tests,
-   lockfile verification, dependency audit, health slice, and CI pass.
+1. A successful-response or `HTTPError` body read raising a real `IncompleteRead` becomes
+   `HttpTransportError("public HTTP GET failed")`; the original exception is the direct cause.
+2. Partial provider bytes, the expected-byte count, and untrusted exception text are absent from
+   the public message, and no partial body, status, headers, or `HttpResponse` is returned.
+3. Each failing body is read exactly once with `max_response_bytes + 1`; `urlopen` is called once
+   and no retry or second read occurs.
+4. TASK-043 mappings for `URLError`, `TimeoutError`, and `OSError`, complete bodies at the exact
+   limit, and one-byte-oversize success and HTTP-error failures remain unchanged.
+5. Response limits, finite-positive timeouts, endpoints, queries, headers, provider behavior,
+   resource closure, and all other transport mappings remain unchanged. Formatting, lint, strict
+   typing, complete tests, lockfile verification, dependency audit, health slice, and CI pass.
 6. TASK-037 remains blocked and authorization remains denied; no operator data, path, database,
    scanner, report, migration, or Stage 3 action occurs.
 
@@ -100,6 +98,25 @@ Acceptance gates:
    all repository gates pass.
 
 ## Recently Completed
+
+### TASK-043 — Typed public-HTTP error-body read-failure mapping
+
+- **Key:** `phase2.typed_public_http_error_response_read_failure_mapping`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
+  `docs/contracts/MARKET_DATA.md`, and the coordinated governance files and governance tests.
+- **Result:** The shared transport now converts `URLError`, `TimeoutError`, and `OSError` raised
+  while reading an `HTTPError` body into the exact sanitized
+  `HttpTransportError("public HTTP GET failed")`, with the read failure as the direct cause.
+  Deterministic tests prove one `cap + 1` body read and one `urlopen` call, absence of untrusted
+  detail from the public message, and no retry or partial response. A symmetric successful-body
+  `OSError` regression test preserves the existing mapping, while the exact-limit and
+  one-byte-oversize success and HTTP-error paths remain covered. `IncompleteRead`, which is not an
+  `OSError`, remains outside this task and is the separately bounded next action. Response limits,
+  timeouts, endpoints, queries, headers, retries, provider behavior, resource closure, parsing,
+  quality, storage, schemas, dependencies, runtime wiring, operator authority, migration, and
+  Stage 3 remain unchanged.
 
 ### TASK-042 — Strict bounded public-HTTP response-byte-limit validation
 

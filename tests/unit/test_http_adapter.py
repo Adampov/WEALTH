@@ -4,7 +4,7 @@ from email.message import Message
 from io import BytesIO
 from types import TracebackType
 from typing import Self
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
 import pytest
@@ -78,6 +78,30 @@ class RecordingBytesIO(BytesIO):
     def read(self, size: int | None = -1) -> bytes:
         self.read_limits.append(size)
         return super().read(size)
+
+
+class RaisingBytesIO(RecordingBytesIO):
+    """Raise one configured transport failure while recording the read."""
+
+    def __init__(self, error: OSError) -> None:
+        super().__init__(b"partial-provider-detail")
+        self.error = error
+
+    def read(self, size: int | None = -1) -> bytes:
+        self.read_limits.append(size)
+        raise self.error
+
+
+class RaisingUrlResponse(StubUrlResponse):
+    """Raise one configured transport failure from a successful response read."""
+
+    def __init__(self, error: OSError) -> None:
+        super().__init__()
+        self.error = error
+
+    def read(self, limit: int) -> bytes:
+        self.read_limits.append(limit)
+        raise self.error
 
 
 def http_error(reader: RecordingBytesIO) -> HTTPError:
@@ -229,6 +253,71 @@ def test_http_error_response_one_byte_over_limit_is_typed_failure(
     assert str(error.value) == "public HTTP error response exceeded the configured limit"
     assert error.value.__cause__ is provider_error
     assert reader.read_limits == [4]
+
+
+@pytest.mark.parametrize(
+    "read_failure",
+    [
+        pytest.param(URLError("provider-url-detail"), id="url-error"),
+        pytest.param(TimeoutError("provider-timeout-detail"), id="timeout-error"),
+        pytest.param(OSError("provider-os-detail"), id="os-error"),
+    ],
+)
+def test_http_error_body_read_failure_is_sanitized_typed_transport_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    read_failure: OSError,
+) -> None:
+    reader = RaisingBytesIO(read_failure)
+    provider_error = http_error(reader)
+    urlopen_calls: list[Request] = []
+
+    def raise_http_error(request: Request, *, timeout: float) -> StubUrlResponse:
+        del timeout
+        urlopen_calls.append(request)
+        raise provider_error
+
+    monkeypatch.setattr(http_adapter, "urlopen", raise_http_error)
+
+    with pytest.raises(HttpTransportError) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert str(error.value) == "public HTTP GET failed"
+    assert error.value.__cause__ is read_failure
+    assert str(read_failure) not in str(error.value)
+    assert reader.read_limits == [4]
+    assert len(urlopen_calls) == 1
+
+
+def test_success_response_body_os_error_retains_typed_transport_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    read_failure = OSError("provider-success-body-detail")
+    response = RaisingUrlResponse(read_failure)
+    urlopen_calls: list[Request] = []
+
+    def stub_urlopen(request: Request, *, timeout: float) -> StubUrlResponse:
+        del timeout
+        urlopen_calls.append(request)
+        return response
+
+    monkeypatch.setattr(http_adapter, "urlopen", stub_urlopen)
+
+    with pytest.raises(HttpTransportError) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert str(error.value) == "public HTTP GET failed"
+    assert error.value.__cause__ is read_failure
+    assert str(read_failure) not in str(error.value)
+    assert response.read_limits == [4]
+    assert len(urlopen_calls) == 1
 
 
 @pytest.mark.parametrize("timeout_seconds", INVALID_TIMEOUTS)

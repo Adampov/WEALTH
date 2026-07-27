@@ -60,7 +60,10 @@ class UrllibPublicHttpClient:
                     body=body,
                 )
         except HTTPError as error:
-            body = error.read(self.max_response_bytes + 1)
+            try:
+                body = error.read(self.max_response_bytes + 1)
+            except (URLError, TimeoutError, OSError) as read_error:
+                raise HttpTransportError("public HTTP GET failed") from read_error
             if len(body) > self.max_response_bytes:
                 raise HttpTransportError(
                     "public HTTP error response exceeded the configured limit"

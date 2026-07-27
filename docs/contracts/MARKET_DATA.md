@@ -24,6 +24,12 @@ exactly one byte beyond the configured limit and fail explicitly when that senti
 body is oversized; no truncated body is returned as evidence. Valid smaller limits and the
 2,000,000-byte default and maximum remain exact configuration values.
 
+If reading an HTTP-error response body raises `URLError`, `TimeoutError`, or `OSError`, the shared
+transport returns no partial response and raises the same sanitized typed transport failure used
+for supported successful-body read failures. The body is attempted once with the configured
+one-byte sentinel, no retry is added, the read failure remains the direct cause, and its untrusted
+detail is absent from the public message.
+
 ## Canonical Order-Flow Foundation
 
 `CanonicalTrade`, `CanonicalTicker`, and `CanonicalBestBidAsk` establish the provider-independent
