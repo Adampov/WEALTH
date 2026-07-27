@@ -86,8 +86,8 @@ def test_template_exists_but_backlog_keeps_task_037_blocked_and_unapproved() -> 
         == EXPECTED_NORMALIZED_BLOCKED_TASK_SECTION_SHA256
     )
     assert project_state["next_action"] == {
-        "task_id": "TASK-054",
-        "action": "phase2.fail_closed_public_http_maximum_timeout_policy",
+        "task_id": "TASK-055",
+        "action": "phase2.fail_closed_public_http_bounded_response_header_projection",
     }
     assert project_state["open_tasks"] == [
         {
@@ -100,8 +100,8 @@ def test_template_exists_but_backlog_keeps_task_037_blocked_and_unapproved() -> 
             "requires_human_approval": True,
         },
         {
-            "task_id": "TASK-054",
-            "action": "phase2.fail_closed_public_http_maximum_timeout_policy",
+            "task_id": "TASK-055",
+            "action": "phase2.fail_closed_public_http_bounded_response_header_projection",
             "status": "ready",
             "risk_tier": 1,
             "requires_human_approval": False,

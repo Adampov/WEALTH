@@ -19,7 +19,12 @@ from wealth.domain.market import (
     RawMarketPayload,
 )
 from wealth.ports.foundation import Clock, ClockContractError, require_utc_clock
-from wealth.ports.http import HttpResponse, HttpTransportError, PublicHttpClient
+from wealth.ports.http import (
+    MAX_PUBLIC_HTTP_TIMEOUT_SECONDS,
+    HttpResponse,
+    HttpTransportError,
+    PublicHttpClient,
+)
 from wealth.ports.market import (
     CandleFetchBatch,
     HistoricalCandleRequest,
@@ -118,6 +123,8 @@ class CoinbasePublicCandleSource:
             not isinstance(self.timeout_seconds, int) and not isfinite(self.timeout_seconds)
         ):
             raise ValueError("timeout_seconds must be finite and positive")
+        if self.timeout_seconds > MAX_PUBLIC_HTTP_TIMEOUT_SECONDS:
+            raise ValueError("timeout_seconds must be at most 120")
         if not self.products_url.startswith("https://"):
             raise ValueError("Coinbase public endpoint must use HTTPS")
 

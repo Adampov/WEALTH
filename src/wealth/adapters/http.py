@@ -17,7 +17,11 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from wealth.ports.http import HttpResponse, HttpTransportError
+from wealth.ports.http import (
+    MAX_PUBLIC_HTTP_TIMEOUT_SECONDS,
+    HttpResponse,
+    HttpTransportError,
+)
 
 MAX_PUBLIC_HTTP_RESPONSE_BYTES = 2_000_000
 _MAX_INITIAL_URL_CHARACTERS = 8_192
@@ -169,6 +173,8 @@ class UrllibPublicHttpClient:
             not isinstance(timeout_seconds, int) and not isfinite(timeout_seconds)
         ):
             raise ValueError("timeout_seconds must be finite and positive")
+        if timeout_seconds > MAX_PUBLIC_HTTP_TIMEOUT_SECONDS:
+            raise ValueError("timeout_seconds must be at most 120")
         _validate_initial_url(url)
         query_snapshot = _snapshot_query(query)
         query_string = urlencode(sorted(query_snapshot))

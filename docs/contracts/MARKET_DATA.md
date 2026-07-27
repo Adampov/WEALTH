@@ -13,11 +13,15 @@ It does not define a trading strategy and does not connect to an exchange.
 Coinbase candle, and Binance aggregate-trade sources enforce the same rule when configured.
 `NaN`, positive or negative infinity, zero, and negative values fail with one explicit error before
 URL/request construction or provider HTTP work. Finite positive integer and fractional values are
-forwarded unchanged. No boundary coerces an invalid value, substitutes a fallback, or adds a retry;
-the timeout retains the standard transport semantics rather than claiming a total wall-clock
-deadline. Finite positive timeouts currently have no configured upper bound. TASK-054 governs one
-shared 120-second maximum at the transport and all three provider construction boundaries without
-adding an exact numeric-type policy or changing retries, waits, pacing, or rate budgets.
+accepted only through one shared maximum of 120 seconds. A larger finite-positive value fails with
+exact `ValueError("timeout_seconds must be at most 120")` at the transport and every active
+provider construction boundary before request or provider work. Exact integer and float 120 and
+smaller accepted objects are forwarded unchanged; a float subclass at exactly 120 also retains its
+identity because no exact numeric-type policy was added. All active defaults remain 10.0 seconds.
+No boundary coerces an invalid value, substitutes a fallback, or adds a retry. The timeout retains
+standard transport semantics rather than claiming a total wall-clock deadline; the maximum does
+not separately bound DNS, multiple operations, or caller/provider work and changes no retries,
+waits, pacing, or rate budgets.
 
 The shared transport also accepts only a built-in integer response limit from 1 through 2,000,000
 bytes. Booleans, integer subclasses, floats, non-finite values, non-positive values, and larger
@@ -25,6 +29,14 @@ integers fail during client construction. Both successful and HTTP-error respons
 exactly one byte beyond the configured limit and fail explicitly when that sentinel proves the
 body is oversized; no truncated body is returned as evidence. Valid smaller limits and the
 2,000,000-byte default and maximum remain exact configuration values.
+
+After either bounded body path, the shared client currently projects every pair returned by
+`headers.items()` into `HttpResponse.headers` without its own pair-count or cumulative-character
+limit. TASK-055 governs an application-level snapshot of at most 100 pairs and 65,536 cumulative
+name-plus-value Python characters on both successful and `HTTPError` responses. That task preserves
+order, duplicates, casing, content, body-first precedence, and cleanup rules. It is a projection
+bound only: standard-library parsing and prior allocations occur before this boundary, so it makes
+no wire-header, parser, total-response-memory, privacy, or redaction guarantee.
 
 If reading an HTTP-error response body raises `URLError`, `TimeoutError`, or `OSError`, the shared
 transport returns no partial response and raises the same sanitized typed transport failure used

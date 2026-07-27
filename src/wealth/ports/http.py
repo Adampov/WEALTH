@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
+MAX_PUBLIC_HTTP_TIMEOUT_SECONDS = 120.0
+
 
 class HttpTransportError(RuntimeError):
     """Report a network failure without exposing provider content."""

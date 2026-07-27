@@ -6,10 +6,12 @@ from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 from hashlib import sha256
+from math import nextafter
 
 import pytest
 from pydantic import ValidationError
 
+from wealth.adapters import binance_order_flow as binance_order_flow_adapter
 from wealth.adapters.binance_order_flow import (
     BINANCE_SPOT_AGG_TRADES_URL,
     BINANCE_USDM_AGG_TRADES_URL,
@@ -21,8 +23,17 @@ from wealth.adapters.binance_order_flow import (
 from wealth.domain.market import InstrumentType
 from wealth.domain.order_flow import AggressorSide, CanonicalTrade, TradeAggregationKind
 from wealth.domain.order_flow_quality import ProviderSequencePolicy
-from wealth.ports.http import HttpResponse, HttpTransportError
+from wealth.ports.http import (
+    MAX_PUBLIC_HTTP_TIMEOUT_SECONDS,
+    HttpResponse,
+    HttpTransportError,
+)
 from wealth.ports.order_flow import PublicTradeWindowRequest
+
+
+class FloatTimeoutSubclass(float):
+    """Represent an accepted timeout without an exact runtime-type policy."""
+
 
 WINDOW_START = datetime(2026, 7, 24, 12, 0, tzinfo=UTC)
 WINDOW_END = WINDOW_START + timedelta(minutes=1)
@@ -50,6 +61,21 @@ INVALID_TIMEOUTS = (
     pytest.param(float("-inf"), id="negative-infinity"),
     pytest.param(0.0, id="zero"),
     pytest.param(-0.25, id="negative"),
+)
+TIMEOUTS_ABOVE_MAXIMUM = (
+    pytest.param(nextafter(120.0, float("inf")), id="next-float-above-maximum"),
+    pytest.param(120.0001, id="fraction-above-maximum"),
+    pytest.param(sys.float_info.max, id="maximum-float"),
+    pytest.param(10**1_000, id="huge-integer"),
+)
+ACCEPTED_TIMEOUTS = (
+    pytest.param(1, id="integer"),
+    pytest.param(10.0, id="default-float"),
+    pytest.param(0.25, id="fractional"),
+    pytest.param(nextafter(120.0, 0.0), id="next-float-below-maximum"),
+    pytest.param(120, id="maximum-integer"),
+    pytest.param(120.0, id="maximum-float"),
+    pytest.param(FloatTimeoutSubclass(120.0), id="maximum-float-subclass"),
 )
 
 
@@ -195,22 +221,72 @@ def test_invalid_timeout_is_rejected_before_http(
     with pytest.raises(ValueError) as error:
         BinancePublicAggregateTradeSource(
             http=http,
-            clock=SequenceClock(REQUEST_TIME),
+            clock=SequenceClock(),
             timeout_seconds=timeout_seconds,
+            spot_agg_trades_url="http://must-not-be-validated.test",
+            usdm_agg_trades_url="http://must-not-be-validated.test",
         )
 
     assert str(error.value) == "timeout_seconds must be finite and positive"
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
     assert http.calls == []
 
 
-@pytest.mark.parametrize(
-    "timeout_seconds",
-    [
-        pytest.param(1, id="integer"),
-        pytest.param(10**1_000, id="large-integer"),
-        pytest.param(0.25, id="fractional"),
-    ],
-)
+def test_timeout_policy_uses_shared_exact_maximum_and_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = BinancePublicAggregateTradeSource(
+        http=StubHttpClient(response([])),
+        clock=SequenceClock(),
+    )
+
+    assert type(MAX_PUBLIC_HTTP_TIMEOUT_SECONDS) is float
+    assert MAX_PUBLIC_HTTP_TIMEOUT_SECONDS == 120.0
+    assert (
+        binance_order_flow_adapter.__dict__["MAX_PUBLIC_HTTP_TIMEOUT_SECONDS"]
+        is MAX_PUBLIC_HTTP_TIMEOUT_SECONDS
+    )
+    assert type(adapter.timeout_seconds) is float
+    assert adapter.timeout_seconds == 10.0
+
+    monkeypatch.setattr(
+        binance_order_flow_adapter,
+        "MAX_PUBLIC_HTTP_TIMEOUT_SECONDS",
+        nextafter(120.0, 0.0),
+    )
+    with pytest.raises(ValueError) as error:
+        BinancePublicAggregateTradeSource(
+            http=StubHttpClient(response([])),
+            clock=SequenceClock(),
+            timeout_seconds=120.0,
+        )
+
+    assert str(error.value) == "timeout_seconds must be at most 120"
+
+
+@pytest.mark.parametrize("timeout_seconds", TIMEOUTS_ABOVE_MAXIMUM)
+def test_timeout_above_maximum_is_rejected_before_provider_work(
+    timeout_seconds: float,
+) -> None:
+    http = StubHttpClient(response([]))
+
+    with pytest.raises(ValueError) as error:
+        BinancePublicAggregateTradeSource(
+            http=http,
+            clock=SequenceClock(),
+            timeout_seconds=timeout_seconds,
+            spot_agg_trades_url="http://must-not-be-validated.test",
+            usdm_agg_trades_url="http://must-not-be-validated.test",
+        )
+
+    assert str(error.value) == "timeout_seconds must be at most 120"
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
+    assert http.calls == []
+
+
+@pytest.mark.parametrize("timeout_seconds", ACCEPTED_TIMEOUTS)
 def test_finite_positive_timeout_is_forwarded_unchanged(
     timeout_seconds: float,
 ) -> None:
@@ -225,6 +301,36 @@ def test_finite_positive_timeout_is_forwarded_unchanged(
 
     assert len(http.calls) == 1
     assert http.calls[0][2] == timeout_seconds
+    assert http.calls[0][2] is timeout_seconds
+
+
+@pytest.mark.parametrize(
+    ("instrument_type", "expected_url"),
+    [
+        pytest.param(InstrumentType.SPOT, BINANCE_SPOT_AGG_TRADES_URL, id="spot"),
+        pytest.param(
+            InstrumentType.PERPETUAL_FUTURE,
+            BINANCE_USDM_AGG_TRADES_URL,
+            id="usdm",
+        ),
+    ],
+)
+def test_maximum_timeout_is_forwarded_on_each_active_provider_path(
+    instrument_type: InstrumentType,
+    expected_url: str,
+) -> None:
+    timeout_seconds = float("120.0")
+    http = StubHttpClient(response([]))
+    adapter = BinancePublicAggregateTradeSource(
+        http=http,
+        clock=SequenceClock(REQUEST_TIME, OBSERVED_AT, PROCESSED_AT),
+        timeout_seconds=timeout_seconds,
+    )
+
+    adapter.fetch(request(instrument_type=instrument_type))
+
+    assert len(http.calls) == 1
+    assert http.calls[0][0] == expected_url
     assert http.calls[0][2] is timeout_seconds
 
 
