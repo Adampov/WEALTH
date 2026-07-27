@@ -77,12 +77,22 @@ network access, or filesystem access. An accepted target retains its exact text 
 separately supplied sorted query is appended once, and GET, `Accept`, `User-Agent`, and timeout
 behavior remain unchanged.
 
-This boundary is structural, not a hostname or SSRF policy. It still permits localhost, IPv4,
-IPv6, CPython-parser-accepted IPvFuture and DNS-label forms, Unicode and trailing-dot hostnames,
-and every syntactically valid explicit port from 1 through 65,535. It performs no DNS resolution,
-IP/public-routability check, hostname or port allowlist, or SSRF guarantee; standard TLS and proxy
-behavior remain unchanged. TASK-050 governs an omitted-or-numeric-443 caller target-port policy
-only and does not constrain a configured proxy peer.
+After that structural validation and still before any query-mapping operation, the caller target
+port must be omitted or parse as numeric 443. A structurally valid explicit nonstandard port fails
+with exact `ValueError("url must use the standard HTTPS target port")`, with no direct cause or
+hidden context and without query access, serialization, request construction, opener or handler
+work, DNS lookup, network access, or filesystem access. Malformed, percent-encoded, empty,
+non-numeric, signed, Unicode-digit, zero, and greater-than-65,535 ports retain the earlier exact
+structural error and precedence. An accepted implicit, explicit, or zero-padded 443 target retains
+its exact original text before the separately supplied sorted query is appended.
+
+These initial-target controls are structural and caller-authority policies, not hostname or SSRF
+policies. They still permit localhost, IPv4, IPv6, CPython-parser-accepted IPvFuture and DNS-label
+forms, Unicode hostnames, and trailing-dot hostnames. They perform no DNS resolution,
+IP/public-routability check, provider or hostname allowlist, or SSRF guarantee. A configured proxy
+peer may use a non-443 port, and standard TLS and proxy behavior remains unchanged. Query
+serialization is not yet bounded in item count or string volume; TASK-051 governs that residual
+adapter-controlled finite-work risk without adding hostname, DNS, IP, or SSRF policy.
 
 Every `HTTPError` path makes one explicit cleanup attempt after at most one bounded body read.
 When cleanup succeeds, the error-response resource is closed before a response or primary failure

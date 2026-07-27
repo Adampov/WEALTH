@@ -30,6 +30,12 @@ from urllib.response import addinfourl
 import pytest
 
 from wealth.adapters import http as http_adapter
+from wealth.adapters.binance import BINANCE_SPOT_KLINES_URL, BINANCE_USDM_KLINES_URL
+from wealth.adapters.binance_order_flow import (
+    BINANCE_SPOT_AGG_TRADES_URL,
+    BINANCE_USDM_AGG_TRADES_URL,
+)
+from wealth.adapters.coinbase import COINBASE_PRODUCTS_URL
 from wealth.adapters.http import (
     MAX_PUBLIC_HTTP_RESPONSE_BYTES,
     UrllibPublicHttpClient,
@@ -68,6 +74,51 @@ UNMAPPED_HTTP_EXCEPTION_TYPES = (
 REDIRECT_STATUS_CODES = (301, 302, 303, 307, 308)
 INVALID_INITIAL_URL_MESSAGE = (
     "url must be an absolute credential-free HTTPS endpoint without query or fragment"
+)
+INVALID_TARGET_PORT_MESSAGE = "url must use the standard HTTPS target port"
+NONSTANDARD_TARGET_PORT_URLS = (
+    pytest.param("https://example.test:1/public", id="minimum"),
+    pytest.param("https://example.test:80/public", id="http-default"),
+    pytest.param("https://example.test:442/public", id="below-standard-https"),
+    pytest.param("https://example.test:444/public", id="above-standard-https"),
+    pytest.param("https://example.test:8443/public", id="alternate-https"),
+    pytest.param("https://example.test:65535/public", id="maximum"),
+    pytest.param("https://example.test:00080/public", id="zero-padded-nonstandard"),
+    pytest.param("https://[2001:db8::1]:444/public", id="ipv6-nonstandard"),
+    pytest.param("https://[v1.example]:444/public", id="ipvfuture-nonstandard"),
+)
+MIXED_STRUCTURAL_AND_NONSTANDARD_PORT_URLS = (
+    pytest.param("http://example.test:444/public", id="non-https"),
+    pytest.param("https://user@example.test:444/public", id="userinfo"),
+    pytest.param("https://example.test%3A444/public", id="encoded-authority"),
+    pytest.param("https://example.test:444/public?query", id="pre-existing-query"),
+)
+ACTIVE_PROVIDER_DEFAULT_URLS = (
+    pytest.param(
+        BINANCE_SPOT_KLINES_URL,
+        "https://data-api.binance.vision/api/v3/klines",
+        id="binance-spot-candles",
+    ),
+    pytest.param(
+        BINANCE_USDM_KLINES_URL,
+        "https://fapi.binance.com/fapi/v1/klines",
+        id="binance-usdm-candles",
+    ),
+    pytest.param(
+        COINBASE_PRODUCTS_URL,
+        "https://api.exchange.coinbase.com/products",
+        id="coinbase-spot-candles",
+    ),
+    pytest.param(
+        BINANCE_SPOT_AGG_TRADES_URL,
+        "https://data-api.binance.vision/api/v3/aggTrades",
+        id="binance-spot-aggregate-trades",
+    ),
+    pytest.param(
+        BINANCE_USDM_AGG_TRADES_URL,
+        "https://fapi.binance.com/fapi/v1/aggTrades",
+        id="binance-usdm-aggregate-trades",
+    ),
 )
 UNICODE_WHITESPACE_CODE_POINTS = (
     0x0085,
@@ -170,10 +221,10 @@ VALID_INITIAL_URLS = (
     pytest.param("https://example.test/", id="root-path"),
     pytest.param("https://example.test/public", id="ordinary-path"),
     pytest.param("HTTPS://Example.TEST/Mixed", id="mixed-case-scheme-and-host"),
-    pytest.param("https://example.test:1/public", id="minimum-port"),
     pytest.param("https://example.test:443/public", id="default-explicit-port"),
-    pytest.param("https://example.test:65535/public", id="maximum-port"),
-    pytest.param("https://example.test:00001/public", id="zero-padded-valid-port"),
+    pytest.param("https://example.test:00443/public", id="zero-padded-standard-port"),
+    pytest.param("https://[2001:db8::1]:443/public", id="ipv6-standard-port"),
+    pytest.param("HTTPS://Example.TEST:00443/Mixed", id="uppercase-zero-padded-standard-port"),
     pytest.param("https://192.0.2.1/public", id="ipv4-without-policy"),
     pytest.param("https://[2001:db8::1]/public", id="bracketed-ipv6-without-policy"),
     pytest.param("https://[v1.example]/public", id="parseable-ipvfuture-without-policy"),
@@ -574,6 +625,62 @@ def test_invalid_initial_url_fails_before_query_request_or_opener_work(
     assert downstream_calls == []
 
 
+@pytest.mark.parametrize("url", NONSTANDARD_TARGET_PORT_URLS)
+def test_nonstandard_target_port_fails_before_query_request_or_opener_work(
+    monkeypatch: pytest.MonkeyPatch,
+    url: str,
+) -> None:
+    query = ExplodingQuery()
+    downstream_calls: list[str] = []
+
+    def unexpected_downstream_call(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        downstream_calls.append("called")
+        raise AssertionError("nonstandard target port reached downstream work")
+
+    class UnexpectedOpener:
+        def open(self, *args: object, **kwargs: object) -> object:
+            return unexpected_downstream_call(*args, **kwargs)
+
+    monkeypatch.setattr(http_adapter, "urlencode", unexpected_downstream_call)
+    monkeypatch.setattr(http_adapter, "Request", unexpected_downstream_call)
+    monkeypatch.setattr(http_adapter, "urlopen", unexpected_downstream_call)
+    monkeypatch.setattr(http_adapter, "_NO_REDIRECT_OPENER", UnexpectedOpener())
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient().get(
+            url=url,
+            query=query,
+            timeout_seconds=1,
+        )
+
+    assert type(error.value) is ValueError
+    assert str(error.value) == INVALID_TARGET_PORT_MESSAGE
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
+    assert query.calls == []
+    assert downstream_calls == []
+
+
+@pytest.mark.parametrize("url", MIXED_STRUCTURAL_AND_NONSTANDARD_PORT_URLS)
+def test_structural_initial_url_error_precedes_nonstandard_target_port_policy(
+    url: str,
+) -> None:
+    query = ExplodingQuery()
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient().get(
+            url=url,
+            query=query,
+            timeout_seconds=1,
+        )
+
+    assert str(error.value) == INVALID_INITIAL_URL_MESSAGE
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
+    assert query.calls == []
+
+
 @pytest.mark.parametrize("url", PARSER_ERROR_INITIAL_URLS)
 def test_initial_url_parser_failure_context_is_suppressed(
     url: str,
@@ -653,6 +760,58 @@ def test_valid_initial_url_is_preserved_through_request_construction(
     assert response.read_limits == [3]
     assert response.exit_calls == 1
     assert result.status_code == 200
+    assert result.body == b"ok"
+
+
+@pytest.mark.parametrize(("url", "expected_url"), ACTIVE_PROVIDER_DEFAULT_URLS)
+def test_active_provider_default_url_uses_the_standard_https_target_port(
+    monkeypatch: pytest.MonkeyPatch,
+    url: str,
+    expected_url: str,
+) -> None:
+    response = StubUrlResponse(b"ok")
+    requests: list[Request] = []
+
+    def stub_urlopen(request: Request, *, timeout: float) -> StubUrlResponse:
+        assert timeout == 1
+        requests.append(request)
+        return response
+
+    monkeypatch.setattr(http_adapter, "urlopen", stub_urlopen)
+
+    assert url == expected_url
+
+    result = UrllibPublicHttpClient(max_response_bytes=2).get(
+        url=url,
+        query={},
+        timeout_seconds=1,
+    )
+
+    assert [request.full_url for request in requests] == [f"{url}?"]
+    assert result.status_code == 200
+    assert result.body == b"ok"
+
+
+def test_zero_padded_standard_port_on_ipvfuture_is_preserved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = StubUrlResponse(b"ok")
+    requests: list[Request] = []
+
+    def stub_urlopen(request: Request, *, timeout: float) -> StubUrlResponse:
+        assert timeout == 1
+        requests.append(request)
+        return response
+
+    monkeypatch.setattr(http_adapter, "urlopen", stub_urlopen)
+
+    result = UrllibPublicHttpClient(max_response_bytes=2).get(
+        url="https://[v1.example]:00443/public",
+        query={"a": "1"},
+        timeout_seconds=1,
+    )
+
+    assert [request.full_url for request in requests] == ["https://[v1.example]:00443/public?a=1"]
     assert result.body == b"ok"
 
 

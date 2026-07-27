@@ -23,6 +23,7 @@ MAX_PUBLIC_HTTP_RESPONSE_BYTES = 2_000_000
 _INVALID_INITIAL_URL_MESSAGE = (
     "url must be an absolute credential-free HTTPS endpoint without query or fragment"
 )
+_INVALID_TARGET_PORT_MESSAGE = "url must use the standard HTTPS target port"
 
 
 def _validate_initial_url(url: str) -> None:
@@ -63,6 +64,8 @@ def _validate_initial_url(url: str) -> None:
         or port == 0
     ):
         raise ValueError(_INVALID_INITIAL_URL_MESSAGE)
+    if port not in (None, 443):
+        raise ValueError(_INVALID_TARGET_PORT_MESSAGE)
 
 
 class _NoRedirectHandler(HTTPRedirectHandler):
