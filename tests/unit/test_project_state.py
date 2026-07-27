@@ -76,24 +76,25 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert "strict_public_http_response_byte_limit_validation" in state.active_components
     assert "typed_public_http_error_response_read_failure_mapping" in state.active_components
     assert "typed_public_http_incomplete_body_read_failure_mapping" in state.active_components
+    assert "deterministic_public_http_error_response_resource_closure" in (state.active_components)
     assert len(state.open_tasks) == 2
-    task_037, task_045 = state.open_tasks
+    task_037, task_046 = state.open_tasks
     assert task_037.task_id == "TASK-037"
     assert task_037.status == "blocked"
     assert task_037.risk_tier == 3
     assert task_037.requires_human_approval is True
-    assert task_045.task_id == "TASK-045"
-    assert task_045.status == "ready"
-    assert task_045.risk_tier == 1
-    assert task_045.requires_human_approval is False
+    assert task_046.task_id == "TASK-046"
+    assert task_046.status == "ready"
+    assert task_046.risk_tier == 1
+    assert task_046.requires_human_approval is False
     assert state.blockers == (
         "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance "
         "location before independent Risk and Security review and the project-owner decision; "
         "authorization remains denied.",
     )
-    assert state.next_action.task_id == "TASK-045"
+    assert state.next_action.task_id == "TASK-046"
     assert state.next_action.action == (
-        "phase2.deterministic_public_http_error_response_resource_closure"
+        "phase2.typed_public_http_pre_response_incomplete_read_failure_mapping"
     )
     assert any(decision.decision_id == "ADR-0027" for decision in state.recent_decisions)
 
@@ -160,20 +161,23 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_044_section = completed_section.split("### TASK-044 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
+    task_045_section = completed_section.split("### TASK-045 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    assert "real `HTTPError`" in next_action_section
-    assert "closable response object" in next_action_section
-    assert "Attempt to close every accepted `HTTPError`" in next_action_section
-    assert "exactly once" in next_action_section
-    assert "header-materialization" in next_action_section
+    assert "TASK-044 deliberately scoped `IncompleteRead` mapping" in next_action_section
+    assert "standard redirect handler" in next_action_section
+    assert "inside `urlopen`" in next_action_section
     assert '`HttpTransportError("public HTTP GET failed")`' in next_action_section
-    assert "close error as direct cause" in next_action_section
-    assert "cannot replace that primary message" in next_action_section
+    assert "original exception is the direct cause" in next_action_section
+    assert "`urlopen` is called exactly once" in next_action_section
+    assert "no adapter body read" in next_action_section
+    assert "response entry or exit remains outside" in next_action_section
     assert "TASK-037 remains blocked and authorization remains denied" in next_action_section
     assert blocked_section.count("### TASK-") == 1
     assert "### TASK-037 " in blocked_section
@@ -288,6 +292,17 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "only around `response.read`" in task_044_section
     assert "raised before body access remains unmapped" in task_044_section
     assert "resource closure" in task_044_section
+    assert "- **Status:** COMPLETE" in task_045_section
+    assert "`phase2.deterministic_public_http_error_response_resource_closure`" in task_045_section
+    assert "`src/wealth/adapters/http.py`" in task_045_section
+    assert "`tests/unit/test_http_adapter.py`" in task_045_section
+    assert "one explicit cleanup attempt" in task_045_section
+    assert "real built-in `HTTPError` smoke test" in task_045_section
+    assert "`HTTPError` subclass prove exact-limit" in task_045_section
+    assert "`OSError`-family or `IncompleteRead`" in task_045_section
+    assert "no cleanup failure can replace" in task_045_section
+    assert "unsupported close-only failures remain unchanged" in task_045_section
+    assert "not claimed to have closed" in task_045_section
 
 
 def test_project_state_forbids_unknown_fields() -> None:

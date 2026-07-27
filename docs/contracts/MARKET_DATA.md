@@ -36,6 +36,15 @@ returned, the body is attempted once with the configured sentinel, and the origi
 `IncompleteRead` remains the direct cause. An `IncompleteRead` raised before body access is outside
 this mapping and retains its prior behavior.
 
+Every `HTTPError` path makes one explicit cleanup attempt after at most one bounded body read.
+When cleanup succeeds, the error-response resource is closed before a response or primary failure
+leaves the transport boundary. An `OSError`-family or `IncompleteRead` cleanup failure after
+otherwise complete processing becomes the same sanitized typed transport failure with that
+cleanup error as direct cause. If any primary read, oversize, header, or other processing failure
+already exists, cleanup is still attempted and no cleanup failure replaces the primary outcome.
+Unsupported cleanup-only failures retain their original type, and a failed cleanup attempt is not
+treated as proof that the resource closed.
+
 ## Canonical Order-Flow Foundation
 
 `CanonicalTrade`, `CanonicalTicker`, and `CanonicalBestBidAsk` establish the provider-independent
