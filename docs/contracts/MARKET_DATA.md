@@ -108,10 +108,22 @@ duplicates and empty or Unicode content. This is an adapter-controlled enumerati
 volume bound, not a total wall-clock bound on caller mapping code or a new query-content,
 normalization, or multi-value policy.
 
-The original initial URL remains finite as a Python string but has no configured character limit
-before structural scanning, parsing, or request construction. TASK-052 governs an 8,192-character
-initial-target bound without adding provider or hostname allowlisting, DNS or IP policy, or an SSRF
-guarantee.
+After finite-positive timeout validation and before any content-dependent URL work, the shared
+client measures the original target with non-polymorphic `str.__len__`. More than 8,192 Python
+characters fails with exact `ValueError("url must contain at most 8192 characters")` and no direct
+cause or hidden context. Rejection occurs before literal membership or character scanning,
+`urlsplit`, hostname, username, port, or NFKC inspection, query access or serialization, request
+construction, opener or handler work, DNS lookup, network access, or filesystem access. Caller
+length and content overrides are not dispatched. Length intentionally precedes structural and port
+errors for an oversized target; at or below the limit, every existing structural, parser-context,
+port, and query rule retains its order and behavior. Exact-limit ASCII and multi-byte Unicode
+targets retain every original character. The limit counts Python characters, not encoded bytes,
+and is not a provider request-line compatibility or total-wall-clock guarantee.
+
+The configured User-Agent remains without an exact runtime type, character policy, or size limit.
+TASK-053 governs an exact built-in visible-ASCII value of 1 through 256 characters during client
+construction. It does not add normalization, replacement, redaction or privacy guarantees,
+provider or hostname allowlisting, DNS or IP policy, or an SSRF guarantee.
 
 Every `HTTPError` path makes one explicit cleanup attempt after at most one bounded body read.
 When cleanup succeeds, the error-response resource is closed before a response or primary failure

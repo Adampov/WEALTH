@@ -20,8 +20,10 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from wealth.ports.http import HttpResponse, HttpTransportError
 
 MAX_PUBLIC_HTTP_RESPONSE_BYTES = 2_000_000
+_MAX_INITIAL_URL_CHARACTERS = 8_192
 _MAX_QUERY_PAIRS = 32
 _MAX_QUERY_CHARACTERS = 8_192
+_INVALID_INITIAL_URL_LENGTH_MESSAGE = "url must contain at most 8192 characters"
 _INVALID_INITIAL_URL_MESSAGE = (
     "url must be an absolute credential-free HTTPS endpoint without query or fragment"
 )
@@ -34,6 +36,8 @@ _INVALID_QUERY_MESSAGE = (
 def _validate_initial_url(url: str) -> None:
     """Reject unsafe or structurally ambiguous initial public request targets."""
 
+    if str.__len__(url) > _MAX_INITIAL_URL_CHARACTERS:
+        raise ValueError(_INVALID_INITIAL_URL_LENGTH_MESSAGE)
     if (
         "?" in url
         or "#" in url
