@@ -6,69 +6,77 @@ promoted through review.
 
 ## Next Action
 
-### TASK-053 — Fail-closed public-HTTP bounded User-Agent validation
+### TASK-054 — Fail-closed public-HTTP maximum timeout policy
 
-- **Key:** `phase2.fail_closed_public_http_bounded_user_agent_validation`
+- **Key:** `phase2.fail_closed_public_http_maximum_timeout_policy`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
 - **Human approval:** NOT REQUIRED — bounded fail-closed development hardening under the owner's
-  explicit authorization; it constrains one public-transport configuration field and changes no
-  permission, deployment, provider, or operator-data boundary.
-- **Context:** TASK-052 now bounds the original target text and TASK-051 bounds query
-  serialization, but `UrllibPublicHttpClient.user_agent` still accepts runtime values without an
-  exact type, size, or character policy. A non-string, empty, oversized, control-bearing, DEL,
-  non-ASCII, or surrogate value can impose unbounded header work or fail later in the standard
-  library. The active default is one 29-character visible-ASCII string.
-- **Goal:** Validate and bound the configured User-Agent during client construction before it can
-  reach request construction or network work, while preserving every accepted character exactly.
-- **Scope:** After preserving the existing `max_response_bytes` validation and its precedence,
-  require `user_agent` to be an exact built-in `str` containing 1 through 256 characters, each in
-  inclusive visible-ASCII range U+0020 through U+007E; reject every violation with exact
-  `ValueError("user_agent must be a built-in string of 1 to 256 visible ASCII characters")`; and
-  add deterministic type, length, character-corpus, precedence, no-work, boundary, default, and
-  exact-header-preservation tests.
-- **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
-  `docs/contracts/MARKET_DATA.md`, plus coordinated governance files and governance tests.
-- **Constraints:** Validate exact type before length or content work and reject an oversized exact
-  string before scanning its characters. Preserve the existing response-limit error and first
-  precedence when both construction fields are invalid. Do not normalize, trim, truncate, repair,
-  replace, redact, or synthesize a User-Agent, and do not claim that accepted caller text contains
-  no sensitive information. Do not add another header, a total-header-block limit, URL or query
-  policy, provider or hostname allowlist, DNS lookup, IP or public-routability policy, SSRF
-  guarantee, IDNA policy, certificate pinning, custom TLS context, proxy change, credential,
-  redirect permission, retry, dependency, endpoint change, or provider-specific exception.
-  Preserve accepted User-Agent text, URL and bounded sorted query behavior, timeouts, response
-  caps, no-follow behavior, TASK-041 through TASK-052 exception and cleanup semantics, provider
-  parsing, canonicalization, quality, storage, schemas, runtime wiring, TASK-037 authority,
-  migration, and Stage 3.
+  explicit authorization; it adds one finite public-transport configuration ceiling and changes no
+  permission, deployment, provider endpoint, or operator-data boundary.
+- **Context:** TASK-041 rejects non-finite and non-positive public-HTTP timeouts, and all active
+  defaults are exactly 10.0 seconds, but the shared client and all three active provider
+  constructors still accept every finite positive value without an upper bound. Extremely large
+  finite values can create excessive per-operation wait windows or fail later in standard-library
+  timeout conversion.
+- **Goal:** Apply one provider-independent maximum of 120 seconds at the shared public transport
+  and every active provider construction boundary while preserving accepted timeout values
+  exactly.
+- **Scope:** Define one shared `MAX_PUBLIC_HTTP_TIMEOUT_SECONDS = 120.0` policy constant in
+  `src/wealth/ports/http.py`. After the existing TASK-041 finite-positive check at each boundary,
+  reject a finite positive timeout greater than 120 with exact
+  `ValueError("timeout_seconds must be at most 120")`; retain the earlier exact error for `NaN`,
+  positive or negative infinity, zero, and negative values; and add deterministic precedence,
+  no-work, shared-boundary, provider-boundary, exact-maximum, identity, default, forwarding, and
+  policy-drift tests.
+- **Files:** `src/wealth/ports/http.py`; the four adapter sources
+  `src/wealth/adapters/http.py`, `src/wealth/adapters/binance.py`,
+  `src/wealth/adapters/coinbase.py`, and `src/wealth/adapters/binance_order_flow.py`; the shared
+  HTTP test `tests/unit/test_http_adapter.py`; the three provider tests
+  `tests/unit/test_binance_public_candles.py`,
+  `tests/unit/test_coinbase_public_candles.py`, and
+  `tests/unit/test_binance_public_aggregate_trades.py`; `docs/contracts/MARKET_DATA.md`; plus
+  coordinated governance files and governance tests.
+- **Constraints:** Preserve TASK-041's finite-positive validation, exact error, and first
+  precedence. Do not introduce an exact runtime type, subclass, coercion, rounding, unit
+  conversion, or fallback policy for accepted numeric values. Preserve exact accepted-object
+  identity, including integer and fractional values, at 120 or below. The ceiling constrains the
+  timeout supplied to each standard transport operation; it is not a total wall-clock deadline
+  and does not separately bound DNS, multiple operations, or caller/provider work. Do not alter
+  retries, backoff, sleeps, waits, pacing, rate budgets, URL/query/User-Agent/response rules,
+  redirect or cleanup behavior, provider parsing, endpoint or dependency configuration, runtime
+  wiring, credentials, permissions, hostname/provider allowlists, DNS/IP/public-routability or
+  SSRF policy, IDNA, TLS/proxy behavior, TASK-037 authority, migration, or Stage 3.
 
 Acceptance gates:
 
-1. Invalid `max_response_bytes` retains first construction-time precedence. With a valid response
-   limit, a non-built-in-string, empty, longer-than-256, or non-visible-ASCII User-Agent raises
-   exactly
-   `ValueError("user_agent must be a built-in string of 1 to 256 visible ASCII characters")`
-   with no direct cause or hidden context.
-2. Exact-type validation precedes length and character inspection; the 257th character rejects an
-   exact string before content scanning. Every rejection occurs during client construction before
-   URL, query, `urlencode`, `Request`, private-opener, handler, DNS, network, or filesystem work.
-3. The invalid corpus covers non-string values and string subclasses; empty and 257-character
-   strings; every C0 control U+0000 through U+001F; DEL U+007F; representative non-ASCII code
-   points; and lone surrogates. No invalid value is normalized, trimmed, truncated, retried, or
-   replaced with the default.
-4. One-character and 256-character boundaries, the complete U+0020-through-U+007E visible-ASCII
-   range, and the exact 29-character active default remain unchanged. An accepted custom value is
-   forwarded once as the exact `User-Agent` header while GET, `Accept`, URL, sorted query, timeout,
-   response, redirect, error, cleanup, and direct-cause behavior remains unchanged.
-5. The validation constrains only this configured header value. It adds no header redaction or
-   privacy guarantee, total-header-block bound, URL/query policy, hostname/provider allowlist,
-   DNS/IP/public-routability or SSRF claim, IDNA, certificate, TLS/proxy, endpoint, dependency,
-   runtime, or provider-specific behavior.
-6. Formatting, lint, strict typing, complete tests, lockfile verification, dependency audit,
+1. `NaN`, positive or negative infinity, zero, and negative values retain TASK-041's exact
+   context- and cause-free
+   `ValueError("timeout_seconds must be finite and positive")` with first precedence. With an
+   otherwise valid finite-positive timeout greater than 120, every boundary raises exact
+   context- and cause-free `ValueError("timeout_seconds must be at most 120")`.
+2. The shared client rejects representative just-over-limit fractions, the largest finite float,
+   and an arbitrarily large integer before URL length or content inspection, query access or
+   serialization, `Request`, private-opener or handler work, DNS lookup, network access, or
+   filesystem access.
+3. The Binance candle, Coinbase candle, and Binance aggregate-trade constructors reject an
+   over-limit timeout before clock, query, injected HTTP, endpoint, record, or other provider work.
+4. Exact 120 integer and float values and representative positive fractions at or below 120 retain
+   their original object identity. All active 10.0-second defaults remain exact, and one accepted
+   request per active provider path forwards the configured timeout unchanged.
+5. One shared maximum constant governs the shared client and all three active provider boundaries.
+   Deterministic mutation tests detect a removed or changed ceiling, a `>=` off-by-one error,
+   reordered finite-positive validation, and provider-policy drift.
+6. The task makes no total-wall-clock deadline, DNS-duration, multi-operation-duration, or
+   caller/provider-work guarantee and adds no exact numeric-type or subclass policy. It changes no
+   retry, backoff, wait, pacing, or rate-budget behavior.
+7. No hostname/provider allowlist, DNS resolution, IP/public-routability or SSRF guarantee, IDNA,
+   certificate, TLS/proxy, endpoint, dependency, runtime, credential, or permission behavior
+   changes. TASK-037 remains blocked and authorization remains denied; no operator data, path,
+   database, scanner, report, migration, or Stage 3 action occurs.
+8. Formatting, lint, strict typing, complete tests, lockfile verification, dependency audit,
    health slice, and CI pass.
-7. TASK-037 remains blocked and authorization remains denied; no operator data, path, database,
-   scanner, report, migration, or Stage 3 action occurs.
 
 ## Blocked, Awaiting Owner-Supplied Restricted Inputs
 
@@ -123,6 +131,39 @@ Acceptance gates:
    all repository gates pass.
 
 ## Recently Completed
+
+### TASK-053 — Fail-closed public-HTTP bounded User-Agent validation
+
+- **Key:** `phase2.fail_closed_public_http_bounded_user_agent_validation`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
+  `docs/contracts/MARKET_DATA.md`, plus the coordinated governance files and governance tests.
+- **Result:** After preserving `max_response_bytes` validation and its first precedence, the
+  shared client now validates `user_agent` during construction by requiring an exact built-in
+  `str`, then a length of 1 through 256 Python characters, then only inclusive visible ASCII
+  U+0020 through U+007E. Every violation raises the exact context- and cause-free
+  `ValueError("user_agent must be a built-in string of 1 to 256 visible ASCII characters")`
+  before URL, query, `urlencode`, `Request`, private-opener, handler, DNS, network, or filesystem
+  work. Exact-type rejection dispatches no caller string hooks; empty and 257-character values
+  fail before character inspection. Sixty-six new deterministic cases within the 509-test
+  adapter suite cover twelve invalid-response-limit precedence combinations; five invalid types,
+  including a hostile string subclass; both invalid length boundaries; all 32 C0 controls, DEL,
+  five representative non-ASCII characters, and two lone surrogates; one independent audit
+  sweeping DEL through every position 0 through 255 in a maximum-length value; four accepted
+  visible-ASCII cases covering lengths 1, 255, and 256 plus the complete visible-ASCII range; the
+  exact 29-character default
+  `"WEALTH/0.1 public-market-data"`; and one exact custom-header preservation path. One-character
+  and 256-character values and the complete U+0020-through-U+007E range retain identity. An
+  accepted custom value containing leading and trailing spaces and punctuation is forwarded
+  exactly once as the sole `User-Agent` header while GET, `Accept`, URL, bounded sorted query,
+  timeout, one bounded response read, one acquisition, redirect, error, cleanup, and direct-cause
+  behavior remains unchanged. No value is normalized, trimmed, truncated, repaired, retried,
+  replaced, redacted, or synthesized, and no privacy or total-header-block guarantee is made. No
+  URL/query policy, hostname/provider allowlist, DNS/IP/public-routability or SSRF claim, IDNA,
+  certificate, TLS/proxy, endpoint, dependency, provider, runtime, TASK-037 authority, migration,
+  or Stage 3 behavior changed. Finite positive public-HTTP timeouts remain without an upper bound;
+  TASK-054 governs that residual per-operation wait risk.
 
 ### TASK-052 — Fail-closed public-HTTP initial-target length bound
 

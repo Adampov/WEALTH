@@ -58,7 +58,8 @@
     "fail_closed_public_http_initial_request_target_validation",
     "fail_closed_public_http_standard_https_target_port_policy",
     "fail_closed_public_http_bounded_query_serialization",
-    "fail_closed_public_http_initial_target_length_bound"
+    "fail_closed_public_http_initial_target_length_bound",
+    "fail_closed_public_http_bounded_user_agent_validation"
   ],
   "active_integrations": [
     "github_actions_ci"
@@ -100,8 +101,8 @@
       "requires_human_approval": true
     },
     {
-      "task_id": "TASK-053",
-      "action": "phase2.fail_closed_public_http_bounded_user_agent_validation",
+      "task_id": "TASK-054",
+      "action": "phase2.fail_closed_public_http_maximum_timeout_policy",
       "status": "ready",
       "risk_tier": 1,
       "requires_human_approval": false
@@ -138,8 +139,8 @@
     }
   ],
   "next_action": {
-    "task_id": "TASK-053",
-    "action": "phase2.fail_closed_public_http_bounded_user_agent_validation"
+    "task_id": "TASK-054",
+    "action": "phase2.fail_closed_public_http_maximum_timeout_policy"
   },
-  "last_updated_utc": "2026-07-27T08:19:31Z"
+  "last_updated_utc": "2026-07-27T08:39:21Z"
 }

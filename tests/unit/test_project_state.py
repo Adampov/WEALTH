@@ -88,26 +88,25 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert "fail_closed_public_http_standard_https_target_port_policy" in state.active_components
     assert "fail_closed_public_http_bounded_query_serialization" in state.active_components
     assert "fail_closed_public_http_initial_target_length_bound" in state.active_components
+    assert "fail_closed_public_http_bounded_user_agent_validation" in state.active_components
     assert len(state.open_tasks) == 2
-    task_037, task_053 = state.open_tasks
+    task_037, task_054 = state.open_tasks
     assert task_037.task_id == "TASK-037"
     assert task_037.status == "blocked"
     assert task_037.risk_tier == 3
     assert task_037.requires_human_approval is True
-    assert task_053.task_id == "TASK-053"
-    assert task_053.action == "phase2.fail_closed_public_http_bounded_user_agent_validation"
-    assert task_053.status == "ready"
-    assert task_053.risk_tier == 1
-    assert task_053.requires_human_approval is False
+    assert task_054.task_id == "TASK-054"
+    assert task_054.action == "phase2.fail_closed_public_http_maximum_timeout_policy"
+    assert task_054.status == "ready"
+    assert task_054.risk_tier == 1
+    assert task_054.requires_human_approval is False
     assert state.blockers == (
         "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance "
         "location before independent Risk and Security review and the project-owner decision; "
         "authorization remains denied.",
     )
-    assert state.next_action.task_id == "TASK-053"
-    assert (
-        state.next_action.action == "phase2.fail_closed_public_http_bounded_user_agent_validation"
-    )
+    assert state.next_action.task_id == "TASK-054"
+    assert state.next_action.action == "phase2.fail_closed_public_http_maximum_timeout_policy"
     assert any(decision.decision_id == "ADR-0027" for decision in state.recent_decisions)
 
 
@@ -199,34 +198,42 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_052_section = completed_section.split("### TASK-052 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
+    task_053_section = completed_section.split("### TASK-053 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    assert "bounded User-Agent validation" in next_action_section
-    assert "`UrllibPublicHttpClient.user_agent`" in next_action_section
-    assert "without an" in next_action_section
-    assert "exact type, size, or character policy" in next_action_section
-    assert "active default is one 29-character visible-ASCII string" in next_action_section
-    assert "existing `max_response_bytes` validation" in next_action_section
-    assert "exact built-in `str`" in next_action_section
-    assert "1 through 256 characters" in next_action_section
-    assert "U+0020 through U+007E" in next_action_section
-    assert (
-        '`ValueError("user_agent must be a built-in string of 1 to 256 visible ASCII '
-        'characters")`' in next_action_section
-    )
-    assert "Validate exact type before length or content work" in next_action_section
-    assert "response-limit error and first" in next_action_section
-    assert "precedence when both construction fields are invalid" in next_action_section
-    assert "Do not normalize, trim, truncate, repair" in next_action_section
-    assert "redact, or synthesize" in next_action_section
-    assert "no sensitive information" in next_action_section
-    assert "total-header-block limit" in next_action_section
-    assert "provider or hostname allowlist" in next_action_section
-    assert "DNS lookup" in next_action_section
+    assert "maximum timeout policy" in next_action_section
+    assert "shared client and all three active provider" in next_action_section
+    assert "finite positive value without an upper bound" in next_action_section
+    assert "all active" in next_action_section
+    assert "defaults are exactly 10.0 seconds" in next_action_section
+    assert "`MAX_PUBLIC_HTTP_TIMEOUT_SECONDS = 120.0`" in next_action_section
+    assert "`src/wealth/ports/http.py`" in next_action_section
+    assert "four adapter sources" in next_action_section
+    assert "`src/wealth/adapters/http.py`" in next_action_section
+    assert "`src/wealth/adapters/binance.py`" in next_action_section
+    assert "`src/wealth/adapters/coinbase.py`" in next_action_section
+    assert "`src/wealth/adapters/binance_order_flow.py`" in next_action_section
+    assert "`tests/unit/test_http_adapter.py`" in next_action_section
+    assert "`tests/unit/test_binance_public_candles.py`" in next_action_section
+    assert "`tests/unit/test_coinbase_public_candles.py`" in next_action_section
+    assert "`tests/unit/test_binance_public_aggregate_trades.py`" in next_action_section
+    assert '`ValueError("timeout_seconds must be finite and positive")`' in next_action_section
+    assert '`ValueError("timeout_seconds must be at most 120")`' in next_action_section
+    assert "TASK-041's finite-positive validation" in next_action_section
+    assert "exact runtime type, subclass, coercion" in next_action_section
+    assert "Preserve exact accepted-object" in next_action_section
+    assert "not a total wall-clock deadline" in next_action_section
+    assert "does not separately bound DNS, multiple operations" in next_action_section
+    assert "Do not alter" in next_action_section
+    assert "retries, backoff, sleeps, waits, pacing, rate budgets" in next_action_section
+    assert "provider-policy drift" in next_action_section
+    assert "No hostname/provider allowlist" in next_action_section
     assert "SSRF" in next_action_section
     assert "TASK-037 remains blocked and authorization remains denied" in next_action_section
     assert blocked_section.count("### TASK-") == 1
@@ -542,6 +549,42 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "no request-line compatibility or total-wall-clock claim" in task_052_section
     assert "User-Agent remains unbounded" in task_052_section
     assert "TASK-053 governs that residual request-construction risk" in task_052_section
+    assert "- **Status:** COMPLETE" in task_053_section
+    assert "`phase2.fail_closed_public_http_bounded_user_agent_validation`" in task_053_section
+    assert "`src/wealth/adapters/http.py`" in task_053_section
+    assert "`tests/unit/test_http_adapter.py`" in task_053_section
+    assert "preserving `max_response_bytes` validation and its first precedence" in task_053_section
+    assert "exact built-in" in task_053_section
+    assert "`str`" in task_053_section
+    assert "1 through 256 Python characters" in task_053_section
+    assert "U+0020 through U+007E" in task_053_section
+    assert (
+        '`ValueError("user_agent must be a built-in string of 1 to 256 visible ASCII '
+        'characters")`' in task_053_section
+    )
+    assert "before URL, query, `urlencode`, `Request`, private-opener" in task_053_section
+    assert "Exact-type rejection dispatches no caller string hooks" in task_053_section
+    assert "257-character values" in task_053_section
+    assert "fail before character inspection" in task_053_section
+    assert "Sixty-six new deterministic cases" in task_053_section
+    assert "509-test" in task_053_section
+    assert "twelve invalid-response-limit precedence combinations" in task_053_section
+    assert "five invalid types" in task_053_section
+    assert "all 32 C0 controls" in task_053_section
+    assert "five representative non-ASCII characters" in task_053_section
+    assert "two lone surrogates" in task_053_section
+    assert "sweeping DEL through every position 0 through 255" in task_053_section
+    assert "four accepted" in task_053_section
+    assert "lengths 1, 255, and 256" in task_053_section
+    assert "complete visible-ASCII range" in task_053_section
+    assert '"WEALTH/0.1 public-market-data"' in task_053_section
+    assert "leading and trailing spaces and punctuation" in task_053_section
+    assert "forwarded" in task_053_section
+    assert "exactly once as the sole `User-Agent` header" in task_053_section
+    assert "No value is normalized, trimmed, truncated, repaired" in task_053_section
+    assert "no privacy or total-header-block guarantee" in task_053_section
+    assert "timeouts remain without an upper bound" in task_053_section
+    assert "TASK-054 governs that residual per-operation wait risk" in task_053_section
     assert "private urllib opener with a no-follow redirect handler" in market_data_contract
     assert "performs no body" in market_data_contract
     assert "read or cleanup" in market_data_contract
@@ -591,9 +634,25 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "not a provider request-line compatibility or total-wall-clock guarantee" in (
         market_data_contract
     )
-    assert "User-Agent remains without an exact runtime type" in market_data_contract
-    assert "TASK-053 governs an exact built-in visible-ASCII value" in market_data_contract
-    assert "1 through 256 characters" in market_data_contract
+    assert "Finite positive timeouts currently have no configured upper bound" in (
+        market_data_contract
+    )
+    assert "TASK-054 governs one" in market_data_contract
+    assert "shared 120-second maximum" in market_data_contract
+    assert "After preserving `max_response_bytes` validation" in market_data_contract
+    assert "exact built-in `str` of 1 through 256 Python characters" in market_data_contract
+    assert "U+0020 through U+007E" in market_data_contract
+    assert (
+        '`ValueError("user_agent must be a built-in string of 1 to 256 visible ASCII '
+        'characters")`' in market_data_contract
+    )
+    assert "oversized exact string" in market_data_contract
+    assert "fails before scanning its characters" in market_data_contract
+    assert "leading or trailing spaces and punctuation" in market_data_contract
+    assert "sole `User-Agent` header" in market_data_contract
+    assert '"WEALTH/0.1 public-market-data"' in market_data_contract
+    assert "no privacy or" in market_data_contract
+    assert "total-header-block guarantee" in market_data_contract
     assert "Automatic 301, 302, 303, 307, and 308 redirects are rejected" in risk_register
     assert "process-global opener is untouched" in risk_register
     assert "original initial target must be an absolute credential-free HTTPS URL" in risk_register
@@ -616,9 +675,11 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "at 8,192 Python characters" in risk_register
     assert "before scanning, parsing, query, or request work" in risk_register
     assert "caller length/content overrides are never dispatched" in risk_register
-    assert "User-Agent remains without an exact runtime type" in risk_register
-    assert "Require one exact built-in visible-ASCII User-Agent" in risk_register
-    assert "1 through 256 characters during client construction" in risk_register
+    assert "configured User-Agent is now an exact built-in string" in risk_register
+    assert "1 through 256 visible-ASCII characters" in risk_register
+    assert "without normalization, fallback, or privacy claims" in risk_register
+    assert "Finite positive public-HTTP timeouts still have no maximum" in risk_register
+    assert "Add one shared 120-second maximum" in risk_register
     assert "Within the canonical UTC migration track" in roadmap
     assert "TASK-037 remains" in roadmap
     assert "blocked and authorization remains denied" in roadmap

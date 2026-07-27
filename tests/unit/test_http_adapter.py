@@ -81,6 +81,11 @@ INVALID_TARGET_PORT_MESSAGE = "url must use the standard HTTPS target port"
 INVALID_QUERY_MESSAGE = (
     "query must contain at most 32 built-in string pairs totaling at most 8192 characters"
 )
+INVALID_USER_AGENT_MESSAGE = (
+    "user_agent must be a built-in string of 1 to 256 visible ASCII characters"
+)
+DEFAULT_USER_AGENT = "WEALTH/0.1 public-market-data"
+VISIBLE_ASCII_USER_AGENT = "".join(chr(code_point) for code_point in range(0x20, 0x7F))
 NONSTANDARD_TARGET_PORT_URLS = (
     pytest.param("https://example.test:1/public", id="minimum"),
     pytest.param("https://example.test:80/public", id="http-default"),
@@ -284,6 +289,19 @@ class StringSubclass(str):
     """Represent text whose runtime type is not the built-in type."""
 
 
+class HostileUserAgent(str):
+    """Fail if exact-type rejection dispatches to caller-controlled string hooks."""
+
+    def __len__(self) -> int:
+        raise AssertionError("invalid User-Agent length hook was invoked")
+
+    def __iter__(self) -> Iterator[str]:
+        raise AssertionError("invalid User-Agent iteration was started")
+
+    def __str__(self) -> str:
+        raise AssertionError("invalid User-Agent was coerced")
+
+
 class LyingLengthUrl(str):
     """Expose a false short length if ordinary polymorphic len() is used."""
 
@@ -482,6 +500,15 @@ def assert_initial_url_length_error(error: BaseException) -> None:
 
     assert type(error) is ValueError
     assert str(error) == INVALID_INITIAL_URL_LENGTH_MESSAGE
+    assert error.__cause__ is None
+    assert error.__context__ is None
+
+
+def assert_user_agent_error(error: BaseException) -> None:
+    """Require the exact context-free TASK-053 construction failure."""
+
+    assert type(error) is ValueError
+    assert str(error) == INVALID_USER_AGENT_MESSAGE
     assert error.__cause__ is None
     assert error.__context__ is None
 
@@ -762,6 +789,230 @@ def test_invalid_response_limit_fails_during_construction_before_work(
 
     assert str(error.value) == ("max_response_bytes must be an integer between 1 and 2000000")
     assert calls == []
+
+
+@pytest.mark.parametrize(
+    "max_response_bytes",
+    [
+        *INVALID_RESPONSE_LIMITS,
+        pytest.param(IntegerSubclass(1), id="integer-subclass"),
+    ],
+)
+def test_invalid_response_limit_precedes_hostile_user_agent_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    max_response_bytes: int,
+) -> None:
+    calls: list[str] = []
+
+    def unexpected_request_or_network_call(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        calls.append("called")
+        raise AssertionError("invalid construction reached request or network work")
+
+    monkeypatch.setattr(http_adapter, "Request", unexpected_request_or_network_call)
+    monkeypatch.setattr(http_adapter, "urlopen", unexpected_request_or_network_call)
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient(
+            user_agent=HostileUserAgent("hostile"),
+            max_response_bytes=max_response_bytes,
+        )
+
+    assert type(error.value) is ValueError
+    assert str(error.value) == "max_response_bytes must be an integer between 1 and 2000000"
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "user_agent",
+    [
+        pytest.param(None, id="none"),
+        pytest.param(b"WEALTH/bytes", id="bytes"),
+        pytest.param(7, id="integer"),
+        pytest.param(object(), id="object"),
+        pytest.param(HostileUserAgent("WEALTH/subclass"), id="string-subclass"),
+    ],
+)
+def test_user_agent_requires_exact_builtin_string_type_before_any_hooks_or_work(
+    monkeypatch: pytest.MonkeyPatch,
+    user_agent: object,
+) -> None:
+    calls: list[str] = []
+
+    def unexpected_request_or_network_call(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        calls.append("called")
+        raise AssertionError("invalid User-Agent reached request or network work")
+
+    monkeypatch.setattr(http_adapter, "Request", unexpected_request_or_network_call)
+    monkeypatch.setattr(http_adapter, "urlopen", unexpected_request_or_network_call)
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient(user_agent=cast(str, user_agent))
+
+    assert_user_agent_error(error.value)
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "user_agent",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("\x00" + ("A" * 256), id="257-before-character-scan"),
+    ],
+)
+def test_user_agent_length_rejects_empty_or_257_characters_before_character_work(
+    monkeypatch: pytest.MonkeyPatch,
+    user_agent: str,
+) -> None:
+    ord_calls: list[str] = []
+    downstream_calls: list[str] = []
+
+    def unexpected_ord(character: str) -> int:
+        ord_calls.append(character)
+        raise AssertionError("invalid User-Agent length reached character inspection")
+
+    def unexpected_request_or_network_call(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        downstream_calls.append("called")
+        raise AssertionError("invalid User-Agent reached request or network work")
+
+    monkeypatch.setattr(http_adapter, "ord", unexpected_ord, raising=False)
+    monkeypatch.setattr(http_adapter, "Request", unexpected_request_or_network_call)
+    monkeypatch.setattr(http_adapter, "urlopen", unexpected_request_or_network_call)
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient(user_agent=user_agent)
+
+    assert_user_agent_error(error.value)
+    assert ord_calls == []
+    assert downstream_calls == []
+
+
+@pytest.mark.parametrize(
+    "invalid_character",
+    [
+        *(pytest.param(chr(code_point), id=f"c0-u{code_point:04x}") for code_point in range(0x20)),
+        pytest.param("\x7f", id="del-u007f"),
+        pytest.param("\x80", id="non-ascii-u0080"),
+        pytest.param("\u00a0", id="non-ascii-u00a0"),
+        pytest.param("é", id="non-ascii-u00e9"),
+        pytest.param("€", id="non-ascii-u20ac"),
+        pytest.param("💰", id="non-ascii-u1f4b0"),
+        pytest.param("\ud800", id="lone-high-surrogate"),
+        pytest.param("\udfff", id="lone-low-surrogate"),
+    ],
+)
+def test_user_agent_rejects_complete_control_and_representative_non_ascii_corpus(
+    monkeypatch: pytest.MonkeyPatch,
+    invalid_character: str,
+) -> None:
+    user_agent = f"A{invalid_character}Z"
+    calls: list[str] = []
+
+    def unexpected_request_or_network_call(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        calls.append("called")
+        raise AssertionError("invalid User-Agent reached request or network work")
+
+    monkeypatch.setattr(http_adapter, "Request", unexpected_request_or_network_call)
+    monkeypatch.setattr(http_adapter, "urlopen", unexpected_request_or_network_call)
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient(user_agent=user_agent)
+
+    assert_user_agent_error(error.value)
+    assert calls == []
+
+
+def test_user_agent_rejects_del_at_every_position_in_a_256_character_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def unexpected_request_or_network_call(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        calls.append("called")
+        raise AssertionError("invalid User-Agent reached request or network work")
+
+    monkeypatch.setattr(http_adapter, "Request", unexpected_request_or_network_call)
+    monkeypatch.setattr(http_adapter, "urlopen", unexpected_request_or_network_call)
+
+    for index in range(256):
+        user_agent = ("A" * index) + "\x7f" + ("A" * (255 - index))
+
+        with pytest.raises(ValueError) as error:
+            UrllibPublicHttpClient(user_agent=user_agent)
+
+        assert_user_agent_error(error.value)
+
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "user_agent",
+    [
+        pytest.param(" ", id="one-visible-ascii-character"),
+        pytest.param("A" * 255, id="255-visible-ascii-characters"),
+        pytest.param("~" * 256, id="256-visible-ascii-characters"),
+        pytest.param(VISIBLE_ASCII_USER_AGENT, id="complete-visible-ascii-range"),
+    ],
+)
+def test_user_agent_visible_ascii_boundaries_are_retained_exactly(user_agent: str) -> None:
+    client = UrllibPublicHttpClient(user_agent=user_agent)
+
+    assert client.user_agent is user_agent
+    assert 1 <= str.__len__(client.user_agent) <= 256
+
+
+def test_default_user_agent_is_the_exact_29_character_active_value() -> None:
+    client = UrllibPublicHttpClient()
+
+    assert type(client.user_agent) is str
+    assert client.user_agent == DEFAULT_USER_AGENT
+    assert str.__len__(client.user_agent) == 29
+
+
+def test_custom_user_agent_is_forwarded_once_without_changing_request_behavior(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_agent = "  WEALTH/Test-Agent (Exact) ~  "
+    response = StubUrlResponse(b"ok")
+    requests: list[Request] = []
+    timeout_seconds = float("0.25")
+
+    def stub_urlopen(request: Request, *, timeout: float) -> StubUrlResponse:
+        assert timeout is timeout_seconds
+        requests.append(request)
+        return response
+
+    monkeypatch.setattr(http_adapter, "urlopen", stub_urlopen)
+
+    result = UrllibPublicHttpClient(
+        user_agent=user_agent,
+        max_response_bytes=2,
+    ).get(
+        url="https://example.test/public",
+        query={"b": "two words", "a": "1"},
+        timeout_seconds=timeout_seconds,
+    )
+
+    assert [request.full_url for request in requests] == [
+        "https://example.test/public?a=1&b=two+words"
+    ]
+    assert [request.get_method() for request in requests] == ["GET"]
+    assert [request.get_header("Accept") for request in requests] == ["application/json"]
+    assert [request.get_header("User-agent") for request in requests] == [user_agent]
+    user_agent_headers = [
+        (name, value) for name, value in requests[0].header_items() if name.lower() == "user-agent"
+    ]
+    assert user_agent_headers == [("User-agent", user_agent)]
+    assert response.enter_calls == 1
+    assert response.read_limits == [3]
+    assert response.exit_calls == 1
+    assert result.body == b"ok"
 
 
 @pytest.mark.parametrize(
