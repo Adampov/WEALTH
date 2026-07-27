@@ -14,6 +14,7 @@ PROJECT_STATE_PATH = REPOSITORY_ROOT / "PROJECT_STATE.json"
 RISK_REGISTER_PATH = REPOSITORY_ROOT / "RISK_REGISTER.md"
 BACKLOG_PATH = REPOSITORY_ROOT / "BACKLOG.md"
 MARKET_DATA_CONTRACT_PATH = REPOSITORY_ROOT / "docs" / "contracts" / "MARKET_DATA.md"
+ROADMAP_PATH = REPOSITORY_ROOT / "docs" / "ROADMAP.md"
 
 
 def load_payload() -> dict[str, Any]:
@@ -83,26 +84,27 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     )
     assert "typed_public_http_response_protocol_failure_mapping" in state.active_components
     assert "fail_closed_public_http_automatic_redirect_rejection" in state.active_components
+    assert "fail_closed_public_http_initial_request_target_validation" in state.active_components
     assert len(state.open_tasks) == 2
-    task_037, task_049 = state.open_tasks
+    task_037, task_050 = state.open_tasks
     assert task_037.task_id == "TASK-037"
     assert task_037.status == "blocked"
     assert task_037.risk_tier == 3
     assert task_037.requires_human_approval is True
-    assert task_049.task_id == "TASK-049"
-    assert task_049.action == "phase2.fail_closed_public_http_initial_request_target_validation"
-    assert task_049.status == "ready"
-    assert task_049.risk_tier == 1
-    assert task_049.requires_human_approval is False
+    assert task_050.task_id == "TASK-050"
+    assert task_050.action == "phase2.fail_closed_public_http_standard_https_target_port_policy"
+    assert task_050.status == "ready"
+    assert task_050.risk_tier == 1
+    assert task_050.requires_human_approval is False
     assert state.blockers == (
         "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance "
         "location before independent Risk and Security review and the project-owner decision; "
         "authorization remains denied.",
     )
-    assert state.next_action.task_id == "TASK-049"
+    assert state.next_action.task_id == "TASK-050"
     assert (
         state.next_action.action
-        == "phase2.fail_closed_public_http_initial_request_target_validation"
+        == "phase2.fail_closed_public_http_standard_https_target_port_policy"
     )
     assert any(decision.decision_id == "ADR-0027" for decision in state.recent_decisions)
 
@@ -112,6 +114,7 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     risk_register = RISK_REGISTER_PATH.read_text(encoding="utf-8")
     backlog = BACKLOG_PATH.read_text(encoding="utf-8")
     market_data_contract = MARKET_DATA_CONTRACT_PATH.read_text(encoding="utf-8")
+    roadmap = ROADMAP_PATH.read_text(encoding="utf-8")
 
     for decision in state.recent_decisions:
         assert (REPOSITORY_ROOT / decision.artifact).is_file()
@@ -182,28 +185,29 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_048_section = completed_section.split("### TASK-048 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
+    task_049_section = completed_section.split("### TASK-049 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    assert "initial request-target validation" in next_action_section
-    assert "`HTTPHandler`, `FTPHandler`, `FileHandler`, `DataHandler`" in next_action_section
-    assert "prefix-level HTTPS check" in next_action_section
-    assert "before query serialization" in next_action_section
-    assert "absolute credential-free HTTPS endpoint" in next_action_section
-    assert "pre-existing `?` or" in next_action_section
-    assert "`#` delimiter" in next_action_section
-    assert "no username or password" in next_action_section
-    assert "zero, or out-of-range explicit port" in next_action_section
-    assert (
-        '`ValueError("url must be an absolute credential-free HTTPS endpoint without query or '
-        'fragment")`' in next_action_section
-    )
-    assert "before the query mapping is iterated or serialized" in next_action_section
-    assert "provider or hostname allowlist" in next_action_section
-    assert "DNS/IP policy" in next_action_section
+    assert "standard HTTPS target-port policy" in next_action_section
+    assert "parsed explicit target port from 1 through 65,535" in next_action_section
+    assert "policy concerns the caller's" in next_action_section
+    assert "target authority only and does not constrain" in next_action_section
+    assert "does not constrain a configured proxy peer" in next_action_section
+    assert "omitted target port or numeric target port 443" in next_action_section
+    assert '`ValueError("url must use the standard HTTPS target port")`' in next_action_section
+    assert "structural error and precedence" in next_action_section
+    assert "before the query mapping is accessed or serialized" in next_action_section
+    assert "zero-padded representation" in next_action_section
+    assert "Every active provider default URL remains unchanged and accepted" in next_action_section
+    assert "No provider or hostname allowlist" in next_action_section
+    assert "DNS lookup or resolution" in next_action_section
+    assert "SSRF" in next_action_section
     assert "TASK-037 remains blocked and authorization remains denied" in next_action_section
     assert blocked_section.count("### TASK-") == 1
     assert "### TASK-037 " in blocked_section
@@ -392,17 +396,67 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "Initial request-target validation remains incomplete" in task_048_section
     assert "non-HTTPS scheme handlers" in task_048_section
     assert "TASK-049 governs that residual risk" in task_048_section
+    assert "- **Status:** COMPLETE" in task_049_section
+    assert "`phase2.fail_closed_public_http_initial_request_target_validation`" in task_049_section
+    assert "`src/wealth/adapters/http.py`" in task_049_section
+    assert "`tests/unit/test_http_adapter.py`" in task_049_section
+    assert "`docs/ROADMAP.md`" in task_049_section
+    assert "After finite-positive timeout validation" in task_049_section
+    assert "before any query-mapping operation" in task_049_section
+    assert "absolute credential-free HTTPS" in task_049_section
+    assert "lone surrogate code point" in task_049_section
+    assert "context-suppressed" in task_049_section
+    assert (
+        '`ValueError("url must be an absolute credential-free HTTPS endpoint without query or '
+        'fragment")`' in task_049_section
+    )
+    assert "Every percent sign in the authority is rejected" in task_049_section
+    assert "NFKC inspection of the authority" in task_049_section
+    assert "IDNA could emit as a percent sign" in task_049_section
+    assert "backslash, whitespace, C0, or DEL" in task_049_section
+    assert "accepted URL is never reconstructed or normalized" in task_049_section
+    assert "117-target invalid corpus" in task_049_section
+    assert "query remains untouched" in task_049_section
+    assert "`urlencode`, `Request`, the private opener, DNS, network" in task_049_section
+    assert "63-target raw subset fails before `urlsplit`" in task_049_section
+    assert "parser tests prove failure context suppression" in task_049_section
+    assert "five invalid timeout cases retain their earlier" in task_049_section
+    assert "18 valid targets preserve their exact text" in task_049_section
+    assert "not a hostname, DNS, IP-routability, or SSRF guarantee" in task_049_section
+    assert "explicit ports 1 through 65,535 remain accepted" in task_049_section
+    assert "TASK-050 governs the remaining target-port" in task_049_section
     assert "private urllib opener with a no-follow redirect handler" in market_data_contract
     assert "performs no body" in market_data_contract
     assert "read or cleanup" in market_data_contract
     assert "No process-global opener is installed or" in market_data_contract
     assert "mutated" in market_data_contract
-    assert "Initial request-target validation remains incomplete" in market_data_contract
-    assert "TASK-049 governs" in market_data_contract
+    assert "before any query-mapping operation" in market_data_contract
+    assert "absolute credential-free HTTPS URL" in market_data_contract
+    assert "lone surrogate code point" in market_data_contract
+    assert "context-suppressed" in market_data_contract
+    assert "Every percent sign in the authority also fails" in market_data_contract
+    assert "authority is inspected under NFKC" in market_data_contract
+    assert "accepted URL itself is never normalized" in market_data_contract
+    assert "A rejected target performs" in market_data_contract
+    assert "no query iteration or serialization" in market_data_contract
+    assert "This boundary is structural, not a hostname or SSRF policy" in market_data_contract
+    assert "every syntactically valid explicit port from 1 through 65,535" in market_data_contract
+    assert "TASK-050 governs" in market_data_contract
     assert "Automatic 301, 302, 303, 307, and 308 redirects are rejected" in risk_register
     assert "process-global opener is untouched" in risk_register
-    assert "Initial request-target validation remains incomplete" in risk_register
-    assert "Require an exact absolute credential-free HTTPS initial request target" in risk_register
+    assert "original initial target must be an absolute credential-free HTTPS URL" in risk_register
+    assert "lone surrogate" in risk_register
+    assert "NFKC authority ambiguity" in risk_register
+    assert "accepted target is never reconstructed or normalized" in risk_register
+    assert "performs no hostname allowlisting, DNS resolution" in risk_register
+    assert "omitted or numeric-443 port" in risk_register
+    assert "Within the canonical UTC migration track" in roadmap
+    assert "TASK-037 remains" in roadmap
+    assert "blocked and authorization remains denied" in roadmap
+    assert "current executable next action is" in roadmap
+    assert "maintained in `PROJECT_STATE.json`" in roadmap
+    assert "separately governed RISK-1 fail-closed work" in roadmap
+    assert "The canonical next action is TASK-037" not in roadmap
 
 
 def test_project_state_forbids_unknown_fields() -> None:

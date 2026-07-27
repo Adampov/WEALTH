@@ -12,13 +12,57 @@ from http.client import (
 )
 from math import isfinite
 from typing import IO, cast
+from unicodedata import normalize
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from wealth.ports.http import HttpResponse, HttpTransportError
 
 MAX_PUBLIC_HTTP_RESPONSE_BYTES = 2_000_000
+_INVALID_INITIAL_URL_MESSAGE = (
+    "url must be an absolute credential-free HTTPS endpoint without query or fragment"
+)
+
+
+def _validate_initial_url(url: str) -> None:
+    """Reject unsafe or structurally ambiguous initial public request targets."""
+
+    if (
+        "?" in url
+        or "#" in url
+        or "\\" in url
+        or any(
+            character.isspace()
+            or ord(character) < 0x20
+            or ord(character) == 0x7F
+            or 0xD800 <= ord(character) <= 0xDFFF
+            for character in url
+        )
+    ):
+        raise ValueError(_INVALID_INITIAL_URL_MESSAGE)
+    try:
+        target = urlsplit(url)
+        hostname = target.hostname
+        username = target.username
+        port = target.port
+        normalized_netloc = normalize("NFKC", target.netloc)
+    except ValueError:
+        raise ValueError(_INVALID_INITIAL_URL_MESSAGE) from None
+    if (
+        target.scheme != "https"
+        or not hostname
+        or username is not None
+        or "%" in normalized_netloc
+        or "\\" in normalized_netloc
+        or any(
+            character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F
+            for character in normalized_netloc
+        )
+        or target.netloc.endswith(":")
+        or port == 0
+    ):
+        raise ValueError(_INVALID_INITIAL_URL_MESSAGE)
 
 
 class _NoRedirectHandler(HTTPRedirectHandler):
@@ -78,6 +122,7 @@ class UrllibPublicHttpClient:
             not isinstance(timeout_seconds, int) and not isfinite(timeout_seconds)
         ):
             raise ValueError("timeout_seconds must be finite and positive")
+        _validate_initial_url(url)
         query_string = urlencode(sorted(query.items()))
         request = Request(
             f"{url}?{query_string}",

@@ -60,12 +60,29 @@ and headers, returns only a complete in-limit body, and preserves all existing r
 cleanup, direct-cause, and primary-failure mappings. No process-global opener is installed or
 mutated.
 
-Initial request-target validation remains incomplete. The shared client does not yet parse and
-constrain its caller-supplied initial URL before query serialization and request construction, and
-the private standard-library opener retains non-HTTPS scheme handlers. Active provider
-constructors perform only a prefix-level HTTPS check. TASK-049 governs an exact absolute,
-credential-free HTTPS initial-target boundary; no provider/hostname allowlist, DNS/IP policy, or
-resolver is currently claimed.
+After finite-positive timeout validation and before any query-mapping operation, the shared client
+validates the original initial target as an absolute credential-free HTTPS URL with a non-empty
+CPython-parser hostname. A literal query or fragment delimiter, backslash, C0 or DEL control,
+Unicode whitespace, lone surrogate code point, relative or non-HTTPS form, absent or malformed
+authority, any userinfo, and an empty, non-numeric, signed, Unicode-digit, zero, or
+greater-than-65,535 explicit port fails with the exact context-suppressed
+`ValueError("url must be an absolute credential-free HTTPS endpoint without query or fragment")`.
+Every percent sign in the authority also fails, covering encoded host characters, ports, userinfo
+delimiters, slashes, backslashes, and controls, as well as malformed escapes and IPv6 zones, before
+urllib can reinterpret the authority. The authority is inspected under NFKC only to reject
+compatibility forms that IDNA could emit as a percent sign, backslash, whitespace, C0, or DEL; the
+accepted URL itself is never normalized, reconstructed, or repaired. A rejected target performs
+no query iteration or serialization, `Request` construction, opener or handler work, DNS lookup,
+network access, or filesystem access. An accepted target retains its exact text before the
+separately supplied sorted query is appended once, and GET, `Accept`, `User-Agent`, and timeout
+behavior remain unchanged.
+
+This boundary is structural, not a hostname or SSRF policy. It still permits localhost, IPv4,
+IPv6, CPython-parser-accepted IPvFuture and DNS-label forms, Unicode and trailing-dot hostnames,
+and every syntactically valid explicit port from 1 through 65,535. It performs no DNS resolution,
+IP/public-routability check, hostname or port allowlist, or SSRF guarantee; standard TLS and proxy
+behavior remain unchanged. TASK-050 governs an omitted-or-numeric-443 caller target-port policy
+only and does not constrain a configured proxy peer.
 
 Every `HTTPError` path makes one explicit cleanup attempt after at most one bounded body read.
 When cleanup succeeds, the error-response resource is closed before a response or primary failure
