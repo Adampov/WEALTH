@@ -163,10 +163,13 @@ database has been scanned, no replacement timestamp has been selected or emitted
 aware-only models, external text, sortable runtime projections, queries, and legacy stores have
 not been migrated.
 
-The canonical next action is TASK-037,
-`phase2.canonical_utc_preflight_operator_authorization_package_owner_decision`. It is a RISK-3
-authorization decision that requires project-owner approval plus independent Risk and Security
-review. It may prepare the exact proposed
+Within the canonical UTC migration track, the next gated action remains TASK-037,
+`phase2.canonical_utc_preflight_operator_authorization_package_owner_decision`. TASK-037 remains
+blocked and authorization remains denied. The repository's current executable next action is
+maintained in `PROJECT_STATE.json` and may identify separately governed RISK-1 fail-closed work
+that neither accesses operator data nor changes TASK-037 authority. If its resume condition is
+met, TASK-037 is a RISK-3 authorization decision that requires project-owner approval plus
+independent Risk and Security review. It may prepare the exact proposed
 read-only path list and real cardinality, writer-fenced consistent/immutable snapshot procedure,
 report destination, retention/disposal boundary, and the change, scope, environment, evidence,
 approver, UTC time, expiry or review trigger, monitoring, and rollback required by policy. It

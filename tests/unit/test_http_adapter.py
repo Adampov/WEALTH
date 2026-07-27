@@ -3,6 +3,7 @@
 import subprocess
 import sys
 from collections import Counter
+from collections.abc import ItemsView, Iterator, Mapping
 from email.message import Message
 from http.client import (
     BadStatusLine,
@@ -65,6 +66,132 @@ UNMAPPED_HTTP_EXCEPTION_TYPES = (
     pytest.param(InvalidURL, id="invalid-url"),
 )
 REDIRECT_STATUS_CODES = (301, 302, 303, 307, 308)
+INVALID_INITIAL_URL_MESSAGE = (
+    "url must be an absolute credential-free HTTPS endpoint without query or fragment"
+)
+UNICODE_WHITESPACE_CODE_POINTS = (
+    0x0085,
+    0x00A0,
+    0x1680,
+    *range(0x2000, 0x200B),
+    0x2028,
+    0x2029,
+    0x202F,
+    0x205F,
+    0x3000,
+)
+RAW_FORBIDDEN_INITIAL_URLS = (
+    pytest.param("https://example.test/public?symbol=BTC", id="populated-query"),
+    pytest.param("https://example.test/public?", id="empty-query"),
+    pytest.param("https://example.test/public#part", id="populated-fragment"),
+    pytest.param("https://example.test/public#", id="empty-fragment"),
+    pytest.param(r"https:\example.test\public", id="backslash-scheme-separator"),
+    pytest.param(r"https://example.test\public", id="backslash-authority"),
+    pytest.param(r"https://example.test/public\part", id="backslash-path"),
+    pytest.param(" https://example.test/public", id="leading-space"),
+    pytest.param("https://example.test/public ", id="trailing-space"),
+    pytest.param("https://\ud800.test/public", id="lone-high-surrogate-authority"),
+    pytest.param("https://example.test/public\udfff", id="lone-low-surrogate-path"),
+    *(
+        pytest.param(
+            f"https://example.test/public{chr(code_point)}part",
+            id=f"c0-u{code_point:04x}",
+        )
+        for code_point in range(0x20)
+    ),
+    pytest.param("https://example.test/public\x7fpart", id="del-u007f"),
+    *(
+        pytest.param(
+            f"https://example.test/public{chr(code_point)}part",
+            id=f"unicode-whitespace-u{code_point:04x}",
+        )
+        for code_point in UNICODE_WHITESPACE_CODE_POINTS
+    ),
+)
+INVALID_INITIAL_URLS = (
+    pytest.param("", id="empty"),
+    pytest.param("relative/path", id="relative"),
+    pytest.param("//example.test/public", id="scheme-relative"),
+    pytest.param("https:example.test/public", id="https-without-authority"),
+    pytest.param("http://example.test/public", id="http"),
+    pytest.param("HTTP://example.test/public", id="uppercase-http"),
+    pytest.param("ftp://example.test/public", id="ftp"),
+    pytest.param("file:///tmp/not-contacted", id="file"),
+    pytest.param("data:text/plain,not-contacted", id="data"),
+    pytest.param("gopher://example.test/public", id="gopher"),
+    pytest.param("wss://example.test/public", id="secure-websocket"),
+    pytest.param("custom://example.test/public", id="custom-scheme"),
+    pytest.param("httpsx://example.test/public", id="https-prefix-only"),
+    pytest.param("https://", id="empty-authority"),
+    pytest.param("https:///public", id="missing-hostname"),
+    pytest.param("https://:443/public", id="port-without-hostname"),
+    pytest.param("https://@example.test/public", id="empty-userinfo"),
+    pytest.param("https://user@example.test/public", id="username"),
+    pytest.param("https://:password@example.test/public", id="password-only"),
+    pytest.param("https://user:@example.test/public", id="empty-password"),
+    pytest.param("https://user:password@example.test/public", id="username-password"),
+    pytest.param("https://example.test@/public", id="userinfo-without-hostname"),
+    *RAW_FORBIDDEN_INITIAL_URLS,
+    pytest.param("https://[::1/public", id="unmatched-opening-bracket"),
+    pytest.param("https://::1/public", id="unbracketed-ipv6"),
+    pytest.param("https://[127.0.0.1]/public", id="bracketed-ipv4"),
+    pytest.param("https://[vG.example]/public", id="malformed-ipvfuture"),
+    pytest.param("https://example\uff0fevil.test/public", id="nfkc-slash"),
+    pytest.param("https://example\uff1fevil.test/public", id="nfkc-question"),
+    pytest.param("https://example\uff03evil.test/public", id="nfkc-fragment"),
+    pytest.param("https://example\uff20evil.test/public", id="nfkc-at"),
+    pytest.param("https://example\uff1a443/public", id="nfkc-colon"),
+    pytest.param("https://example\ufe68evil.test/public", id="nfkc-small-backslash"),
+    pytest.param("https://example\uff3cevil.test/public", id="nfkc-fullwidth-backslash"),
+    pytest.param("https://example\ufe6a2Fevil.test/public", id="nfkc-small-percent"),
+    pytest.param("https://example\uff052Fevil.test/public", id="nfkc-fullwidth-percent"),
+    pytest.param("https://exa\u00a8mple.test/public", id="nfkc-normalized-whitespace"),
+    pytest.param("https://example.test:/public", id="empty-port"),
+    pytest.param("https://[2001:db8::1]:/public", id="ipv6-empty-port"),
+    pytest.param("https://example.test:abc/public", id="alphabetic-port"),
+    pytest.param("https://example.test:+1/public", id="signed-positive-port"),
+    pytest.param("https://example.test:-1/public", id="negative-port"),
+    pytest.param("https://example.test:\uff11\uff12/public", id="unicode-digit-port"),
+    pytest.param("https://example.test:0/public", id="zero-port"),
+    pytest.param("https://example.test:65536/public", id="above-maximum-port"),
+    pytest.param(f"https://example.test:{10**1_000}/public", id="huge-port"),
+    pytest.param("https://%65xample.test/public", id="encoded-host-character"),
+    pytest.param("https://example.test%3a0/public", id="encoded-zero-port"),
+    pytest.param("https://example.test%3A65536/public", id="encoded-large-port"),
+    pytest.param("https://user%40example.test/public", id="encoded-userinfo-delimiter"),
+    pytest.param("https://example.test%2Fother/public", id="encoded-authority-slash"),
+    pytest.param("https://example.test%5Cother/public", id="encoded-authority-backslash"),
+    pytest.param("https://example.test%00other/public", id="encoded-authority-control"),
+    pytest.param("https://example.test%zz/public", id="malformed-authority-escape"),
+    pytest.param("https://[fe80::1%25eth0]/public", id="encoded-ipv6-zone"),
+)
+VALID_INITIAL_URLS = (
+    pytest.param("https://example.test", id="hostname-only"),
+    pytest.param("https://example.test/", id="root-path"),
+    pytest.param("https://example.test/public", id="ordinary-path"),
+    pytest.param("HTTPS://Example.TEST/Mixed", id="mixed-case-scheme-and-host"),
+    pytest.param("https://example.test:1/public", id="minimum-port"),
+    pytest.param("https://example.test:443/public", id="default-explicit-port"),
+    pytest.param("https://example.test:65535/public", id="maximum-port"),
+    pytest.param("https://example.test:00001/public", id="zero-padded-valid-port"),
+    pytest.param("https://192.0.2.1/public", id="ipv4-without-policy"),
+    pytest.param("https://[2001:db8::1]/public", id="bracketed-ipv6-without-policy"),
+    pytest.param("https://[v1.example]/public", id="parseable-ipvfuture-without-policy"),
+    pytest.param("https://localhost/public", id="localhost-without-policy"),
+    pytest.param("https://xn--mnich-kva.test/public", id="punycode-hostname"),
+    pytest.param("https://münich.test/מחקר", id="unicode-hostname-and-path"),
+    pytest.param("https://example.test./public", id="trailing-dot-hostname"),
+    pytest.param(
+        "https://example.test/%2F%3F%23%E2%82%AC",
+        id="encoded-path-delimiters",
+    ),
+    pytest.param("https://example.test/a;b//c", id="semicolon-and-double-slash-path"),
+    pytest.param("https://example.test/user:password@path", id="userinfo-symbols-in-path"),
+)
+PARSER_ERROR_INITIAL_URLS = (
+    pytest.param("https://[::1/public", id="urlsplit-error"),
+    pytest.param("https://example.test:abc/public", id="port-property-error"),
+)
 REDIRECT_TARGETS = (
     pytest.param(None, None, id="no-location"),
     pytest.param("Location", "", id="empty-location"),
@@ -90,6 +217,29 @@ REDIRECT_TARGETS = (
 
 class IntegerSubclass(int):
     """Represent an integer whose runtime type is not the built-in type."""
+
+
+class ExplodingQuery(Mapping[str, str]):
+    """Fail if an invalid URL reaches any query-mapping operation."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def __getitem__(self, key: str) -> str:
+        self.calls.append(f"getitem:{key}")
+        raise AssertionError("invalid URL reached query item access")
+
+    def __iter__(self) -> Iterator[str]:
+        self.calls.append("iter")
+        raise AssertionError("invalid URL reached query iteration")
+
+    def __len__(self) -> int:
+        self.calls.append("len")
+        raise AssertionError("invalid URL reached query length")
+
+    def items(self) -> ItemsView[str, str]:
+        self.calls.append("items")
+        raise AssertionError("invalid URL reached query serialization")
 
 
 class StubUrlResponse:
@@ -386,6 +536,124 @@ def test_valid_response_limit_is_retained_exactly(max_response_bytes: int) -> No
 
 def test_default_response_limit_is_the_hard_maximum() -> None:
     assert UrllibPublicHttpClient().max_response_bytes == MAX_PUBLIC_HTTP_RESPONSE_BYTES
+
+
+@pytest.mark.parametrize("url", INVALID_INITIAL_URLS)
+def test_invalid_initial_url_fails_before_query_request_or_opener_work(
+    monkeypatch: pytest.MonkeyPatch,
+    url: str,
+) -> None:
+    query = ExplodingQuery()
+    downstream_calls: list[str] = []
+
+    def unexpected_downstream_call(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        downstream_calls.append("called")
+        raise AssertionError("invalid URL reached downstream work")
+
+    class UnexpectedOpener:
+        def open(self, *args: object, **kwargs: object) -> object:
+            return unexpected_downstream_call(*args, **kwargs)
+
+    monkeypatch.setattr(http_adapter, "urlencode", unexpected_downstream_call)
+    monkeypatch.setattr(http_adapter, "Request", unexpected_downstream_call)
+    monkeypatch.setattr(http_adapter, "urlopen", unexpected_downstream_call)
+    monkeypatch.setattr(http_adapter, "_NO_REDIRECT_OPENER", UnexpectedOpener())
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient().get(
+            url=url,
+            query=query,
+            timeout_seconds=1,
+        )
+
+    assert type(error.value) is ValueError
+    assert str(error.value) == INVALID_INITIAL_URL_MESSAGE
+    assert error.value.__cause__ is None
+    assert query.calls == []
+    assert downstream_calls == []
+
+
+@pytest.mark.parametrize("url", PARSER_ERROR_INITIAL_URLS)
+def test_initial_url_parser_failure_context_is_suppressed(
+    url: str,
+) -> None:
+    query = ExplodingQuery()
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient().get(
+            url=url,
+            query=query,
+            timeout_seconds=1,
+        )
+
+    assert str(error.value) == INVALID_INITIAL_URL_MESSAGE
+    assert error.value.__cause__ is None
+    assert isinstance(error.value.__context__, ValueError)
+    assert error.value.__suppress_context__ is True
+    assert query.calls == []
+
+
+@pytest.mark.parametrize("url", RAW_FORBIDDEN_INITIAL_URLS)
+def test_raw_forbidden_initial_url_fails_before_url_parsing(
+    monkeypatch: pytest.MonkeyPatch,
+    url: str,
+) -> None:
+    parser_calls: list[str] = []
+
+    def unexpected_urlsplit(value: str) -> object:
+        parser_calls.append(value)
+        raise AssertionError("raw-forbidden URL reached parsing")
+
+    monkeypatch.setattr(http_adapter, "urlsplit", unexpected_urlsplit)
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient().get(
+            url=url,
+            query=ExplodingQuery(),
+            timeout_seconds=1,
+        )
+
+    assert str(error.value) == INVALID_INITIAL_URL_MESSAGE
+    assert parser_calls == []
+
+
+@pytest.mark.parametrize("url", VALID_INITIAL_URLS)
+def test_valid_initial_url_is_preserved_through_request_construction(
+    monkeypatch: pytest.MonkeyPatch,
+    url: str,
+) -> None:
+    response = StubUrlResponse(b"ok")
+    calls: list[tuple[Request, float]] = []
+    timeout_seconds = float("0.25")
+
+    def stub_urlopen(request: Request, *, timeout: float) -> StubUrlResponse:
+        calls.append((request, timeout))
+        return response
+
+    monkeypatch.setattr(http_adapter, "urlopen", stub_urlopen)
+
+    result = UrllibPublicHttpClient(
+        user_agent="WEALTH/test initial-target",
+        max_response_bytes=2,
+    ).get(
+        url=url,
+        query={"b": "2", "a": "1"},
+        timeout_seconds=timeout_seconds,
+    )
+
+    assert len(calls) == 1
+    request, forwarded_timeout = calls[0]
+    assert request.full_url == f"{url}?a=1&b=2"
+    assert request.get_method() == "GET"
+    assert request.get_header("Accept") == "application/json"
+    assert request.get_header("User-agent") == "WEALTH/test initial-target"
+    assert forwarded_timeout is timeout_seconds
+    assert response.enter_calls == 1
+    assert response.read_limits == [3]
+    assert response.exit_calls == 1
+    assert result.status_code == 200
+    assert result.body == b"ok"
 
 
 def test_production_private_opener_replaces_only_the_default_redirect_handler() -> None:
@@ -1535,6 +1803,32 @@ def test_invalid_timeout_fails_before_request_construction_or_network(
 
     assert str(error.value) == "timeout_seconds must be finite and positive"
     assert calls == []
+
+
+@pytest.mark.parametrize("timeout_seconds", INVALID_TIMEOUTS)
+def test_invalid_timeout_precedes_initial_url_and_query_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    timeout_seconds: float,
+) -> None:
+    validator_calls: list[str] = []
+    query = ExplodingQuery()
+
+    def unexpected_url_validation(url: str) -> None:
+        validator_calls.append(url)
+        raise AssertionError("invalid timeout reached initial URL validation")
+
+    monkeypatch.setattr(http_adapter, "_validate_initial_url", unexpected_url_validation)
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient().get(
+            url="http://invalid-timeout.test/not-contacted",
+            query=query,
+            timeout_seconds=timeout_seconds,
+        )
+
+    assert str(error.value) == "timeout_seconds must be finite and positive"
+    assert validator_calls == []
+    assert query.calls == []
 
 
 @pytest.mark.parametrize(

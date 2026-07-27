@@ -6,62 +6,59 @@ promoted through review.
 
 ## Next Action
 
-### TASK-049 — Fail-closed public-HTTP initial request-target validation
+### TASK-050 — Fail-closed public-HTTP standard HTTPS target-port policy
 
-- **Key:** `phase2.fail_closed_public_http_initial_request_target_validation`
+- **Key:** `phase2.fail_closed_public_http_standard_https_target_port_policy`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
 - **Human approval:** NOT REQUIRED — bounded fail-closed development hardening under the owner's
   explicit authorization; it narrows public-network behavior and changes no permission,
   deployment, provider, or operator-data boundary.
-- **Context:** TASK-048 rejects every automatic redirect, but the initial caller-supplied target
-  still reaches request construction without one exact shared validation boundary. The private
-  standard-library opener retains `HTTPHandler`, `FTPHandler`, `FileHandler`, `DataHandler`, and
-  `HTTPSHandler`; direct shared-client use can therefore select a non-HTTPS handler. The active
-  provider constructors use only a prefix-level HTTPS check, which does not reject an empty or
-  malformed authority, embedded credentials, a pre-existing query or fragment, control
-  characters, or an invalid explicit port.
-- **Goal:** Reject every non-absolute, non-HTTPS, credential-bearing, or structurally ambiguous
-  initial request target before query serialization, `Request` construction, or opener work,
-  while forwarding a valid credential-free HTTPS endpoint unchanged.
-- **Scope:** Add one private pure initial-target validator to `UrllibPublicHttpClient`; require an
-  absolute HTTPS URL with a non-empty parseable hostname, no username or password, no pre-existing
-  query or fragment, no whitespace, control character, or backslash, and no empty, non-numeric,
-  zero, or out-of-range explicit port; and add deterministic boundary tests proving invalid
-  targets perform no downstream work.
+- **Context:** TASK-049 now rejects structurally invalid or ambiguous initial targets, but it
+  deliberately accepts every parsed explicit target port from 1 through 65,535. Every active
+  provider default uses implicit HTTPS port 443. A different otherwise valid target port can
+  select another TLS service even though the URL remains HTTPS; this policy concerns the caller's
+  target authority only and does not constrain a configured proxy peer.
+- **Goal:** Permit only an omitted target port or numeric target port 443 before query or request
+  work, while preserving the exact original text of an accepted target.
+- **Scope:** Extend the private initial-target validator after TASK-049 structural validation;
+  reject a structurally valid explicit non-443 target port with exact
+  `ValueError("url must use the standard HTTPS target port")`; and add deterministic no-work,
+  precedence, preservation, and active-provider-default tests.
 - **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
   `docs/contracts/MARKET_DATA.md`, plus coordinated governance files and governance tests.
-- **Constraints:** Do not normalize, rewrite, resolve, or contact an invalid target. Do not add a
-  provider or hostname allowlist, DNS lookup, IP or public-routability policy, certificate pinning,
-  custom TLS context, proxy change, credential, redirect permission, retry, dependency, endpoint
-  change, or provider-specific exception. Preserve valid endpoint text, sorted query construction,
-  headers, timeouts, response caps, no-follow behavior, TASK-043 through TASK-048 exception and
+- **Constraints:** Preserve TASK-049's structural error and precedence for malformed, encoded,
+  empty, non-numeric, signed, Unicode-digit, zero, or out-of-range ports. Do not normalize,
+  rewrite, resolve, or contact a rejected target. Do not add a provider or hostname allowlist, DNS
+  lookup, IP or public-routability policy, SSRF guarantee, IDNA policy, certificate pinning, custom
+  TLS context, proxy change, credential, redirect permission, retry, dependency, endpoint change,
+  or provider-specific exception. Preserve accepted target text, sorted query construction,
+  headers, timeouts, response caps, no-follow behavior, TASK-041 through TASK-049 exception and
   cleanup semantics, provider parsing, canonicalization, quality, storage, schemas, runtime
   wiring, TASK-037 authority, migration, and Stage 3.
 
 Acceptance gates:
 
-1. With a valid timeout, each `http`, `ftp`, `file`, and `data` target; relative and
-   scheme-relative target; missing or empty hostname; username or password; pre-existing `?` or
-   `#` delimiter; whitespace, C0/DEL control character, or backslash; malformed authority; and
-   empty, non-numeric, zero, or greater-than-65535 explicit port raises exactly
-   `ValueError("url must be an absolute credential-free HTTPS endpoint without query or fragment")`.
-2. Every rejected target fails before the query mapping is iterated or serialized and before
-   `Request`, the private opener, DNS, or any network or filesystem handler is invoked. No target
-   is normalized, repaired, retried, or partially opened.
-3. A valid absolute credential-free HTTPS endpoint with a hostname, optional valid explicit port,
-   and optional path is retained unchanged; the separately supplied sorted query is appended
-   exactly once, and the existing method, `Accept`, `User-Agent`, and finite-positive timeout are
-   forwarded unchanged.
-4. Non-redirect success and HTTP-error behavior and TASK-048 redirect rejection remain unchanged:
-   one original acquisition, one bounded body read, the applicable cleanup behavior, no retry,
-   and no second destination. All TASK-043 through TASK-047 mappings, exclusions, direct causes,
-   and primary-failure precedence remain intact.
-5. No provider or hostname allowlist, DNS/IP policy, resolver, certificate pin, TLS/proxy
-   customization, credential, endpoint change, dependency, provider-specific behavior, or
-   process-global opener mutation is introduced. Formatting, lint, strict typing, complete tests,
-   lockfile verification, dependency audit, health slice, and CI pass.
+1. With a valid timeout and otherwise valid target, explicit ports 1, 80, 442, 444, and 65,535
+   raise exactly `ValueError("url must use the standard HTTPS target port")`, with no direct or
+   displayed parser cause. Malformed, percent-encoded, empty, non-numeric, signed, Unicode-digit,
+   zero, and greater-than-65,535 ports retain TASK-049's exact structural error and precedence.
+2. Every rejected non-443 target fails before the query mapping is accessed or serialized and
+   before `Request`, the private opener, DNS, or any network or filesystem handler is invoked. No
+   target is normalized, repaired, retried, or partially opened.
+3. An implicit target port and explicit numeric port 443, including a zero-padded representation
+   parsed as 443, retain their exact original URL text; the separately supplied sorted query is
+   appended exactly once, and the existing GET method, `Accept`, `User-Agent`, and finite-positive
+   timeout are forwarded unchanged.
+4. Every active provider default URL remains unchanged and accepted. Non-redirect success,
+   HTTP-error behavior, TASK-048 redirect rejection, and every TASK-041 through TASK-049 mapping,
+   exclusion, direct cause, cleanup rule, and primary-failure precedence remain unchanged.
+5. No provider or hostname allowlist, DNS lookup or resolution, IP/public-routability policy, SSRF
+   guarantee, IDNA policy, certificate pin, TLS/proxy customization, endpoint, dependency, or
+   provider-specific behavior is introduced. The policy constrains only the caller target port;
+   a configured proxy may itself use a non-443 peer. Formatting, lint, strict typing, complete
+   tests, lockfile verification, dependency audit, health slice, and CI pass.
 6. TASK-037 remains blocked and authorization remains denied; no operator data, path, database,
    scanner, report, migration, or Stage 3 action occurs.
 
@@ -118,6 +115,41 @@ Acceptance gates:
    all repository gates pass.
 
 ## Recently Completed
+
+### TASK-049 — Fail-closed public-HTTP initial request-target validation
+
+- **Key:** `phase2.fail_closed_public_http_initial_request_target_validation`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
+  `docs/contracts/MARKET_DATA.md`, `docs/ROADMAP.md`, and the coordinated governance files and
+  governance tests.
+- **Result:** After finite-positive timeout validation and before any query-mapping operation, the
+  shared client now validates the original initial target as an absolute credential-free HTTPS
+  URL with a non-empty CPython-parser hostname. It rejects every literal `?`, `#`, or backslash;
+  every C0 or DEL control, Unicode whitespace character, and lone surrogate code point; relative,
+  scheme-relative, and non-HTTPS targets; absent or malformed authorities; any userinfo; and
+  empty, non-numeric,
+  signed, Unicode-digit, zero, or greater-than-65,535 explicit ports. Parser and port failures
+  become the exact context-suppressed
+  `ValueError("url must be an absolute credential-free HTTPS endpoint without query or fragment")`.
+  Every percent sign in the authority is rejected, covering encoded host characters, ports,
+  userinfo delimiters, slashes, backslashes, and controls, as well as malformed escapes and IPv6
+  zones, before urllib can reinterpret the authority. NFKC inspection of the authority
+  additionally rejects compatibility characters that IDNA could emit as a percent sign,
+  backslash, whitespace, C0, or DEL; the accepted URL is never reconstructed or normalized. A
+  117-target invalid corpus
+  proves the query remains untouched and `urlencode`, `Request`, the private opener, DNS, network,
+  and filesystem handlers receive no work. A 63-target raw subset fails before `urlsplit`; focused
+  parser tests prove failure context suppression; five invalid timeout cases retain their earlier
+  precedence; and 18 valid targets preserve their exact text, sorted query, GET, `Accept`,
+  `User-Agent`, timeout identity, one bounded response read, and one acquisition. This is a
+  structural boundary, not a hostname, DNS, IP-routability, or SSRF guarantee: localhost, IPv4,
+  IPv6, parser-accepted IPvFuture and DNS-label forms, Unicode and trailing-dot hostnames, and
+  explicit ports 1 through 65,535 remain accepted. TASK-050 governs the remaining target-port
+  policy. Proxy/TLS defaults, endpoints, TASK-043 through TASK-048 response and redirect mappings,
+  provider behavior, parsing, quality, storage, schemas, dependencies, runtime wiring, TASK-037
+  authority, migration, and Stage 3 remain unchanged.
 
 ### TASK-048 — Fail-closed public-HTTP automatic redirect rejection
 
