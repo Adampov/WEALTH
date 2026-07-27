@@ -65,7 +65,8 @@
     "public_trade_disconnect_sparse_window_restart_recovery_drill",
     "versioned_public_provider_schema_fixture_contract_and_drift_runbook",
     "continuous_public_trade_collection_operating_contract",
-    "continuous_public_trade_closed_window_planner_contracts"
+    "continuous_public_trade_closed_window_planner_contracts",
+    "continuous_public_trade_stream_persistence_contract"
   ],
   "active_integrations": [
     "github_actions_ci"
@@ -107,8 +108,8 @@
       "requires_human_approval": true
     },
     {
-      "task_id": "TASK-060",
-      "action": "phase2.continuous_public_trade_stream_persistence_contract_decision",
+      "task_id": "TASK-061",
+      "action": "phase2.continuous_public_trade_stream_persistence_codec_contracts",
       "status": "ready",
       "risk_tier": 1,
       "requires_human_approval": false
@@ -147,11 +148,16 @@
       "decision_id": "ADR-0028",
       "summary": "Select a conceptual single-host continuous public-trade collection operating contract.",
       "artifact": "docs/decisions/0028-continuous-public-trade-collection-operating-contract.md"
+    },
+    {
+      "decision_id": "ADR-0029",
+      "summary": "Define the conceptual single-host continuous public-trade stream persistence contract.",
+      "artifact": "docs/decisions/0029-continuous-public-trade-stream-persistence-contract.md"
     }
   ],
   "next_action": {
-    "task_id": "TASK-060",
-    "action": "phase2.continuous_public_trade_stream_persistence_contract_decision"
+    "task_id": "TASK-061",
+    "action": "phase2.continuous_public_trade_stream_persistence_codec_contracts"
   },
-  "last_updated_utc": "2026-07-27T11:55:14Z"
+  "last_updated_utc": "2026-07-27T17:09:58Z"
 }

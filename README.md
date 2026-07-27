@@ -360,9 +360,119 @@ or retry behavior, wait/sleep, scheduler, trigger, daemon, service runner, CLI, 
 deployment, configuration loading, operator path/data, credential, permission, notification,
 dependency, lockfile, or automatic action. It does not establish persistence, cross-database
 atomicity, physical durability, capacity adequacy, multi-host exclusivity, continuous operation,
-recovery, deployment, or Phase 2 readiness. TASK-060 is limited to a design-only decision for a
-possible future persistence contract; ADR-0028 and the current explicitly invoked bounded
+recovery, deployment, or Phase 2 readiness. ADR-0028 and the current explicitly invoked bounded
 public-trade flow remain unchanged.
+
+## Continuous Public-Trade Stream Persistence Contract (Design Only)
+
+[ADR-0029](docs/decisions/0029-continuous-public-trade-stream-persistence-contract.md) defines the
+logical persistence contract that a possible future stream store must satisfy. It does not add a
+port, repository, codec implementation, database, schema, migration, or runtime.
+
+The future durable current state is exactly the TASK-059 stream checkpoint: immutable stream and
+market identity, request variant, stream-policy fingerprint and start; exact epoch-millisecond
+cursor; active/paused status and reason; optional immutable attachment; and monotonic version. The
+planner result, injected clock, full policy, service run, fences, bounded-child state, source
+health, market evidence, and shared budget remain invocation-local or separately durable and are
+never inferred from the stream record.
+
+The TASK-059 attachment's `creation_fingerprint` is non-invertible. An attach-before-create commit
+must therefore atomically retain a new canonical `child_creation_payload` for the complete
+deterministic pristine child plus stream/request binding and explicit versions, including its exact
+UTC creation time and separate bounded-child policy fingerprint. This evidence payload does not
+replace or redefine the existing bounded-child store serializer. A future implementation must
+reject missing bytes, fingerprint disagreement, policy confusion, any child identity/range
+mismatch, or a range that cannot construct the exact existing child model; it may not recreate a
+child from a new clock or current configuration.
+
+Conceptual `create` accepts only pristine version-one state, complete policy, governed-create
+reference, and one fixed-UTC command time sampled exactly once by the future mutation boundary's
+trusted injected clock; it returns inserted, exact creation/history duplicate, or conflict without
+replacement. One store-local natural feed identity cannot use two stream UUIDs, without claiming
+cross-store or multi-host uniqueness. Exact-identity current load
+requires the full immutable identity and complete effective stream policy plus the effective child
+policy while attached, compares every stream-policy field and its caller-supplied fingerprint
+against immutable stream-creation evidence, checks only a constant-size latest/predecessor proof,
+and distinguishes absence, conflict, unsupported version, corruption, and storage failure. Full
+history audit is a separate 1-to-100-new-record paginated operation under an explicit finite outer
+limit; every noninitial page loads one predecessor overlap so its first TASK-059 transition can be
+validated against exact prior envelope bytes as well as the rolling-root continuation. It extends a
+domain-separated rolling history root over every creation/transition byte, including bounded
+evidence references whose digests/scopes bind their external bodies. Before child
+creation/recovery, a claim, budget reservation, provider request, evidence admission, or stream
+mutation after the sole governed-create bootstrap, a future runtime requires an externally anchored
+accepted attestation matching the exact current version, envelope digest, and history root. A
+bounded creation audit must attest version one before any post-create action; current load/planning
+alone grants no action. ADR-0028's sole narrow exception lets an operation already past every
+pre-request gate admit its already-returning evidence and finish or fail that same finite child
+under its exact pre-hold attestation, fence, and authority only when validated hold evidence
+explicitly preserves the response/admission contract. Drift, invalid payload, quality/evidence
+failure, corruption, or ambiguous hold classification stops canonical admission/progress and may
+use only a separately governed quarantine/attention path. No exception starts a new attempt/request
+or mutates the stream.
+
+The store-level compare-and-swap command is constructed inside the trusted mutation boundary only
+after exact reload and one trusted clock sample. The caller cannot supply `recorded_at` or a
+preconstructed ATTACH successor. The internal command requires the trusted previous version and
+domain-separated stream-envelope digest, one explicit transition, a complete successor envelope at
+exactly `version + 1`, and transition authority plus child-completion evidence when applicable.
+Create also retains a separate
+stream-creation record with lowercase-hex exact version-one envelope bytes and the complete
+canonical stream-policy projection; it does not invent a TASK-059 `CREATE` kind. Current state and
+a separate canonical append-only transition record commit together only inside the future stream
+store. Every transition retains lowercase-hex exact successor-envelope bytes and binds
+prior/successor digests, the prior rolling root, and typed bounded external evidence references,
+allowing the full chain to be revalidated without embedding operator identities, secrets,
+credentials, or operator paths. Kind-specific scope digests bind the exact stream/transition and,
+for creation, the complete policy projection. ATTACH authority is intentionally time-independent:
+it binds exact prior version, envelope digest, accepted history root, successor version, candidate
+child UUID, and effective child-policy fingerprint while successor digest and creation fingerprint
+are null. Every other transition authority binds that prior root and its exact successor digest;
+the finalized ATTACH transition and rolling root bind its exact result.
+Canonical reason scope is required for RETAIN and MANUAL_HOLD, equals the held checkpoint reason,
+and is null for other transitions. A future mutation boundary samples command time from its trusted
+injected UTC clock; the caller cannot backdate it. Later expiry does not corrupt history or
+authorize new work, record time cannot regress, and ATTACH uses that same time for the pristine
+child.
+Compare-and-swap is not the outer UUID fence. A conflict/lost fence ends the invocation without
+blind retry and requires the ADR-0028 failed-service/manual-hold decision.
+
+Canonical records use an explicit record type and serialization version separate from the
+TASK-059 model version, causal checkpoint version, and any future physical-store schema. The
+selected profile is exact compact sorted-key UTF-8 JSON with no BOM/newline, exact UUID/enum and
+integer representations, explicit nulls, duplicate/unknown keys rejected, and domain-separated
+SHA-256 child-creation fingerprints. Generic dependency-version JSON output is not the byte
+authority. Six distinct digest contracts cover child creation, stream envelope, stream creation,
+transition record, evidence scope, and rolling history root; an external evidence-body digest
+remains externally supplied. TASK-059 epoch milliseconds remain exact; a future implementation
+must fail closed rather than overflow when a value cannot be projected to ADR-0027 epoch
+microseconds.
+Every datetime in `child_creation_payload` uses exact fixed-UTC six-fractional-digit `Z` text and
+must round-trip from attachment epoch milliseconds without rounding; this still does not alter the
+existing child-store serializer.
+Version-one readers reject unknown/newer fields; newer readers dispatch original version-one bytes
+through the frozen codec, and downgrade requires an untouched old generation or a proven lossless
+reverse converter.
+
+Because TASK-059's planner accepts a fingerprint before returning a new due range, attachment uses
+an exact pure two-pass proof. One fixed-UTC trusted instant is the planner's `now`, the child's
+`created_at`/`updated_at`, and the transition's `recorded_at`; first plan with the fixed in-memory
+all-zero provisional digest, build and hash the child payload from that range, then replan with the
+real digest and require every non-fingerprint result field to match. The provisional value is never
+persisted or used for action, and the TASK-059 API remains unchanged.
+
+Every attach, child-create, evidence, child-checkpoint, child-completion, stream-advance, hold, and
+resume crash seam is resolved by exact reload. An attachment commits before child creation;
+accepted evidence precedes child progress; verified child completion precedes stream progress; and
+an already-completed attached child advances with zero provider requests. The stores remain
+separate and are never described as atomic. Rollback disables the continuous path and returns to
+the existing explicit bounded flow while preserving the exact stream, attachment, child, history,
+hold, evidence, health, lifecycle, fence, and budget records.
+
+This decision adds no automatic creation, pause, resume, recovery, restart, scheduling, provider
+access, capacity, physical-durability, multi-host, deployment, or readiness guarantee. TASK-061 is
+the separately governed pure, unused persistence-record and canonical-codec contract increment.
+TASK-037 remains blocked and authorization remains denied.
 
 Operators and monitoring tools can read the separate candle collector-service state through a
 dedicated JSON command:
