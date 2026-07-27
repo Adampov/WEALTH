@@ -91,26 +91,27 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert "fail_closed_public_http_bounded_user_agent_validation" in state.active_components
     assert "fail_closed_public_http_maximum_timeout_policy" in state.active_components
     assert "fail_closed_public_http_bounded_response_header_projection" in (state.active_components)
+    assert "public_trade_disconnect_sparse_window_restart_recovery_drill" in state.active_components
     assert len(state.open_tasks) == 2
-    task_037, task_056 = state.open_tasks
+    task_037, task_057 = state.open_tasks
     assert task_037.task_id == "TASK-037"
     assert task_037.status == "blocked"
     assert task_037.risk_tier == 3
     assert task_037.requires_human_approval is True
-    assert task_056.task_id == "TASK-056"
-    assert task_056.action == "phase2.public_trade_disconnect_sparse_window_restart_recovery_drill"
-    assert task_056.status == "ready"
-    assert task_056.risk_tier == 1
-    assert task_056.requires_human_approval is False
+    assert task_057.task_id == "TASK-057"
+    assert task_057.action == "phase2.versioned_public_provider_schema_fixtures_and_drift_runbook"
+    assert task_057.status == "ready"
+    assert task_057.risk_tier == 1
+    assert task_057.requires_human_approval is False
     assert state.blockers == (
         "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance "
         "location before independent Risk and Security review and the project-owner decision; "
         "authorization remains denied.",
     )
-    assert state.next_action.task_id == "TASK-056"
+    assert state.next_action.task_id == "TASK-057"
     assert (
         state.next_action.action
-        == "phase2.public_trade_disconnect_sparse_window_restart_recovery_drill"
+        == "phase2.versioned_public_provider_schema_fixtures_and_drift_runbook"
     )
     assert any(decision.decision_id == "ADR-0027" for decision in state.recent_decisions)
 
@@ -212,59 +213,53 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_055_section = completed_section.split("### TASK-055 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
+    task_056_section = completed_section.split("### TASK-056 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    assert "Deterministic public-trade disconnect, sparse-window" in next_action_section
-    assert "restart-recovery drill evidence" in next_action_section
-    assert "`RISK-001`, `RISK-004`" in next_action_section
-    assert "No single process-reopen drill currently composes all three" in next_action_section
-    assert "generated SQLite boundaries" in next_action_section
-    assert "exhausted public-trade" in next_action_section
-    assert "transport disconnect" in next_action_section
-    assert "without skipping a pending" in next_action_section
-    assert "shared budget" in next_action_section
-    assert "reusing lease authority" in next_action_section
-    assert "three-millisecond synthetic Binance Spot" in next_action_section
-    assert "one-millisecond initial windows" in next_action_section
-    assert "exhausts exactly two retryable synthetic" in next_action_section
-    assert "newly constructed evidence, checkpoint, and" in next_action_section
-    assert "rate-budget adapters" in next_action_section
-    assert "fresh UUID fence" in next_action_section
-    assert "exact empty, one-valid-trade, and empty" in next_action_section
-    assert "`tests/integration/test_recoverable_public_trade_collection.py`" in (
-        next_action_section
-    )
+    assert "Versioned public-provider schema fixtures" in next_action_section
+    assert "drift-response runbook" in next_action_section
+    assert "`RISK-002` remains open" in next_action_section
+    assert "five active public request variants" in next_action_section
+    assert "Binance Spot and" in next_action_section
+    assert "USD-M candles" in next_action_section
+    assert "Coinbase Exchange candles" in next_action_section
+    assert "Binance Spot and USD-M aggregate trades" in next_action_section
+    assert "without widening them" in next_action_section
+    assert "`tests/fixtures/public_provider_schema/v1/manifest.json`" in next_action_section
+    assert "exact-byte SHA-256" in next_action_section
+    assert "official public-contract reference" in next_action_section
+    assert "`tests/unit/test_public_provider_schema_fixtures.py`" in next_action_section
+    assert "`docs/runbooks/PUBLIC_PROVIDER_SCHEMA_DRIFT.md`" in next_action_section
     assert "`README.md`" in next_action_section
     assert "`docs/contracts/MARKET_DATA.md`" in next_action_section
-    assert "`docs/ROADMAP.md`" in next_action_section
-    assert "Test and documentation evidence only" in next_action_section
-    assert "generated `tmp_path` databases" in next_action_section
-    assert "perform no real network call or wall-clock sleep" in next_action_section
-    assert "Do not change production" in next_action_section
-    assert "A discovered production defect fails this task" in next_action_section
-    assert "continuous collector, scheduler, daemon" in next_action_section
-    assert "crash-durable per-job pre-request reservation" in next_action_section
-    assert "Do not claim cross-database atomicity" in next_action_section
-    assert "exactly two retryable `HttpTransportError` outcomes" in next_action_section
-    assert "no market evidence is written" in next_action_section
-    assert "`FAILED` at checkpoint version 3" in next_action_section
-    assert "`UNAVAILABLE` health" in next_action_section
-    assert "canonical failure code `provider_unavailable`" in next_action_section
-    assert "stop reason `attempts_exhausted`" in next_action_section
-    assert "fresh never-reused UUID fencing token" in next_action_section
-    assert "Completion reaches checkpoint version 6" in next_action_section
-    assert "three raw captures, one canonical trade, zero conflicts" in next_action_section
-    assert "exact contiguous versions 1 through 6" in next_action_section
-    assert "health only at versions 3, 5, and 6" in next_action_section
-    assert "exactly five durable reservations" in next_action_section
-    assert "A run after durable completion" in next_action_section
-    assert "zero range invocations" in next_action_section
-    assert "no cross-database-atomicity, physical-durability" in next_action_section
-    assert "TASK-037 remains blocked and authorization remains denied" in next_action_section
+    assert "minimal, synthetic, secret-free, and bounded" in next_action_section
+    assert "do not copy a live" in next_action_section
+    assert "perform no network call, wall-clock sleep, online snapshot" in next_action_section
+    assert "Do not change production source" in next_action_section
+    assert "aggregate-trade rule rejects unknown fields" in next_action_section
+    assert "does not detect upstream drift automatically" in next_action_section
+    assert "Do not add an operator CLI, dashboard, alert delivery" in next_action_section
+    assert "A parser or provider-contract behavior change" in next_action_section
+    assert "one-to-one to one exact committed fixture" in next_action_section
+    assert "exactly the five active request variants" in next_action_section
+    assert "exactly 12 positional values" in next_action_section
+    assert "Coinbase candle rows exactly six" in next_action_section
+    assert "exact raw-byte lineage" in next_action_section
+    assert "non-retryable typed `INVALID_PAYLOAD`" in next_action_section
+    assert "no" in next_action_section
+    assert "partial canonical or raw evidence" in next_action_section
+    assert "immediate pause and containment" in next_action_section
+    assert "without overwriting an old" in next_action_section
+    assert "must not be pasted into logs or issues" in next_action_section
+    assert "fixture review never authorizes an adapter, parser, endpoint" in next_action_section
+    assert "TASK-037" in next_action_section
+    assert "authorization remains denied" in next_action_section
     assert blocked_section.count("### TASK-") == 1
     assert "### TASK-037 " in blocked_section
     assert "- **Status:** BLOCKED" in blocked_section
@@ -726,6 +721,53 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "does not bound wire-header bytes" in task_055_section
     assert "adds no privacy, redaction" in task_055_section
     assert "TASK-037 authority" in task_055_section
+    assert "- **Status:** COMPLETE" in task_056_section
+    assert (
+        "`phase2.public_trade_disconnect_sparse_window_restart_recovery_drill`" in task_056_section
+    )
+    assert "`tests/integration/test_recoverable_public_trade_collection.py`" in task_056_section
+    assert "One new deterministic generated-fixture integration case" in task_056_section
+    assert "evidence, checkpoint, and shared rate-budget SQLite adapters" in task_056_section
+    assert "exactly two scripted retryable `HttpTransportError` outcomes" in task_056_section
+    assert "one 0.125-second retry" in task_056_section
+    assert "`FAILED` checkpoint version 3" in task_056_section
+    assert "`UNAVAILABLE` health" in task_056_section
+    assert "`provider_unavailable`" in task_056_section
+    assert "`attempts_exhausted`" in task_056_section
+    assert "exact first one-millisecond pending leaf" in task_056_section
+    assert "Hostile upstream detail is absent" in task_056_section
+    assert "newly constructed adapters on the same three generated databases" in task_056_section
+    assert "fresh UUID fence" in task_056_section
+    assert "exact empty, one-valid-trade, and empty" in task_056_section
+    assert "Completion is checkpoint version 6" in task_056_section
+    assert "five lifetime source" in task_056_section
+    assert "four traces, one retry, three completed windows" in task_056_section
+    assert "one canonical record, three raw" in task_056_section
+    assert "captures, and zero conflicts" in task_056_section
+    assert "exact six transition statuses" in task_056_section
+    assert "worker A, absent" in task_056_section
+    assert "worker B, and worker B" in task_056_section
+    assert "health exists only at versions 3, 5, and 6" in task_056_section
+    assert "five unique granted durable reservations precede five provider attempts" in (
+        task_056_section
+    )
+    assert "one 0.125-second retry plus two 0.25-second pacing waits" in task_056_section
+    assert "completed rerun performs zero range invocations" in task_056_section
+    assert "focused recovery integration" in task_056_section
+    assert "file passes 14 tests, previously 13" in task_056_section
+    assert "no production" in task_056_section
+    assert "An isolated mutation audit killed all 30 of 30" in task_056_section
+    assert "zero survivors and zero harness errors" in task_056_section
+    assert "adapter and UUID-fence reuse" in task_056_section
+    assert "empty raw-capture admission" in task_056_section
+    assert "hostile-detail persistence" in task_056_section
+    assert "completed-rerun work" in task_056_section
+    assert "complete suite passed 1,650 tests" in task_056_section
+    assert "dependency audit, and local health checks also passed" in task_056_section
+    assert "cross-database-atomicity" in task_056_section
+    assert "continuous-operation" in task_056_section
+    assert "TASK-037 remains blocked and authorization remains" in task_056_section
+    assert "denied" in task_056_section
     assert "private urllib opener with a no-follow redirect handler" in market_data_contract
     assert "performs no body" in market_data_contract
     assert "read or cleanup" in market_data_contract
@@ -814,9 +856,20 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     )
     assert "does not bound wire-header bytes, parser work or memory" in market_data_contract
     assert "no privacy, redaction" in market_data_contract
-    assert "composed generated-fixture" in market_data_contract
-    assert "exhausted disconnect, sparse windows" in market_data_contract
-    assert "remains pending under TASK-056" in market_data_contract
+    assert "One composed generated-fixture drill now exercises" in market_data_contract
+    assert "exhausted" in market_data_contract
+    assert "disconnect, sparse one-millisecond windows" in market_data_contract
+    assert "newly constructed evidence, checkpoint, and shared" in market_data_contract
+    assert "pending-leaf recovery from failed checkpoint version 3" in market_data_contract
+    assert "completed version 6" in market_data_contract
+    assert "five" in market_data_contract
+    assert "budgeted requests, one retry, two pacing waits" in market_data_contract
+    assert "three raw captures, one canonical trade, zero" in market_data_contract
+    assert "conflicts, and a no-work completed rerun" in market_data_contract
+    assert "does not prove cross-database atomicity, physical" in market_data_contract
+    assert "five active provider payload variants" in market_data_contract
+    assert "schema-drift response runbook" in market_data_contract
+    assert "remain pending under TASK-057" in market_data_contract
     assert "After preserving `max_response_bytes` validation" in market_data_contract
     assert "exact built-in `str` of 1 through 256 Python characters" in market_data_contract
     assert "U+0020 through U+007E" in market_data_contract
@@ -872,19 +925,40 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "raw header-origin failures are preserved" in risk_register
     assert "Standard-library parsing and prior allocations occur before" in risk_register
     assert "no wire-header, parser-allocation, total-memory" in risk_register
-    assert "Run TASK-056's generated-fixture public-trade drill" in risk_register
-    assert "exhausted transport disconnect, sparse windows" in risk_register
-    assert "do not infer continuous-operation readiness" in risk_register
-    assert "Run TASK-056's generated-fixture restart drill" in risk_register
-    assert "newly constructed evidence, control, and rate-budget SQLite adapters" in risk_register
-    assert "Keep cross-database atomicity open" in risk_register
-    assert "do not infer physical durability" in risk_register
+    assert "TASK-056 now adds one deterministic generated-fixture drill" in risk_register
+    assert "exact pending leaf at failed version 3" in risk_register
+    assert "completes sparse windows at version 6 under a fresh fence" in risk_register
+    assert "Five durable reservations precede five requests" in risk_register
+    assert "completed rerun performs no work" in risk_register
+    assert "Preserve the TASK-056 disconnect and sparse-recovery evidence" in risk_register
+    assert "TASK-057 adds an exact-byte, SHA-256-pinned" in risk_register
+    assert "all five active public-provider request variants" in risk_register
+    assert "offline tests through the existing production adapters" in risk_register
+    assert "operator-visible containment/review/resume runbook" in risk_register
+    assert "may not fetch or refresh fixtures online" in risk_register
+    assert "TASK-056 adds one composed generated-fixture drill" in risk_register
+    assert "newly constructed evidence, checkpoint, and rate-budget SQLite adapters" in (
+        risk_register
+    )
+    assert "worker A fails at version 3 with the exact pending leaf" in risk_register
+    assert "worker B completes at version 6 under a fresh fence" in risk_register
+    assert "completed rerun changes nothing" in risk_register
+    assert "keep cross-database atomicity and physical durability" in risk_register
     assert "Within the canonical UTC migration track" in roadmap
     assert "TASK-037 remains" in roadmap
     assert "blocked and authorization remains denied" in roadmap
     assert "current executable next action is" in roadmap
     assert "maintained in `PROJECT_STATE.json`" in roadmap
     assert "separately governed RISK-1 fail-closed work" in roadmap
+    assert "TASK-056 now supplies one composed deterministic" in roadmap
+    assert "failed checkpoint version 3 through completed version 6" in roadmap
+    assert "does not" in roadmap
+    assert "establish cross-database atomicity, physical durability" in roadmap
+    assert "current RISK-1 next action, TASK-057" in roadmap
+    assert "all five active provider payload variants" in roadmap
+    assert "operator-visible schema-drift response runbook" in roadmap
+    assert "Continuous public-trade collection remains a" in roadmap
+    assert "separately scoped future decision" in roadmap
     assert "The canonical next action is TASK-037" not in roadmap
 
 

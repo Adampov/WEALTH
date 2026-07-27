@@ -36,6 +36,7 @@ from wealth.application.public_trade_collection import (
 )
 from wealth.domain.collection import CollectionJobStatus, SourceHealthStatus
 from wealth.domain.market import InstrumentType, RawMarketPayload
+from wealth.domain.order_flow import CanonicalTrade
 from wealth.domain.order_flow_collection import (
     PublicTradeCollectionCheckpoint,
     PublicTradeCollectionHealthSummary,
@@ -62,7 +63,7 @@ from wealth.ports.collection import (
     CollectionCheckpointWriteStatus,
 )
 from wealth.ports.foundation import Clock, IdGenerator, Sleeper
-from wealth.ports.http import HttpResponse
+from wealth.ports.http import HttpResponse, HttpTransportError
 from wealth.ports.order_flow import (
     OrderFlowFetchBatch,
     OrderFlowStore,
@@ -118,8 +119,12 @@ class RecordingSleeper:
 class ScriptedHttpClient:
     """Return exact public responses while exposing every provider request."""
 
-    def __init__(self, *responses: HttpResponse, events: list[str] | None = None) -> None:
-        self._responses = list(responses)
+    def __init__(
+        self,
+        *outcomes: HttpResponse | HttpTransportError,
+        events: list[str] | None = None,
+    ) -> None:
+        self._outcomes = list(outcomes)
         self.events = [] if events is None else events
         self.calls: list[dict[str, str]] = []
 
@@ -133,9 +138,12 @@ class ScriptedHttpClient:
         del url, timeout_seconds
         self.calls.append(dict(query))
         self.events.append("http")
-        if not self._responses:
+        if not self._outcomes:
             raise AssertionError("unexpected provider request")
-        return self._responses.pop(0)
+        outcome = self._outcomes.pop(0)
+        if isinstance(outcome, HttpTransportError):
+            raise outcome
+        return outcome
 
 
 class IdentityMismatchingSource:
@@ -188,6 +196,7 @@ class InstrumentedOrderFlowStore:
         self.delegate = delegate
         self.events = events
         self.crash_before_next_batch = crash_before_next_batch
+        self.batches: list[OrderFlowFetchBatch] = []
 
     def append(self, record: OrderFlowRecord) -> OrderFlowWriteResult:
         return self.delegate.append(record)
@@ -197,6 +206,7 @@ class InstrumentedOrderFlowStore:
             self.crash_before_next_batch = False
             raise RuntimeError("simulated crash before evidence commit")
         result = self.delegate.append_batch(batch)
+        self.batches.append(batch)
         self.events.append("evidence")
         return result
 
@@ -377,6 +387,8 @@ def collection_policy(
     max_source_requests: int = 8,
     max_records_per_run: int = 100,
     retry_max_attempts: int = 1,
+    retry_delay_seconds: float = 0,
+    inter_request_delay_seconds: float = 0,
 ) -> PublicTradeCollectionPolicy:
     """Build one permissive local policy whose work bounds remain tiny."""
 
@@ -387,12 +399,12 @@ def collection_policy(
             max_range_duration=timedelta(milliseconds=10),
             max_source_requests=max_source_requests,
             max_records_per_run=max_records_per_run,
-            inter_request_delay_seconds=0,
+            inter_request_delay_seconds=inter_request_delay_seconds,
         ),
         retry=PublicTradeRetryPolicy(
             max_attempts=retry_max_attempts,
-            base_delay_seconds=0,
-            max_delay_seconds=0,
+            base_delay_seconds=retry_delay_seconds,
+            max_delay_seconds=retry_delay_seconds,
             max_retry_after_seconds=0,
         ),
         rate_budget=RateBudgetPolicy(
@@ -1203,3 +1215,378 @@ def test_crash_after_evidence_refetches_idempotently_after_expired_takeover(
     assert events.count("evidence") == 2
     assert events.count("control:outcome") == 1
     assert_budget_precedes_every_http(events)
+
+
+def test_disconnect_reopen_sparse_windows_and_completed_rerun_are_exact(
+    tmp_path: Path,
+) -> None:
+    """Prove one complete generated-fixture recovery drill across a process-style reopen."""
+
+    retry_delay_seconds = 0.125
+    pacing_delay_seconds = 0.25
+    evidence_path = tmp_path / "order-flow.sqlite3"
+    control_path = tmp_path / "public-trade-control.sqlite3"
+    budget_path = tmp_path / "rate-budget.sqlite3"
+    events: list[str] = []
+    policy_a = collection_policy(
+        retry_max_attempts=2,
+        retry_delay_seconds=retry_delay_seconds,
+        inter_request_delay_seconds=pacing_delay_seconds,
+    )
+    clock_a = MutableClock()
+    sleeper_a = RecordingSleeper()
+    evidence_delegate_a = SQLiteOrderFlowStore(evidence_path)
+    evidence_a = InstrumentedOrderFlowStore(evidence_delegate_a, events)
+    control_delegate_a = SQLitePublicTradeCollectionCheckpointStore(control_path)
+    control_a = InstrumentedCheckpointStore(
+        control_delegate_a,
+        events,
+    )
+    budget_delegate_a = SQLiteRateBudgetCoordinator(budget_path)
+    budget_a = InstrumentedRateBudgetCoordinator(budget_delegate_a, events)
+    disconnect_details = (
+        "synthetic disconnect detail alpha",
+        "synthetic disconnect detail omega",
+    )
+    http_a = ScriptedHttpClient(
+        *(HttpTransportError(detail) for detail in disconnect_details),
+        events=events,
+    )
+    worker_a = orchestrator(
+        http=http_a,
+        evidence_store=evidence_a,
+        checkpoint_store=control_a,
+        rate_budget=budget_a,
+        clock=clock_a,
+        ids=SequentialIds(start=1_000),
+        policy=policy_a,
+        worker_id="worker-a",
+        sleeper=sleeper_a,
+    )
+    job = worker_a.create_job(request(3), job_id=JOB_ID)
+
+    disconnected = worker_a.run(job.job_id)
+    failed = control_a.get(job.job_id)
+    failed_health = control_a.health_for_job(job.job_id)
+    failed_transitions = control_delegate_a.transitions_for_job(job.job_id)
+
+    assert disconnected.status is PublicTradeCollectionRunStatus.FAILED
+    assert disconnected.range_invocations == 1
+    assert failed == disconnected.checkpoint
+    assert failed is not None
+    assert failed.status is CollectionJobStatus.FAILED
+    assert failed.version == 3
+    assert failed.next_window_start == START
+    assert failed.pending_window_end_exclusive == START + timedelta(milliseconds=1)
+    assert failed.lease_owner is None
+    assert failed.lease_token is None
+    assert failed.lease_expires_at is None
+    assert failed.windows_completed == 0
+    assert failed.records_completed == 0
+    assert failed.source_requests == 2
+    assert failed.window_traces == 1
+    assert failed.retry_attempts == 1
+    assert failed.splits_completed == 0
+    assert failed.last_failure_code == (PublicTradeCollectionFailureCode.PROVIDER_UNAVAILABLE.value)
+    assert failed.last_stop_reason == PublicTradeRetryStopReason.ATTEMPTS_EXHAUSTED.value
+    assert len(failed_health) == 1
+    assert failed_health[0].checkpoint_version == 3
+    assert failed_health[0].range_start == START
+    assert failed_health[0].range_end_exclusive == START + timedelta(milliseconds=3)
+    assert failed_health[0].next_window_start == START
+    assert failed_health[0].pending_window_end_exclusive == START + timedelta(milliseconds=1)
+    assert failed_health[0].status is SourceHealthStatus.UNAVAILABLE
+    assert failed_health[0].accepted is False
+    assert failed_health[0].source_requests == 2
+    assert failed_health[0].window_traces == 1
+    assert failed_health[0].windows_completed == 0
+    assert failed_health[0].records_completed == 0
+    assert failed_health[0].retry_delays_seconds == (retry_delay_seconds,)
+    assert failed_health[0].failure_code == (
+        PublicTradeCollectionFailureCode.PROVIDER_UNAVAILABLE.value
+    )
+    assert failed_health[0].stop_reason == PublicTradeRetryStopReason.ATTEMPTS_EXHAUSTED.value
+    assert tuple(item.checkpoint.version for item in failed_transitions) == (1, 2, 3)
+    assert tuple(item.checkpoint.status for item in failed_transitions) == (
+        CollectionJobStatus.PENDING,
+        CollectionJobStatus.RUNNING,
+        CollectionJobStatus.FAILED,
+    )
+    worker_a_token = failed_transitions[1].checkpoint.lease_token
+    assert worker_a_token is not None
+    assert tuple(item.actor_lease_token for item in failed_transitions) == (
+        None,
+        None,
+        worker_a_token,
+    )
+    serialized_failure_evidence = json.dumps(
+        {
+            "checkpoint": failed.model_dump(mode="json"),
+            "health": [item.model_dump(mode="json") for item in failed_health],
+            "transitions": [item.model_dump(mode="json") for item in failed_transitions],
+        },
+        sort_keys=True,
+    )
+    assert all(detail not in serialized_failure_evidence for detail in disconnect_details)
+    assert sleeper_a.delays == [retry_delay_seconds]
+    assert evidence_a.batches == []
+    assert evidence_counts(evidence_path) == (0, 0, 0)
+    assert budget_delegate_a.summary(BUDGET_KEY).reservation_count == 2
+    assert budget_delegate_a.summary(BUDGET_KEY).granted_count == 2
+    assert len(budget_delegate_a.decisions_for_budget(BUDGET_KEY)) == 2
+    assert len(http_a.calls) == 2
+    assert http_a.calls[0] == http_a.calls[1]
+    assert events == [
+        "control:claim",
+        "budget",
+        "http",
+        "budget",
+        "http",
+        "control:outcome",
+    ]
+    assert_budget_precedes_every_http(events)
+
+    policy_b = collection_policy(
+        retry_max_attempts=2,
+        retry_delay_seconds=retry_delay_seconds,
+        inter_request_delay_seconds=pacing_delay_seconds,
+    )
+    assert policy_b.fingerprint == job.policy_fingerprint
+    clock_b = MutableClock()
+    sleeper_b = RecordingSleeper()
+    evidence_delegate_b = SQLiteOrderFlowStore(evidence_path)
+    evidence_b = InstrumentedOrderFlowStore(evidence_delegate_b, events)
+    control_delegate_b = SQLitePublicTradeCollectionCheckpointStore(control_path)
+    control_b = InstrumentedCheckpointStore(control_delegate_b, events)
+    budget_delegate_b = SQLiteRateBudgetCoordinator(budget_path)
+    budget_b = InstrumentedRateBudgetCoordinator(budget_delegate_b, events)
+    assert evidence_delegate_b is not evidence_delegate_a
+    assert control_delegate_b is not control_delegate_a
+    assert budget_delegate_b is not budget_delegate_a
+    recovery_responses = (
+        response(),
+        response(aggregate_trade(START + timedelta(milliseconds=1), 77)),
+        response(),
+    )
+    http_b = ScriptedHttpClient(*recovery_responses, events=events)
+    worker_b = orchestrator(
+        http=http_b,
+        evidence_store=evidence_b,
+        checkpoint_store=control_b,
+        rate_budget=budget_b,
+        clock=clock_b,
+        ids=SequentialIds(start=2_000),
+        policy=policy_b,
+        worker_id="worker-b",
+        sleeper=sleeper_b,
+    )
+
+    recovered = worker_b.run(job.job_id)
+    durable = control_delegate_b.get(job.job_id)
+    health = control_delegate_b.health_for_job(job.job_id)
+    health_summary = control_delegate_b.health_summary(job.job_id)
+    transitions = control_delegate_b.transitions_for_job(job.job_id)
+    budget_decisions = budget_delegate_b.decisions_for_budget(BUDGET_KEY)
+    budget_summary = budget_delegate_b.summary(BUDGET_KEY)
+
+    assert recovered.status is PublicTradeCollectionRunStatus.COMPLETED
+    assert recovered.range_invocations == 2
+    assert durable == recovered.checkpoint
+    assert durable is not None
+    assert durable.status is CollectionJobStatus.COMPLETED
+    assert durable.version == 6
+    assert durable.next_window_start == START + timedelta(milliseconds=3)
+    assert durable.pending_window_end_exclusive is None
+    assert durable.lease_owner is None
+    assert durable.lease_token is None
+    assert durable.lease_expires_at is None
+    assert durable.windows_completed == 3
+    assert durable.records_completed == 1
+    assert durable.source_requests == 5
+    assert durable.window_traces == 4
+    assert durable.retry_attempts == 1
+    assert durable.splits_completed == 0
+    assert durable.last_failure_code is None
+    assert durable.last_stop_reason is None
+    assert tuple(item.checkpoint.version for item in transitions) == tuple(range(1, 7))
+    assert tuple(item.checkpoint.status for item in transitions) == (
+        CollectionJobStatus.PENDING,
+        CollectionJobStatus.RUNNING,
+        CollectionJobStatus.FAILED,
+        CollectionJobStatus.RUNNING,
+        CollectionJobStatus.RUNNING,
+        CollectionJobStatus.COMPLETED,
+    )
+    worker_b_token = transitions[3].checkpoint.lease_token
+    assert worker_b_token is not None
+    assert worker_b_token != worker_a_token
+    assert tuple(item.checkpoint.lease_owner for item in transitions) == (
+        None,
+        "worker-a",
+        None,
+        "worker-b",
+        "worker-b",
+        None,
+    )
+    assert tuple(item.checkpoint.lease_token for item in transitions) == (
+        None,
+        worker_a_token,
+        None,
+        worker_b_token,
+        worker_b_token,
+        None,
+    )
+    assert tuple(item.actor_lease_token for item in transitions) == (
+        None,
+        None,
+        worker_a_token,
+        None,
+        worker_b_token,
+        worker_b_token,
+    )
+    assert transitions[-1].checkpoint == durable
+    assert tuple(item.checkpoint_version for item in health) == (3, 5, 6)
+    assert tuple(item.status for item in health) == (
+        SourceHealthStatus.UNAVAILABLE,
+        SourceHealthStatus.HEALTHY,
+        SourceHealthStatus.HEALTHY,
+    )
+    assert tuple(item.accepted for item in health) == (False, True, True)
+    assert health[1].range_start == START
+    assert health[1].range_end_exclusive == START + timedelta(milliseconds=1)
+    assert health[1].next_window_start == START + timedelta(milliseconds=1)
+    assert health[1].pending_window_end_exclusive is None
+    assert health[1].source_requests == 1
+    assert health[1].window_traces == 1
+    assert health[1].windows_completed == 1
+    assert health[1].records_completed == 0
+    assert health[1].retry_delays_seconds == ()
+    assert health[2].range_start == START + timedelta(milliseconds=1)
+    assert health[2].range_end_exclusive == START + timedelta(milliseconds=3)
+    assert health[2].next_window_start == START + timedelta(milliseconds=3)
+    assert health[2].pending_window_end_exclusive is None
+    assert health[2].source_requests == 2
+    assert health[2].window_traces == 2
+    assert health[2].windows_completed == 2
+    assert health[2].records_completed == 1
+    assert health[2].retry_delays_seconds == ()
+    assert health_summary.observation_count == 3
+    assert health_summary.healthy_count == 2
+    assert health_summary.degraded_count == 0
+    assert health_summary.unavailable_count == 1
+    assert health_summary.accepted_count == 2
+    assert health_summary.total_source_requests == 5
+    assert health_summary.total_window_traces == 4
+    assert health_summary.total_retry_attempts == 1
+    assert health_summary.total_windows_completed == 3
+    assert health_summary.total_records_completed == 1
+    assert health_summary.total_splits_completed == 0
+    assert health_summary.total_retry_delay_seconds == retry_delay_seconds
+    assert len(budget_decisions) == 5
+    assert len({item.reservation_id for item in budget_decisions}) == 5
+    assert all(item.status.value == "granted" for item in budget_decisions)
+    assert all(item.requested_at == NOW for item in budget_decisions)
+    assert all(item.cost == BINANCE_SPOT_AGG_TRADES_REQUEST_WEIGHT for item in budget_decisions)
+    assert budget_summary.reservation_count == 5
+    assert budget_summary.granted_count == 5
+    assert budget_summary.denied_count == 0
+    assert budget_summary.total_requested_cost == (5 * BINANCE_SPOT_AGG_TRADES_REQUEST_WEIGHT)
+    assert budget_summary.total_retry_after_seconds == 0
+    assert budget_summary.maximum_retry_after_seconds == 0
+    assert sleeper_b.delays == [pacing_delay_seconds, pacing_delay_seconds]
+    assert sleeper_a.delays + sleeper_b.delays == [
+        retry_delay_seconds,
+        pacing_delay_seconds,
+        pacing_delay_seconds,
+    ]
+    expected_queries = []
+    for offset in (0, 0, 0, 1, 2):
+        boundary = START + timedelta(milliseconds=offset)
+        expected_queries.append(
+            {
+                "symbol": "BTCUSDT",
+                "startTime": str(epoch_milliseconds(boundary)),
+                "endTime": str(epoch_milliseconds(boundary)),
+                "limit": "1000",
+            }
+        )
+    assert http_a.calls + http_b.calls == expected_queries
+    assert len(evidence_b.batches) == 3
+    assert tuple(batch.raw_payload.payload for batch in evidence_b.batches) == tuple(
+        item.body for item in recovery_responses
+    )
+    stored_raw_payloads = tuple(
+        evidence_delegate_b.raw_payload(batch.raw_payload.record_id) for batch in evidence_b.batches
+    )
+    assert stored_raw_payloads == tuple(batch.raw_payload for batch in evidence_b.batches)
+    stream = OrderFlowStream(
+        source=BINANCE_ORDER_FLOW_SOURCE,
+        venue=BINANCE_ORDER_FLOW_VENUE,
+        instrument="BTC-USDT",
+        instrument_type=InstrumentType.SPOT,
+        record_type=OrderFlowRecordType.TRADE,
+        sequence_policy=ProviderSequencePolicy.MONOTONIC,
+    )
+    records = evidence_delegate_b.records_for_stream(stream)
+    assert len(records) == 1
+    record = records[0]
+    assert isinstance(record, CanonicalTrade)
+    assert record.event_time == START + timedelta(milliseconds=1)
+    assert record.provider_trade_id == "77"
+    assert evidence_delegate_b.raw_payload_ids_for_record(record.record_id) == (
+        evidence_b.batches[1].raw_payload.record_id,
+    )
+    conflicts = evidence_delegate_b.conflicts_for_stream(stream)
+    assert conflicts == ()
+    assert evidence_counts(evidence_path) == (3, 1, 0)
+    assert events == [
+        "control:claim",
+        "budget",
+        "http",
+        "budget",
+        "http",
+        "control:outcome",
+        "control:claim",
+        "budget",
+        "http",
+        "evidence",
+        "control:outcome",
+        "budget",
+        "http",
+        "evidence",
+        "budget",
+        "http",
+        "evidence",
+        "control:outcome",
+    ]
+    assert_budget_precedes_every_http(events)
+
+    before_http_calls = tuple(tuple(sorted(call.items())) for call in http_b.calls)
+    before_batches = tuple(evidence_b.batches)
+    before_sleeps = tuple(sleeper_b.delays)
+    before_events = tuple(events)
+    completed_rerun = worker_b.run(job.job_id)
+
+    assert completed_rerun.status is PublicTradeCollectionRunStatus.COMPLETED
+    assert completed_rerun.range_invocations == 0
+    assert completed_rerun.checkpoint == durable
+    assert control_delegate_b.get(job.job_id) == durable
+    assert control_delegate_b.transitions_for_job(job.job_id) == transitions
+    assert control_delegate_b.health_for_job(job.job_id) == health
+    assert control_delegate_b.health_summary(job.job_id) == health_summary
+    assert budget_delegate_b.decisions_for_budget(BUDGET_KEY) == budget_decisions
+    assert budget_delegate_b.summary(BUDGET_KEY) == budget_summary
+    assert tuple(tuple(sorted(call.items())) for call in http_b.calls) == before_http_calls
+    assert tuple(evidence_b.batches) == before_batches
+    assert tuple(sleeper_b.delays) == before_sleeps
+    assert tuple(events) == before_events
+    assert evidence_counts(evidence_path) == (3, 1, 0)
+    assert evidence_delegate_b.records_for_stream(stream) == records
+    assert evidence_delegate_b.conflicts_for_stream(stream) == conflicts
+    assert (
+        tuple(
+            evidence_delegate_b.raw_payload(batch.raw_payload.record_id)
+            for batch in evidence_b.batches
+        )
+        == stored_raw_payloads
+    )

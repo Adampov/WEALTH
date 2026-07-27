@@ -244,6 +244,16 @@ through the existing control-storage error boundary. Reads do not change the dat
 and remain separate from source-health history. Transition time comes from an injected trusted UTC
 clock. This flow is not a scheduler, daemon, continuous poller, or live stream.
 
+A deterministic generated-fixture recovery drill now composes the evidence, checkpoint, and
+shared rate-budget SQLite boundaries across a process-style reopen. One worker exhausts two
+retryable disconnect outcomes and retains the exact pending one-millisecond leaf at failed
+checkpoint version 3; a newly constructed worker with a fresh UUID fence then consumes exact
+empty, one-trade, and empty windows and completes at version 6. The audit chain retains all six
+causal transitions, health at versions 3, 5, and 6, five budgeted requests, one retry, two pacing
+waits, three raw captures, one canonical trade, and zero conflicts. Reinvocation after completion
+does no work and changes no observation. This generated test evidence does not establish
+cross-database atomicity, physical durability, continuous operation, or automatic recovery.
+
 Operators and monitoring tools can read the separate candle collector-service state through a
 dedicated JSON command:
 
@@ -301,6 +311,8 @@ Included:
   evidence-first progress, typed pause/failure outcomes, and restart recovery.
 - Typed read-only public-trade transition history with bounded checkpoint-version pagination,
   actor-authority validation, restart replay, and fail-closed corruption detection.
+- Generated-fixture public-trade disconnect, sparse-window, and process-style reopen recovery evidence
+  across the local evidence, control, and shared rate-budget SQLite boundaries.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:
@@ -310,6 +322,8 @@ Not included:
 - Automatic aggregate-trade scheduling, continuous collection, live WebSockets, provider gap
   recovery, an operator transition-history CLI or dashboard, or crash-durable per-job pre-request
   attempt reservations.
+- A versioned synthetic public-provider schema-fixture corpus, automatic schema-drift detection,
+  and an operator-visible provider schema-drift response runbook.
 - Automatic historical collection scheduling.
 - Multi-host request-budget coordination.
 - Automatic source ranking, price blending, or cross-quote conversion.

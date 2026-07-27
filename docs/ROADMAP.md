@@ -99,6 +99,10 @@ Completed Phase 2 slices include:
   ascending contiguous checkpoint-version pages, strict cursor and page bounds, full projection
   and lifecycle validation, restart replay, and fail-closed corruption tests without a schema
   migration.
+- Deterministic generated-fixture public-trade recovery evidence across an exhausted disconnect,
+  sparse one-millisecond windows, newly constructed evidence, checkpoint, and shared rate-budget
+  SQLite adapters, fresh UUID fencing authority, exact causal transition and health history, and
+  a no-work completed rerun.
 - An evidence-backed canonical UTC boundary inventory covering every discovered model, clock,
   provider edge, JSON/text representation, SQLite projection, order, index, cursor, and test path,
   with an accepted staged compatibility, quarantine, backup, rollback, and migration plan. No
@@ -134,9 +138,15 @@ evidence is durable. Lease claims remain control-only transitions. Crash-durable
 pre-request attempt reservations remain future work; the existing shared durable provider-rate
 budget is the current pre-request capacity boundary. The append-only transition audit history is
 now available through a bounded typed port that revalidates causal versions and the retained actor
-fencing authority without mutating control state. Operational recovery drills remain required
-before continuous public-trade collection. `RISK-005` remains open: the accepted plan selects
-Python datetimes in the fixed `datetime.UTC` zone, fixed microsecond RFC 3339 `Z` text, and derived
+fencing authority without mutating control state. TASK-056 now supplies one composed deterministic
+recovery drill from failed checkpoint version 3 through completed version 6, with exact sparse
+evidence, budget, retry, pacing, transition, health, and no-work rerun assertions. It does not
+establish cross-database atomicity, physical durability, automatic recovery, or continuous
+operation. The current RISK-1 next action, TASK-057, is limited to versioned synthetic fixtures
+for all five active provider payload variants, offline production-adapter drift tests, and an
+operator-visible schema-drift response runbook. Continuous public-trade collection remains a
+separately scoped future decision. `RISK-005` remains open: the accepted plan selects Python
+datetimes in the fixed `datetime.UTC` zone, fixed microsecond RFC 3339 `Z` text, and derived
 epoch-microsecond SQL projections. New injected clock values are fixed-UTC, and the isolated pure
 module now provides the complete unused Stage 2 primitive foundation: strict validation, explicit
 normalization, exact canonical text, and exact integer-only epoch-microsecond conversion across

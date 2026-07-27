@@ -6,78 +6,84 @@ promoted through review.
 
 ## Next Action
 
-### TASK-056 — Deterministic public-trade disconnect, sparse-window, and restart-recovery drill evidence
+### TASK-057 — Versioned public-provider schema fixtures and drift-response runbook
 
-- **Key:** `phase2.public_trade_disconnect_sparse_window_restart_recovery_drill`
+- **Key:** `phase2.versioned_public_provider_schema_fixtures_and_drift_runbook`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
-- **Human approval:** NOT REQUIRED — bounded generated-fixture test and documentation evidence
-  under the owner's explicit authorization; it performs no external request, deployment,
-  operator-data access, schema change, or permission change.
-- **Context:** The restart-safe public-trade orchestrator has exact pending-leaf recovery,
-  evidence-first progress, shared durable rate-budget gating, two separately tested cross-database
-  crash seams, and a typed causally validated transition-history reader. `RISK-001`, `RISK-004`,
-  and the Phase 2 roadmap still require deterministic planned-disconnect, sparse-window, and
-  operational restart evidence. No single process-reopen drill currently composes all three
-  generated SQLite boundaries and verifies the complete durable audit chain.
-- **Goal:** Prove through one deterministic generated-fixture drill that an exhausted public-trade
-  transport disconnect can be recovered by a newly constructed process without skipping a pending
-  leaf, inventing sparse records, bypassing the shared budget, reusing lease authority, or losing
-  causal transition evidence.
-- **Scope:** Exercise one three-millisecond synthetic Binance Spot public-trade job with
-  one-millisecond initial windows. A first worker exhausts exactly two retryable synthetic
-  transport attempts. A second worker reopens newly constructed evidence, checkpoint, and
-  rate-budget adapters on the same three temporary SQLite files, claims a fresh UUID fence, and
-  consumes exact empty, one-valid-trade, and empty provider responses. Verify checkpoint, health,
-  transition, budget, sleep, raw-evidence, canonical-evidence, conflict, request-order, and
-  completed-rerun observations through public production boundaries.
-- **Files:** `tests/integration/test_recoverable_public_trade_collection.py`, `README.md`,
-  `docs/contracts/MARKET_DATA.md`, `docs/ROADMAP.md`, plus coordinated governance files and
-  governance tests.
-- **Constraints:** Test and documentation evidence only. Use generated `tmp_path` databases,
-  injected deterministic UTC clocks and UUIDs, scripted public responses and failures, and
-  recording sleepers; perform no real network call or wall-clock sleep. Do not change production
-  source, a SQLite schema, a public contract, a policy fingerprint, retry or pacing semantics,
-  provider behavior, runtime wiring, dependencies, credentials, permissions, or operating mode.
-  A discovered production defect fails this task and requires a separately scoped fix; the drill
-  cannot silently expand into one. Do not add a continuous collector, scheduler, daemon,
-  WebSocket, CLI, dashboard, automatic recovery, deployment, multi-host coordination, or
-  crash-durable per-job pre-request reservation. Do not claim cross-database atomicity, physical
-  durability from returned outcomes, Phase 2 exit, or readiness for continuous operation. Preserve
-  TASK-037 authority, migration, and Stage 3.
+- **Human approval:** NOT REQUIRED — bounded synthetic fixtures, offline tests, documentation,
+  and governance only; no network, operator-data access, production behavior, schema, deployment,
+  credential, permission, or operating-mode change.
+- **Context:** `RISK-002` remains open because the active provider payload contracts are exercised
+  through inline test values but have no independently versioned fixture corpus or operator-visible
+  schema-drift response procedure. The five active public request variants are Binance Spot and
+  USD-M candles, Coinbase Exchange candles, and Binance Spot and USD-M aggregate trades. Their
+  existing adapters already fail closed on exact positional widths, required and optional fields,
+  value types, and canonical-domain validation. This task records and tests those current
+  boundaries without widening them.
+- **Goal:** Establish a small, deterministic, versioned synthetic fixture corpus for every active
+  public-provider payload shape, prove the existing production adapters accept the reviewed
+  versions and reject representative drift, and give operators an exact containment and review
+  runbook before any continuous public-trade collection is considered.
+- **Scope:** Add `tests/fixtures/public_provider_schema/v1/manifest.json` plus exactly five
+  synthetic JSON fixtures: Binance Spot candle, Binance USD-M candle, Coinbase candle, Binance
+  Spot aggregate trade, and Binance USD-M aggregate trade. The manifest records schema version,
+  exact relative path, exact-byte SHA-256, provider, dataset, market/request variant, expected
+  positional width or required/optional field set, official public-contract reference, review UTC
+  date, and review status. Add one offline unit-test module that loads exact fixture bytes through
+  the existing production adapters with deterministic HTTP stubs and UTC clocks, verifies
+  canonical values and raw-byte lineage, and derives bounded synthetic drift cases. Add
+  `docs/runbooks/PUBLIC_PROVIDER_SCHEMA_DRIFT.md` and link it from the market-data contract and
+  README.
+- **Files:** `tests/fixtures/public_provider_schema/v1/manifest.json`, five versioned JSON fixture
+  files in that directory, `tests/unit/test_public_provider_schema_fixtures.py`,
+  `docs/runbooks/PUBLIC_PROVIDER_SCHEMA_DRIFT.md`, `README.md`,
+  `docs/contracts/MARKET_DATA.md`, plus coordinated governance files and governance tests.
+- **Constraints:** Fixtures are minimal, synthetic, secret-free, and bounded; do not copy a live
+  response or operator evidence. Tests perform no network call, wall-clock sleep, online snapshot,
+  or automatic fixture refresh. Do not change production source, adapter acceptance, endpoint,
+  query, row limit, precision, ordering, retry, pacing, canonical model, persistence, SQLite
+  schema, runtime wiring, dependency, credential, permission, or operating mode. The current
+  aggregate-trade rule rejects unknown fields and must not be relabeled as additive-compatible.
+  Fixture or runbook completion does not detect upstream drift automatically and does not claim
+  upstream documentation is immutable. Do not add an operator CLI, dashboard, alert delivery,
+  automatic pause, malformed-response evidence store, collector, scheduler, daemon, WebSocket,
+  deployment, or multi-host coordination. A parser or provider-contract behavior change requires
+  a separately governed task. Preserve TASK-037 authority, migration, and Stage 3.
 
 Acceptance gates:
 
-1. Worker A receives exactly two retryable `HttpTransportError` outcomes under a two-attempt
-   policy. Each attempt follows one granted durable budget reservation, exactly one configured
-   retry delay is recorded without sleeping, and no market evidence is written.
-2. The first run durably reaches `FAILED` at checkpoint version 3 with `UNAVAILABLE` health,
-   canonical failure code `provider_unavailable`, stop reason `attempts_exhausted`, two source
-   requests, one trace, one retry, the original cursor, and the exact first one-millisecond pending
-   leaf. Arbitrary synthetic provider-error detail does not become durable control text.
-3. Worker B uses newly constructed SQLite evidence, checkpoint, and budget adapters, the exact
-   original policy fingerprint, and a fresh never-reused UUID fencing token. It processes the
-   retained one-millisecond leaf first and then at most one remaining-range segment.
-4. The recovery responses are exactly empty, one valid trade, and empty in chronological
-   one-millisecond windows. Completion reaches checkpoint version 6 in two range invocations with
-   three raw captures, one canonical trade, zero conflicts, three completed windows, no invented
-   record, no skipped boundary, and no duplicate canonical evidence.
-5. The reopened typed transition reader returns exact contiguous versions 1 through 6 with
-   `PENDING`, `RUNNING`, `FAILED`, `RUNNING`, `RUNNING`, and `COMPLETED` status, correct worker-A
-   and worker-B actor authority, health only at versions 3, 5, and 6, and a final transition equal
-   to the current checkpoint.
-6. Across both processes, exactly five durable reservations precede exactly five provider
-   attempts. Retry and inter-segment/window pacing calls equal the configured deterministic
-   delays, and no extra request, reservation, transition, health record, evidence write, or sleep
-   occurs.
-7. A run after durable completion returns `COMPLETED` with zero range invocations and leaves
-   checkpoint, transition history, health, budget, HTTP, evidence, and sleep observations
-   unchanged. The drill makes no cross-database-atomicity, physical-durability, multi-host,
-   continuous-operation, automatic-recovery, or Phase 2 exit claim.
-8. TASK-037 remains blocked and authorization remains denied; no operator data, path, database,
-   scanner, report, migration, or Stage 3 action occurs. Formatting, lint, strict typing, complete
-   tests, lockfile verification, dependency audit, health slice, and CI pass.
+1. Manifest parsing fails closed on unknown or missing keys, invalid version/status/type values,
+   duplicate identities or paths, absolute paths, traversal, wrong directory, extra or missing
+   corpus files, digest mismatch, and a fixture above the explicit byte bound. Every manifest
+   entry maps one-to-one to one exact committed fixture.
+2. The corpus contains exactly the five active request variants. Binance candle rows retain
+   exactly 12 positional values, Coinbase candle rows exactly six, and aggregate-trade objects
+   declare the current exact required and optional field sets, including the documented USD-M
+   optional fields, without suggesting unknown-field tolerance.
+3. Deterministic stubs feed each fixture's exact bytes through its existing production adapter and
+   active request path. Tests verify request variant, canonical values, provider identifiers,
+   UTC/event-time behavior, and exact raw-byte lineage without a real request.
+4. Bounded drift derivations cover positional width minus/plus one, positional reorder or wrong
+   type, missing and unknown aggregate fields, required-versus-optional drift, and numeric
+   precision/type drift. Existing boundaries return non-retryable typed `INVALID_PAYLOAD` and no
+   partial canonical or raw evidence is admitted.
+5. The runbook defines signals and classification, immediate pause and containment, safe evidence
+   handling, official-document re-review, synthetic fixture versioning without overwriting an old
+   version, regression commands, escalation, resume gates, and rollback. Provider payload content
+   is untrusted and must not be pasted into logs or issues; any real evidence requires an approved
+   handling location and must contain no secret.
+6. The runbook states that a fixture review never authorizes an adapter, parser, endpoint,
+   runtime, or deployment change, and that collection resumes only after the exact affected
+   contract is reviewed, synthetic evidence passes, required change governance is complete, and
+   rollback is available. It makes no automatic detection, immutable-upstream, or continuous
+   readiness claim.
+7. No production file, runtime behavior, serialized contract, dependency, lockfile, SQLite schema,
+   operator path, operator data, credential, permission, or external system changes. TASK-037
+   remains blocked and authorization remains denied.
+8. Formatting, lint, strict typing, focused and complete tests, lockfile verification, dependency
+   audit, health slice, and CI pass.
 
 ## Blocked, Awaiting Owner-Supplied Restricted Inputs
 
@@ -132,6 +138,48 @@ Acceptance gates:
    all repository gates pass.
 
 ## Recently Completed
+
+### TASK-056 — Deterministic public-trade disconnect, sparse-window, and restart-recovery drill evidence
+
+- **Key:** `phase2.public_trade_disconnect_sparse_window_restart_recovery_drill`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Files:** `tests/integration/test_recoverable_public_trade_collection.py`, `README.md`,
+  `docs/contracts/MARKET_DATA.md`, `docs/ROADMAP.md`, plus coordinated governance files and
+  governance tests.
+- **Result:** One new deterministic generated-fixture integration case composes the existing
+  public-trade evidence, checkpoint, and shared rate-budget SQLite adapters across a process-style
+  reopen. Worker A receives exactly two scripted retryable `HttpTransportError` outcomes, records
+  one 0.125-second retry without wall-clock sleep, writes no market evidence, and reaches
+  `FAILED` checkpoint version 3 with `UNAVAILABLE` health, `provider_unavailable`,
+  `attempts_exhausted`, two source requests, one trace, one retry, the original cursor, and the
+  exact first one-millisecond pending leaf. Hostile upstream detail is absent from durable
+  checkpoint, health, and transition text.
+
+  Worker B uses newly constructed adapters on the same three generated databases, the unchanged
+  policy fingerprint, and a fresh UUID fence. It finishes the pending leaf first and then the
+  remaining range in two bounded invocations from exact empty, one-valid-trade, and empty
+  one-millisecond responses. Completion is checkpoint version 6 with five lifetime source
+  requests, four traces, one retry, three completed windows, one canonical record, three raw
+  captures, and zero conflicts. The exact six transition statuses are `PENDING`, `RUNNING`,
+  `FAILED`, `RUNNING`, `RUNNING`, and `COMPLETED`; actors are absent, absent, worker A, absent,
+  worker B, and worker B; matching health exists only at versions 3, 5, and 6.
+
+  Across both workers, five unique granted durable reservations precede five provider attempts.
+  The combined sleeper evidence is one 0.125-second retry plus two 0.25-second pacing waits.
+  A completed rerun performs zero range invocations and leaves checkpoint, transition, health,
+  budget, HTTP, evidence, and sleeper observations unchanged. The focused recovery integration
+  file passes 14 tests, previously 13. Only test helpers and the new case changed; no production
+  defect or production-source change was found. An isolated mutation audit killed all 30 of 30
+  mutants with zero survivors and zero harness errors. It covered budget ordering and bypass,
+  retry count and delay, pending-leaf and response chronology, adapter and UUID-fence reuse,
+  failure/status/version/health/actor drift, both pacing waits, empty raw-capture admission,
+  hostile-detail persistence, and completed-rerun work. The complete suite passed 1,650 tests;
+  lockfile, formatting, lint, strict typing, dependency audit, and local health checks also passed.
+  The drill uses no network, wall-clock sleep, operator path, operator data, or credential and
+  makes no cross-database-atomicity, physical-durability, continuous-operation,
+  automatic-recovery, or Phase 2 exit claim. TASK-037 remains blocked and authorization remains
+  denied.
 
 ### TASK-055 — Fail-closed bounded public-HTTP response-header projection
 
@@ -813,8 +861,8 @@ Acceptance gates:
 
 ## Queued, Not Yet Approved
 
-- Design continuous public-trade collection only after typed transition audit access and
-  operational recovery drills are accepted.
+- Design continuous public-trade collection only after TASK-057's fixture/version review and
+  schema-drift runbook are complete and a separately scoped task is approved.
 
 ## Backlog Rules
 
