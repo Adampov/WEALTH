@@ -72,20 +72,35 @@ class StubUrlResponse:
 class RecordingBytesIO(BytesIO):
     """Record the byte sentinel requested through an HTTPError body."""
 
-    def __init__(self, body: bytes) -> None:
+    def __init__(self, body: bytes, *, close_error: BaseException | None = None) -> None:
         super().__init__(body)
         self.read_limits: list[int | None] = []
+        self.close_calls = 0
+        self.close_error = close_error
 
     def read(self, size: int | None = -1) -> bytes:
         self.read_limits.append(size)
         return super().read(size)
 
+    def close(self) -> None:
+        self.close_calls += 1
+        if self.close_error is not None:
+            close_error = self.close_error
+            self.close_error = None
+            raise close_error
+        super().close()
+
 
 class RaisingBytesIO(RecordingBytesIO):
     """Raise one configured transport failure while recording the read."""
 
-    def __init__(self, error: Exception) -> None:
-        super().__init__(b"partial-provider-detail")
+    def __init__(
+        self,
+        error: Exception,
+        *,
+        close_error: BaseException | None = None,
+    ) -> None:
+        super().__init__(b"partial-provider-detail", close_error=close_error)
         self.error = error
 
     def read(self, size: int | None = -1) -> bytes:
@@ -105,12 +120,49 @@ class RaisingUrlResponse(StubUrlResponse):
         raise self.error
 
 
-def http_error(reader: RecordingBytesIO) -> HTTPError:
+class RaisingMessage(Message):
+    """Raise one configured failure while materializing HTTP headers."""
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__()
+        self.error = error
+        self.items_calls = 0
+
+    def items(self) -> list[tuple[str, str]]:
+        self.items_calls += 1
+        raise self.error
+
+
+class RecordingHTTPError(HTTPError):
+    """Count each explicit close attempt on a real HTTP-error response."""
+
+    def __init__(
+        self,
+        url: str,
+        code: int,
+        message: str,
+        headers: Message,
+        reader: RecordingBytesIO,
+    ) -> None:
+        self.close_calls = 0
+        super().__init__(url, code, message, headers, reader)
+
+    def close(self) -> None:
+        self.close_calls += 1
+        super().close()
+
+
+def http_error(
+    reader: RecordingBytesIO,
+    *,
+    headers: Message | None = None,
+) -> RecordingHTTPError:
     """Build one deterministic public HTTP error with a recording body."""
 
-    headers = Message()
-    headers["Retry-After"] = "1"
-    return HTTPError(
+    if headers is None:
+        headers = Message()
+        headers["Retry-After"] = "1"
+    return RecordingHTTPError(
         "https://example.test/public",
         429,
         "rate limited",
@@ -230,6 +282,44 @@ def test_http_error_response_uses_one_byte_sentinel_and_accepts_exact_limit(
     assert result.status_code == 429
     assert result.headers == (("Retry-After", "1"),)
     assert result.body == b"err"
+    assert provider_error.close_calls == 1
+    assert reader.close_calls == 1
+    assert reader.closed is True
+
+
+def test_builtin_http_error_response_is_closed_before_exact_body_returns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reader = RecordingBytesIO(b"err")
+    headers = Message()
+    headers["Retry-After"] = "1"
+    provider_error = HTTPError(
+        "https://example.test/public",
+        429,
+        "rate limited",
+        headers,
+        reader,
+    )
+
+    def raise_http_error(request: Request, *, timeout: float) -> StubUrlResponse:
+        del request, timeout
+        raise provider_error
+
+    monkeypatch.setattr(http_adapter, "urlopen", raise_http_error)
+
+    result = UrllibPublicHttpClient(max_response_bytes=3).get(
+        url="https://example.test/public",
+        query={},
+        timeout_seconds=1,
+    )
+
+    assert type(provider_error) is HTTPError
+    assert result.status_code == 429
+    assert result.headers == (("Retry-After", "1"),)
+    assert result.body == b"err"
+    assert reader.read_limits == [4]
+    assert reader.close_calls == 1
+    assert reader.closed is True
 
 
 def test_http_error_response_one_byte_over_limit_is_typed_failure(
@@ -254,6 +344,9 @@ def test_http_error_response_one_byte_over_limit_is_typed_failure(
     assert str(error.value) == "public HTTP error response exceeded the configured limit"
     assert error.value.__cause__ is provider_error
     assert reader.read_limits == [4]
+    assert provider_error.close_calls == 1
+    assert reader.close_calls == 1
+    assert reader.closed is True
 
 
 @pytest.mark.parametrize(
@@ -290,6 +383,9 @@ def test_http_error_body_read_failure_is_sanitized_typed_transport_failure(
     assert error.value.__cause__ is read_failure
     assert str(read_failure) not in str(error.value)
     assert reader.read_limits == [4]
+    assert provider_error.close_calls == 1
+    assert reader.close_calls == 1
+    assert reader.closed is True
     assert len(urlopen_calls) == 1
 
 
@@ -383,7 +479,232 @@ def test_http_error_body_incomplete_read_is_sanitized_without_partial_response(
     assert partial_body.decode() not in str(error.value)
     assert str(read_failure.expected) not in str(error.value)
     assert reader.read_limits == [4]
+    assert provider_error.close_calls == 1
+    assert reader.close_calls == 1
+    assert reader.closed is True
     assert len(urlopen_calls) == 1
+
+
+def test_http_error_header_failure_still_closes_before_propagation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reader = RecordingBytesIO(b"err")
+    header_failure = ValueError("provider-header-detail")
+    headers = RaisingMessage(header_failure)
+    provider_error = http_error(reader, headers=headers)
+
+    def raise_http_error(request: Request, *, timeout: float) -> StubUrlResponse:
+        del request, timeout
+        raise provider_error
+
+    monkeypatch.setattr(http_adapter, "urlopen", raise_http_error)
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert error.value is header_failure
+    assert headers.items_calls == 1
+    assert reader.read_limits == [4]
+    assert provider_error.close_calls == 1
+    assert reader.close_calls == 1
+    assert reader.closed is True
+
+
+@pytest.mark.parametrize(
+    "close_failure",
+    [
+        pytest.param(URLError("close-url-detail"), id="url-error"),
+        pytest.param(TimeoutError("close-timeout-detail"), id="timeout-error"),
+        pytest.param(OSError("close-os-detail"), id="os-error"),
+        pytest.param(IncompleteRead(b"close-partial", 55), id="incomplete-read"),
+    ],
+)
+def test_http_error_close_failure_without_primary_is_sanitized_typed_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    close_failure: Exception,
+) -> None:
+    reader = RecordingBytesIO(b"err", close_error=close_failure)
+    provider_error = http_error(reader)
+    urlopen_calls: list[Request] = []
+
+    def raise_http_error(request: Request, *, timeout: float) -> StubUrlResponse:
+        del timeout
+        urlopen_calls.append(request)
+        raise provider_error
+
+    monkeypatch.setattr(http_adapter, "urlopen", raise_http_error)
+
+    with pytest.raises(HttpTransportError) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert str(error.value) == "public HTTP GET failed"
+    assert error.value.__cause__ is close_failure
+    assert str(close_failure) not in str(error.value)
+    assert reader.read_limits == [4]
+    assert provider_error.close_calls == 1
+    assert reader.close_calls == 1
+    assert reader.closed is False
+    assert len(urlopen_calls) == 1
+
+
+def test_non_os_close_failure_remains_unmapped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    close_failure = RuntimeError("programmer-close-detail")
+    reader = RecordingBytesIO(b"err", close_error=close_failure)
+    provider_error = http_error(reader)
+
+    def raise_http_error(request: Request, *, timeout: float) -> StubUrlResponse:
+        del request, timeout
+        raise provider_error
+
+    monkeypatch.setattr(http_adapter, "urlopen", raise_http_error)
+
+    with pytest.raises(RuntimeError) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert error.value is close_failure
+    assert reader.read_limits == [4]
+    assert provider_error.close_calls == 1
+    assert reader.close_calls == 1
+    assert reader.closed is False
+
+
+@pytest.mark.parametrize(
+    "close_failure",
+    [
+        pytest.param(OSError("secondary-close-os-detail"), id="os-error"),
+        pytest.param(RuntimeError("secondary-close-runtime-detail"), id="runtime-error"),
+        pytest.param(KeyboardInterrupt(), id="keyboard-interrupt"),
+    ],
+)
+def test_http_error_read_failure_remains_primary_when_close_also_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    close_failure: BaseException,
+) -> None:
+    read_failure = OSError("primary-read-detail")
+    reader = RaisingBytesIO(read_failure, close_error=close_failure)
+    provider_error = http_error(reader)
+
+    def raise_http_error(request: Request, *, timeout: float) -> StubUrlResponse:
+        del request, timeout
+        raise provider_error
+
+    monkeypatch.setattr(http_adapter, "urlopen", raise_http_error)
+
+    with pytest.raises(HttpTransportError) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert str(error.value) == "public HTTP GET failed"
+    assert error.value.__cause__ is read_failure
+    assert reader.read_limits == [4]
+    assert provider_error.close_calls == 1
+    assert reader.close_calls == 1
+    assert reader.closed is False
+
+
+def test_http_error_oversize_failure_remains_primary_when_close_also_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    close_failure = OSError("secondary-close-detail")
+    reader = RecordingBytesIO(b"oops", close_error=close_failure)
+    provider_error = http_error(reader)
+
+    def raise_http_error(request: Request, *, timeout: float) -> StubUrlResponse:
+        del request, timeout
+        raise provider_error
+
+    monkeypatch.setattr(http_adapter, "urlopen", raise_http_error)
+
+    with pytest.raises(HttpTransportError) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert str(error.value) == "public HTTP error response exceeded the configured limit"
+    assert error.value.__cause__ is provider_error
+    assert reader.read_limits == [4]
+    assert provider_error.close_calls == 1
+    assert reader.close_calls == 1
+    assert reader.closed is False
+
+
+def test_http_error_header_failure_remains_primary_when_close_also_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    header_failure = ValueError("primary-header-detail")
+    close_failure = OSError("secondary-close-detail")
+    reader = RecordingBytesIO(b"err", close_error=close_failure)
+    headers = RaisingMessage(header_failure)
+    provider_error = http_error(reader, headers=headers)
+
+    def raise_http_error(request: Request, *, timeout: float) -> StubUrlResponse:
+        del request, timeout
+        raise provider_error
+
+    monkeypatch.setattr(http_adapter, "urlopen", raise_http_error)
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert error.value is header_failure
+    assert headers.items_calls == 1
+    assert reader.read_limits == [4]
+    assert provider_error.close_calls == 1
+    assert reader.close_calls == 1
+    assert reader.closed is False
+
+
+def test_same_http_error_raised_during_processing_remains_primary_on_close_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    close_failure = OSError("secondary-close-detail")
+    reader = RecordingBytesIO(b"err", close_error=close_failure)
+    headers = RaisingMessage(RuntimeError("placeholder"))
+    provider_error = http_error(reader, headers=headers)
+    headers.error = provider_error
+
+    def raise_http_error(request: Request, *, timeout: float) -> StubUrlResponse:
+        del request, timeout
+        raise provider_error
+
+    monkeypatch.setattr(http_adapter, "urlopen", raise_http_error)
+
+    with pytest.raises(HTTPError) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://example.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert error.value is provider_error
+    assert headers.items_calls == 1
+    assert reader.read_limits == [4]
+    assert provider_error.close_calls == 1
+    assert reader.close_calls == 1
+    assert reader.closed is False
 
 
 def test_incomplete_read_raised_before_body_read_remains_unmapped(

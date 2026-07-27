@@ -64,18 +64,31 @@ class UrllibPublicHttpClient:
                     body=body,
                 )
         except HTTPError as error:
+            response_materialized = False
             try:
-                body = error.read(self.max_response_bytes + 1)
-            except (URLError, TimeoutError, OSError, IncompleteRead) as read_error:
-                raise HttpTransportError("public HTTP GET failed") from read_error
-            if len(body) > self.max_response_bytes:
-                raise HttpTransportError(
-                    "public HTTP error response exceeded the configured limit"
-                ) from error
-            return HttpResponse(
-                status_code=error.code,
-                headers=tuple(error.headers.items()),
-                body=body,
-            )
+                try:
+                    body = error.read(self.max_response_bytes + 1)
+                except (URLError, TimeoutError, OSError, IncompleteRead) as read_error:
+                    raise HttpTransportError("public HTTP GET failed") from read_error
+                if len(body) > self.max_response_bytes:
+                    raise HttpTransportError(
+                        "public HTTP error response exceeded the configured limit"
+                    ) from error
+                response = HttpResponse(
+                    status_code=error.code,
+                    headers=tuple(error.headers.items()),
+                    body=body,
+                )
+                response_materialized = True
+                return response
+            finally:
+                try:
+                    error.close()
+                except (OSError, IncompleteRead) as close_error:
+                    if response_materialized:
+                        raise HttpTransportError("public HTTP GET failed") from close_error
+                except BaseException:
+                    if response_materialized:
+                        raise
         except (URLError, TimeoutError, OSError) as error:
             raise HttpTransportError("public HTTP GET failed") from error

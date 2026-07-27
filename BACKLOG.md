@@ -6,47 +6,43 @@ promoted through review.
 
 ## Next Action
 
-### TASK-045 — Deterministic public-HTTP error-response resource closure
+### TASK-046 — Typed pre-response public-HTTP incomplete-read mapping
 
-- **Key:** `phase2.deterministic_public_http_error_response_resource_closure`
+- **Key:** `phase2.typed_public_http_pre_response_incomplete_read_failure_mapping`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
 - **Human approval:** NOT REQUIRED — bounded fail-closed development hardening under the owner's
   explicit authorization; no permission, deployment, or operator-data change.
-- **Context:** A real `HTTPError` is also a closable response object. The successful-response path
-  is context-managed, but the current HTTP-error path leaves its body resource open after an
-  exact-limit return, oversize failure, or supported body-read failure.
-- **Goal:** Attempt to close every accepted `HTTPError` response resource exactly once before
-  returning or propagating a result, while preserving the primary transport outcome.
-- **Scope:** Add deterministic error-response closure across complete, oversize, read-failure,
-  header-materialization, and supported close-failure paths, with explicit primary-failure
-  precedence and path-specific tests.
+- **Context:** TASK-044 deliberately scoped `IncompleteRead` mapping to body reads and pinned a
+  pre-response `urlopen` failure as raw. The standard redirect handler can read a redirect body
+  inside `urlopen`, so a truncated redirect can reach this seam with partial-byte metadata before
+  the adapter receives a response handle.
+- **Goal:** Convert only pre-response `IncompleteRead` from `urlopen` into the shared sanitized
+  typed transport failure without accepting partial bytes or broadening later response boundaries.
+- **Scope:** Add a narrow acquisition-call boundary around `urlopen`, preserve the real
+  `IncompleteRead` as direct cause, and add deterministic adjacent-boundary tests.
 - **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
   `docs/contracts/MARKET_DATA.md`, plus coordinated governance files and governance tests.
 - **Constraints:** Do not change response-size limits, timeout behavior, endpoints, queries,
-  headers, retries, number of reads, successful-response context management, valid response
-  content, provider parsing, canonicalization, quality, storage, schemas, dependencies, runtime
-  wiring, operator paths, TASK-037 authority, migration, or Stage 3. Do not include close-failure
-  or provider exception text in the public message.
+  headers, retries, response-body reads, response entry/exit behavior, TASK-045 closure, any other
+  exception mapping, provider parsing, canonicalization, quality, storage, schemas, dependencies,
+  runtime wiring, operator paths, TASK-037 authority, migration, or Stage 3. Do not include partial
+  provider bytes, expected counts, or exception text in the public message.
 
 Acceptance gates:
 
-1. Cleanup of a real HTTP-error response resource is attempted exactly once after an exact-limit
-   body, an oversize body, every supported body-read failure, and any later header-materialization
-   failure; when cleanup succeeds, the resource is closed before return or propagation.
-2. The cleanup attempt occurs after no more than one `max_response_bytes + 1` read and before
-   return or propagation; no retry, second read, partial response, or duplicate close occurs.
-3. When close succeeds, every existing status, header, body, public error message, and direct
-   cause remains unchanged.
-4. A supported close failure with no earlier failure becomes
-   `HttpTransportError("public HTTP GET failed")` with the close error as direct cause. If a primary
-   read, oversize, or later processing failure already exists, closure is still attempted once and
-   cannot replace that primary message, exception type, or direct cause.
-5. Successful-response context management, response limits, finite-positive timeouts, endpoints,
-   queries, headers, provider behavior, and all other transport mappings remain unchanged.
-   Formatting, lint, strict typing, complete tests, lockfile verification, dependency audit,
-   health slice, and CI pass.
+1. A real `IncompleteRead` raised directly by `urlopen` becomes
+   `HttpTransportError("public HTTP GET failed")`; the original exception is the direct cause.
+2. Its partial bytes, expected-byte count, and untrusted detail are absent from the public message;
+   no response handle, body, status, headers, or partial `HttpResponse` is accepted or returned.
+3. `urlopen` is called exactly once and no adapter body read, response entry, retry, or cleanup
+   attempt occurs because no response handle was received.
+4. An `IncompleteRead` raised by response entry or exit remains outside this acquisition boundary;
+   TASK-044 body mappings and TASK-045 HTTP-error cleanup remain unchanged.
+5. Response limits, finite-positive timeouts, endpoints, queries, headers, provider behavior, and
+   all other transport mappings remain unchanged. Formatting, lint, strict typing, complete tests,
+   lockfile verification, dependency audit, health slice, and CI pass.
 6. TASK-037 remains blocked and authorization remains denied; no operator data, path, database,
    scanner, report, migration, or Stage 3 action occurs.
 
@@ -103,6 +99,27 @@ Acceptance gates:
    all repository gates pass.
 
 ## Recently Completed
+
+### TASK-045 — Deterministic public-HTTP error-response resource closure
+
+- **Key:** `phase2.deterministic_public_http_error_response_resource_closure`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
+  `docs/contracts/MARKET_DATA.md`, and the coordinated governance files and governance tests.
+- **Result:** Every `HTTPError` processing path now makes one explicit cleanup attempt after no
+  more than one `cap + 1` body read. A real built-in `HTTPError` smoke test and a counting
+  `HTTPError` subclass prove exact-limit return, oversize failure, every supported read failure,
+  later header failure, and close failure each invoke `close` exactly once; successful cleanup
+  closes the underlying body before return or propagation. An `OSError`-family or `IncompleteRead`
+  close-only failure becomes `HttpTransportError("public HTTP GET failed")` with that close error
+  as direct cause; unsupported close-only failures remain unchanged. If any primary read,
+  oversize, header, or processing failure already exists, no cleanup failure can replace its type,
+  public message, or direct cause. Existing status, headers, body, read count, response limits,
+  timeouts, endpoints, queries, retries, successful-response context management, provider
+  behavior, parsing, quality, storage, schemas, dependencies, runtime wiring, operator authority,
+  migration, and Stage 3 remain unchanged. A failed cleanup attempt is not claimed to have closed
+  its resource.
 
 ### TASK-044 — Typed public-HTTP incomplete-body read-failure mapping
 
