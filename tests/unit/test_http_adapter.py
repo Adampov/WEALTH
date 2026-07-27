@@ -1,5 +1,8 @@
 """Tests for the bounded standard-library public HTTP adapter."""
 
+import subprocess
+import sys
+from collections import Counter
 from email.message import Message
 from http.client import (
     BadStatusLine,
@@ -11,9 +14,17 @@ from http.client import (
 )
 from io import BytesIO
 from types import TracebackType
-from typing import Self
+from typing import Self, cast
+from urllib import request as urllib_request
 from urllib.error import HTTPError, URLError
-from urllib.request import Request
+from urllib.request import (
+    BaseHandler,
+    HTTPRedirectHandler,
+    ProxyHandler,
+    Request,
+    build_opener,
+)
+from urllib.response import addinfourl
 
 import pytest
 
@@ -52,6 +63,28 @@ PROTOCOL_FAILURE_TYPES = (
 UNMAPPED_HTTP_EXCEPTION_TYPES = (
     pytest.param(HTTPException, id="base-http-exception"),
     pytest.param(InvalidURL, id="invalid-url"),
+)
+REDIRECT_STATUS_CODES = (301, 302, 303, 307, 308)
+REDIRECT_TARGETS = (
+    pytest.param(None, None, id="no-location"),
+    pytest.param("Location", "", id="empty-location"),
+    pytest.param("Location", "/relative-target", id="location-relative"),
+    pytest.param("Location", "https://origin.test/same-origin", id="location-same-origin"),
+    pytest.param("Location", "https://other.test/cross-origin", id="location-cross-origin"),
+    pytest.param("Location", "http://origin.test/downgrade", id="location-https-to-http"),
+    pytest.param("Location", "ftp://origin.test/archive", id="location-ftp"),
+    pytest.param(
+        "Location",
+        "data:text/plain,not-contacted",
+        id="location-unsupported-scheme",
+    ),
+    pytest.param("Location", "https://[", id="location-malformed"),
+    pytest.param("URI", "", id="empty-uri"),
+    pytest.param("URI", "/relative-target", id="uri-relative"),
+    pytest.param("URI", "https://origin.test/same-origin", id="uri-same-origin"),
+    pytest.param("URI", "https://other.test/cross-origin", id="uri-cross-origin"),
+    pytest.param("URI", "http://origin.test/downgrade", id="uri-https-to-http"),
+    pytest.param("URI", "ftp://origin.test/archive", id="uri-ftp"),
 )
 
 
@@ -109,6 +142,73 @@ class RecordingBytesIO(BytesIO):
             self.close_error = None
             raise close_error
         super().close()
+
+
+class SyntheticOpenerResponse(addinfourl):
+    """Provide the real urllib response surface without external network work."""
+
+    def __init__(
+        self,
+        *,
+        reader: RecordingBytesIO,
+        headers: Message,
+        url: str,
+        status_code: int,
+        message: str,
+    ) -> None:
+        super().__init__(reader, headers, url, status_code)
+        self.msg = message
+
+
+class SyntheticUrlHandler(BaseHandler):
+    """Return one configured response and record any attempted redirect target."""
+
+    handler_order = 100
+
+    def __init__(
+        self,
+        *,
+        status_code: int,
+        headers: Message,
+        reader: RecordingBytesIO,
+    ) -> None:
+        self.status_code = status_code
+        self.headers = headers
+        self.reader = reader
+        self.requests: list[Request] = []
+        self.responses: list[SyntheticOpenerResponse] = []
+
+    def _open(self, request: Request) -> SyntheticOpenerResponse:
+        self.requests.append(request)
+        if len(self.requests) == 1:
+            status_code = self.status_code
+            headers = self.headers
+            reader = self.reader
+            message = "synthetic redirect"
+        else:
+            status_code = 200
+            headers = Message()
+            headers["X-Synthetic-Target"] = "contacted"
+            reader = RecordingBytesIO(b"target-contacted")
+            message = "synthetic target"
+        response = SyntheticOpenerResponse(
+            reader=reader,
+            headers=headers,
+            url=request.full_url,
+            status_code=status_code,
+            message=message,
+        )
+        self.responses.append(response)
+        return response
+
+    def http_open(self, request: Request) -> SyntheticOpenerResponse:
+        return self._open(request)
+
+    def https_open(self, request: Request) -> SyntheticOpenerResponse:
+        return self._open(request)
+
+    def ftp_open(self, request: Request) -> SyntheticOpenerResponse:
+        return self._open(request)
 
 
 class RaisingBytesIO(RecordingBytesIO):
@@ -219,6 +319,29 @@ def http_error(
     )
 
 
+def use_synthetic_private_opener(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    status_code: int,
+    headers: Message,
+    reader: RecordingBytesIO,
+) -> SyntheticUrlHandler:
+    """Install one real private opener chain backed by a synthetic transport."""
+
+    transport = SyntheticUrlHandler(
+        status_code=status_code,
+        headers=headers,
+        reader=reader,
+    )
+    opener = build_opener(
+        ProxyHandler({}),
+        transport,
+        http_adapter._NoRedirectHandler(),
+    )
+    monkeypatch.setattr(http_adapter, "_NO_REDIRECT_OPENER", opener)
+    return transport
+
+
 @pytest.mark.parametrize(
     "max_response_bytes",
     [
@@ -263,6 +386,329 @@ def test_valid_response_limit_is_retained_exactly(max_response_bytes: int) -> No
 
 def test_default_response_limit_is_the_hard_maximum() -> None:
     assert UrllibPublicHttpClient().max_response_bytes == MAX_PUBLIC_HTTP_RESPONSE_BYTES
+
+
+def test_production_private_opener_replaces_only_the_default_redirect_handler() -> None:
+    production_handlers = cast(
+        list[BaseHandler],
+        vars(http_adapter._NO_REDIRECT_OPENER)["handlers"],
+    )
+    redirect_handlers = [
+        handler for handler in production_handlers if isinstance(handler, HTTPRedirectHandler)
+    ]
+    default_handlers = cast(list[BaseHandler], vars(build_opener())["handlers"])
+    expected_handler_types = Counter(type(handler) for handler in default_handlers)
+    normalized_production_handler_types = Counter(
+        HTTPRedirectHandler if type(handler) is http_adapter._NoRedirectHandler else type(handler)
+        for handler in production_handlers
+    )
+
+    assert len(redirect_handlers) == 1
+    assert type(redirect_handlers[0]) is http_adapter._NoRedirectHandler
+    assert normalized_production_handler_types == expected_handler_types
+
+
+def test_import_does_not_install_the_private_opener_process_wide() -> None:
+    probe = (
+        "import importlib\n"
+        "import os\n"
+        "import urllib.request\n"
+        "proxy_url = 'http://proxy.test:8080'\n"
+        "os.environ['https_proxy'] = proxy_url\n"
+        "install_calls = []\n"
+        "urllib.request._opener = None\n"
+        "urllib.request.install_opener = lambda opener: install_calls.append(opener)\n"
+        "http_adapter = importlib.import_module('wealth.adapters.http')\n"
+        "assert urllib.request._opener is None\n"
+        "assert install_calls == []\n"
+        "proxy_handlers = [handler for handler in "
+        "http_adapter._NO_REDIRECT_OPENER.handlers "
+        "if isinstance(handler, urllib.request.ProxyHandler)]\n"
+        "assert len(proxy_handlers) == 1\n"
+        "assert proxy_handlers[0].proxies['https'] == proxy_url\n"
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", probe],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_private_redirect_handler_returns_original_error_before_body_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    headers = Message()
+    headers["Location"] = "https://["
+    reader = RecordingBytesIO(b"abc")
+    transport = use_synthetic_private_opener(
+        monkeypatch,
+        status_code=302,
+        headers=headers,
+        reader=reader,
+    )
+    request = Request("https://origin.test/public", method="GET")
+
+    with pytest.raises(HTTPError) as captured:
+        http_adapter.urlopen(request, timeout=1)
+
+    redirect_error = captured.value
+    assert redirect_error.code == 302
+    assert redirect_error.headers is headers
+    assert len(transport.requests) == 1
+    assert reader.read_limits == []
+    assert reader.close_calls == 0
+    assert reader.closed is False
+
+    redirect_error.close()
+
+    assert reader.read_limits == []
+    assert reader.close_calls == 1
+    assert reader.closed is True
+
+
+@pytest.mark.parametrize("status_code", REDIRECT_STATUS_CODES)
+@pytest.mark.parametrize(("header_name", "target_url"), REDIRECT_TARGETS)
+def test_private_opener_rejects_every_automatic_redirect_before_drain_or_follow(
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+    header_name: str | None,
+    target_url: str | None,
+) -> None:
+    headers = Message()
+    headers["X-Original-Response"] = "retained"
+    if header_name is not None:
+        assert target_url is not None
+        headers[header_name] = target_url
+    reader = RecordingBytesIO(b"abc")
+    transport = use_synthetic_private_opener(
+        monkeypatch,
+        status_code=status_code,
+        headers=headers,
+        reader=reader,
+    )
+
+    result = UrllibPublicHttpClient(max_response_bytes=3).get(
+        url="https://origin.test/public",
+        query={},
+        timeout_seconds=1,
+    )
+
+    expected_headers = [("X-Original-Response", "retained")]
+    if header_name is not None:
+        assert target_url is not None
+        expected_headers.append((header_name, target_url))
+    assert result.status_code == status_code
+    assert result.headers == tuple(expected_headers)
+    assert result.body == b"abc"
+    assert [request.full_url for request in transport.requests] == ["https://origin.test/public?"]
+    assert [request.get_method() for request in transport.requests] == ["GET"]
+    assert [request.timeout for request in transport.requests] == [1]
+    assert len(transport.responses) == 1
+    assert reader.read_limits == [4]
+    assert reader.close_calls == 1
+    assert reader.closed is True
+
+
+def test_nonredirect_http_error_with_location_header_remains_bounded_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    headers = Message()
+    headers["Location"] = "https://other.test/not-contacted"
+    headers["Retry-After"] = "1"
+    reader = RecordingBytesIO(b"err")
+    transport = use_synthetic_private_opener(
+        monkeypatch,
+        status_code=429,
+        headers=headers,
+        reader=reader,
+    )
+
+    result = UrllibPublicHttpClient(max_response_bytes=3).get(
+        url="https://origin.test/public",
+        query={},
+        timeout_seconds=1,
+    )
+
+    assert result.status_code == 429
+    assert result.headers == (
+        ("Location", "https://other.test/not-contacted"),
+        ("Retry-After", "1"),
+    )
+    assert result.body == b"err"
+    assert [request.full_url for request in transport.requests] == ["https://origin.test/public?"]
+    assert len(transport.responses) == 1
+    assert reader.read_limits == [4]
+    assert reader.close_calls == 1
+    assert reader.closed is True
+
+
+def test_redirect_one_byte_over_limit_uses_existing_bounded_error_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    headers = Message()
+    headers["Location"] = "https://other.test/not-contacted"
+    reader = RecordingBytesIO(b"abcd")
+    transport = use_synthetic_private_opener(
+        monkeypatch,
+        status_code=302,
+        headers=headers,
+        reader=reader,
+    )
+
+    with pytest.raises(HttpTransportError) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://origin.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert str(error.value) == "public HTTP error response exceeded the configured limit"
+    assert isinstance(error.value.__cause__, HTTPError)
+    assert error.value.__cause__.code == 302
+    assert [request.full_url for request in transport.requests] == ["https://origin.test/public?"]
+    assert len(transport.responses) == 1
+    assert reader.read_limits == [4]
+    assert reader.close_calls == 1
+    assert reader.closed is True
+
+
+def test_redirect_body_read_failure_retains_sanitized_direct_cause(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    read_failure = OSError("redirect-provider-read-detail")
+    headers = Message()
+    headers["Location"] = "/not-contacted"
+    reader = RaisingBytesIO(read_failure)
+    transport = use_synthetic_private_opener(
+        monkeypatch,
+        status_code=307,
+        headers=headers,
+        reader=reader,
+    )
+
+    with pytest.raises(HttpTransportError) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://origin.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert str(error.value) == "public HTTP GET failed"
+    assert error.value.__cause__ is read_failure
+    assert str(read_failure) not in str(error.value)
+    assert len(transport.requests) == 1
+    assert len(transport.responses) == 1
+    assert reader.read_limits == [4]
+    assert reader.close_calls == 1
+    assert reader.closed is True
+
+
+def test_redirect_cleanup_failure_retains_sanitized_direct_cause(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    close_failure = OSError("redirect-provider-close-detail")
+    headers = Message()
+    headers["Location"] = "ftp://other.test/not-contacted"
+    reader = RecordingBytesIO(b"abc", close_error=close_failure)
+    transport = use_synthetic_private_opener(
+        monkeypatch,
+        status_code=308,
+        headers=headers,
+        reader=reader,
+    )
+
+    with pytest.raises(HttpTransportError) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://origin.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert str(error.value) == "public HTTP GET failed"
+    assert error.value.__cause__ is close_failure
+    assert str(close_failure) not in str(error.value)
+    assert len(transport.requests) == 1
+    assert len(transport.responses) == 1
+    assert reader.read_limits == [4]
+    assert reader.close_calls == 1
+    assert reader.closed is False
+
+
+def test_redirect_primary_read_failure_is_not_replaced_by_cleanup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    read_failure = OSError("primary-redirect-read-detail")
+    close_failure = OSError("secondary-redirect-close-detail")
+    headers = Message()
+    headers["Location"] = "https://other.test/not-contacted"
+    reader = RaisingBytesIO(read_failure, close_error=close_failure)
+    transport = use_synthetic_private_opener(
+        monkeypatch,
+        status_code=301,
+        headers=headers,
+        reader=reader,
+    )
+
+    with pytest.raises(HttpTransportError) as error:
+        UrllibPublicHttpClient(max_response_bytes=3).get(
+            url="https://origin.test/public",
+            query={},
+            timeout_seconds=1,
+        )
+
+    assert str(error.value) == "public HTTP GET failed"
+    assert error.value.__cause__ is read_failure
+    assert len(transport.requests) == 1
+    assert len(transport.responses) == 1
+    assert reader.read_limits == [4]
+    assert reader.close_calls == 1
+    assert reader.closed is False
+
+
+def test_private_opener_does_not_mutate_process_global_urllib_opener(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    headers = Message()
+    headers["Content-Type"] = "application/json"
+    reader = RecordingBytesIO(b"abc")
+    transport = use_synthetic_private_opener(
+        monkeypatch,
+        status_code=200,
+        headers=headers,
+        reader=reader,
+    )
+    process_global_opener = object()
+    monkeypatch.setattr(urllib_request, "_opener", process_global_opener)
+
+    result = UrllibPublicHttpClient(
+        user_agent="WEALTH/test no-follow",
+        max_response_bytes=3,
+    ).get(
+        url="https://origin.test/public",
+        query={"b": "2", "a": "1"},
+        timeout_seconds=0.25,
+    )
+
+    assert result.status_code == 200
+    assert result.headers == (("Content-Type", "application/json"),)
+    assert result.body == b"abc"
+    assert vars(urllib_request)["_opener"] is process_global_opener
+    assert [request.full_url for request in transport.requests] == [
+        "https://origin.test/public?a=1&b=2"
+    ]
+    assert [request.get_method() for request in transport.requests] == ["GET"]
+    assert [request.get_header("Accept") for request in transport.requests] == ["application/json"]
+    assert [request.get_header("User-agent") for request in transport.requests] == [
+        "WEALTH/test no-follow"
+    ]
+    assert [request.timeout for request in transport.requests] == [0.25]
+    assert reader.read_limits == [4]
+    assert reader.close_calls == 1
+    assert reader.closed is True
 
 
 def test_success_response_uses_one_byte_sentinel_and_accepts_exact_limit(

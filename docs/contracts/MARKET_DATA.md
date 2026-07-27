@@ -48,10 +48,24 @@ message, acquisition is attempted once, and each body seam retains its single co
 one-byte-sentinel read. A direct base `HTTPException`, `InvalidURL`, or one of those three failures
 raised by response entry, response exit, or HTTP-error cleanup remains outside this mapping.
 `RemoteDisconnected` retains its pre-existing `OSError`-family typed outcome; the explicit protocol
-tuple does not create a broad `HTTPException` catch. This mapping does not change default redirect
-behavior: urllib may still drain a redirect body outside the adapter response cap and contact a
-changed `http`, `https`, or `ftp` destination before a handle reaches the adapter; TASK-048 governs
-fail-closed redirect rejection.
+tuple does not create a broad `HTTPException` catch.
+
+The shared transport uses one private urllib opener with a no-follow redirect handler. Original
+301, 302, 303, 307, and 308 responses are never followed. Before parsing `Location` or `URI`, the
+handler rejects absent, empty, relative, same-origin, cross-origin, HTTPS-to-HTTP downgrade, FTP,
+unsupported-scheme, and malformed targets. It creates no follow-up `Request` and performs no body
+read or cleanup. The original 3xx instead enters the existing bounded `HTTPError` path: the adapter
+performs one configured one-byte-sentinel read and one cleanup attempt, retains the original status
+and headers, returns only a complete in-limit body, and preserves all existing read, protocol,
+cleanup, direct-cause, and primary-failure mappings. No process-global opener is installed or
+mutated.
+
+Initial request-target validation remains incomplete. The shared client does not yet parse and
+constrain its caller-supplied initial URL before query serialization and request construction, and
+the private standard-library opener retains non-HTTPS scheme handlers. Active provider
+constructors perform only a prefix-level HTTPS check. TASK-049 governs an exact absolute,
+credential-free HTTPS initial-target boundary; no provider/hostname allowlist, DNS/IP policy, or
+resolver is currently claimed.
 
 Every `HTTPError` path makes one explicit cleanup attempt after at most one bounded body read.
 When cleanup succeeds, the error-response resource is closed before a response or primary failure
