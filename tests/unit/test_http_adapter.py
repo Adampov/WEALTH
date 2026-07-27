@@ -76,6 +76,7 @@ REDIRECT_STATUS_CODES = (301, 302, 303, 307, 308)
 INVALID_INITIAL_URL_MESSAGE = (
     "url must be an absolute credential-free HTTPS endpoint without query or fragment"
 )
+INVALID_INITIAL_URL_LENGTH_MESSAGE = "url must contain at most 8192 characters"
 INVALID_TARGET_PORT_MESSAGE = "url must use the standard HTTPS target port"
 INVALID_QUERY_MESSAGE = (
     "query must contain at most 32 built-in string pairs totaling at most 8192 characters"
@@ -101,26 +102,31 @@ ACTIVE_PROVIDER_DEFAULT_URLS = (
     pytest.param(
         BINANCE_SPOT_KLINES_URL,
         "https://data-api.binance.vision/api/v3/klines",
+        45,
         id="binance-spot-candles",
     ),
     pytest.param(
         BINANCE_USDM_KLINES_URL,
         "https://fapi.binance.com/fapi/v1/klines",
+        39,
         id="binance-usdm-candles",
     ),
     pytest.param(
         COINBASE_PRODUCTS_URL,
         "https://api.exchange.coinbase.com/products",
+        42,
         id="coinbase-spot-candles",
     ),
     pytest.param(
         BINANCE_SPOT_AGG_TRADES_URL,
         "https://data-api.binance.vision/api/v3/aggTrades",
+        48,
         id="binance-spot-aggregate-trades",
     ),
     pytest.param(
         BINANCE_USDM_AGG_TRADES_URL,
         "https://fapi.binance.com/fapi/v1/aggTrades",
+        42,
         id="binance-usdm-aggregate-trades",
     ),
 )
@@ -276,6 +282,37 @@ class IntegerSubclass(int):
 
 class StringSubclass(str):
     """Represent text whose runtime type is not the built-in type."""
+
+
+class LyingLengthUrl(str):
+    """Expose a false short length if ordinary polymorphic len() is used."""
+
+    def __len__(self) -> int:
+        return 1
+
+
+class LongLyingLengthUrl(str):
+    """Expose a false oversized length if ordinary polymorphic len() is used."""
+
+    def __len__(self) -> int:
+        return 100_000
+
+
+class ExplodingUrl(str):
+    """Fail if oversized URL handling dispatches to content or length overrides."""
+
+    def __str__(self) -> str:
+        raise AssertionError("oversized URL was coerced")
+
+    def __len__(self) -> int:
+        raise AssertionError("URL length override was invoked")
+
+    def __contains__(self, item: object) -> bool:
+        del item
+        raise AssertionError("oversized URL content membership was inspected")
+
+    def __iter__(self) -> Iterator[str]:
+        raise AssertionError("oversized URL character iteration was started")
 
 
 class PairTupleSubclass(tuple[str, str]):
@@ -436,6 +473,15 @@ def assert_query_boundary_error(error: BaseException) -> None:
 
     assert type(error) is ValueError
     assert str(error) == INVALID_QUERY_MESSAGE
+    assert error.__cause__ is None
+    assert error.__context__ is None
+
+
+def assert_initial_url_length_error(error: BaseException) -> None:
+    """Require the exact context-free TASK-052 boundary failure."""
+
+    assert type(error) is ValueError
+    assert str(error) == INVALID_INITIAL_URL_LENGTH_MESSAGE
     assert error.__cause__ is None
     assert error.__context__ is None
 
@@ -736,6 +782,289 @@ def test_default_response_limit_is_the_hard_maximum() -> None:
     assert UrllibPublicHttpClient().max_response_bytes == MAX_PUBLIC_HTTP_RESPONSE_BYTES
 
 
+@pytest.mark.parametrize("timeout_seconds", INVALID_TIMEOUTS)
+def test_invalid_timeout_precedes_initial_url_length_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    timeout_seconds: float,
+) -> None:
+    url = ExplodingUrl("https://example.test/" + ("a" * 8_200))
+    query = ExplodingQuery()
+    validator_calls: list[str] = []
+
+    def unexpected_url_validation(value: str) -> None:
+        validator_calls.append(value)
+        raise AssertionError("invalid timeout reached URL validation")
+
+    monkeypatch.setattr(http_adapter, "_validate_initial_url", unexpected_url_validation)
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient().get(
+            url=url,
+            query=query,
+            timeout_seconds=timeout_seconds,
+        )
+
+    assert str(error.value) == "timeout_seconds must be finite and positive"
+    assert validator_calls == []
+    assert query.calls == []
+
+
+@pytest.mark.parametrize(
+    "url_type",
+    [
+        pytest.param(LyingLengthUrl, id="lying-length-override"),
+        pytest.param(ExplodingUrl, id="raising-length-and-content-overrides"),
+    ],
+)
+def test_oversized_initial_url_uses_true_builtin_string_length_before_all_other_work(
+    monkeypatch: pytest.MonkeyPatch,
+    url_type: type[str],
+) -> None:
+    original_text = "https://example.test/" + ("a" * 8_200)
+    url = url_type(original_text)
+    assert str.__len__(url) > 8192
+    query = ExplodingQuery()
+    parser_calls: list[str] = []
+    normalization_calls: list[tuple[str, str]] = []
+
+    def unexpected_urlsplit(value: str) -> object:
+        parser_calls.append(value)
+        raise AssertionError("oversized URL reached parsing")
+
+    def unexpected_normalize(form: str, value: str) -> str:
+        normalization_calls.append((form, value))
+        raise AssertionError("oversized URL reached NFKC inspection")
+
+    monkeypatch.setattr(http_adapter, "urlsplit", unexpected_urlsplit)
+    monkeypatch.setattr(http_adapter, "normalize", unexpected_normalize)
+    downstream_calls = forbid_query_downstream_work(monkeypatch)
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient().get(
+            url=url,
+            query=query,
+            timeout_seconds=1,
+        )
+
+    assert_initial_url_length_error(error.value)
+    assert parser_calls == []
+    assert normalization_calls == []
+    assert query.calls == []
+    assert downstream_calls == []
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param("forbidden-content", id="forbidden-content"),
+        pytest.param("malformed-authority", id="malformed-authority"),
+        pytest.param("nonstandard-port", id="nonstandard-port"),
+    ],
+)
+def test_oversized_length_error_precedes_structural_and_port_errors(case: str) -> None:
+    if case == "forbidden-content":
+        prefix = "https://example.test/path?"
+    elif case == "malformed-authority":
+        prefix = "https://["
+    else:
+        prefix = "https://example.test:444/"
+    url = prefix + ("a" * (8193 - str.__len__(prefix)))
+    assert str.__len__(url) == 8193
+    query = ExplodingQuery()
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient().get(
+            url=url,
+            query=query,
+            timeout_seconds=1,
+        )
+
+    assert_initial_url_length_error(error.value)
+    assert query.calls == []
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_message", "expects_parser_context"),
+    [
+        pytest.param(
+            "forbidden-content",
+            INVALID_INITIAL_URL_MESSAGE,
+            False,
+            id="structural-error-retained",
+        ),
+        pytest.param(
+            "malformed-authority",
+            INVALID_INITIAL_URL_MESSAGE,
+            True,
+            id="parser-error-retained",
+        ),
+        pytest.param(
+            "nonstandard-port",
+            INVALID_TARGET_PORT_MESSAGE,
+            False,
+            id="port-error-retained",
+        ),
+    ],
+)
+def test_at_most_8192_characters_retains_existing_validation_precedence(
+    case: str,
+    expected_message: str,
+    expects_parser_context: bool,
+) -> None:
+    if case == "forbidden-content":
+        prefix = "https://example.test/path?"
+    elif case == "malformed-authority":
+        prefix = "https://["
+    else:
+        prefix = "https://example.test:444/"
+    url = prefix + ("a" * (8192 - str.__len__(prefix)))
+    assert str.__len__(url) == 8192
+    query = ExplodingQuery()
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient().get(
+            url=url,
+            query=query,
+            timeout_seconds=1,
+        )
+
+    assert type(error.value) is ValueError
+    assert str(error.value) == expected_message
+    assert error.value.__cause__ is None
+    if expects_parser_context:
+        assert isinstance(error.value.__context__, ValueError)
+        assert error.value.__suppress_context__ is True
+    else:
+        assert error.value.__context__ is None
+    assert query.calls == []
+
+
+@pytest.mark.parametrize(
+    "path_character",
+    [
+        pytest.param("a", id="ascii"),
+        pytest.param("💰", id="unicode-code-point"),
+    ],
+)
+def test_exactly_8192_character_initial_url_is_preserved_through_request_work(
+    monkeypatch: pytest.MonkeyPatch,
+    path_character: str,
+) -> None:
+    prefix = "https://example.test/"
+    url = prefix + (path_character * (8192 - str.__len__(prefix)))
+    assert type(url) is str
+    assert str.__len__(url) == 8192
+    if path_character != "a":
+        assert len(url.encode("utf-8")) > 8192
+    response = StubUrlResponse(b"ok")
+    requests: list[Request] = []
+    timeout_seconds = float("0.25")
+
+    def stub_urlopen(request: Request, *, timeout: float) -> StubUrlResponse:
+        assert timeout is timeout_seconds
+        requests.append(request)
+        return response
+
+    monkeypatch.setattr(http_adapter, "urlopen", stub_urlopen)
+
+    result = UrllibPublicHttpClient(
+        user_agent="WEALTH/test initial URL length",
+        max_response_bytes=2,
+    ).get(
+        url=url,
+        query={"b": "two words", "a": "1"},
+        timeout_seconds=timeout_seconds,
+    )
+
+    assert [request.full_url for request in requests] == [f"{url}?a=1&b=two+words"]
+    assert [request.get_method() for request in requests] == ["GET"]
+    assert [request.get_header("Accept") for request in requests] == ["application/json"]
+    assert [request.get_header("User-agent") for request in requests] == [
+        "WEALTH/test initial URL length"
+    ]
+    assert response.enter_calls == 1
+    assert response.read_limits == [3]
+    assert response.exit_calls == 1
+    assert result.body == b"ok"
+
+
+def test_exactly_8192_character_string_subclass_cannot_lie_long(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prefix = "https://example.test/"
+    url = LongLyingLengthUrl(prefix + ("a" * (8192 - str.__len__(prefix))))
+    assert str.__len__(url) == 8192
+    assert len(url) == 100_000
+    response = StubUrlResponse(b"ok")
+    requests: list[Request] = []
+
+    def stub_urlopen(request: Request, *, timeout: float) -> StubUrlResponse:
+        assert timeout == 1
+        requests.append(request)
+        return response
+
+    monkeypatch.setattr(http_adapter, "urlopen", stub_urlopen)
+
+    result = UrllibPublicHttpClient(max_response_bytes=2).get(
+        url=url,
+        query={"a": "1"},
+        timeout_seconds=1,
+    )
+
+    assert [request.full_url for request in requests] == [f"{url!s}?a=1"]
+    assert result.body == b"ok"
+
+
+@pytest.mark.parametrize(
+    "path_character",
+    [
+        pytest.param("a", id="ascii"),
+        pytest.param("💰", id="unicode-code-point"),
+    ],
+)
+def test_8193_character_initial_url_fails_before_query_or_request_work(
+    monkeypatch: pytest.MonkeyPatch,
+    path_character: str,
+) -> None:
+    prefix = "https://example.test/"
+    url = prefix + (path_character * (8193 - str.__len__(prefix)))
+    assert str.__len__(url) == 8193
+    query = ExplodingQuery()
+    downstream_calls = forbid_query_downstream_work(monkeypatch)
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient().get(
+            url=url,
+            query=query,
+            timeout_seconds=1,
+        )
+
+    assert_initial_url_length_error(error.value)
+    assert query.calls == []
+    assert downstream_calls == []
+
+
+def test_exact_length_valid_url_reaches_the_existing_query_boundary_after_url_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prefix = "https://example.test/"
+    url = prefix + ("a" * (8192 - str.__len__(prefix)))
+    query = ScriptedQuery((["invalid", "list-pair"],), maximum_next_calls=1)
+    downstream_calls = forbid_query_downstream_work(monkeypatch)
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient().get(
+            url=url,
+            query=query,
+            timeout_seconds=1,
+        )
+
+    assert_query_boundary_error(error.value)
+    assert query.items_calls == 1
+    assert query.next_calls == 1
+    assert downstream_calls == []
+
+
 @pytest.mark.parametrize("url", INVALID_INITIAL_URLS)
 def test_invalid_initial_url_fails_before_query_request_or_opener_work(
     monkeypatch: pytest.MonkeyPatch,
@@ -910,11 +1239,12 @@ def test_valid_initial_url_is_preserved_through_request_construction(
     assert result.body == b"ok"
 
 
-@pytest.mark.parametrize(("url", "expected_url"), ACTIVE_PROVIDER_DEFAULT_URLS)
+@pytest.mark.parametrize(("url", "expected_url", "expected_length"), ACTIVE_PROVIDER_DEFAULT_URLS)
 def test_active_provider_default_url_uses_the_standard_https_target_port(
     monkeypatch: pytest.MonkeyPatch,
     url: str,
     expected_url: str,
+    expected_length: int,
 ) -> None:
     response = StubUrlResponse(b"ok")
     requests: list[Request] = []
@@ -927,6 +1257,9 @@ def test_active_provider_default_url_uses_the_standard_https_target_port(
     monkeypatch.setattr(http_adapter, "urlopen", stub_urlopen)
 
     assert url == expected_url
+    assert type(url) is str
+    assert str.__len__(url) == expected_length
+    assert str.__len__(expected_url) == expected_length
 
     result = UrllibPublicHttpClient(max_response_bytes=2).get(
         url=url,

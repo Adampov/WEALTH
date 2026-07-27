@@ -87,24 +87,27 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert "fail_closed_public_http_initial_request_target_validation" in state.active_components
     assert "fail_closed_public_http_standard_https_target_port_policy" in state.active_components
     assert "fail_closed_public_http_bounded_query_serialization" in state.active_components
+    assert "fail_closed_public_http_initial_target_length_bound" in state.active_components
     assert len(state.open_tasks) == 2
-    task_037, task_052 = state.open_tasks
+    task_037, task_053 = state.open_tasks
     assert task_037.task_id == "TASK-037"
     assert task_037.status == "blocked"
     assert task_037.risk_tier == 3
     assert task_037.requires_human_approval is True
-    assert task_052.task_id == "TASK-052"
-    assert task_052.action == "phase2.fail_closed_public_http_initial_target_length_bound"
-    assert task_052.status == "ready"
-    assert task_052.risk_tier == 1
-    assert task_052.requires_human_approval is False
+    assert task_053.task_id == "TASK-053"
+    assert task_053.action == "phase2.fail_closed_public_http_bounded_user_agent_validation"
+    assert task_053.status == "ready"
+    assert task_053.risk_tier == 1
+    assert task_053.requires_human_approval is False
     assert state.blockers == (
         "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance "
         "location before independent Risk and Security review and the project-owner decision; "
         "authorization remains denied.",
     )
-    assert state.next_action.task_id == "TASK-052"
-    assert state.next_action.action == "phase2.fail_closed_public_http_initial_target_length_bound"
+    assert state.next_action.task_id == "TASK-053"
+    assert (
+        state.next_action.action == "phase2.fail_closed_public_http_bounded_user_agent_validation"
+    )
     assert any(decision.decision_id == "ADR-0027" for decision in state.recent_decisions)
 
 
@@ -193,31 +196,35 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_051_section = completed_section.split("### TASK-051 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
+    task_052_section = completed_section.split("### TASK-052 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    assert "initial-target length bound" in next_action_section
-    assert "original" in next_action_section
-    assert "caller-supplied URL still has no configured size limit" in next_action_section
-    assert "`urlsplit`" in next_action_section
-    assert "inspected under NFKC" in next_action_section
-    assert "39 through 48 characters" in next_action_section
-    assert "private 8,192-character initial-target limit" in next_action_section
-    assert '`ValueError("url must contain at most 8192 characters")`' in next_action_section
-    assert "first line of the existing" in next_action_section
-    assert "private URL validator" in next_action_section
-    assert "Count Python characters" in next_action_section
-    assert "not encoded bytes" in next_action_section
-    assert "invalid-timeout precedence" in next_action_section
-    assert "length rejection" in next_action_section
-    assert "precedes TASK-049 structural scanning" in next_action_section
-    assert "TASK-050 port validation" in next_action_section
-    assert "TASK-051" in next_action_section
-    assert "Do not truncate, normalize, repair, retry, or replace" in next_action_section
-    assert "user-agent policy" in next_action_section
+    assert "bounded User-Agent validation" in next_action_section
+    assert "`UrllibPublicHttpClient.user_agent`" in next_action_section
+    assert "without an" in next_action_section
+    assert "exact type, size, or character policy" in next_action_section
+    assert "active default is one 29-character visible-ASCII string" in next_action_section
+    assert "existing `max_response_bytes` validation" in next_action_section
+    assert "exact built-in `str`" in next_action_section
+    assert "1 through 256 characters" in next_action_section
+    assert "U+0020 through U+007E" in next_action_section
+    assert (
+        '`ValueError("user_agent must be a built-in string of 1 to 256 visible ASCII '
+        'characters")`' in next_action_section
+    )
+    assert "Validate exact type before length or content work" in next_action_section
+    assert "response-limit error and first" in next_action_section
+    assert "precedence when both construction fields are invalid" in next_action_section
+    assert "Do not normalize, trim, truncate, repair" in next_action_section
+    assert "redact, or synthesize" in next_action_section
+    assert "no sensitive information" in next_action_section
+    assert "total-header-block limit" in next_action_section
     assert "provider or hostname allowlist" in next_action_section
     assert "DNS lookup" in next_action_section
     assert "SSRF" in next_action_section
@@ -504,6 +511,37 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "no query-content, normalization, or multi-value policy" in task_051_section
     assert "no configured size bound" in task_051_section
     assert "TASK-052 governs that residual finite-work risk" in task_051_section
+    assert "- **Status:** COMPLETE" in task_052_section
+    assert "`phase2.fail_closed_public_http_initial_target_length_bound`" in task_052_section
+    assert "`src/wealth/adapters/http.py`" in task_052_section
+    assert "`tests/unit/test_http_adapter.py`" in task_052_section
+    assert "After finite-positive timeout validation" in task_052_section
+    assert "first line of the private" in task_052_section
+    assert "non-polymorphic `str.__len__`" in task_052_section
+    assert "longer than 8,192 Python characters" in task_052_section
+    assert '`ValueError("url must contain at most 8192 characters")`' in task_052_section
+    assert "before literal" in task_052_section
+    assert "membership or character scanning" in task_052_section
+    assert "`urlsplit`, hostname, username, port, or NFKC inspection" in task_052_section
+    assert "Lying-length and raising-length/content `str` subclasses" in task_052_section
+    assert "without dispatching to caller overrides" in task_052_section
+    assert "intentionally precedes TASK-049 structure" in task_052_section
+    assert "every target at or below the limit retains" in task_052_section
+    assert "ASCII and multi-byte Unicode" in task_052_section
+    assert "exactly 8,192 characters preserve every original character" in task_052_section
+    assert "8,193-character targets fail without query or request work" in task_052_section
+    assert "Nineteen new deterministic" in task_052_section
+    assert "443-test adapter suite" in task_052_section
+    assert "all five invalid timeouts" in task_052_section
+    assert "two adversarial" in task_052_section
+    assert "oversized subclasses and one exact-limit false-long subclass" in task_052_section
+    assert "three oversized combined-error" in task_052_section
+    assert "three exact-limit prior-error forms" in task_052_section
+    assert "39, 42, 42, 45, and 48" in task_052_section
+    assert "Python characters rather than encoded bytes" in task_052_section
+    assert "no request-line compatibility or total-wall-clock claim" in task_052_section
+    assert "User-Agent remains unbounded" in task_052_section
+    assert "TASK-053 governs that residual request-construction risk" in task_052_section
     assert "private urllib opener with a no-follow redirect handler" in market_data_contract
     assert "performs no body" in market_data_contract
     assert "read or cleanup" in market_data_contract
@@ -543,8 +581,19 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "including `ValueError`, remain the same raw objects" in market_data_contract
     assert "duplicates and empty or Unicode content" in market_data_contract
     assert "not a total wall-clock bound" in market_data_contract
-    assert "no configured character limit" in market_data_contract
-    assert "TASK-052 governs an 8,192-character" in market_data_contract
+    assert "non-polymorphic `str.__len__`" in market_data_contract
+    assert "More than 8,192 Python" in market_data_contract
+    assert '`ValueError("url must contain at most 8192 characters")`' in market_data_contract
+    assert "before literal membership or character scanning" in market_data_contract
+    assert "Caller" in market_data_contract
+    assert "length and content overrides are not dispatched" in market_data_contract
+    assert "Exact-limit ASCII and multi-byte Unicode" in market_data_contract
+    assert "not a provider request-line compatibility or total-wall-clock guarantee" in (
+        market_data_contract
+    )
+    assert "User-Agent remains without an exact runtime type" in market_data_contract
+    assert "TASK-053 governs an exact built-in visible-ASCII value" in market_data_contract
+    assert "1 through 256 characters" in market_data_contract
     assert "Automatic 301, 302, 303, 307, and 308 redirects are rejected" in risk_register
     assert "process-global opener is untouched" in risk_register
     assert "original initial target must be an absolute credential-free HTTPS URL" in risk_register
@@ -563,9 +612,13 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "8,192 cumulative key-plus-value characters" in risk_register
     assert "33 yielded items" in risk_register
     assert "mapping-originated failures remain raw" in risk_register
-    assert "no configured size limit" in risk_register
-    assert "Bound the original initial target to 8,192 Python characters" in risk_register
-    assert "before content scanning, parsing, query access" in risk_register
+    assert "non-polymorphic built-in string length is capped" in risk_register
+    assert "at 8,192 Python characters" in risk_register
+    assert "before scanning, parsing, query, or request work" in risk_register
+    assert "caller length/content overrides are never dispatched" in risk_register
+    assert "User-Agent remains without an exact runtime type" in risk_register
+    assert "Require one exact built-in visible-ASCII User-Agent" in risk_register
+    assert "1 through 256 characters during client construction" in risk_register
     assert "Within the canonical UTC migration track" in roadmap
     assert "TASK-037 remains" in roadmap
     assert "blocked and authorization remains denied" in roadmap

@@ -6,64 +6,67 @@ promoted through review.
 
 ## Next Action
 
-### TASK-052 — Fail-closed public-HTTP initial-target length bound
+### TASK-053 — Fail-closed public-HTTP bounded User-Agent validation
 
-- **Key:** `phase2.fail_closed_public_http_initial_target_length_bound`
+- **Key:** `phase2.fail_closed_public_http_bounded_user_agent_validation`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
 - **Human approval:** NOT REQUIRED — bounded fail-closed development hardening under the owner's
-  explicit authorization; it limits adapter-controlled public-request work and changes no
+  explicit authorization; it constrains one public-transport configuration field and changes no
   permission, deployment, provider, or operator-data boundary.
-- **Context:** TASK-051 now bounds query enumeration and raw string volume, but the original
-  caller-supplied URL still has no configured size limit before TASK-049 scans it, `urlsplit`
-  parses it, the authority is inspected under NFKC, and `Request` consumes it. Every active
-  provider default is only 39 through 48 characters, so a generous explicit cap can bound this
-  remaining target-text work without changing any endpoint.
-- **Goal:** Reject an oversized original initial target before all content-dependent URL, query,
-  or request work while preserving every character of an accepted target.
-- **Scope:** Add a private 8,192-character initial-target limit at the first line of the existing
-  private URL validator, after timeout validation at the caller; reject a longer target with exact
-  `ValueError("url must contain at most 8192 characters")`; and add deterministic precedence,
-  early-no-work, exact-boundary, preservation, and active-provider-default tests.
+- **Context:** TASK-052 now bounds the original target text and TASK-051 bounds query
+  serialization, but `UrllibPublicHttpClient.user_agent` still accepts runtime values without an
+  exact type, size, or character policy. A non-string, empty, oversized, control-bearing, DEL,
+  non-ASCII, or surrogate value can impose unbounded header work or fail later in the standard
+  library. The active default is one 29-character visible-ASCII string.
+- **Goal:** Validate and bound the configured User-Agent during client construction before it can
+  reach request construction or network work, while preserving every accepted character exactly.
+- **Scope:** After preserving the existing `max_response_bytes` validation and its precedence,
+  require `user_agent` to be an exact built-in `str` containing 1 through 256 characters, each in
+  inclusive visible-ASCII range U+0020 through U+007E; reject every violation with exact
+  `ValueError("user_agent must be a built-in string of 1 to 256 visible ASCII characters")`; and
+  add deterministic type, length, character-corpus, precedence, no-work, boundary, default, and
+  exact-header-preservation tests.
 - **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
   `docs/contracts/MARKET_DATA.md`, plus coordinated governance files and governance tests.
-- **Constraints:** Count Python characters in the original supplied string, not encoded bytes, and
-  do not claim an HTTP provider or server request-line compatibility limit or a total wall-clock
-  bound on caller code. Preserve invalid-timeout precedence before URL length; length rejection
-  intentionally precedes TASK-049 structural scanning, TASK-050 port validation, and TASK-051
-  query access. Do not truncate, normalize, repair, retry, or replace a target. Do not add a URL
-  character policy, user-agent policy, query-content or multi-value policy, provider or hostname
-  allowlist, DNS lookup, IP or public-routability policy, SSRF guarantee, IDNA policy, certificate
-  pinning, custom TLS context, proxy change, credential, redirect permission, retry, dependency,
-  endpoint change, or provider-specific exception. Preserve accepted URL text, bounded sorted
-  query encoding, headers, timeouts, response caps, no-follow behavior, TASK-041 through TASK-051
-  exception and cleanup semantics, provider parsing, canonicalization, quality, storage, schemas,
-  runtime wiring, TASK-037 authority, migration, and Stage 3.
+- **Constraints:** Validate exact type before length or content work and reject an oversized exact
+  string before scanning its characters. Preserve the existing response-limit error and first
+  precedence when both construction fields are invalid. Do not normalize, trim, truncate, repair,
+  replace, redact, or synthesize a User-Agent, and do not claim that accepted caller text contains
+  no sensitive information. Do not add another header, a total-header-block limit, URL or query
+  policy, provider or hostname allowlist, DNS lookup, IP or public-routability policy, SSRF
+  guarantee, IDNA policy, certificate pinning, custom TLS context, proxy change, credential,
+  redirect permission, retry, dependency, endpoint change, or provider-specific exception.
+  Preserve accepted User-Agent text, URL and bounded sorted query behavior, timeouts, response
+  caps, no-follow behavior, TASK-041 through TASK-052 exception and cleanup semantics, provider
+  parsing, canonicalization, quality, storage, schemas, runtime wiring, TASK-037 authority,
+  migration, and Stage 3.
 
 Acceptance gates:
 
-1. Invalid timeout retains first precedence and performs no URL-length, content, parser, query, or
-   request work. With a valid timeout, a target longer than 8,192 characters raises exactly
-   `ValueError("url must contain at most 8192 characters")` with no direct cause or hidden context.
-2. Length rejection occurs before literal membership or character scanning, `urlsplit`, hostname,
-   username, port, or NFKC inspection, query access or serialization, `Request`, the private
-   opener, DNS, network, or filesystem-handler work. An oversized exploding string subclass and
-   patched downstream seams prove that order.
-3. Length has intentional precedence for an oversized target that also contains TASK-049
-   forbidden content or a TASK-050 nonstandard port. At 8,192 characters or fewer, TASK-049
-   structure, TASK-050 port, and TASK-051 query validation retain their exact order, errors,
-   causes, contexts, and no-work behavior.
-4. A structurally valid target of exactly 8,192 characters retains its exact original text before
-   the bounded sorted query is appended once; an otherwise identical 8,193-character target
-   fails. Every 39-through-48-character active provider default remains unchanged and accepted.
-5. No target is truncated, normalized, repaired, retried, replaced, partially opened, or sent to
-   an alternate destination. Existing GET, `Accept`, `User-Agent`, timeout, response-limit,
-   HTTP-error, redirect, cleanup, and direct-cause behavior remains unchanged.
-6. No URL-content or user-agent policy, query-contract change, provider or hostname allowlist,
+1. Invalid `max_response_bytes` retains first construction-time precedence. With a valid response
+   limit, a non-built-in-string, empty, longer-than-256, or non-visible-ASCII User-Agent raises
+   exactly
+   `ValueError("user_agent must be a built-in string of 1 to 256 visible ASCII characters")`
+   with no direct cause or hidden context.
+2. Exact-type validation precedes length and character inspection; the 257th character rejects an
+   exact string before content scanning. Every rejection occurs during client construction before
+   URL, query, `urlencode`, `Request`, private-opener, handler, DNS, network, or filesystem work.
+3. The invalid corpus covers non-string values and string subclasses; empty and 257-character
+   strings; every C0 control U+0000 through U+001F; DEL U+007F; representative non-ASCII code
+   points; and lone surrogates. No invalid value is normalized, trimmed, truncated, retried, or
+   replaced with the default.
+4. One-character and 256-character boundaries, the complete U+0020-through-U+007E visible-ASCII
+   range, and the exact 29-character active default remain unchanged. An accepted custom value is
+   forwarded once as the exact `User-Agent` header while GET, `Accept`, URL, sorted query, timeout,
+   response, redirect, error, cleanup, and direct-cause behavior remains unchanged.
+5. The validation constrains only this configured header value. It adds no header redaction or
+   privacy guarantee, total-header-block bound, URL/query policy, hostname/provider allowlist,
    DNS/IP/public-routability or SSRF claim, IDNA, certificate, TLS/proxy, endpoint, dependency,
-   runtime, or provider-specific behavior is introduced. Formatting, lint, strict typing, complete
-   tests, lockfile verification, dependency audit, health slice, and CI pass.
+   runtime, or provider-specific behavior.
+6. Formatting, lint, strict typing, complete tests, lockfile verification, dependency audit,
+   health slice, and CI pass.
 7. TASK-037 remains blocked and authorization remains denied; no operator data, path, database,
    scanner, report, migration, or Stage 3 action occurs.
 
@@ -120,6 +123,40 @@ Acceptance gates:
    all repository gates pass.
 
 ## Recently Completed
+
+### TASK-052 — Fail-closed public-HTTP initial-target length bound
+
+- **Key:** `phase2.fail_closed_public_http_initial_target_length_bound`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
+  `docs/contracts/MARKET_DATA.md`, plus the coordinated governance files and governance tests.
+- **Result:** After finite-positive timeout validation and at the first line of the private
+  initial-target validator, the shared client now measures the original string with
+  non-polymorphic `str.__len__`. A target longer than 8,192 Python characters raises the exact
+  context- and cause-free `ValueError("url must contain at most 8192 characters")` before literal
+  membership or character scanning, `urlsplit`, hostname, username, port, or NFKC inspection,
+  query access or serialization, `Request`, private-opener or handler work, DNS lookup, network
+  access, or filesystem access. Lying-length and raising-length/content `str` subclasses prove
+  that the true built-in string length is used without dispatching to caller overrides. Length
+  intentionally precedes TASK-049 structure and TASK-050 port errors for an oversized target,
+  while every target at or below the limit retains TASK-049 structure, parser-context suppression,
+  TASK-050 port, and TASK-051 query precedence and exact errors. ASCII and multi-byte Unicode
+  targets of exactly 8,192 characters preserve every original character through the existing
+  sorted query, GET, `Accept`, `User-Agent`, timeout, one bounded response read, and one
+  acquisition; corresponding 8,193-character targets fail without query or request work. An
+  exact-limit valid target still reaches the existing query boundary. Nineteen new deterministic
+  cases within the 443-test adapter suite cover all five invalid timeouts; two adversarial
+  oversized subclasses and one exact-limit false-long subclass; three oversized combined-error
+  forms; three exact-limit prior-error forms; ASCII and Unicode exact-8,192 and 8,193 boundaries;
+  and exact-limit query precedence. The five active
+  provider defaults are pinned to their exact unchanged lengths of 39, 42, 42, 45, and 48
+  characters and remain accepted. The control counts Python characters rather than encoded bytes
+  and makes no request-line compatibility or total-wall-clock claim. No target is normalized,
+  truncated, repaired, retried, replaced, or redirected, and no URL-content, hostname, DNS, IP,
+  SSRF, IDNA, TLS/proxy, endpoint, dependency, provider, runtime, TASK-037 authority, migration, or
+  Stage 3 behavior changed. The configured User-Agent remains unbounded and without an exact
+  runtime type or character policy; TASK-053 governs that residual request-construction risk.
 
 ### TASK-051 — Fail-closed public-HTTP bounded query serialization
 
