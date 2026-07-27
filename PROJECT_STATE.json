@@ -63,7 +63,8 @@
     "fail_closed_public_http_maximum_timeout_policy",
     "fail_closed_public_http_bounded_response_header_projection",
     "public_trade_disconnect_sparse_window_restart_recovery_drill",
-    "versioned_public_provider_schema_fixture_contract_and_drift_runbook"
+    "versioned_public_provider_schema_fixture_contract_and_drift_runbook",
+    "continuous_public_trade_collection_operating_contract"
   ],
   "active_integrations": [
     "github_actions_ci"
@@ -105,8 +106,8 @@
       "requires_human_approval": true
     },
     {
-      "task_id": "TASK-058",
-      "action": "phase2.continuous_public_trade_collection_operating_contract_decision",
+      "task_id": "TASK-059",
+      "action": "phase2.continuous_public_trade_closed_window_planner_contracts",
       "status": "ready",
       "risk_tier": 1,
       "requires_human_approval": false
@@ -140,11 +141,16 @@
       "decision_id": "ADR-0027",
       "summary": "Inventory timestamp boundaries and define the staged canonical UTC migration plan.",
       "artifact": "docs/decisions/0027-canonical-utc-boundary-and-migration-plan.md"
+    },
+    {
+      "decision_id": "ADR-0028",
+      "summary": "Select a conceptual single-host continuous public-trade collection operating contract.",
+      "artifact": "docs/decisions/0028-continuous-public-trade-collection-operating-contract.md"
     }
   ],
   "next_action": {
-    "task_id": "TASK-058",
-    "action": "phase2.continuous_public_trade_collection_operating_contract_decision"
+    "task_id": "TASK-059",
+    "action": "phase2.continuous_public_trade_closed_window_planner_contracts"
   },
-  "last_updated_utc": "2026-07-27T10:57:39Z"
+  "last_updated_utc": "2026-07-27T11:26:33Z"
 }

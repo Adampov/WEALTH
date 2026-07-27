@@ -103,6 +103,13 @@ Completed Phase 2 slices include:
   sparse one-millisecond windows, newly constructed evidence, checkpoint, and shared rate-budget
   SQLite adapters, fresh UUID fencing authority, exact causal transition and health history, and
   a no-work completed rerun.
+- A design-only [single-host continuous public-trade operating
+  contract](decisions/0028-continuous-public-trade-collection-operating-contract.md) defining the
+  separate stream, service-run, and bounded-job lifecycles; UTC closed-window cadence; bounded
+  catch-up; cooperating-single-host compare-and-swap and fencing; manual drift hold; health;
+  capacity-evidence; failure; escalation; resume; and rollback requirements that a separately
+  governed future implementation must satisfy. This is neither process-manager nor multi-host
+  exclusivity.
 - An evidence-backed canonical UTC boundary inventory covering every discovered model, clock,
   provider edge, JSON/text representation, SQLite projection, order, index, cursor, and test path,
   with an accepted staged compatibility, quarantine, backup, rollback, and migration plan. No
@@ -149,11 +156,22 @@ variants retain the shared optional parser set `M`, `nq`; fixture presence diffe
 creating a market-specific parser rule. Representative detectable drift fails closed, while
 precision-only changes and some same-typed semantic reorder may parse and therefore require
 manual pause and contract review rather than serving as compatibility evidence. The current
-RISK-1 next action, TASK-058, is a design-only ADR and operating contract for a possible future
-single-host continuous public-trade lifecycle, scheduling/cadence, fencing/restart, drift-pause,
-health, capacity, failure, escalation, resume, and rollback boundary. It cannot add production
-code, runtime, network, scheduler, daemon, deployment, automatic recovery/resume, operator data,
-or a continuous-readiness claim; implementation remains a separately governed future task.
+public-trade path remains one finite, explicitly invoked bounded job flow: no component schedules
+another invocation or owns continuous operation. TASK-058 now records a design-only ADR and
+operating contract for a possible future single-host continuous public-trade lifecycle, including
+UTC closed-window cadence, bounded catch-up, fencing and restart, manual drift hold, health,
+capacity-evidence, failure, escalation, governed resume, and rollback requirements. The design
+preserves today's immutable policy, exact pending-leaf, evidence-first, idempotent replay, causal
+audit, and shared-budget boundaries. It does not implement or approve production code, runtime,
+network activity, a scheduler, daemon, process manager, service, deployment, capacity
+configuration, drift detection or automatic drift response, automatic restart, automatic
+recovery, automatic resume, failover, or multi-host coordination. Continuous-operation,
+automatic recovery, deployment, and Phase 2 readiness remain unproven; implementation requires a
+separately governed future task. No stale-heartbeat threshold, capacity value, retention policy,
+outage envelope, or settlement-lag adequacy is selected or proven. Settlement lag is not proof
+against late provider events; pause cannot cancel in-flight work; dense one-millisecond windows,
+separate-database commit seams, crash-uncommitted request counts, physical durability, and
+cooperating-single-host-only coordination remain residual risks.
 `RISK-005` remains open: the accepted plan selects Python
 datetimes in the fixed `datetime.UTC` zone, fixed microsecond RFC 3339 `Z` text, and derived
 epoch-microsecond SQL projections. New injected clock values are fixed-UTC, and the isolated pure

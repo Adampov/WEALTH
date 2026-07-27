@@ -270,6 +270,63 @@ waits, three raw captures, one canonical trade, and zero conflicts. Reinvocation
 does no work and changes no observation. This generated test evidence does not establish
 cross-database atomicity, physical durability, continuous operation, or automatic recovery.
 
+## Continuous Public-Trade Operating Contract (Design Only)
+
+The current public-trade path remains finite and explicitly invoked. A caller supplies one
+immutable bounded job and one complete finite policy; when work is available, an invocation claims
+fresh UUID fencing authority and processes only the durable cursor or exact retained pending leaf,
+followed by at most one bounded remaining segment. Nothing in the current path schedules another
+invocation, starts a background process, detects provider drift, or automatically pauses,
+recovers, resumes, or rolls back collection.
+
+[ADR-0028](docs/decisions/0028-continuous-public-trade-collection-operating-contract.md) records a
+conceptual operating contract for a possible future single-host continuous public-trade
+lifecycle. It separates three layers. Future durable stream control is `active` or `paused`;
+`schema_drift_hold` is a scoped pause reason, while enablement remains an external
+disabled-by-default posture. Each service invocation records `starting`, `running`, and exactly
+one terminal `stopped`, `paused`, `failed`, or `run_limit` state. The existing bounded job retains
+`pending`, `running`, `paused`, `failed`, and `completed`. `waiting`, `caught_up`, and
+`work_limit_reached` are cycle outcomes, not lifecycle states, and carry no authority to schedule
+another invocation.
+
+A clean bounded-job `paused` outcome caused by a request or record work limit retains the exact
+attachment and leaves the stream active for later bounded continuation. Bounded `failed`,
+already-running/conflict/lost-lease, corrupt state, or source/policy drift ends the service run as
+failed and places or keeps the stream on manual hold; a supervisor never retries it automatically.
+Clean stop leaves stream status, cursor, counters, and attachment unchanged. Governed resume
+clears only the hold and never rewrites progress.
+
+The design requires UTC half-open closed windows derived from explicit finite window and
+settlement-lag policy, with bounded catch-up and per-invocation work. It also preserves immutable
+job identity and policy fingerprints, fresh fencing, exact pending-leaf restart, evidence-first
+checkpoint progress, idempotent refetch, causal transition and health evidence, and the shared
+durable request-budget gate. Before child creation, the future stream checkpoint must retain the
+exact child UUID, target end, creation input, and bounded-policy fingerprint; an attached end is
+never replanned. The stream cursor advances exactly to that end and clears the attachment only
+after the child is durably `completed`. Restart may reconstruct an absent attached child exactly,
+handle an existing child under the explicit manual policy, or advance a completed attachment
+without a network refetch.
+
+The same design routes a suspected schema change for the smallest exact affected request variant,
+plus every variant sharing an uncertain parser or endpoint boundary when isolation is not proven,
+into the TASK-057 manual hold and governed review procedure. It keeps bounded-job source health
+separate from service-run liveness and terminal health and identifies future capacity,
+storage-growth, outage, catch-up, failure, escalation, resume, and rollback evidence that an
+implementation proposal would need. Rollback keeps the conceptual continuous path disabled or
+returns operation to today's explicitly invoked bounded flow without discarding evidence or
+weakening any adapter, drift, budget, fencing, checkpoint, or audit control.
+
+This is documentation, not a running component or a readiness claim. It does not select or install
+a scheduler, daemon, process manager, service, or deployment; configure capacity; deliver alerts;
+add a drift detector or automatic drift response; or authorize automatic restart, recovery,
+pause, remediation, resume, failover, or multi-host coordination. Production implementation,
+operational validation, deployment evidence, and any applicable approval remain separate future
+work. No stale-heartbeat threshold, capacity value, retention policy, outage envelope, or
+settlement-lag adequacy is selected or proven. Settlement lag is not proof against late provider
+events; pause cannot cancel in-flight work; one-millisecond density, separate-database commit
+seams, crash-uncommitted request counts, physical durability, and cooperating-single-host-only
+coordination remain residual risks.
+
 Operators and monitoring tools can read the separate candle collector-service state through a
 dedicated JSON command:
 
@@ -331,6 +388,8 @@ Included:
   across the local evidence, control, and shared rate-budget SQLite boundaries.
 - A strict versioned synthetic fixture corpus for all five active public-provider payload variants,
   with offline adapter/drift regression and a manual schema-drift response runbook.
+- A design-only operating contract for a possible future single-host continuous public-trade
+  lifecycle, with explicit implementation evidence and rollback requirements.
 - Continuous integration and dependency vulnerability auditing.
 
 Not included:
@@ -342,6 +401,8 @@ Not included:
   attempt reservations.
 - Automatic public-provider schema-drift detection, online fixture refresh, automatic
   pause/remediation/resume, or continuous-readiness evidence.
+- A running continuous public-trade lifecycle, scheduler, daemon, process manager, service,
+  deployment, configured capacity envelope, or automatic recovery and drift response.
 - Automatic historical collection scheduling.
 - Multi-host request-budget coordination.
 - Automatic source ranking, price blending, or cross-quote conversion.

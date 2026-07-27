@@ -96,30 +96,28 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
         "versioned_public_provider_schema_fixture_contract_and_drift_runbook"
         in state.active_components
     )
+    assert "continuous_public_trade_collection_operating_contract" in state.active_components
     assert len(state.open_tasks) == 2
-    task_037, task_058 = state.open_tasks
+    task_037, task_059 = state.open_tasks
     assert task_037.task_id == "TASK-037"
     assert task_037.status == "blocked"
     assert task_037.risk_tier == 3
     assert task_037.requires_human_approval is True
-    assert task_058.task_id == "TASK-058"
-    assert (
-        task_058.action == "phase2.continuous_public_trade_collection_operating_contract_decision"
-    )
-    assert task_058.status == "ready"
-    assert task_058.risk_tier == 1
-    assert task_058.requires_human_approval is False
+    assert task_059.task_id == "TASK-059"
+    assert task_059.action == "phase2.continuous_public_trade_closed_window_planner_contracts"
+    assert task_059.status == "ready"
+    assert task_059.risk_tier == 1
+    assert task_059.requires_human_approval is False
     assert state.blockers == (
         "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance "
         "location before independent Risk and Security review and the project-owner decision; "
         "authorization remains denied.",
     )
-    assert state.next_action.task_id == "TASK-058"
+    assert state.next_action.task_id == "TASK-059"
     assert (
-        state.next_action.action
-        == "phase2.continuous_public_trade_collection_operating_contract_decision"
+        state.next_action.action == "phase2.continuous_public_trade_closed_window_planner_contracts"
     )
-    assert any(decision.decision_id == "ADR-0027" for decision in state.recent_decisions)
+    assert any(decision.decision_id == "ADR-0028" for decision in state.recent_decisions)
 
 
 def test_project_state_references_existing_governance_artifacts() -> None:
@@ -225,46 +223,46 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_057_section = completed_section.split("### TASK-057 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
+    task_058_section = completed_section.split("### TASK-058 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    assert "Continuous public-trade collection operating-contract decision" in next_action_section
-    assert "bounded ADR, operating-contract documentation" in next_action_section
-    assert "TASK-057 now supplies a reviewed exact-byte fixture corpus" in next_action_section
-    assert "finite, explicitly invoked composition" in next_action_section
-    assert "no approved continuous lifecycle" in next_action_section
-    assert "one bounded single-host operating contract" in next_action_section
-    assert "lifecycle, scheduling, fencing, restart, drift-pause" in next_action_section
-    assert "`docs/decisions/0028-continuous-public-trade-collection-operating-contract.md`" in (
+    assert "Pure continuous public-trade closed-window planner" in next_action_section
+    assert "ADR-0028 now records the conceptual single-host operating contract" in (
         next_action_section
     )
-    assert "`docs/decisions/README.md`" in next_action_section
-    assert "`README.md`" in next_action_section
-    assert "`docs/contracts/MARKET_DATA.md`" in next_action_section
-    assert "Design and documentation only" in next_action_section
-    assert "Do not add or change production source, runtime" in next_action_section
-    assert "scheduler, daemon, service" in next_action_section
-    assert "Do not start collection" in next_action_section
-    assert "fabricate deployment values" in next_action_section
-    assert "authorize automatic recovery, drift detection" in next_action_section
-    assert "must not claim continuous-operation, capacity, recovery" in next_action_section
-    assert "It does not present a component as implemented" in next_action_section
-    assert "UTC closed-window" in next_action_section
-    assert "existing immutable job identity and policy fingerprint" in next_action_section
-    assert "evidence-first checkpoint advancement" in next_action_section
-    assert "claim cross-database atomicity" in next_action_section
-    assert "TASK-057 runbook" in next_action_section
-    assert "no detector, automatic pause, remediation" in next_action_section
-    assert "Capacity and failure sections identify" in next_action_section
-    assert "No deployment value or adequacy" in next_action_section
-    assert "future continuous path disabled" in next_action_section
-    assert "A future implementation requires a separate bounded task" in next_action_section
-    assert "ADR acceptance alone grants no" in next_action_section
+    assert "current public-trade path remains finite and explicitly invoked" in next_action_section
+    assert "strict frozen domain policy" in next_action_section
+    assert "only `HELD`, `WAITING`, or `ATTACHED_JOB`" in next_action_section
+    assert "explicit canonical UTC `now`" in next_action_section
+    assert "epoch-aligned half-open `[start, end)` UTC millisecond windows" in next_action_section
+    assert "non-negative" in next_action_section
+    assert "settlement lag" in next_action_section
+    assert "target_end = min(latest_eligible_end, cursor + max_catchup_span)" in (
+        next_action_section
+    )
+    assert "return the existing" in next_action_section
+    assert "attachment unchanged" in next_action_section
+    assert "Pure and unused contracts only" in next_action_section
+    assert "Do not add or change SQLite, a schema" in next_action_section
+    assert "scheduler, trigger, daemon, service runner" in next_action_section
+    assert "Do not start, attach, persist, invoke, schedule, or recover a real job" in (
+        next_action_section
+    )
+    assert "claim continuous-operation, recovery, capacity" in next_action_section
+    assert "manual hold returns only `HELD`" in next_action_section
+    assert "existing attachment returns only `ATTACHED_JOB`" in next_action_section
+    assert "cursor at or beyond the latest eligible boundary returns only" in next_action_section
+    assert "cannot overlap, skip a gap" in next_action_section
+    assert "module is not imported by runtime composition" in next_action_section
+    assert "ADR-0028 remains a conceptual decision" in next_action_section
     assert "TASK-037" in next_action_section
-    assert "authorization remains denied" in next_action_section
+    assert "authorization denied" in next_action_section
     assert blocked_section.count("### TASK-") == 1
     assert "### TASK-037 " in blocked_section
     assert "- **Status:** BLOCKED" in blocked_section
@@ -726,6 +724,56 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "does not bound wire-header bytes" in task_055_section
     assert "adds no privacy, redaction" in task_055_section
     assert "TASK-037 authority" in task_055_section
+    assert "- **Status:** COMPLETE" in task_058_section
+    assert "`phase2.continuous_public_trade_collection_operating_contract_decision`" in (
+        task_058_section
+    )
+    assert "`docs/decisions/0028-continuous-public-trade-collection-operating-contract.md`" in (
+        task_058_section
+    )
+    assert "one conceptual single-host composition" in task_058_section
+    assert "unselected external trigger" in task_058_section
+    assert "finite-run" in task_058_section
+    assert "existing explicitly invoked bounded orchestrator" in task_058_section
+    assert "outer fresh-UUID fence" in task_058_section
+    assert "exact pending leaf" in task_058_section
+    assert "evidence-first checkpoint" in task_058_section
+    assert "idempotent refetch" in task_058_section
+    assert "shared durable" in task_058_section
+    assert "single-host request-budget gate" in task_058_section
+    assert "separates three conceptual layers" in task_058_section
+    assert "Durable stream" in task_058_section
+    assert "is `ACTIVE` or `PAUSED`" in task_058_section
+    assert "schema drift is a scoped pause reason" in task_058_section
+    assert "external disabled-by-default posture" in task_058_section
+    assert "finite service run moves from `STARTING` to `RUNNING`" in task_058_section
+    assert "`STOPPED`, `PAUSED`, `FAILED`, or `RUN_LIMIT`" in task_058_section
+    assert "bounded job keeps" in task_058_section
+    assert "`PENDING`, `RUNNING`, `PAUSED`, `FAILED`, and `COMPLETED`" in task_058_section
+    assert "`waiting`, `caught_up`, and" in task_058_section
+    assert "`work_limit_reached` are outcomes rather than lifecycle states" in task_058_section
+    assert "clean bounded-job `PAUSED` keeps the" in task_058_section
+    assert "stream `ACTIVE` and its exact attachment" in task_058_section
+    assert "failure, conflict, lost lease" in task_058_section
+    assert "requires a manual stream pause" in task_058_section
+    assert "clean service stop" in task_058_section
+    assert "leaves stream state, cursor, and attachment unchanged" in task_058_section
+    assert "closed epoch-aligned half-open UTC windows" in task_058_section
+    assert "no self-scheduling state" in task_058_section
+    assert "A reopen must use fresh outer and child" in task_058_section
+    assert "continuous cursor only" in task_058_section
+    assert "cross-database" in task_058_section
+    assert "manual exact-variant or inseparable-parser hold" in task_058_section
+    assert "no detector, automatic pause, remediation, or" in task_058_section
+    assert "Source health remains causal" in task_058_section
+    assert "health would separately distinguish" in task_058_section
+    assert "complete provider/cadence/backlog/range/" in task_058_section
+    assert "disable-to-current-bounded-flow rollback" in task_058_section
+    assert "documentation and governance only" in task_058_section
+    assert "selected future component is not implemented" in task_058_section
+    assert "TASK-059 is a separately governed pure-contract increment" in task_058_section
+    assert "TASK-037 remains" in task_058_section
+    assert "blocked and authorization remains denied" in task_058_section
     assert "- **Status:** COMPLETE" in task_057_section
     assert "`phase2.versioned_public_provider_schema_fixtures_and_drift_runbook`" in (
         task_057_section
@@ -940,6 +988,36 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "Neither supplies automatic detection, pause, remediation, resume" in (
         market_data_contract
     )
+    assert "## Continuous Public-Trade Operating Contract (Design Only)" in market_data_contract
+    assert "current public-trade component owns a" in market_data_contract
+    assert "continuous lifecycle, cadence, automatic restart" in market_data_contract
+    assert "separates three layers" in market_data_contract
+    assert "stream control is `active` or `paused`" in market_data_contract
+    assert "`schema_drift_hold` is a scoped pause reason" in market_data_contract
+    assert "external" in market_data_contract
+    assert "disabled-by-default posture" in market_data_contract
+    assert "`starting`, `running`, and exactly" in market_data_contract
+    assert "`stopped`, `paused`, `failed`, or `run_limit`" in market_data_contract
+    assert "`waiting`, `caught_up`, and" in market_data_contract
+    assert "`work_limit_reached` are cycle outcomes, not lifecycle states" in market_data_contract
+    assert "clean bounded-job `paused` outcome" in market_data_contract
+    assert "leaves the stream active for later bounded continuation" in market_data_contract
+    assert "conflict/lost-lease, corrupt state, or source/policy drift" in market_data_contract
+    assert "service run as" in market_data_contract
+    assert "failed and places or keeps the stream on manual hold" in market_data_contract
+    assert "Clean stop leaves stream status, cursor, counters, and attachment unchanged" in (
+        market_data_contract
+    )
+    assert "fully closed half-open UTC windows `[start, end)`" in market_data_contract
+    assert "persist the exact child UUID, target end, creation input" in market_data_contract
+    assert "bounded-policy fingerprint" in market_data_contract
+    assert "never replan an attached end" in market_data_contract
+    assert "This contract adds no production code, runtime wiring, network call" in (
+        market_data_contract
+    )
+    assert "does not establish physical" in market_data_contract
+    assert "continuous" in market_data_contract
+    assert "operation, operational readiness, or Phase 2 completion" in market_data_contract
     assert "After preserving `max_response_bytes` validation" in market_data_contract
     assert "exact built-in `str` of 1 through 256 Python characters" in market_data_contract
     assert "U+0020 through U+007E" in market_data_contract
@@ -1013,10 +1091,19 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "acceptance is not compatibility proof" in risk_register
     assert "manual pause/review/resume procedure" in risk_register
     assert "adds no automatic detector" in risk_register
-    assert "TASK-058 is limited to a design-only ADR and operating contract" in risk_register
-    assert "possible future single-host continuous public-trade lifecycle" in risk_register
-    assert "may not add code, runtime, network, deployment" in risk_register
-    assert "implementation remains separately governed" in risk_register
+    assert "ADR-0028 preserves that exact manual hold and governed resume boundary" in risk_register
+    assert "TASK-059 must model a validated manual hold as a pure durable input" in risk_register
+    assert "only planner outcome is `HELD`" in risk_register
+    assert "may not inspect payloads, detect drift, write a hold" in risk_register
+    assert "ADR-0028 records only a conceptual finite-run single-host composition" in risk_register
+    assert "TASK-059 may add only a pure closed-window planner" in risk_register
+    assert "results are `HELD`, `WAITING`, or `ATTACHED_JOB`" in risk_register
+    assert "operational capacity remain unproven" in risk_register
+    assert "ADR-0028 requires one shared durable single-host budget" in risk_register
+    assert "TASK-059 may validate only finite pure policy and planner bounds" in risk_register
+    assert "do not claim capacity adequacy, multi-host safety" in risk_register
+    assert "ADR-0028 requires an attached child to retain its exact pending leaf" in risk_register
+    assert "TASK-059 may add only pure attachment and transition validation" in risk_register
     assert "TASK-056 adds one composed generated-fixture drill" in risk_register
     assert "newly constructed evidence, checkpoint, and rate-budget SQLite adapters" in (
         risk_register
@@ -1041,12 +1128,16 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "shared optional parser set `M`, `nq`" in roadmap
     assert "precision-only changes and some same-typed semantic reorder may parse" in roadmap
     assert "manual pause and contract review" in roadmap
-    assert "current" in roadmap
-    assert "RISK-1 next action, TASK-058" in roadmap
-    assert "design-only ADR and operating contract" in roadmap
-    assert "single-host continuous public-trade lifecycle" in roadmap
-    assert "cannot add production" in roadmap
-    assert "implementation remains a separately governed future task" in roadmap
+    assert "TASK-058 now records a design-only ADR and" in roadmap
+    assert "operating contract for a possible future single-host continuous public-trade" in roadmap
+    assert "UTC closed-window cadence, bounded catch-up, fencing and restart" in roadmap
+    assert "preserves today's immutable policy, exact pending-leaf, evidence-first" in roadmap
+    assert "does not implement or approve production code, runtime" in roadmap
+    assert "scheduler, daemon, process manager, service, deployment" in roadmap
+    assert "Continuous-operation" in roadmap
+    assert "Phase 2 readiness remain unproven" in roadmap
+    assert "implementation requires a" in roadmap
+    assert "separately governed future task" in roadmap
     assert "The canonical next action is TASK-037" not in roadmap
 
 

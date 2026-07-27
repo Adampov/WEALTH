@@ -377,6 +377,80 @@ outcomes establish internally coherent admission evidence; they do not prove phy
 readback, `fsync`, rollback, or atomicity between the evidence and control databases. The
 orchestrator is not a scheduler, daemon, continuous poller, or live stream.
 
+## Continuous Public-Trade Operating Contract (Design Only)
+
+The implemented public-trade collection boundary remains the explicitly invoked bounded
+orchestrator described above. Each job has one immutable finite range and policy fingerprint.
+When work is available, an invocation obtains a fresh UUID fence and performs only finite
+configured work from the durable cursor or exact pending leaf, followed by at most one bounded
+remaining segment. It never schedules its successor. No current public-trade component owns a
+continuous lifecycle, cadence, automatic restart, drift response, deployment, or readiness state.
+
+[ADR-0028](../decisions/0028-continuous-public-trade-collection-operating-contract.md) selects a
+design-only operating contract for a possible future single-host continuous lifecycle. It
+separates three layers. Future durable stream control is `active` or `paused`;
+`schema_drift_hold` is a scoped pause reason, while enablement remains an external
+disabled-by-default posture. Each service invocation records `starting`, `running`, and exactly
+one terminal `stopped`, `paused`, `failed`, or `run_limit` state. The existing bounded job retains
+`pending`, `running`, `paused`, `failed`, and `completed`. `waiting`, `caught_up`, and
+`work_limit_reached` are cycle outcomes, not lifecycle states, and carry no authority to schedule
+another invocation.
+
+A clean bounded-job `paused` outcome caused by a request or record work limit retains the exact
+attachment and leaves the stream active for later bounded continuation. Bounded `failed`,
+already-running/conflict/lost-lease, corrupt state, or source/policy drift ends the service run as
+failed and places or keeps the stream on manual hold; a supervisor never retries it automatically.
+Clean stop leaves stream status, cursor, counters, and attachment unchanged. Governed resume
+clears only the hold and never rewrites progress.
+
+The conceptual future stream boundary has one explicit owner and must remain externally disabled
+unless separately implemented and enabled through applicable governance. It must:
+
+- derive only fully closed half-open UTC windows `[start, end)` from explicit finite window length
+  and settlement-lag policy, with the eligible end on the UTC grid at or before
+  `now - settlement_lag`, and never request the current open window;
+- cap catch-up with explicit finite span, job/cycle, request, record, retry, wait, pacing, and
+  per-operation-timeout inputs, without inventing a deployment value, selecting a scheduler, or
+  establishing a total wall-clock deadline;
+- require cooperating single-host processes sharing the same control and budget stores to use
+  stream compare-and-swap for attachment and advancement plus the existing bounded-job UUID fence
+  for job work; conflicts fail closed, and neither process-manager nor multi-host exclusivity is
+  claimed;
+- persist the exact child UUID, target end, creation input, and bounded-policy fingerprint on the
+  stream checkpoint before child creation and never replan an attached end; advance the stream
+  cursor exactly to that end and clear the attachment only after the child is durably `completed`;
+- treat stop and pause as cooperative safe-boundary actions checked before attachment or claim and
+  during waits; an in-flight bounded request may finish or fail before terminal evidence is stored,
+  and no immediate cancellation or total stop-latency guarantee is claimed;
+- route suspected schema drift for the smallest exact affected request variant, plus every variant
+  sharing an uncertain parser or endpoint boundary when isolation is not proven, into the
+  fail-closed manual hold in the TASK-057 runbook, with governed contract review and evidence
+  before resume;
+- expose bounded internal health and audit evidence for operator decisions without delivering an
+  external notification or taking a restart, pause, remediation, or resume action, while keeping
+  bounded-job source health distinct from service-run liveness and terminal health; and
+- retain explicit configuration and measurement inputs for provider weights and limits, cadence,
+  range and record bounds, retry and pacing, shared-budget pressure, storage growth and retention,
+  checkpoint and health volume, outage and catch-up limits, escalation, and tested rollback before
+  any implementation can claim an adequate capacity envelope.
+
+Conceptual rollback leaves the future continuous path disabled or returns to the current
+explicitly invoked bounded flow. It may not delete evidence, advance a checkpoint without accepted
+evidence, skip the exact retained leaf, or weaken adapter validation, manual drift review, shared
+budget, fencing, checkpoint, or audit controls.
+
+This contract adds no production code, runtime wiring, network call, scheduler, daemon, service,
+deployment, persistence or SQLite schema, capacity value, drift detector, automatic pause,
+automatic recovery or resume, failover, or multi-host exclusivity. It does not establish physical
+durability, cross-database atomicity, crash-durable per-job attempt accounting, continuous
+operation, operational readiness, or Phase 2 completion. A future implementation requires its own
+bounded task, deterministic lifecycle and failure evidence, capacity measurements, operational
+review, deployment and rollback evidence, and applicable approval. No stale-heartbeat threshold,
+capacity value, retention policy, outage envelope, or settlement-lag adequacy is selected or
+proven. Settlement lag is not proof against late provider events; pause cannot cancel in-flight
+work; dense one-millisecond windows, separate-database commit seams, crash-uncommitted request
+counts, physical durability, and cooperating-single-host-only coordination remain residual risks.
+
 ## Canonical Candle
 
 `CanonicalCandle` represents one final OHLCV interval. Every record includes:
