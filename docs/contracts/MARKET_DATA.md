@@ -533,6 +533,39 @@ observation and a failed control transition, retains the prior `next_window_star
 transition may still update status, version, attempts, and diagnostic fields; no progress does not
 mean no control-state write.
 
+## Versioned Public-Provider Schema Fixtures
+
+The reviewed [`v1` synthetic fixture corpus](../../tests/fixtures/public_provider_schema/v1/)
+contains exactly one minimal payload for each active public request variant: Binance Spot and
+USD-M candles, Coinbase Exchange Spot candles, and Binance Spot and USD-M aggregate trades. Its
+strict manifest binds every unique identity and relative path to exact bytes with SHA-256, provider,
+dataset, market/request variant, shape type, positional width or exact required/optional field
+sets and optional fields present in each fixture, current official contract reference, UTC review
+date, and review status. Binance candle rows remain exactly 12 positions, Coinbase candle rows
+exactly six, and both aggregate-trade variants require exactly `T`, `a`, `f`, `l`, `m`, `p`, and
+`q` while the shared parser's optional set is exactly `M` and `nq`. The v1 Spot fixture contains
+`M`; the v1 USD-M fixture contains `nq`. Fixture presence does not create a market-specific parser
+rule, and unknown aggregate-trade fields are not additive-compatible.
+
+Offline tests use deterministic HTTP stubs and UTC clocks to feed each fixture's exact bytes
+through the active request path and existing production adapter. They verify canonical values,
+provider identity, event-time behavior, and raw-byte lineage. Bounded synthetic derivations verify
+that representative unsupported width, selected detectable positional reorder, wrong numeric
+type, invalid decimal value, missing required field, invalid present optional-field value, and
+unknown field returns the existing non-retryable `INVALID_PAYLOAD` boundary without admitting
+partial raw or canonical evidence. Decimal precision alone is not adapter-bounded, and a same-typed
+positional reorder can remain canonically valid; either may parse successfully. Such an unreviewed
+change remains semantic drift that requires pause and contract review, not evidence of
+compatibility.
+
+Fixture versions are retained rather than overwritten. The corpus is minimal, synthetic,
+secret-free, bounded, and never refreshed from a real response. It records a reviewed local
+contract; it neither detects upstream drift nor makes provider documentation immutable. See the
+[public-provider schema-drift response runbook](../runbooks/PUBLIC_PROVIDER_SCHEMA_DRIFT.md) for
+manual containment, evidence handling, official-document re-review, versioning, regression,
+escalation, resume gates, and rollback. A fixture review never authorizes a parser, adapter,
+endpoint, runtime, or deployment change.
+
 ## Current Limitations
 
 - Final candles are implemented end to end. Trade, ticker, and best-bid-ask records have strict
@@ -557,9 +590,10 @@ mean no control-state write.
   pending-leaf recovery from failed checkpoint version 3 through completed version 6, five
   budgeted requests, one retry, two pacing waits, three raw captures, one canonical trade, zero
   conflicts, and a no-work completed rerun. It does not prove cross-database atomicity, physical
-  durability, continuous operation, or automatic recovery. Versioned synthetic fixtures for the
-  five active provider payload variants and an operator-visible schema-drift response runbook
-  remain pending under TASK-057.
+  durability, continuous operation, or automatic recovery. Versioned synthetic fixtures now cover
+  the five active provider payload variants, and a manual schema-drift response runbook is
+  available. Neither supplies automatic detection, pause, remediation, resume, fixture refresh,
+  or continuous-readiness evidence.
 - Each Binance provider request remains bounded to one already-closed window of at most 1,000
   candles; the application composes multiple requests into a bounded range.
 - No operating-system-managed scheduling, deployment, adaptive pacing, retry jitter, or live
