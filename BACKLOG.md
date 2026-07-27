@@ -6,77 +6,77 @@ promoted through review.
 
 ## Next Action
 
-### TASK-054 — Fail-closed public-HTTP maximum timeout policy
+### TASK-055 — Fail-closed bounded public-HTTP response-header projection
 
-- **Key:** `phase2.fail_closed_public_http_maximum_timeout_policy`
+- **Key:** `phase2.fail_closed_public_http_bounded_response_header_projection`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
 - **Human approval:** NOT REQUIRED — bounded fail-closed development hardening under the owner's
-  explicit authorization; it adds one finite public-transport configuration ceiling and changes no
-  permission, deployment, provider endpoint, or operator-data boundary.
-- **Context:** TASK-041 rejects non-finite and non-positive public-HTTP timeouts, and all active
-  defaults are exactly 10.0 seconds, but the shared client and all three active provider
-  constructors still accept every finite positive value without an upper bound. Extremely large
-  finite values can create excessive per-operation wait windows or fail later in standard-library
-  timeout conversion.
-- **Goal:** Apply one provider-independent maximum of 120 seconds at the shared public transport
-  and every active provider construction boundary while preserving accepted timeout values
-  exactly.
-- **Scope:** Define one shared `MAX_PUBLIC_HTTP_TIMEOUT_SECONDS = 120.0` policy constant in
-  `src/wealth/ports/http.py`. After the existing TASK-041 finite-positive check at each boundary,
-  reject a finite positive timeout greater than 120 with exact
-  `ValueError("timeout_seconds must be at most 120")`; retain the earlier exact error for `NaN`,
-  positive or negative infinity, zero, and negative values; and add deterministic precedence,
-  no-work, shared-boundary, provider-boundary, exact-maximum, identity, default, forwarding, and
-  policy-drift tests.
-- **Files:** `src/wealth/ports/http.py`; the four adapter sources
-  `src/wealth/adapters/http.py`, `src/wealth/adapters/binance.py`,
-  `src/wealth/adapters/coinbase.py`, and `src/wealth/adapters/binance_order_flow.py`; the shared
-  HTTP test `tests/unit/test_http_adapter.py`; the three provider tests
-  `tests/unit/test_binance_public_candles.py`,
-  `tests/unit/test_coinbase_public_candles.py`, and
-  `tests/unit/test_binance_public_aggregate_trades.py`; `docs/contracts/MARKET_DATA.md`; plus
-  coordinated governance files and governance tests.
-- **Constraints:** Preserve TASK-041's finite-positive validation, exact error, and first
-  precedence. Do not introduce an exact runtime type, subclass, coercion, rounding, unit
-  conversion, or fallback policy for accepted numeric values. Preserve exact accepted-object
-  identity, including integer and fractional values, at 120 or below. The ceiling constrains the
-  timeout supplied to each standard transport operation; it is not a total wall-clock deadline
-  and does not separately bound DNS, multiple operations, or caller/provider work. Do not alter
-  retries, backoff, sleeps, waits, pacing, rate budgets, URL/query/User-Agent/response rules,
-  redirect or cleanup behavior, provider parsing, endpoint or dependency configuration, runtime
-  wiring, credentials, permissions, hostname/provider allowlists, DNS/IP/public-routability or
-  SSRF policy, IDNA, TLS/proxy behavior, TASK-037 authority, migration, or Stage 3.
+  explicit authorization; it constrains only the application-level projection of already acquired
+  public response metadata and changes no permission, deployment, endpoint, or operator-data
+  boundary.
+- **Context:** Successful and `HTTPError` bodies are byte-bounded, but each path still constructs
+  `tuple(headers.items())` without an adapter-level pair-count or cumulative character bound.
+  Standard-library header parsing occurs before the adapter receives the response; the residual is
+  the size and work of the `HttpResponse.headers` projection, not the wire parser itself.
+- **Goal:** Bound the shared client's projected response-header snapshot on both response paths
+  while preserving every accepted header pair exactly and retaining all body, failure, and cleanup
+  precedence.
+- **Scope:** After the existing one-byte-sentinel body read and body-size decision and before
+  constructing `HttpResponse`, take one header-item snapshot that accepts at most 100 pairs whose
+  cumulative name-plus-value length is at most 65,536 Python characters. Consume at most a 101st
+  yielded pair to prove count overflow; reject either limit with exact sanitized
+  `HttpTransportError("public HTTP response headers exceeded the configured limit")`; and add
+  deterministic success/`HTTPError`, count, volume, one-pass, preservation, failure-propagation,
+  resource-closure, and mutation tests.
+- **Files:** `src/wealth/adapters/http.py`, `tests/unit/test_http_adapter.py`,
+  `docs/contracts/MARKET_DATA.md`, plus coordinated governance files and governance tests.
+- **Constraints:** Call `headers.items()` once, start its iterator once, and do not call
+  `len(headers)`, directly iterate the message object, start a second pass, or request a length
+  hint. Preserve accepted pair order, duplicate names, original casing, and every name and value
+  character exactly; do not normalize, unfold, combine, deduplicate, filter, reorder, redact, or
+  synthesize headers. Preserve the existing body read and oversize decisions before header
+  projection, caller-originated header-enumeration failures, success-context closure,
+  `HTTPError` one-cleanup-attempt behavior, and primary-failure precedence. This is only an
+  adapter-controlled projection bound: it does not bound wire bytes, standard-library parsing or
+  its prior allocations, total response or process memory, response time, or provider work. Do
+  not add a header allowlist, denylist, content-type, content-length, content-encoding, privacy, or
+  sensitive-data guarantee. Preserve status/body semantics, request headers, URL/query/User-Agent,
+  timeout/response limits, redirects, exceptions, retries, providers, endpoints, dependencies,
+  runtime wiring, credentials, permissions, hostname/provider allowlists, DNS/IP/public-routability
+  or SSRF policy, IDNA, TLS/proxy behavior, TASK-037 authority, migration, and Stage 3.
 
 Acceptance gates:
 
-1. `NaN`, positive or negative infinity, zero, and negative values retain TASK-041's exact
-   context- and cause-free
-   `ValueError("timeout_seconds must be finite and positive")` with first precedence. With an
-   otherwise valid finite-positive timeout greater than 120, every boundary raises exact
-   context- and cause-free `ValueError("timeout_seconds must be at most 120")`.
-2. The shared client rejects representative just-over-limit fractions, the largest finite float,
-   and an arbitrarily large integer before URL length or content inspection, query access or
-   serialization, `Request`, private-opener or handler work, DNS lookup, network access, or
-   filesystem access.
-3. The Binance candle, Coinbase candle, and Binance aggregate-trade constructors reject an
-   over-limit timeout before clock, query, injected HTTP, endpoint, record, or other provider work.
-4. Exact 120 integer and float values and representative positive fractions at or below 120 retain
-   their original object identity. All active 10.0-second defaults remain exact, and one accepted
-   request per active provider path forwards the configured timeout unchanged.
-5. One shared maximum constant governs the shared client and all three active provider boundaries.
-   Deterministic mutation tests detect a removed or changed ceiling, a `>=` off-by-one error,
-   reordered finite-positive validation, and provider-policy drift.
-6. The task makes no total-wall-clock deadline, DNS-duration, multi-operation-duration, or
-   caller/provider-work guarantee and adds no exact numeric-type or subclass policy. It changes no
-   retry, backoff, wait, pacing, or rate-budget behavior.
-7. No hostname/provider allowlist, DNS resolution, IP/public-routability or SSRF guarantee, IDNA,
-   certificate, TLS/proxy, endpoint, dependency, runtime, credential, or permission behavior
-   changes. TASK-037 remains blocked and authorization remains denied; no operator data, path,
-   database, scanner, report, migration, or Stage 3 action occurs.
-8. Formatting, lint, strict typing, complete tests, lockfile verification, dependency audit,
-   health slice, and CI pass.
+1. Both the successful and `HTTPError` paths call `headers.items()` and create its iterator once,
+   consume no more than 101 yielded pairs, and accept zero through 100 pairs only when cumulative
+   name-plus-value length is at most 65,536 Python characters.
+2. A 101st pair fails before its name or value is inspected. A 65,537th cumulative character fails
+   immediately with exact sanitized
+   `HttpTransportError("public HTTP response headers exceeded the configured limit")`; no partial
+   `HttpResponse`, provider parsing, retry, second body read, or second header pass occurs.
+3. Empty, one-pair, exact-100-pair, and exact-65,536-character boundaries remain accepted.
+   Multi-byte Unicode is counted as Python characters. Accepted order, duplicates, casing, empty
+   strings, and all name/value content remain exact, including existing `Retry-After` behavior.
+4. Body-read failures and body oversize retain precedence without header enumeration. On a
+   successful response, a header-limit failure exits the existing response context once. On an
+   `HTTPError`, it follows the existing single body read and is followed by exactly one cleanup
+   attempt; cleanup failure cannot replace the header-limit primary failure.
+5. Exceptions raised by `headers.items()`, iterator creation, or any consumed pull remain the same
+   raw objects. Existing supported read/protocol mappings, direct causes, cleanup-only mappings,
+   redirect behavior, and primary-failure precedence remain unchanged.
+6. Deterministic mutation tests detect removed or changed count/character limits, a `>=`
+   off-by-one error, full or second-pass enumeration, inspection of the 101st pair, projection
+   before the body-size decision, success/error-path drift, and normalization or reordering.
+7. The result is only an adapter-level header-projection bound. It makes no wire-header,
+   standard-library parser/allocation, total-memory, total-wall-clock, privacy, redaction,
+   content-type/length/encoding, hostname/provider allowlist, DNS/IP/public-routability, or SSRF
+   guarantee and changes no retry, endpoint, dependency, runtime, credential, or permission
+   behavior.
+8. TASK-037 remains blocked and authorization remains denied; no operator data, path, database,
+   scanner, report, migration, or Stage 3 action occurs. Formatting, lint, strict typing, complete
+   tests, lockfile verification, dependency audit, health slice, and CI pass.
 
 ## Blocked, Awaiting Owner-Supplied Restricted Inputs
 
@@ -131,6 +131,49 @@ Acceptance gates:
    all repository gates pass.
 
 ## Recently Completed
+
+### TASK-054 — Fail-closed public-HTTP maximum timeout policy
+
+- **Key:** `phase2.fail_closed_public_http_maximum_timeout_policy`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Files:** `src/wealth/ports/http.py`, `src/wealth/adapters/http.py`,
+  `src/wealth/adapters/binance.py`, `src/wealth/adapters/coinbase.py`,
+  `src/wealth/adapters/binance_order_flow.py`, `tests/unit/test_http_adapter.py`,
+  `tests/unit/test_binance_public_candles.py`,
+  `tests/unit/test_coinbase_public_candles.py`,
+  `tests/unit/test_binance_public_aggregate_trades.py`, `docs/contracts/MARKET_DATA.md`, plus the
+  coordinated governance files and governance tests.
+- **Result:** One provider-independent
+  `MAX_PUBLIC_HTTP_TIMEOUT_SECONDS = 120.0` constant now governs the shared client and the Binance
+  candle, Coinbase candle, and Binance aggregate-trade constructors. At all four boundaries, the
+  new comparison follows TASK-041's finite-positive check. `NaN`, positive or negative infinity,
+  zero, and negative values therefore retain exact context- and cause-free
+  `ValueError("timeout_seconds must be finite and positive")`; an otherwise valid finite-positive
+  value greater than 120 raises exact context- and cause-free
+  `ValueError("timeout_seconds must be at most 120")`. The shared client rejects over-limit values
+  before URL length or content, query, `Request`, opener, DNS, network, or filesystem work. Each
+  provider constructor rejects them before endpoint validation, clock, query, injected HTTP,
+  provider, or record work. Forty new deterministic cases bring the four focused files from
+  640 to 680 tests: `test_http_adapter.py` has 518 tests (+9), Binance candle has 49 (+11),
+  Coinbase candle has 54 (+9), and Binance aggregate-trade has 59 (+11). The over-limit corpus
+  covers the next float above 120, 120.0001, the largest finite float, and a 1,001-digit integer at
+  every boundary. Accepted identity coverage pins integer 1, fractional 0.25, the exact 10.0
+  default, the next float below 120, exact built-in integer and float 120, and a float subclass at
+  120. All five active provider request paths forward the configured accepted object unchanged,
+  including subclass identity. An isolated mutation audit killed all 14 of 14 mutants with zero
+  survivors and zero harness errors, covering a removed or changed cap, `>=` off-by-one, reordered
+  finite validation, hardcoded or unshared module policy, a missing provider cap, float-subclass
+  coercion or identity loss, wrong message, injected cause, late shared or provider validation,
+  provider clock work before the cap, default drift, and forwarded-timeout drift. The task adds no
+  exact numeric-type, subclass,
+  coercion, rounding, unit-conversion, fallback, or total-wall-clock policy and does not separately
+  bound DNS, multiple operations, caller/provider work, retries, waits, pacing, or rate budgets.
+  URL/query/User-Agent, response body, header projection, redirect, cleanup, provider, endpoint,
+  dependency, runtime, credential, permission, hostname/DNS/IP/SSRF, TASK-037 authority,
+  migration, and Stage 3 behavior remain unchanged. Successful and `HTTPError` header projection
+  still has no adapter-level pair-count or cumulative-character bound; TASK-055 governs that
+  residual response-metadata risk.
 
 ### TASK-053 — Fail-closed public-HTTP bounded User-Agent validation
 

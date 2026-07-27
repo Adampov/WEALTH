@@ -14,6 +14,7 @@ from http.client import (
     UnknownProtocol,
 )
 from io import BytesIO
+from math import nextafter
 from types import TracebackType
 from typing import Self, cast
 from urllib import request as urllib_request
@@ -41,7 +42,15 @@ from wealth.adapters.http import (
     MAX_PUBLIC_HTTP_RESPONSE_BYTES,
     UrllibPublicHttpClient,
 )
-from wealth.ports.http import HttpTransportError
+from wealth.ports.http import (
+    MAX_PUBLIC_HTTP_TIMEOUT_SECONDS,
+    HttpTransportError,
+)
+
+
+class FloatTimeoutSubclass(float):
+    """Represent an accepted timeout without an exact runtime-type policy."""
+
 
 INVALID_TIMEOUTS = (
     pytest.param(float("nan"), id="nan"),
@@ -49,6 +58,21 @@ INVALID_TIMEOUTS = (
     pytest.param(float("-inf"), id="negative-infinity"),
     pytest.param(0.0, id="zero"),
     pytest.param(-0.25, id="negative"),
+)
+TIMEOUTS_ABOVE_MAXIMUM = (
+    pytest.param(nextafter(120.0, float("inf")), id="next-float-above-maximum"),
+    pytest.param(120.0001, id="fraction-above-maximum"),
+    pytest.param(sys.float_info.max, id="maximum-float"),
+    pytest.param(10**1_000, id="huge-integer"),
+)
+ACCEPTED_TIMEOUTS = (
+    pytest.param(1, id="integer"),
+    pytest.param(10.0, id="default-float"),
+    pytest.param(0.25, id="fractional"),
+    pytest.param(nextafter(120.0, 0.0), id="next-float-below-maximum"),
+    pytest.param(120, id="maximum-integer"),
+    pytest.param(120.0, id="maximum-float"),
+    pytest.param(FloatTimeoutSubclass(120.0), id="maximum-float-subclass"),
 )
 INVALID_RESPONSE_LIMITS = (
     pytest.param(True, id="boolean-true"),
@@ -3210,6 +3234,8 @@ def test_invalid_timeout_fails_before_request_construction_or_network(
         )
 
     assert str(error.value) == "timeout_seconds must be finite and positive"
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
     assert calls == []
 
 
@@ -3235,18 +3261,68 @@ def test_invalid_timeout_precedes_initial_url_and_query_validation(
         )
 
     assert str(error.value) == "timeout_seconds must be finite and positive"
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
     assert validator_calls == []
     assert query.calls == []
 
 
-@pytest.mark.parametrize(
-    "timeout_seconds",
-    [
-        pytest.param(1, id="integer"),
-        pytest.param(10**1_000, id="large-integer"),
-        pytest.param(0.25, id="fractional"),
-    ],
-)
+def test_public_http_timeout_policy_uses_shared_exact_maximum(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert type(MAX_PUBLIC_HTTP_TIMEOUT_SECONDS) is float
+    assert MAX_PUBLIC_HTTP_TIMEOUT_SECONDS == 120.0
+    assert (
+        http_adapter.__dict__["MAX_PUBLIC_HTTP_TIMEOUT_SECONDS"] is MAX_PUBLIC_HTTP_TIMEOUT_SECONDS
+    )
+
+    monkeypatch.setattr(
+        http_adapter,
+        "MAX_PUBLIC_HTTP_TIMEOUT_SECONDS",
+        nextafter(120.0, 0.0),
+    )
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient().get(
+            url=ExplodingUrl("http://must-not-be-validated.test"),
+            query=ExplodingQuery(),
+            timeout_seconds=120.0,
+        )
+
+    assert str(error.value) == "timeout_seconds must be at most 120"
+
+
+@pytest.mark.parametrize("timeout_seconds", TIMEOUTS_ABOVE_MAXIMUM)
+def test_timeout_above_maximum_precedes_url_query_request_and_network(
+    monkeypatch: pytest.MonkeyPatch,
+    timeout_seconds: float,
+) -> None:
+    calls: list[str] = []
+    query = ExplodingQuery()
+
+    def unexpected_call(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        calls.append("called")
+        raise AssertionError("excessive timeout reached downstream work")
+
+    monkeypatch.setattr(http_adapter, "_validate_initial_url", unexpected_call)
+    monkeypatch.setattr(http_adapter, "Request", unexpected_call)
+    monkeypatch.setattr(http_adapter, "urlopen", unexpected_call)
+
+    with pytest.raises(ValueError) as error:
+        UrllibPublicHttpClient().get(
+            url=ExplodingUrl("http://must-not-be-validated.test"),
+            query=query,
+            timeout_seconds=timeout_seconds,
+        )
+
+    assert str(error.value) == "timeout_seconds must be at most 120"
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
+    assert calls == []
+    assert query.calls == []
+
+
+@pytest.mark.parametrize("timeout_seconds", ACCEPTED_TIMEOUTS)
 def test_finite_positive_timeout_is_forwarded_unchanged(
     monkeypatch: pytest.MonkeyPatch,
     timeout_seconds: float,

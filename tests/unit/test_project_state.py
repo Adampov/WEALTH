@@ -89,24 +89,28 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert "fail_closed_public_http_bounded_query_serialization" in state.active_components
     assert "fail_closed_public_http_initial_target_length_bound" in state.active_components
     assert "fail_closed_public_http_bounded_user_agent_validation" in state.active_components
+    assert "fail_closed_public_http_maximum_timeout_policy" in state.active_components
     assert len(state.open_tasks) == 2
-    task_037, task_054 = state.open_tasks
+    task_037, task_055 = state.open_tasks
     assert task_037.task_id == "TASK-037"
     assert task_037.status == "blocked"
     assert task_037.risk_tier == 3
     assert task_037.requires_human_approval is True
-    assert task_054.task_id == "TASK-054"
-    assert task_054.action == "phase2.fail_closed_public_http_maximum_timeout_policy"
-    assert task_054.status == "ready"
-    assert task_054.risk_tier == 1
-    assert task_054.requires_human_approval is False
+    assert task_055.task_id == "TASK-055"
+    assert task_055.action == "phase2.fail_closed_public_http_bounded_response_header_projection"
+    assert task_055.status == "ready"
+    assert task_055.risk_tier == 1
+    assert task_055.requires_human_approval is False
     assert state.blockers == (
         "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance "
         "location before independent Risk and Security review and the project-owner decision; "
         "authorization remains denied.",
     )
-    assert state.next_action.task_id == "TASK-054"
-    assert state.next_action.action == "phase2.fail_closed_public_http_maximum_timeout_policy"
+    assert state.next_action.task_id == "TASK-055"
+    assert (
+        state.next_action.action
+        == "phase2.fail_closed_public_http_bounded_response_header_projection"
+    )
     assert any(decision.decision_id == "ADR-0027" for decision in state.recent_decisions)
 
 
@@ -201,39 +205,45 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_053_section = completed_section.split("### TASK-053 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
+    task_054_section = completed_section.split("### TASK-054 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    assert "maximum timeout policy" in next_action_section
-    assert "shared client and all three active provider" in next_action_section
-    assert "finite positive value without an upper bound" in next_action_section
-    assert "all active" in next_action_section
-    assert "defaults are exactly 10.0 seconds" in next_action_section
-    assert "`MAX_PUBLIC_HTTP_TIMEOUT_SECONDS = 120.0`" in next_action_section
-    assert "`src/wealth/ports/http.py`" in next_action_section
-    assert "four adapter sources" in next_action_section
+    assert "bounded public-HTTP response-header projection" in next_action_section
+    assert "`tuple(headers.items())`" in next_action_section
+    assert "without an adapter-level pair-count or cumulative character bound" in (
+        next_action_section
+    )
+    assert "Standard-library header parsing occurs before" in next_action_section
+    assert "at most 100 pairs" in next_action_section
+    assert "65,536 Python characters" in next_action_section
+    assert "at most a 101st" in next_action_section
     assert "`src/wealth/adapters/http.py`" in next_action_section
-    assert "`src/wealth/adapters/binance.py`" in next_action_section
-    assert "`src/wealth/adapters/coinbase.py`" in next_action_section
-    assert "`src/wealth/adapters/binance_order_flow.py`" in next_action_section
     assert "`tests/unit/test_http_adapter.py`" in next_action_section
-    assert "`tests/unit/test_binance_public_candles.py`" in next_action_section
-    assert "`tests/unit/test_coinbase_public_candles.py`" in next_action_section
-    assert "`tests/unit/test_binance_public_aggregate_trades.py`" in next_action_section
-    assert '`ValueError("timeout_seconds must be finite and positive")`' in next_action_section
-    assert '`ValueError("timeout_seconds must be at most 120")`' in next_action_section
-    assert "TASK-041's finite-positive validation" in next_action_section
-    assert "exact runtime type, subclass, coercion" in next_action_section
-    assert "Preserve exact accepted-object" in next_action_section
-    assert "not a total wall-clock deadline" in next_action_section
-    assert "does not separately bound DNS, multiple operations" in next_action_section
-    assert "Do not alter" in next_action_section
-    assert "retries, backoff, sleeps, waits, pacing, rate budgets" in next_action_section
-    assert "provider-policy drift" in next_action_section
-    assert "No hostname/provider allowlist" in next_action_section
+    assert (
+        '`HttpTransportError("public HTTP response headers exceeded the configured limit")`'
+        in next_action_section
+    )
+    assert "Call `headers.items()` once" in next_action_section
+    assert "start its iterator once" in next_action_section
+    assert "do not call" in next_action_section
+    assert "`len(headers)`" in next_action_section
+    assert "Preserve accepted pair order, duplicate names, original casing" in next_action_section
+    assert "do not normalize, unfold, combine, deduplicate, filter, reorder" in next_action_section
+    assert "body read and oversize decisions before header" in next_action_section
+    assert "caller-originated header-enumeration failures" in next_action_section
+    assert "only an" in next_action_section
+    assert "adapter-controlled projection bound" in next_action_section
+    assert "does not bound wire bytes, standard-library parsing" in next_action_section
+    assert "header allowlist, denylist, content-type" in next_action_section
+    assert "privacy, or" in next_action_section
+    assert "sensitive-data guarantee" in next_action_section
+    assert "hostname/provider allowlists" in next_action_section
     assert "SSRF" in next_action_section
     assert "TASK-037 remains blocked and authorization remains denied" in next_action_section
     assert blocked_section.count("### TASK-") == 1
@@ -585,6 +595,58 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "no privacy or total-header-block guarantee" in task_053_section
     assert "timeouts remain without an upper bound" in task_053_section
     assert "TASK-054 governs that residual per-operation wait risk" in task_053_section
+    assert "- **Status:** COMPLETE" in task_054_section
+    assert "`phase2.fail_closed_public_http_maximum_timeout_policy`" in task_054_section
+    assert "`src/wealth/ports/http.py`" in task_054_section
+    assert "`src/wealth/adapters/http.py`" in task_054_section
+    assert "`src/wealth/adapters/binance.py`" in task_054_section
+    assert "`src/wealth/adapters/coinbase.py`" in task_054_section
+    assert "`src/wealth/adapters/binance_order_flow.py`" in task_054_section
+    assert "`tests/unit/test_http_adapter.py`" in task_054_section
+    assert "`tests/unit/test_binance_public_candles.py`" in task_054_section
+    assert "`tests/unit/test_coinbase_public_candles.py`" in task_054_section
+    assert "`tests/unit/test_binance_public_aggregate_trades.py`" in task_054_section
+    assert "`MAX_PUBLIC_HTTP_TIMEOUT_SECONDS = 120.0`" in task_054_section
+    assert "all four boundaries" in task_054_section
+    assert "follows TASK-041's finite-positive check" in task_054_section
+    assert '`ValueError("timeout_seconds must be finite and positive")`' in task_054_section
+    assert '`ValueError("timeout_seconds must be at most 120")`' in task_054_section
+    assert "before URL length or content, query, `Request`, opener" in task_054_section
+    assert "before endpoint validation, clock, query, injected HTTP" in task_054_section
+    assert "Forty new deterministic cases" in task_054_section
+    assert "640 to 680 tests" in task_054_section
+    assert "`test_http_adapter.py` has 518 tests (+9)" in task_054_section
+    assert "Binance candle has 49 (+11)" in task_054_section
+    assert "Coinbase candle has 54 (+9)" in task_054_section
+    assert "Binance aggregate-trade has 59 (+11)" in task_054_section
+    assert "next float above 120" in task_054_section
+    assert "largest finite float" in task_054_section
+    assert "1,001-digit integer" in task_054_section
+    assert "next float below 120" in task_054_section
+    assert "exact built-in integer and float 120" in task_054_section
+    assert "float subclass at" in task_054_section
+    assert "including subclass identity" in task_054_section
+    assert "All five active provider" in task_054_section
+    assert "isolated mutation audit killed all 14 of 14 mutants" in task_054_section
+    assert "with zero" in task_054_section
+    assert "survivors and zero harness errors" in task_054_section
+    assert "removed or changed cap" in task_054_section
+    assert "`>=` off-by-one" in task_054_section
+    assert "hardcoded or unshared module policy" in task_054_section
+    assert "float-subclass" in task_054_section
+    assert "coercion or identity loss" in task_054_section
+    assert "wrong message, injected cause" in task_054_section
+    assert "provider clock work before the cap" in task_054_section
+    assert "default drift" in task_054_section
+    assert "forwarded-timeout drift" in task_054_section
+    assert "task adds no" in task_054_section
+    assert "exact numeric-type, subclass" in task_054_section
+    assert "does not separately" in task_054_section
+    assert "bound DNS, multiple operations" in task_054_section
+    assert "header projection" in task_054_section
+    assert "still has no adapter-level pair-count" in task_054_section
+    assert "TASK-055 governs that" in task_054_section
+    assert "residual response-metadata risk" in task_054_section
     assert "private urllib opener with a no-follow redirect handler" in market_data_contract
     assert "performs no body" in market_data_contract
     assert "read or cleanup" in market_data_contract
@@ -634,11 +696,20 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "not a provider request-line compatibility or total-wall-clock guarantee" in (
         market_data_contract
     )
-    assert "Finite positive timeouts currently have no configured upper bound" in (
-        market_data_contract
-    )
-    assert "TASK-054 governs one" in market_data_contract
-    assert "shared 120-second maximum" in market_data_contract
+    assert "one shared maximum of 120 seconds" in market_data_contract
+    assert '`ValueError("timeout_seconds must be at most 120")`' in market_data_contract
+    assert "Exact integer and float 120" in market_data_contract
+    assert "float subclass at exactly 120" in market_data_contract
+    assert "identity because no exact numeric-type policy was added" in market_data_contract
+    assert "not separately bound DNS, multiple operations" in market_data_contract
+    assert "currently projects every pair returned by" in market_data_contract
+    assert "`headers.items()`" in market_data_contract
+    assert "TASK-055 governs an application-level snapshot" in market_data_contract
+    assert "at most 100 pairs and 65,536 cumulative" in market_data_contract
+    assert "name-plus-value Python characters" in market_data_contract
+    assert "projection" in market_data_contract
+    assert "bound only" in market_data_contract
+    assert "no wire-header, parser, total-response-memory, privacy" in market_data_contract
     assert "After preserving `max_response_bytes` validation" in market_data_contract
     assert "exact built-in `str` of 1 through 256 Python characters" in market_data_contract
     assert "U+0020 through U+007E" in market_data_contract
@@ -678,8 +749,15 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "configured User-Agent is now an exact built-in string" in risk_register
     assert "1 through 256 visible-ASCII characters" in risk_register
     assert "without normalization, fallback, or privacy claims" in risk_register
-    assert "Finite positive public-HTTP timeouts still have no maximum" in risk_register
-    assert "Add one shared 120-second maximum" in risk_register
+    assert (
+        "Finite-positive public-HTTP timeouts now also share a 120-second maximum" in risk_register
+    )
+    assert "without changing their standard per-operation semantics" in risk_register
+    assert "every pair returned by `headers.items()` is still projected" in risk_register
+    assert "without an adapter-level pair-count or cumulative-character limit" in risk_register
+    assert "Add an application-level successful/HTTP-error header snapshot" in risk_register
+    assert "100 pairs and 65,536 cumulative name-plus-value Python characters" in risk_register
+    assert "do not claim a wire-header, parser-allocation, total-memory" in risk_register
     assert "Within the canonical UTC migration track" in roadmap
     assert "TASK-037 remains" in roadmap
     assert "blocked and authorization remains denied" in roadmap

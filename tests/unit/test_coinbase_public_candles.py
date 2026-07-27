@@ -5,9 +5,11 @@ import sys
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime, timedelta, timezone
 from hashlib import sha256
+from math import nextafter
 
 import pytest
 
+from wealth.adapters import coinbase as coinbase_adapter
 from wealth.adapters.coinbase import (
     COINBASE_PRODUCTS_URL,
     CoinbaseCandleError,
@@ -15,8 +17,17 @@ from wealth.adapters.coinbase import (
     CoinbasePublicCandleSource,
 )
 from wealth.domain.market import CandleTimeframe, InstrumentType
-from wealth.ports.http import HttpResponse, HttpTransportError
+from wealth.ports.http import (
+    MAX_PUBLIC_HTTP_TIMEOUT_SECONDS,
+    HttpResponse,
+    HttpTransportError,
+)
 from wealth.ports.market import HistoricalCandleRequest
+
+
+class FloatTimeoutSubclass(float):
+    """Represent an accepted timeout without an exact runtime-type policy."""
+
 
 WINDOW_START = datetime(2026, 7, 24, 10, 0, tzinfo=UTC)
 WINDOW_END = WINDOW_START + timedelta(minutes=2)
@@ -45,6 +56,21 @@ INVALID_TIMEOUTS = (
     pytest.param(float("-inf"), id="negative-infinity"),
     pytest.param(0.0, id="zero"),
     pytest.param(-0.25, id="negative"),
+)
+TIMEOUTS_ABOVE_MAXIMUM = (
+    pytest.param(nextafter(120.0, float("inf")), id="next-float-above-maximum"),
+    pytest.param(120.0001, id="fraction-above-maximum"),
+    pytest.param(sys.float_info.max, id="maximum-float"),
+    pytest.param(10**1_000, id="huge-integer"),
+)
+ACCEPTED_TIMEOUTS = (
+    pytest.param(1, id="integer"),
+    pytest.param(10.0, id="default-float"),
+    pytest.param(0.25, id="fractional"),
+    pytest.param(nextafter(120.0, 0.0), id="next-float-below-maximum"),
+    pytest.param(120, id="maximum-integer"),
+    pytest.param(120.0, id="maximum-float"),
+    pytest.param(FloatTimeoutSubclass(120.0), id="maximum-float-subclass"),
 )
 
 
@@ -172,22 +198,70 @@ def test_invalid_timeout_is_rejected_before_http(
     with pytest.raises(ValueError) as error:
         CoinbasePublicCandleSource(
             http=http,
-            clock=SequenceClock(REQUEST_TIME),
+            clock=SequenceClock(),
             timeout_seconds=timeout_seconds,
+            products_url="http://must-not-be-validated.test",
         )
 
     assert str(error.value) == "timeout_seconds must be finite and positive"
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
     assert http.calls == []
 
 
-@pytest.mark.parametrize(
-    "timeout_seconds",
-    [
-        pytest.param(1, id="integer"),
-        pytest.param(10**1_000, id="large-integer"),
-        pytest.param(0.25, id="fractional"),
-    ],
-)
+def test_timeout_policy_uses_shared_exact_maximum_and_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = CoinbasePublicCandleSource(
+        http=StubHttpClient(response([])),
+        clock=SequenceClock(),
+    )
+
+    assert type(MAX_PUBLIC_HTTP_TIMEOUT_SECONDS) is float
+    assert MAX_PUBLIC_HTTP_TIMEOUT_SECONDS == 120.0
+    assert (
+        coinbase_adapter.__dict__["MAX_PUBLIC_HTTP_TIMEOUT_SECONDS"]
+        is MAX_PUBLIC_HTTP_TIMEOUT_SECONDS
+    )
+    assert type(adapter.timeout_seconds) is float
+    assert adapter.timeout_seconds == 10.0
+
+    monkeypatch.setattr(
+        coinbase_adapter,
+        "MAX_PUBLIC_HTTP_TIMEOUT_SECONDS",
+        nextafter(120.0, 0.0),
+    )
+    with pytest.raises(ValueError) as error:
+        CoinbasePublicCandleSource(
+            http=StubHttpClient(response([])),
+            clock=SequenceClock(),
+            timeout_seconds=120.0,
+        )
+
+    assert str(error.value) == "timeout_seconds must be at most 120"
+
+
+@pytest.mark.parametrize("timeout_seconds", TIMEOUTS_ABOVE_MAXIMUM)
+def test_timeout_above_maximum_is_rejected_before_provider_work(
+    timeout_seconds: float,
+) -> None:
+    http = StubHttpClient(response([]))
+
+    with pytest.raises(ValueError) as error:
+        CoinbasePublicCandleSource(
+            http=http,
+            clock=SequenceClock(),
+            timeout_seconds=timeout_seconds,
+            products_url="http://must-not-be-validated.test",
+        )
+
+    assert str(error.value) == "timeout_seconds must be at most 120"
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
+    assert http.calls == []
+
+
+@pytest.mark.parametrize("timeout_seconds", ACCEPTED_TIMEOUTS)
 def test_finite_positive_timeout_is_forwarded_unchanged(
     timeout_seconds: float,
 ) -> None:
@@ -201,6 +275,7 @@ def test_finite_positive_timeout_is_forwarded_unchanged(
     adapter.fetch(request())
 
     assert len(http.calls) == 1
+    assert http.calls[0][0] == f"{COINBASE_PRODUCTS_URL}/BTC-USD/candles"
     assert http.calls[0][2] == timeout_seconds
     assert http.calls[0][2] is timeout_seconds
 
