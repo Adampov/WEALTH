@@ -12,6 +12,12 @@ promoted through review.
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
+- **Contract generation:** 2 — `FROZEN`. Generation 1, normalized SHA-256
+  `2ba9d4d70bde04c5225649d1c3e4f70e86b5085c46a370ffcfbe716887bef836`, was
+  `SUPERSEDED` before any writable activation because its SQL `INTEGER` projection constraint
+  contradicted accepted ADR-0031. Generation-1 read-only research and review outputs are retained
+  as evidence only: they may inform generation 2 but cannot be integrated or counted as
+  generation-2 review or acceptance evidence unless revalidated and rebound to generation 2.
 - **Human approval:** NOT REQUIRED for the bounded test-only implementation, verification, review,
   and draft publication. Exact owner approval naming the pull request and current head commit
   remains required before merge.
@@ -57,13 +63,32 @@ promoted through review.
   allowed only for the declared evidence. Production code must never import the harness; test
   support may import only standard-library modules and the frozen pure TASK-061/062 types and
   validators. No extension loading, `ATTACH`, `writable_schema`, caller-supplied SQL, UDF or
-  collation dependency, shared cache, or URI-option injection. Do not alter TASK-059 behavior,
-  TASK-061 bytes or digest domains, TASK-062 port semantics, or ADR-0031.
-  Only `stream_start_epoch_ms` and causal versions may be SQL `INTEGER` projections; current cursor
-  and optional attachment-window epochs remain solely in authoritative TASK-061 BLOBs and TASK-064
-  must not invent scalar columns for them. Schema, descriptor, fingerprint, and report-contract
-  fixtures are text only: no `.db`, `.sqlite`, `.sqlite3`, `-wal`, `-shm`, or generated record
-  fixture may be committed. Preserve TASK-037 denial and Stage 3.
+  collation dependency, shared cache, or caller-controlled URI-option injection. Operation opens
+  may use only a correctly encoded, harness-internally constructed `file:` URI for the already
+  validated same-bootstrap-owned database with the sole fixed option `mode=rw`; callers may supply
+  neither a URI nor URI/query options. This narrow construction prevents missing-file creation and
+  does not relax the ban on URI-option injection. Do not alter TASK-059 behavior, TASK-061 bytes or
+  digest domains, TASK-062 port semantics, or ADR-0031.
+
+  SQL `INTEGER` columns are permitted only for (a) schema-local singleton and internal row keys,
+  internal foreign keys, and physical-format, schema-generation, natural-key-version, and page-size
+  markers, and (b) these non-authoritative ADR-0031 logical projections:
+  `stream_contract_version`, `stream_start_epoch_ms`, current/successor causal versions,
+  `prior_version` (SQL `NULL` only for creation), integer `serialization_version`, and policy
+  `window_size_ms`, `settlement_lag_ms`, `max_catchup_span_ms`, `max_jobs_per_invocation`,
+  `max_requests_per_job`, and `max_records_per_job`. Every logical `INTEGER` projection accepts and
+  binds only an exact built-in `int`; `bool` and subclasses are rejected. BLOB columns carry the
+  storage marker and schema fingerprint, UUID, reversible natural-identity key, policy
+  `schema_version` and fingerprint, entry kind, record `model_version`, authoritative canonical
+  record/envelope/witness bytes, and exact digests and roots. Natural-identity atoms have no
+  separate columns. `cursor_epoch_ms`, optional attachment `window_start_epoch_ms` and
+  `window_end_epoch_ms`, `recorded_at`, and every other unlisted TASK-061 value have no scalar
+  columns and remain only within authoritative TASK-061 BLOBs. No logical `REAL` or `TEXT`
+  projection is allowed.
+
+  Schema, descriptor, fingerprint, and report-contract fixtures are text only: no `.db`, `.sqlite`,
+  `.sqlite3`, `-wal`, `-shm`, or generated record fixture may be committed. Preserve TASK-037 denial
+  and Stage 3.
 - **Research boundary:** Read-only official SQLite documentation, vulnerability, release, source-ID,
   and application-ID registry research may be cited as review evidence. The harness and generated
   tests perform no network or provider I/O.
@@ -131,11 +156,14 @@ Acceptance gates:
     closes and manifests the exact complete required file set, reruns schema, integrity,
     foreign-key, bounded-current, and full paginated audit checks, and completes an isolated restore
     drill. Raw copying and a main-file-only digest while WAL state may be required are rejected.
-11. Migration evidence copies one version-one generated source into a separate empty version-one
-    generation, revalidates every byte, value, digest, root, identity, count, and tail, and leaves
-    the source authoritative. This is a same-format rehearsal only and never incompatible
-    migration, cutover, rollback, routing-marker, reverse-converter, semantic deletion, compaction,
-    or production migration proof or authority.
+11. Same-format generation-copy evidence copies one version-one generated source into a separate
+    empty version-one generation, revalidates every byte, value, digest, root, identity, count, and
+    tail, and leaves the source authoritative. This is a same-format rehearsal only and never
+    incompatible migration, cutover, rollback, routing-marker, reverse-converter, semantic
+    deletion, compaction, or production migration proof or authority. All ADR-0031
+    incompatible-generation migration, shadow-read, cutover, routing-marker, reverse-converter,
+    rollback, and production-migration evidence is explicitly deferred to a separately frozen later
+    task.
 12. Before measurement, ADR-0032 freezes the numeric pass thresholds, run count, seed,
     minimum/typical/maximum record-size and workload/concurrency matrix, test-local
     `max_page_count` and checkpoint parameters, long-reader WAL-starvation/growth case, and memory

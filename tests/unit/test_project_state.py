@@ -303,6 +303,16 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
+    assert "- **Contract generation:** 2" in next_action_section
+    assert "`FROZEN`" in next_action_section
+    assert (
+        "`2ba9d4d70bde04c5225649d1c3e4f70e86b5085c46a370ffcfbe716887bef836`" in next_action_section
+    )
+    assert "`SUPERSEDED` before any writable activation" in next_action_prose
+    assert "Generation-1 read-only research and review outputs are retained as evidence only" in (
+        next_action_prose
+    )
+    assert "revalidated and rebound to generation 2" in next_action_prose
     assert "`phase2.continuous_public_trade_stream_sqlite_schema_evidence_harness`" in (
         task_064_section
     )
@@ -325,10 +335,36 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "No `src/` adapter" in next_action_prose
     assert "operator path or data" in next_action_prose
     assert "dependency or lockfile change" in next_action_prose
-    assert "Only `stream_start_epoch_ms` and causal versions may be SQL `INTEGER` projections" in (
+    assert "SQL `INTEGER` columns are permitted only for" in next_action_prose
+    assert "schema-local singleton and internal row keys" in next_action_prose
+    assert "`stream_contract_version`, `stream_start_epoch_ms`" in next_action_prose
+    assert "`prior_version` (SQL `NULL` only for creation)" in next_action_prose
+    assert "integer `serialization_version`" in next_action_prose
+    for policy_field in (
+        "window_size_ms",
+        "settlement_lag_ms",
+        "max_catchup_span_ms",
+        "max_jobs_per_invocation",
+        "max_requests_per_job",
+        "max_records_per_job",
+    ):
+        assert f"`{policy_field}`" in task_064_section
+    assert "exact built-in `int`; `bool` and subclasses are rejected" in next_action_prose
+    assert "policy `schema_version` and fingerprint" in next_action_prose
+    assert "record `model_version`" in next_action_prose
+    assert "Natural-identity atoms have no separate columns" in next_action_prose
+    assert "`recorded_at`, and every other unlisted TASK-061 value have no scalar columns" in (
         next_action_prose
     )
-    assert "must not invent scalar columns for them" in next_action_prose
+    assert "No logical `REAL` or `TEXT` projection is allowed" in next_action_prose
+    assert (
+        "Only `stream_start_epoch_ms` and causal versions may be SQL `INTEGER` projections"
+        not in task_064_section
+    )
+    assert "caller-controlled URI-option injection" in next_action_prose
+    assert "harness-internally constructed `file:` URI" in next_action_prose
+    assert "sole fixed option `mode=rw`" in next_action_prose
+    assert "callers may supply neither a URI nor URI/query options" in next_action_prose
     assert "exact non-colliding `application_id`" in next_action_prose
     assert "ordered descriptor canonicalization" in next_action_prose
     assert "4,096-byte pages, WAL, `synchronous=FULL` writers" in next_action_prose
@@ -348,6 +384,8 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "`AT_TAIL` returns exactly one overlap and zero new rows" in next_action_prose
     assert "SQLite Online Backup" in next_action_prose
     assert "same-format generation-copy" in next_action_prose
+    assert "Same-format generation-copy evidence" in next_action_prose
+    assert "explicitly deferred to a separately frozen later task" in next_action_prose
     assert "Before measurement, ADR-0032 freezes the numeric pass thresholds" in (next_action_prose)
     assert "minimum/typical/maximum record-size and workload/concurrency matrix" in (
         next_action_prose
