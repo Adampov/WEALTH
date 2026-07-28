@@ -111,8 +111,8 @@
       "requires_human_approval": true
     },
     {
-      "task_id": "TASK-063",
-      "action": "phase2.continuous_public_trade_stream_physical_store_architecture",
+      "task_id": "TASK-064",
+      "action": "phase2.continuous_public_trade_stream_sqlite_schema_evidence_harness",
       "status": "ready",
       "risk_tier": 1,
       "requires_human_approval": false
@@ -164,8 +164,8 @@
     }
   ],
   "next_action": {
-    "task_id": "TASK-063",
-    "action": "phase2.continuous_public_trade_stream_physical_store_architecture"
+    "task_id": "TASK-064",
+    "action": "phase2.continuous_public_trade_stream_sqlite_schema_evidence_harness"
   },
-  "last_updated_utc": "2026-07-28T16:45:00Z"
+  "last_updated_utc": "2026-07-28T21:41:54Z"
 }

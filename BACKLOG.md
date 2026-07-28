@@ -6,66 +6,158 @@ promoted through review.
 
 ## Next Action
 
-### TASK-063 — Continuous public-trade physical stream-store architecture and evidence plan
+### TASK-064 — Test-only continuous public-trade SQLite schema and evidence harness
 
-- **Key:** `phase2.continuous_public_trade_stream_physical_store_architecture`
+- **Key:** `phase2.continuous_public_trade_stream_sqlite_schema_evidence_harness`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
-- **Human approval:** NOT REQUIRED — architecture, evidence planning, documentation, and
-  coordinated governance only; no adapter, database, schema execution, runtime, operator data,
-  permission, or operating-mode change.
-- **Context:** TASK-062 is complete after exact owner approval, PR #63 merge commit
-  `6b959670e1737bd10585b437786d06408a22e31d`, and successful required target-branch CI run
-  `30373228787`. ADR-0030 now freezes the unused logical store port, exact retained-byte wrappers,
-  commands, queries, closed outcomes, atomic ownership, and bounded audit state machine. Physical
-  implementation remains prohibited until one reviewed design resolves technology, exact epoch
-  representation, transaction/schema/index mapping, retention, migration, backup/restore, crash
-  evidence, and capacity prerequisites without weakening ADR-0029 or ADR-0030.
-- **Goal:** Review ADR-0029 and ADR-0030 narrowly and record one evidence-backed physical
-  single-host stream-store architecture and implementation-readiness plan, selecting or explicitly
-  deferring each material storage choice before any adapter or schema is implemented.
-- **Scope:** Add one design decision and coordinated documentation/governance. Inventory the
-  logical-to-physical mapping for exact original TASK-061 bytes, decoded values, digests, rolling
-  roots, immutable history, current state, UUID and natural-identity uniqueness, one-winner
-  compare-and-swap, bounded current reads, and 1-through-100 audit pages with one predecessor
-  overlap. Resolve exact full-range epoch-millisecond representation; transaction and concurrency
-  semantics; typed unsupported/corrupt/unavailable mapping; crash and lost-acknowledgement
-  evidence; forward migration and rollback; retention/compaction constraints; backup/restore
-  verification; and the finite capacity/performance evidence required before implementation.
-- **Files:** `docs/decisions/0031-continuous-public-trade-stream-physical-store-architecture.md`,
-  `docs/decisions/README.md`, `README.md`, `docs/contracts/MARKET_DATA.md`, `docs/ROADMAP.md`,
-  `PROJECT_STATE.json`, `BACKLOG.md`, `RISK_REGISTER.md`, and governance tests only.
-- **Constraints:** No production source or adapter, repository implementation, executable DDL,
-  database or schema creation, migration execution, path/configuration, filesystem/network/provider
-  I/O, benchmark against operator data, runtime composition/import, clock, evidence-body or
-  attestation access, outer fence/lease, request-budget use, retry/recovery action, child or stream
-  action, credential, permission, notification, capacity/readiness claim, deployment, or Phase 2
-  claim. Do not alter TASK-059 behavior, TASK-061 bytes, or TASK-062 port semantics. Preserve
-  ADR-0027's full-range issue, ADR-0028, TASK-037 denial, and Stage 3.
+- **Human approval:** NOT REQUIRED for the bounded test-only implementation, verification, review,
+  and draft publication. Exact owner approval naming the pull request and current head commit
+  remains required before merge.
+- **Context:** TASK-063 is complete after owner-approved PR #66, accepted head
+  `8def515c29f6b778540e1ac2d6c55b0006c59b1b`, merge commit
+  `cf5f69c818185c54cb1e4c701bf6e390cdf96237`, and successful required target-branch CI run
+  `30401016909`. ADR-0031 selects a dedicated local SQLite generation and freezes a non-executable
+  physical descriptor plus fail-closed schema, transaction, crash, bounded-query, backup/restore,
+  migration, retention, and capacity evidence requirements. No executable schema, database,
+  adapter, path, or runtime exists. This TASK-064 contract becomes executable only after the
+  TASK-063 completion-governance pull request itself is merged and its required target-branch CI
+  succeeds; the governance transition creates no ADR-0032, schema, harness, database, or TASK-064
+  active component.
+- **Goal:** Freeze one exact executable version-one SQLite schema and build an isolated,
+  generated-data evidence harness that proves the bounded physical design and its failure
+  classifications without creating a production adapter or operational path.
+- **Scope:** Add ADR-0032; exact version-one DDL, ordered schema descriptor, canonical descriptor
+  fingerprint, and generated fixtures; and test-only bootstrap/open, transaction, validation,
+  corruption, subprocess crash, bounded-query, online-backup/restore, same-format generation-copy,
+  and finite synthetic-workload evidence helpers. Exercise only generated non-operator databases
+  beneath pytest temporary directories. Coordinate documentation and governance without importing
+  the harness from production source.
+- **Files:** `docs/decisions/0032-continuous-public-trade-stream-sqlite-schema-evidence-harness.md`,
+  `docs/decisions/README.md`, `tests/fixtures/continuous_public_trade_stream_store/v1/schema.sql`,
+  `tests/fixtures/continuous_public_trade_stream_store/v1/schema_descriptor.json`,
+  `tests/fixtures/continuous_public_trade_stream_store/v1/schema_fingerprint.txt`,
+  `tests/support/__init__.py`,
+  `tests/support/continuous_public_trade_stream_sqlite_harness.py`,
+  `tests/unit/test_task_064_continuous_public_trade_stream_sqlite_schema.py`,
+  `tests/integration/test_task_064_continuous_public_trade_stream_sqlite_evidence.py`,
+  `README.md`, `docs/contracts/MARKET_DATA.md`, `docs/ROADMAP.md`, `PROJECT_STATE.json`,
+  `BACKLOG.md`, `RISK_REGISTER.md`, and `tests/unit/test_project_state.py`.
+- **Constraints:** Test-only generated data and evidence. No `src/` adapter, repository port
+  change, production fake, runtime import or composition, operator path or data, pre-existing or
+  non-harness-owned database, network/provider/account access, domain/runtime wall-clock sampling
+  or time authority, accepted-attestation access, domain/runtime outer fence or lease,
+  request-budget use, retry/recovery action, repair, routing or cutover, semantic history/source
+  deletion or compaction, credential, permission, notification, dependency or lockfile change,
+  deployment, operational capacity, durability, recovery/readiness, operating-mode, Phase 2
+  completion, or risk-closure claim. Every operated database must have been created by the same
+  test bootstrap beneath its pytest temporary root. Test-only monotonic timing, an injected or
+  externally recorded evidence timestamp, and cleanup of pytest-owned temporary artifacts are
+  allowed only for the declared evidence. Production code must never import the harness; test
+  support may import only standard-library modules and the frozen pure TASK-061/062 types and
+  validators. No extension loading, `ATTACH`, `writable_schema`, caller-supplied SQL, UDF or
+  collation dependency, shared cache, or URI-option injection. Do not alter TASK-059 behavior,
+  TASK-061 bytes or digest domains, TASK-062 port semantics, or ADR-0031.
+  Only `stream_start_epoch_ms` and causal versions may be SQL `INTEGER` projections; current cursor
+  and optional attachment-window epochs remain solely in authoritative TASK-061 BLOBs and TASK-064
+  must not invent scalar columns for them. Schema, descriptor, fingerprint, and report-contract
+  fixtures are text only: no `.db`, `.sqlite`, `.sqlite3`, `-wal`, `-shm`, or generated record
+  fixture may be committed. Preserve TASK-037 denial and Stage 3.
+- **Research boundary:** Read-only official SQLite documentation, vulnerability, release, source-ID,
+  and application-ID registry research may be cited as review evidence. The harness and generated
+  tests perform no network or provider I/O.
+- **Rollback:** Failure, rejection, or revert leaves production source/runtime and every
+  pre-existing database untouched, preserves the recorded generated-evidence disposition, and
+  removes only harness-owned pytest temporary artifacts. Rollback is a revert of the exact
+  TASK-064 candidate; it is never database repair, migration, routing, or cutover.
 
 Acceptance gates:
 
-1. ADR-0031 maps every ADR-0030 logical value and operation to one explicit physical design or a
-   named unresolved prerequisite without implementing it.
-2. Original TASK-061 canonical bytes remain authoritative; no generic serializer, reconstructed
-   model, text collation, or alternate digest replaces exact retained bytes.
-3. Full-range TASK-059 epoch milliseconds are represented exactly or implementation remains
-   blocked; no datetime, floating-point, epoch-microsecond, truncating, wrapping, or clamping
-   projection is permitted.
-4. Current state, immutable creation/transition history, UUID and natural-identity uniqueness,
-   atomic create, one-winner compare-and-swap, exact duplicate classification, and bounded audit
-   access have explicit transaction, table/index, and corruption-check designs.
-5. Unsupported-version, corrupt, unavailable, conflict, absence, identity-conflict, and
-   anchor-conflict mappings remain distinct and no failure becomes create or retry authority.
-6. Crash/lost-acknowledgement, migration/rollback, backup/restore, retention/compaction, and finite
-   capacity/performance evidence are specified as preimplementation gates with owners and
-   fail-closed dispositions.
-7. The decision adds no physical capability, I/O, dependency, lockfile change, runtime import,
-   authority, action, durability, recovery, capacity, readiness, or Phase 2 claim. TASK-037 remains
-   blocked and authorization remains denied.
-8. Documentation, governance assertions, formatting, lint, strict typing, complete tests,
-   lockfile verification, dependency audit, health slice, and CI pass.
+1. ADR-0032 freezes the exact non-colliding `application_id`, executable DDL, ordered descriptor
+   canonicalization, domain-separated golden SHA-256 fingerprint, object inventory, constraints,
+   indexes, triggers, bootstrap/open contract, and closed SQLite extended-result-code matrix.
+2. Only an explicit test bootstrap may create a database, and only beneath a pytest-provided
+   temporary directory. Every operation open requires an existing regular database and must never
+   create a missing file, follow an alias, or access an operator path.
+3. Every coherent operation verifies exact `application_id`, `user_version`, metadata marker,
+   schema fingerprint, UTF-8 encoding, 4,096-byte pages, WAL, `synchronous=FULL` writers, foreign
+   keys on, shared cache never enabled, `read_uncommitted` off, `trusted_schema` off, busy timeout
+   zero with no busy-handler retry, `auto_vacuum=NONE`, exact patched SQLite source ID, compile
+   options, and connection limits. `THREADSAFE=0`, `OMIT_FOREIGN_KEY`, and `OMIT_TRIGGER` are
+   rejected; extension loading is disabled; and `SQLITE_DBCONFIG_DEFENSIVE` is enabled when the
+   accepted binding exposes it. Readers use an explicit finite transaction with `query_only=ON`
+   and close every cursor before return. The packet records defensive-mode availability and never
+   treats an unavailable control as passing; missing or mismatched required settings fail closed.
+4. Generated boundary records prove `stream_start_epoch_ms` over exact `0` through `2**63 - 1`,
+   causal versions over exact `1` through `2**63 - 1`, and an optional prior version that is SQL
+   `NULL` only for creation. They round-trip authoritative TASK-061 BLOBs, reversible UUID/natural
+   keys, digests, roots, and policy projections. Booleans, scalar subclasses, alternate encodings,
+   and any projection/byte disagreement are rejected. Current cursor and attachment-window epochs
+   have no scalar columns.
+5. Executable constraints and hostile tests prove deferred creation/current-tail/predecessor
+   bindings, immutable history and witnesses, UUID and natural-identity uniqueness, exact
+   byte-equality guards, and rejection of normal update/delete, orphan, gap, alternate-successor,
+   short-page, overflow, and unsupported-generation states.
+6. Generated create and compare-and-swap prototypes each use one explicit `BEGIN IMMEDIATE`
+   transaction and prove atomic current/history ownership, one winner under two writers, exact
+   duplicate versus conflict classification, unknown-acknowledgement reload, and no upsert,
+   replacement, repair, implicit transaction, or hidden retry.
+7. Fresh-process evidence covers every ADR-0031 named seam: before transaction; after lock; between
+   stream insert and creation insert; between creation insert and create commit; between transition
+   insert and current update; between current update and compare-and-swap commit; true during
+   commit; after commit before acknowledgement; writer/checkpointer concurrency; disk full or
+   `max_page_count`; readonly; busy/locked; and injected I/O failure. A new-connection reopen
+   verifies application/format/schema identity, `integrity_check`, empty `foreign_key_check`,
+   bounded current state, and complete paginated history/root state, and may establish only exact
+   old, new, duplicate, or unavailable state. No mocked before-commit or after-commit substitute
+   counts as true during-commit evidence. Results use only `PASS`, `FAIL`, `UNPROVEN`, or
+   `NOT_APPLICABLE`. Every in-scope declared seam must be `PASS`; `FAIL`, `UNPROVEN`, skipped, or
+   xfailed evidence blocks TASK-064 completion and every adapter/runtime proposal.
+   `NOT_APPLICABLE` is allowed only for named target/deployment evidence outside this task, includes
+   a reason, and never implies a pass.
+8. Exact query-plan, statement-count, and row-materialization evidence proves a current load reads
+   one stream row and at most three distinct history rows, historical duplicate classification
+   materializes at most five rows, and a two-row identity-conflict path plus every failure path has
+   an explicit finite budget. Initial audit returns exactly 1 through the requested limit new rows
+   with limit at most 100; continuation returns exactly one overlap plus 0 through the requested
+   limit new rows with at most 101 total; `AT_TAIL` returns exactly one overlap and zero new rows.
+   Query-plan evidence is pinned at limits 1 and 100. No count, lookahead, offset, unbounded
+   iteration, hidden history query, or extra row is permitted.
+9. Every retained value is validated before classification. Deterministic SQLite extended result
+   codes map to the frozen closed outcomes; an unmapped operational failure is sanitized
+   `UNAVAILABLE`, while a malformed claimed version-one generation or retained value is `CORRUPT`.
+10. Generated concurrent-write backup evidence uses SQLite Online Backup into a fresh destination,
+    closes and manifests the exact complete required file set, reruns schema, integrity,
+    foreign-key, bounded-current, and full paginated audit checks, and completes an isolated restore
+    drill. Raw copying and a main-file-only digest while WAL state may be required are rejected.
+11. Migration evidence copies one version-one generated source into a separate empty version-one
+    generation, revalidates every byte, value, digest, root, identity, count, and tail, and leaves
+    the source authoritative. This is a same-format rehearsal only and never incompatible
+    migration, cutover, rollback, routing-marker, reverse-converter, semantic deletion, compaction,
+    or production migration proof or authority.
+12. Before measurement, ADR-0032 freezes the numeric pass thresholds, run count, seed,
+    minimum/typical/maximum record-size and workload/concurrency matrix, test-local
+    `max_page_count` and checkpoint parameters, long-reader WAL-starvation/growth case, and memory
+    and open-cursor bounds. Reports record the exact contract digest, runtime/source ID, compile
+    options, PRAGMAs, sanitized environment class, row/query counts, database/WAL/page/freelist
+    sizes, cursor bounds, latency samples, and the four-state disposition for every gate. Generated
+    JSON reports exist only beneath pytest temporary directories. The durable evidence channel is
+    the draft PR plus exact CI check/run logs bound after publication to the immutable candidate
+    head SHA; it records no user path, host/user name, device serial, credential, or operator
+    identifier. A committed report must not claim to self-bind its own commit. These test
+    measurements are not target-filesystem, capacity, durability, RPO/RTO, or readiness evidence.
+13. No existing validation is removed, skipped, weakened, or replaced. Formatting, lint, strict
+    typing, complete tests, lockfile verification, dependency audit, health slice, and final-diff
+    inspection pass. Before material work, the merged base, contract generation, and normalized
+    contract digest are recorded with a contemporaneous writable lease ID, issue/expiry,
+    `ASSIGNED` to `ACTIVE` to `RETURNED` timestamps, and exact result-commit binding; no
+    retrospective packet is valid. Independent Engineering, Security/Risk, and QA reviews bind the
+    same exact committed SHA, contract generation/digest, and CI evidence.
+14. A production adapter remains blocked until separately approved target path/filesystem,
+    permissions, SQLite source ID, sync/locking behavior, checkpoint/WAL bounds, capacity and
+    latency envelope, backup destination, retention/disposal, RPO/RTO, restore cadence, monitoring,
+    stop thresholds, and operational evidence all pass without expanding this task.
 
 ## Blocked, Awaiting Owner-Supplied Restricted Inputs
 
@@ -120,6 +212,39 @@ Acceptance gates:
    all repository gates pass.
 
 ## Recently Completed
+
+### TASK-063 — Continuous public-trade physical stream-store architecture and evidence plan
+
+- **Key:** `phase2.continuous_public_trade_stream_physical_store_architecture`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Merge evidence:** Owner-approved PR
+  [#66](https://github.com/Adampov/WEALTH/pull/66), accepted head
+  `8def515c29f6b778540e1ac2d6c55b0006c59b1b`, merge commit
+  `cf5f69c818185c54cb1e4c701bf6e390cdf96237`, and successful required target-branch CI run
+  [30401016909](https://github.com/Adampov/WEALTH/actions/runs/30401016909).
+- **Files:** `docs/decisions/0031-continuous-public-trade-stream-physical-store-architecture.md`,
+  `docs/decisions/README.md`, `README.md`, `docs/contracts/MARKET_DATA.md`, `docs/ROADMAP.md`,
+  `PROJECT_STATE.json`, `BACKLOG.md`, `RISK_REGISTER.md`, `tests/unit/test_project_state.py`, and
+  `tests/unit/test_task_063_physical_store_architecture.py`.
+- **Result:** ADR-0031 selects one dedicated local SQLite generation behind the unused ADR-0030
+  port and freezes a non-executable physical descriptor and fail-closed preimplementation evidence
+  plan. Original TASK-061 BLOBs remain authoritative. Only `stream_start_epoch_ms` and causal
+  versions receive exact signed-64-bit SQL `INTEGER` projections; current cursor and optional
+  attachment-window epochs deliberately have no scalar columns.
+
+  The design maps reversible UUID and natural-identity keys, strict metadata, immutable history,
+  constraint-bound creation/current/predecessor witnesses, atomic create, one-winner
+  compare-and-swap, closed failure classification, constant-size current loads, and audit pages of
+  1 through 100 new rows plus only the permitted overlap. Preserve-all retention,
+  separate-generation migration, Online Backup plus independent restore, crash and
+  lost-acknowledgement testing, exact query bounds, target-runtime/filesystem verification, and
+  finite capacity thresholds remain mandatory gates.
+
+  TASK-063 creates no executable schema, database, adapter, path, configuration, I/O, runtime,
+  clock, fence, budget, retry or recovery action, permission, durability, capacity, readiness,
+  deployment, Phase 2 completion, or risk closure. TASK-037 remains blocked and authorization
+  remains denied.
 
 ### TASK-062 — Pure continuous public-trade logical stream-store port and outcome contracts
 
@@ -1141,14 +1266,12 @@ Acceptance gates:
 
 ## Queued, Not Yet Approved
 
-- Promote a test-only TASK-064 SQLite schema, transaction, crash, bounded-query, backup/restore,
-  migration, and capacity evidence harness only after TASK-063 is complete. It must use generated
-  non-operator records under a separately frozen executable schema and add no production adapter,
-  runtime wiring, operator path/data access, durability, capacity, or readiness claim.
-- Implement a production physical continuous public-trade stream-store adapter only after the
-  TASK-064 evidence task passes every ADR-0031 schema, runtime, filesystem, crash, query-bound,
-  backup/restore, migration, retention, and finite-capacity gate with the required reviews and
-  approvals.
+- Implement a production physical continuous public-trade stream-store adapter only after
+  TASK-064 passes its exact generated/test-environment schema, transaction, crash, query-bound,
+  backup/restore, same-format generation-copy, and synthetic-workload gates, and a separately
+  governed task approves the target path/VFS/filesystem and power-loss evidence, operational
+  capacity/checkpoint values, backup boundary, retention, and any incompatible migration with the
+  required reviews and approvals.
 - Implement continuous public-trade runtime collection only through a separately promoted task
   with the complete ADR-0028/0029 operational evidence and approvals.
 

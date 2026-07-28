@@ -518,11 +518,12 @@ validation, an accepted history attestation, authority, a fence, a budget grant,
 durability, recovery evidence, or readiness. TASK-062 adds no physical store, adapter, database,
 schema, migration, I/O, clock, runtime import, automatic retry/action, capacity value, or
 operating-mode change. TASK-062 is complete only as this unused logical contract increment. The
-canonical next action is TASK-063: a design-only physical stream-store architecture and evidence
-plan resolving exact epoch representation, schema/index and transaction mapping,
-retention/compaction, migration, backup/restore, crash evidence, and capacity before any adapter,
-while granting no physical implementation authority. TASK-037 remains blocked and authorization
-remains denied.
+design-only TASK-063 architecture is also complete without adding physical capability. The
+canonical next action is TASK-064: an isolated test-only SQLite schema and generated-data evidence
+harness for the frozen transaction, crash, bounded-query, backup/restore, same-format
+generation-copy, and finite synthetic-workload gates. It grants no production adapter, operator
+path/data access, durability, capacity, recovery, or readiness claim. TASK-037 remains blocked and
+authorization remains denied.
 
 ## Continuous Public-Trade Physical Stream-Store Architecture (Design Only)
 
@@ -552,8 +553,10 @@ path, configuration, I/O, runtime, clock, fence, budget, recovery action, durabi
 readiness claim. Preserve-all retention, separate-generation migration, verified online backup and
 independent restore, crash/lost-acknowledgement tests, query-bound proof, target-filesystem
 durability evidence, and finite capacity evidence all remain fail-closed prerequisites. TASK-063
-remains the canonical next action until its governed lifecycle completes; TASK-037 remains blocked
-and authorization remains denied.
+is complete only as this non-executable architecture and evidence plan. TASK-064 is the canonical
+next action and may add only an isolated executable test schema and generated-data evidence
+harness; it cannot add a production adapter, runtime, operator path/data access, or operational
+claim. TASK-037 remains blocked and authorization remains denied.
 
 Operators and monitoring tools can read the separate candle collector-service state through a
 dedicated JSON command:

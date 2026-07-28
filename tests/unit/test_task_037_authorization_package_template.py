@@ -86,8 +86,8 @@ def test_template_exists_but_backlog_keeps_task_037_blocked_and_unapproved() -> 
         == EXPECTED_NORMALIZED_BLOCKED_TASK_SECTION_SHA256
     )
     assert project_state["next_action"] == {
-        "task_id": "TASK-063",
-        "action": "phase2.continuous_public_trade_stream_physical_store_architecture",
+        "task_id": "TASK-064",
+        "action": "phase2.continuous_public_trade_stream_sqlite_schema_evidence_harness",
     }
     assert project_state["open_tasks"] == [
         {
@@ -100,8 +100,8 @@ def test_template_exists_but_backlog_keeps_task_037_blocked_and_unapproved() -> 
             "requires_human_approval": True,
         },
         {
-            "task_id": "TASK-063",
-            "action": "phase2.continuous_public_trade_stream_physical_store_architecture",
+            "task_id": "TASK-064",
+            "action": "phase2.continuous_public_trade_stream_sqlite_schema_evidence_harness",
             "status": "ready",
             "risk_tier": 1,
             "requires_human_approval": False,
