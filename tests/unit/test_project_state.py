@@ -29,6 +29,12 @@ ADR_0030_PATH = (
     / "decisions"
     / "0030-continuous-public-trade-stream-store-port-contract.md"
 )
+ADR_0031_PATH = (
+    REPOSITORY_ROOT
+    / "docs"
+    / "decisions"
+    / "0031-continuous-public-trade-stream-physical-store-architecture.md"
+)
 
 
 def load_payload() -> dict[str, Any]:
@@ -121,6 +127,7 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert "continuous_public_trade_stream_persistence_contract" in state.active_components
     assert "continuous_public_trade_stream_persistence_codec_contracts" in state.active_components
     assert "continuous_public_trade_stream_store_port_contracts" in state.active_components
+    assert "continuous_public_trade_stream_physical_store_architecture" in (state.active_components)
     assert len(state.open_tasks) == 2
     task_037, task_063 = state.open_tasks
     assert task_037.task_id == "TASK-037"
@@ -144,6 +151,7 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     )
     assert any(decision.decision_id == "ADR-0029" for decision in state.recent_decisions)
     assert any(decision.decision_id == "ADR-0030" for decision in state.recent_decisions)
+    assert any(decision.decision_id == "ADR-0031" for decision in state.recent_decisions)
 
 
 def test_project_state_references_existing_governance_artifacts() -> None:
@@ -156,6 +164,7 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     decision_index = DECISION_INDEX_PATH.read_text(encoding="utf-8")
     adr_0029 = ADR_0029_PATH.read_text(encoding="utf-8")
     adr_0030 = ADR_0030_PATH.read_text(encoding="utf-8")
+    adr_0031 = ADR_0031_PATH.read_text(encoding="utf-8")
 
     for decision in state.recent_decisions:
         assert (REPOSITORY_ROOT / decision.artifact).is_file()
@@ -276,12 +285,14 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_060_prose = collapse_whitespace(task_060_section)
     task_061_prose = collapse_whitespace(task_061_section)
     task_062_prose = collapse_whitespace(task_062_section)
+    queued_prose = collapse_whitespace(queued_section)
     root_readme_prose = collapse_whitespace(root_readme)
     market_data_prose = collapse_whitespace(market_data_contract)
     risk_register_prose = collapse_whitespace(risk_register)
     roadmap_prose = collapse_whitespace(roadmap)
     adr_0029_prose = collapse_whitespace(adr_0029)
     adr_0030_prose = collapse_whitespace(adr_0030)
+    adr_0031_prose = collapse_whitespace(adr_0031)
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
@@ -347,8 +358,12 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "The port performs no I/O and is not imported by runtime composition" in task_062_prose
     assert "TASK-063 may define" not in queued_section
     assert "### TASK-063" not in queued_section
-    assert queued_section.count("\n- ") == 2
-    assert "Implement a physical continuous public-trade stream store" in queued_section
+    assert queued_section.count("\n- ") == 3
+    assert "Promote a test-only TASK-064 SQLite schema" in queued_section
+    assert "generated non-operator records" in queued_prose
+    assert "Implement a production physical continuous public-trade stream-store adapter" in (
+        queued_section
+    )
     assert "Implement continuous public-trade runtime collection" in queued_section
     assert "- **Status:** COMPLETE" in task_061_section
     assert "`phase2.continuous_public_trade_stream_persistence_codec_contracts`" in task_061_section
@@ -1176,6 +1191,7 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "total-header-block guarantee" in market_data_contract
     assert "0029-continuous-public-trade-stream-persistence-contract.md" in decision_index
     assert "0030-continuous-public-trade-stream-store-port-contract.md" in decision_index
+    assert "0031-continuous-public-trade-stream-physical-store-architecture.md" in decision_index
     assert "## Continuous Public-Trade Persistence Records and Codecs (Unused)" in (
         root_readme_prose
     )
@@ -1223,6 +1239,14 @@ def test_project_state_references_existing_governance_artifacts() -> None:
         root_readme_prose
     )
     assert "canonical next action is TASK-063" in root_readme_prose
+    assert "## Continuous Public-Trade Physical Stream-Store Architecture (Design Only)" in (
+        root_readme
+    )
+    assert "one dedicated local SQLite generation behind the unused ADR-0030 port" in (
+        root_readme_prose
+    )
+    assert "constraint-bound exact predecessor-record witness" in root_readme_prose
+    assert "non-executable design and evidence plan only" in root_readme_prose
     assert "TASK-063 remains queued until TASK-062 is `COMPLETE`" not in root_readme_prose
     assert "## Continuous Public-Trade Persistence Records and Codecs (Unused)" in (
         market_data_prose
@@ -1265,6 +1289,12 @@ def test_project_state_references_existing_governance_artifacts() -> None:
         market_data_prose
     )
     assert "canonical next action is TASK-063" in market_data_prose
+    assert "## Continuous Public-Trade Physical Stream-Store Architecture (Design Only)" in (
+        market_data_contract
+    )
+    assert "Full-range TASK-059 epoch milliseconds and causal versions map" in market_data_prose
+    assert "hidden second history-row read" in market_data_prose
+    assert "ADR-0031 contains no executable schema" in market_data_prose
     assert "TASK-063 remains queued until TASK-062 is `COMPLETE`" not in market_data_prose
     assert "# ADR 0029: Continuous Public-Trade Stream Persistence Contract" in adr_0029
     assert "- **Status:** Accepted" in adr_0029
@@ -1358,6 +1388,12 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "`EXACT_REQUEST_ONLY` is not retry authority" in adr_0030_prose
     assert "No result means that external evidence bodies were loaded" in adr_0030_prose
     assert "TASK-037 remains blocked and authorization remains denied" in adr_0030_prose
+    assert "# ADR 0031: Continuous Public-Trade Stream Physical Store Architecture" in adr_0031
+    assert "- **Status:** Accepted" in adr_0031
+    assert "one dedicated SQLite database per physical stream-store generation" in adr_0031_prose
+    assert "predecessor witness is deliberate bounded-read redundancy" in adr_0031_prose
+    assert "This ADR intentionally contains no executable DDL" in adr_0031_prose
+    assert "TASK-037" in adr_0031_prose
     assert "Automatic 301, 302, 303, 307, and 308 redirects are rejected" in risk_register
     assert "process-global opener is untouched" in risk_register
     assert "original initial target must be an absolute credential-free HTTPS URL" in risk_register
@@ -1445,6 +1481,13 @@ def test_project_state_references_existing_governance_artifacts() -> None:
         "claim"
     ) in risk_register_prose
     assert "TASK-063 remains queued until TASK-062 is `COMPLETE`" not in risk_register_prose
+    assert "## TASK-063 Physical Store Design Treatment" in risk_register
+    assert "changes no risk state" in risk_register_prose
+    assert "the stream store grants no request budget" in risk_register_prose
+    assert "stores remain separate and non-atomic" in risk_register_prose
+    assert "No schema, adapter, database, migration, or operator-data access is executed" in (
+        risk_register_prose
+    )
     assert "TASK-062 adds only strict finalized-record storage commands/results" in (
         risk_register_prose
     )
@@ -1524,6 +1567,12 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "`UNAVAILABLE` carries no coherent classification" in roadmap_prose
     assert "TASK-062 is complete only as this unused logical contract increment" in roadmap_prose
     assert "TASK-063 is the canonical next action" in roadmap_prose
+    assert "ADR-0031 now records the TASK-063 design-only result" in roadmap_prose
+    assert (
+        "Constraint-bound creation-record, current-record, and predecessor-record witnesses"
+        in roadmap_prose
+    )
+    assert "No schema, database, adapter, path, I/O, runtime" in roadmap_prose
     assert "TASK-063 remains queued until TASK-062 is `COMPLETE`" not in roadmap_prose
     assert "grants no physical implementation authority" in roadmap_prose
     assert "The canonical next action is TASK-037" not in roadmap
