@@ -517,11 +517,12 @@ no coherent store-local classification could be established. No result is extern
 validation, an accepted history attestation, authority, a fence, a budget grant, retry permission,
 durability, recovery evidence, or readiness. TASK-062 adds no physical store, adapter, database,
 schema, migration, I/O, clock, runtime import, automatic retry/action, capacity value, or
-operating-mode change. TASK-063 remains queued until TASK-062 is `COMPLETE`; that proposed
-design-only physical stream-store architecture and evidence plan would resolve exact epoch
-representation, schema/index and transaction mapping, retention/compaction, migration,
-backup/restore, crash evidence, and capacity before any adapter, while granting no physical
-implementation authority. TASK-037 remains blocked and authorization remains denied.
+operating-mode change. TASK-062 is complete only as this unused logical contract increment. The
+canonical next action is TASK-063: a design-only physical stream-store architecture and evidence
+plan resolving exact epoch representation, schema/index and transaction mapping,
+retention/compaction, migration, backup/restore, crash evidence, and capacity before any adapter,
+while granting no physical implementation authority. TASK-037 remains blocked and authorization
+remains denied.
 
 Operators and monitoring tools can read the separate candle collector-service state through a
 dedicated JSON command:

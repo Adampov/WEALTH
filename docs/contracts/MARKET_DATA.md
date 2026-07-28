@@ -732,11 +732,12 @@ acquire a fence, reserve budget, call a provider, admit evidence, or mutate a st
 unavailable storage; it is not retry authority and defines no retry loop, delay, recovery, or
 permission. TASK-062 adds no physical store, adapter, database, schema, migration, I/O, clock,
 evidence-body access, runtime composition, authority, automatic action, capacity, durability,
-recovery, multi-host guarantee, deployment, or readiness. TASK-063 remains queued until TASK-062 is
-`COMPLETE`; that proposed design-only physical stream-store architecture and evidence plan would
-resolve exact epoch representation, schema/index and transaction mapping, retention/compaction,
-migration, backup/restore, crash evidence, and capacity before any adapter, while granting no
-physical implementation authority. TASK-037 remains blocked and authorization remains denied.
+recovery, multi-host guarantee, deployment, or readiness. TASK-062 is complete only as this unused
+logical contract increment. The canonical next action is TASK-063: a design-only physical
+stream-store architecture and evidence plan resolving exact epoch representation, schema/index and
+transaction mapping, retention/compaction, migration, backup/restore, crash evidence, and capacity
+before any adapter, while granting no physical implementation authority. TASK-037 remains blocked
+and authorization remains denied.
 
 ## Canonical Candle
 

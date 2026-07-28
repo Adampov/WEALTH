@@ -254,12 +254,12 @@ carries no coherent classification. None grants authority or constitutes an acce
 TASK-062 selects no physical store and adds no adapter, transaction implementation, database,
 schema, path, migration, I/O, clock, evidence-body access, attestation service, fence, budget,
 runtime, retry loop, automatic action, capacity value, durability, recovery, deployment, or
-readiness claim. TASK-063 remains queued until TASK-062 is `COMPLETE`; it is only a proposed
-design-only physical stream-store architecture and evidence plan resolving exact ADR-0027 epoch
-representation, schema/index and transaction mapping, retention/compaction, migration,
-backup/restore, crash evidence, and capacity before any adapter. It remains separately governed and
-grants no physical implementation authority. TASK-037 remains blocked and authorization remains
-denied.
+readiness claim. TASK-062 is complete only as this unused logical contract increment. TASK-063 is
+the canonical next action and remains only a design-only physical stream-store architecture and
+evidence plan resolving exact ADR-0027 epoch representation, schema/index and transaction mapping,
+retention/compaction, migration, backup/restore, crash evidence, and capacity before any adapter.
+It remains separately governed and grants no physical implementation authority. TASK-037 remains
+blocked and authorization remains denied.
 
 `RISK-005` remains open: the accepted plan selects Python
 datetimes in the fixed `datetime.UTC` zone, fixed microsecond RFC 3339 `Z` text, and derived
