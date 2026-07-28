@@ -263,13 +263,14 @@ blocked and authorization remains denied.
 
 ADR-0031 now records the TASK-063 design-only result: one dedicated local SQLite generation behind
 the unused ADR-0030 port, with Python's standard-library binding, exact signed-64-bit `INTEGER`
-epoch/version values, authoritative original TASK-061 BLOBs, reversible binary identity keys,
-explicit writer transactions, and bounded snapshot reads. Constraint-bound creation-record,
-current-record, and predecessor-record witnesses plus deferred current-tail bindings preserve
-authoritative policy and tail/root state and permit complete validation of an arbitrary
-continuation overlap or `AT_TAIL` without exceeding 100 new history rows plus one logical overlap.
-Exact tail-derived counts avoid signed-64-bit overflow and reject short pages that could conceal a
-retained gap.
+stream-start/version projections, and authoritative original TASK-061 BLOBs for current cursor and
+optional attachment-window epochs that deliberately have no scalar columns. Reversible binary
+identity keys, explicit writer transactions, and bounded snapshot reads complete the proposed
+shape. Constraint-bound creation-record, current-record, and predecessor-record witnesses plus
+deferred current-tail bindings preserve authoritative policy and tail/root state and permit
+complete validation of an arbitrary continuation overlap or `AT_TAIL` without exceeding 100 new
+history rows plus one logical overlap. Exact tail-derived counts avoid signed-64-bit overflow and
+reject short pages that could conceal a retained gap.
 
 This selects only a non-executable physical mapping and fail-closed evidence plan. No schema,
 database, adapter, path, I/O, runtime, durability, recovery, capacity, or readiness exists.

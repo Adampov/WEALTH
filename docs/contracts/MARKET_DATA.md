@@ -744,10 +744,13 @@ and authorization remains denied.
 [ADR-0031](../decisions/0031-continuous-public-trade-stream-physical-store-architecture.md)
 selects one dedicated local SQLite generation behind the unused logical port and Python's
 standard-library `sqlite3` binding. Full-range TASK-059 epoch milliseconds and causal versions map
-to exact signed-64-bit `INTEGER` values without datetime, floating-point, or epoch-microsecond
-projection. Original canonical TASK-061 record and envelope BLOBs remain authority; strict metadata,
-stream/current, immutable-history, UUID, reversible natural-identity, digest, root, and policy
-projections are only access and corruption-detection structures and must reproduce the bytes.
+without loss: the SQL-projected stream-start epoch and causal versions use exact signed-64-bit
+`INTEGER` values, while current cursor and optional attachment-window epochs have no scalar
+columns in version one and remain exact inside authoritative original TASK-061 record and envelope
+BLOBs. No epoch may undergo datetime, floating-point, or epoch-microsecond projection. Strict
+metadata, stream/current, immutable-history, UUID, reversible natural-identity, digest, root, and
+policy projections are only access and corruption-detection structures and must reproduce the
+bytes.
 
 The design uses explicit one-writer transactions and bounded snapshot readers. Create proposes one
 atomic current-plus-creation insert; compare-and-swap proposes one atomic transition append plus

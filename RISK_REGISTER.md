@@ -43,9 +43,11 @@ ADR-0031 adds only a design-level treatment and changes no risk state:
   dedicated stream database's current row and immutable history row atomic. Market, child,
   evidence, lifecycle, health, fence, and budget stores remain separate and non-atomic; crash,
   backup, restore, target-filesystem, and operational evidence remain prerequisites.
-- **RISK-005:** every TASK-059 epoch millisecond and causal version maps exactly to signed-64-bit
-  SQLite `INTEGER` over `0` through `2**63 - 1`, with no datetime, floating-point,
-  epoch-microsecond, truncating, wrapping, or clamping projection. No schema, adapter, database,
+- **RISK-005:** every TASK-059 epoch millisecond remains exact over `0` through `2**63 - 1`. The
+  SQL-projected stream-start epoch and causal versions use signed-64-bit SQLite `INTEGER`; current
+  cursor and optional attachment-window epochs deliberately have no scalar columns and remain
+  exact inside authoritative TASK-061 BLOBs. No datetime, floating-point, epoch-microsecond,
+  truncating, wrapping, or clamping projection is permitted. No schema, adapter, database,
   migration, or operator-data access is executed.
 
 TASK-063 remains the canonical design-only next action until its governed lifecycle completes. It

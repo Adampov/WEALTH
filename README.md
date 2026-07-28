@@ -528,13 +528,15 @@ remains denied.
 
 [ADR-0031](docs/decisions/0031-continuous-public-trade-stream-physical-store-architecture.md)
 selects one dedicated local SQLite generation behind the unused ADR-0030 port, accessed through
-Python's standard-library `sqlite3` binding. The design maps every full-range TASK-059 epoch
-millisecond and causal version to an exact signed-64-bit `INTEGER`; original canonical TASK-061
-record and envelope BLOBs remain authority. A versioned metadata marker, immutable stream identity
-and policy projections, one current row, and append-only history provide the proposed physical
-shape. Explicit `BEGIN IMMEDIATE` writer transactions, WAL snapshot readers, `synchronous=FULL`,
-UUID and reversible binary natural-identity uniqueness, and closed failure mapping preserve the
-logical one-winner contract without adding retry authority.
+Python's standard-library `sqlite3` binding. The design maps the SQL-projected stream-start epoch
+and every causal version to exact signed-64-bit `INTEGER` values. Current cursor and optional
+attachment-window epochs have no scalar columns in version one; they remain exact inside the
+authoritative original TASK-061 record and envelope BLOBs and are decoded and range-checked from
+those bytes. A versioned metadata marker, immutable stream identity and policy projections, one
+current row, and append-only history provide the proposed physical shape. Explicit
+`BEGIN IMMEDIATE` writer transactions, WAL snapshot readers, `synchronous=FULL`, UUID and
+reversible binary natural-identity uniqueness, and closed failure mapping preserve the logical
+one-winner contract without adding retry authority.
 
 The stream row carries constraint-bound exact creation-record and current-record witnesses, and
 each transition carries a constraint-bound exact predecessor-record witness. These immutable

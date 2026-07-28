@@ -38,10 +38,21 @@ def test_adr_0031_selects_one_bounded_dedicated_sqlite_design() -> None:
 
 
 def test_adr_0031_preserves_exact_bytes_identity_and_full_epoch_range() -> None:
+    source = _source()
     prose = _prose()
 
     assert "epoch milliseconds: `0` through `9223372036854775807`" in prose
     assert "causal versions: `1` through `9223372036854775807`" in prose
+    assert "selects only `stream_start_epoch_ms` as an epoch-valued SQL scalar projection" in prose
+    assert (
+        "Current `cursor_epoch_ms` and optional attachment `window_start_epoch_ms` and "
+        "`window_end_epoch_ms` are deliberately not SQL scalar projections"
+    ) in prose
+    assert "History rows likewise have no scalar cursor or attachment-window columns" in prose
+    assert (
+        "Every TASK-059 epoch-millisecond coordinate and every causal version is stored"
+        not in source
+    )
     assert "No epoch value is converted to `datetime`" in prose
     assert "floating point" in prose
     assert "epoch microseconds" in prose

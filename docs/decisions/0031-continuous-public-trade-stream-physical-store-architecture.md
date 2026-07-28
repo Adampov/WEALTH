@@ -205,17 +205,26 @@ No connection proceeds when a required setting cannot be established.
 
 ### Exact epoch and scalar representation
 
-Every TASK-059 epoch-millisecond coordinate and every causal version is stored as `INTEGER NOT
-NULL` with an explicit range constraint:
+Every TASK-059 epoch-millisecond coordinate remains exact across the frozen accepted range. The
+version-one physical descriptor selects only `stream_start_epoch_ms` as an epoch-valued SQL scalar
+projection. That projection and every causal version projection use `INTEGER NOT NULL` with an
+explicit range constraint:
 
 - epoch milliseconds: `0` through `9223372036854775807`;
 - causal versions: `1` through `9223372036854775807`; and
 - optional prior versions: SQL `NULL` only where the version-one creation record requires null.
 
-No epoch value is converted to `datetime`, RFC 3339 text, floating point, seconds,
-epoch microseconds, unsigned arithmetic, or a generated time column. The adapter accepts and binds
-only an exact built-in Python `int`, rejects `bool` and subclasses before SQLite, and requires the
-read-back SQLite storage class and integer value to agree exactly.
+Current `cursor_epoch_ms` and optional attachment `window_start_epoch_ms` and
+`window_end_epoch_ms` are deliberately not SQL scalar projections in version one. They remain
+exact inside the authoritative original TASK-061 record and envelope BLOBs and are decoded,
+range-checked, and cross-checked whenever those BLOBs are validated. TASK-064 must not invent
+cursor or attachment-window columns without a successor architecture decision.
+
+No epoch value is converted to `datetime`, RFC 3339 text, floating point, seconds, epoch
+microseconds, unsigned arithmetic, or a generated time column, whether it is projected or embedded.
+For each SQL integer projection, the adapter accepts and binds only an exact built-in Python `int`,
+rejects `bool` and subclasses before SQLite, and requires the read-back SQLite storage class and
+integer value to agree exactly.
 
 Fixed-UTC `recorded_at` values remain inside original TASK-061 record BLOBs. Causal ordering is the
 integer successor version, never textual or wall-clock ordering.
@@ -303,6 +312,11 @@ The complete effective policy projection contains exactly the TASK-061 version-o
 `policy_fingerprint`. Strings use reversible BLOB atoms; integers use exact signed-64-bit
 INTEGERs.
 
+The stream row has no scalar column for the current cursor or optional attachment-window
+coordinates. Those values are reconstructed only by decoding the exact current-record and current
+envelope BLOBs, which must agree byte-for-byte with the immutable current history tail and satisfy
+the frozen TASK-059/TASK-061 validators.
+
 Identity, policy, start, creation-witness, and internal-key fields are immutable. A schema mutation
 guard permits only the current version, current-record bytes/digest, current-envelope bytes/digest,
 and root to change and requires the version to increase by exactly one. No normal delete exists.
@@ -348,6 +362,10 @@ key to the stream row. Each row contains:
 - successor rolling-history-root BLOB; and
 - no copied external evidence body, accepted attestation, clock value, operator data, or
   permission.
+
+History rows likewise have no scalar cursor or attachment-window columns. Each retained
+successor's coordinates are reconstructed only from its exact canonical record and envelope BLOBs
+and must pass the same full-range validation before contributing to any result.
 
 The pair `(stream foreign key, successor version)` is unique and indexed in that order. This is the
 only range-access path required by audit. A second composite unique key over
@@ -400,7 +418,7 @@ can contain 16 KiB envelope and 64 KiB record values. The small singleton metada
 |---|---|
 | `ContinuousPublicTradeStreamIdentityV1` | UUID BLOB, reversible natural key, stream-contract/start/policy projections in the stream row; exact fields are revalidated from the constraint-bound creation-record and current-record witnesses. |
 | `ContinuousPublicTradeStreamExpectationV1` | Invocation-only; never persisted. It is revalidated before opening a transaction and compared with stream projections plus authoritative decoded entries where required. |
-| `ContinuousPublicTradeStreamStoredEnvelopeV1` | Original envelope BLOB plus exact digest projection in current and history; decoded value is reconstructed only through TASK-061 and must equal the envelope embedded in the current-record witness. |
+| `ContinuousPublicTradeStreamStoredEnvelopeV1` | Original envelope BLOB plus exact digest projection in current and history; decoded value, including cursor and optional attachment-window epochs that have no SQL scalar projections, is reconstructed only through TASK-061 and must equal the envelope embedded in the current-record witness. |
 | `ContinuousPublicTradeStreamStoredCreationV1` | Immutable history version one: original creation-record BLOB/digest, original successor-envelope BLOB/digest, initial root; governed-create scope is deterministically rederived and checked, and the stream creation witness must match byte for byte. |
 | `ContinuousPublicTradeStreamStoredTransitionV1` | Immutable history version greater than one: original transition BLOB/digest, original successor-envelope BLOB/digest, prior projections, exact constraint-bound predecessor-record witness BLOB/digest, next root; transition/completion scopes are deterministically rederived and checked. |
 | create/CAS commands | Invocation-only finalized values. The adapter revalidates them before storage and persists only their exact authoritative entry plus required projections. |
