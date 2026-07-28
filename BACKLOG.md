@@ -6,64 +6,66 @@ promoted through review.
 
 ## Next Action
 
-### TASK-062 — Pure continuous public-trade logical stream-store port and outcome contracts
+### TASK-063 — Continuous public-trade physical stream-store architecture and evidence plan
 
-- **Key:** `phase2.continuous_public_trade_stream_store_port_contracts`
+- **Key:** `phase2.continuous_public_trade_stream_physical_store_architecture`
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
-- **Human approval:** NOT REQUIRED for the bounded implementation, verification, review, and draft
-  publication. Exact owner approval naming the pull request and current head commit remains required
-  before merge.
-- **Context:** TASK-061 is complete and freezes the canonical persistence records and bytes.
-  ADR-0029 still has no store port. TASK-062 may define only the unused provider-independent logical
-  boundary that accepts already-finalized TASK-061 creation and transition records.
-- **Goal:** Freeze one strict, bounded, fail-closed logical stream-store protocol with exact retained
-  bytes, atomic ownership obligations, closed outcomes, and deterministic tests, without selecting
-  or implementing physical storage.
-- **Scope:** Add ADR-0030, one unused port module, a deterministic test-only fake/spy, documentation,
-  and coordinated governance. Define strict identity and complete-policy expectations; stored
-  envelope, creation, transition, and history values; create, current-load, compare-and-swap, audit,
-  receipt, result, and retry-disposition contracts; and the public
-  `validate_continuous_public_trade_stream_audit_page` query/page validator. Preserve original
-  TASK-061 canonical bytes as authoritative. Require UUID and natural-identity uniqueness, one
-  logical atomic create, one-winner compare-and-swap, exact historical duplicate classification,
-  constant-size current views, and audit returns of 1 through 100 new records with at most one
-  predecessor overlap.
-- **Files:** `docs/decisions/0030-continuous-public-trade-stream-store-port-contract.md`,
-  `docs/decisions/README.md`, `src/wealth/ports/continuous_public_trade_stream_store.py`,
-  `tests/unit/test_continuous_public_trade_stream_store_port_contracts.py`, `README.md`,
-  `docs/contracts/MARKET_DATA.md`, `docs/ROADMAP.md`, `PROJECT_STATE.json`, `BACKLOG.md`,
-  `RISK_REGISTER.md`, and governance tests only.
-- **Constraints:** No production adapter or fake, repository implementation, database, schema,
-  migration, path/configuration, filesystem/network/provider I/O, runtime import, clock, UUID
-  generation, successor construction, evidence-body or attestation access, outer fence/lease,
-  request-budget use, retry/recovery action, credential, permission, capacity/durability/readiness
-  claim, deployment, or operating-mode change. Do not alter TASK-059 behavior or TASK-061 bytes.
-  TASK-037 remains blocked and authorization remains denied.
+- **Human approval:** NOT REQUIRED — architecture, evidence planning, documentation, and
+  coordinated governance only; no adapter, database, schema execution, runtime, operator data,
+  permission, or operating-mode change.
+- **Context:** TASK-062 is complete after exact owner approval, PR #63 merge commit
+  `6b959670e1737bd10585b437786d06408a22e31d`, and successful required target-branch CI run
+  `30373228787`. ADR-0030 now freezes the unused logical store port, exact retained-byte wrappers,
+  commands, queries, closed outcomes, atomic ownership, and bounded audit state machine. Physical
+  implementation remains prohibited until one reviewed design resolves technology, exact epoch
+  representation, transaction/schema/index mapping, retention, migration, backup/restore, crash
+  evidence, and capacity prerequisites without weakening ADR-0029 or ADR-0030.
+- **Goal:** Review ADR-0029 and ADR-0030 narrowly and record one evidence-backed physical
+  single-host stream-store architecture and implementation-readiness plan, selecting or explicitly
+  deferring each material storage choice before any adapter or schema is implemented.
+- **Scope:** Add one design decision and coordinated documentation/governance. Inventory the
+  logical-to-physical mapping for exact original TASK-061 bytes, decoded values, digests, rolling
+  roots, immutable history, current state, UUID and natural-identity uniqueness, one-winner
+  compare-and-swap, bounded current reads, and 1-through-100 audit pages with one predecessor
+  overlap. Resolve exact full-range epoch-millisecond representation; transaction and concurrency
+  semantics; typed unsupported/corrupt/unavailable mapping; crash and lost-acknowledgement
+  evidence; forward migration and rollback; retention/compaction constraints; backup/restore
+  verification; and the finite capacity/performance evidence required before implementation.
+- **Files:** `docs/decisions/0031-continuous-public-trade-stream-physical-store-architecture.md`,
+  `docs/decisions/README.md`, `README.md`, `docs/contracts/MARKET_DATA.md`, `docs/ROADMAP.md`,
+  `PROJECT_STATE.json`, `BACKLOG.md`, `RISK_REGISTER.md`, and governance tests only.
+- **Constraints:** No production source or adapter, repository implementation, executable DDL,
+  database or schema creation, migration execution, path/configuration, filesystem/network/provider
+  I/O, benchmark against operator data, runtime composition/import, clock, evidence-body or
+  attestation access, outer fence/lease, request-budget use, retry/recovery action, child or stream
+  action, credential, permission, notification, capacity/readiness claim, deployment, or Phase 2
+  claim. Do not alter TASK-059 behavior, TASK-061 bytes, or TASK-062 port semantics. Preserve
+  ADR-0027's full-range issue, ADR-0028, TASK-037 denial, and Stage 3.
 
 Acceptance gates:
 
-1. ADR-0030 freezes the exact public values, operations, outcomes, retry dispositions, bounded
-   audit state machine, public query/page validator, validation ownership, and safety exclusions.
-2. Original TASK-061 canonical bytes remain authoritative and every decoded value, digest, evidence
-   scope, embedded successor, predecessor link, and rolling root is cross-validated.
-3. Create and compare-and-swap expose only logical atomic ownership; exact duplicate, conflict,
-   absence, identity conflict, anchor conflict, unsupported version, corruption, and unavailability
-   remain distinct and grant no retry or action authority.
-4. Current results require only bounded creation/current/direct-predecessor material. The port
-   returns at most 100 new audit records plus one exact continuation overlap; a future adapter must
-   separately prove the same physical-read bound.
-5. Strict hostile, mutation, signature, concurrency, policy-drift, retained-corruption, boundary,
-   audit, and lifecycle tests pass without database, filesystem, network, provider, or clock work.
-6. No physical capability, dependency, lockfile change, runtime import, authority, action,
-   durability, recovery, capacity, readiness, deployment, Phase 2 claim, or TASK-037 authorization
-   enters the change.
-7. Formatting, lint, strict typing, complete tests, lockfile verification, dependency audit, local
-   health, independent review, final-diff inspection, and CI pass for the exact published commit.
-8. TASK-062 becomes `COMPLETE`, and TASK-063 may become the canonical next action, only after exact
-   merge approval, verified target-branch merge, green required target CI, and a truthful
-   post-merge governance synchronization.
+1. ADR-0031 maps every ADR-0030 logical value and operation to one explicit physical design or a
+   named unresolved prerequisite without implementing it.
+2. Original TASK-061 canonical bytes remain authoritative; no generic serializer, reconstructed
+   model, text collation, or alternate digest replaces exact retained bytes.
+3. Full-range TASK-059 epoch milliseconds are represented exactly or implementation remains
+   blocked; no datetime, floating-point, epoch-microsecond, truncating, wrapping, or clamping
+   projection is permitted.
+4. Current state, immutable creation/transition history, UUID and natural-identity uniqueness,
+   atomic create, one-winner compare-and-swap, exact duplicate classification, and bounded audit
+   access have explicit transaction, table/index, and corruption-check designs.
+5. Unsupported-version, corrupt, unavailable, conflict, absence, identity-conflict, and
+   anchor-conflict mappings remain distinct and no failure becomes create or retry authority.
+6. Crash/lost-acknowledgement, migration/rollback, backup/restore, retention/compaction, and finite
+   capacity/performance evidence are specified as preimplementation gates with owners and
+   fail-closed dispositions.
+7. The decision adds no physical capability, I/O, dependency, lockfile change, runtime import,
+   authority, action, durability, recovery, capacity, readiness, or Phase 2 claim. TASK-037 remains
+   blocked and authorization remains denied.
+8. Documentation, governance assertions, formatting, lint, strict typing, complete tests,
+   lockfile verification, dependency audit, health slice, and CI pass.
 
 ## Blocked, Awaiting Owner-Supplied Restricted Inputs
 
@@ -118,6 +120,53 @@ Acceptance gates:
    all repository gates pass.
 
 ## Recently Completed
+
+### TASK-062 — Pure continuous public-trade logical stream-store port and outcome contracts
+
+- **Key:** `phase2.continuous_public_trade_stream_store_port_contracts`
+- **Risk tier:** RISK 1 — DEVELOPMENT
+- **Status:** COMPLETE
+- **Merge evidence:** Owner-approved PR
+  [#63](https://github.com/Adampov/WEALTH/pull/63), accepted head
+  `21c3171de68ee5ec42eeff82ce1171008f2e854b`, merge commit
+  `6b959670e1737bd10585b437786d06408a22e31d`, and successful required target-branch CI run
+  [30373228787](https://github.com/Adampov/WEALTH/actions/runs/30373228787).
+- **Files:** `docs/decisions/0030-continuous-public-trade-stream-store-port-contract.md`,
+  `docs/decisions/README.md`, `src/wealth/ports/continuous_public_trade_stream_store.py`,
+  `tests/unit/test_continuous_public_trade_stream_store_port_contracts.py`, `README.md`,
+  `docs/contracts/MARKET_DATA.md`, `docs/ROADMAP.md`, `PROJECT_STATE.json`, `BACKLOG.md`,
+  `RISK_REGISTER.md`, and governance tests only.
+- **Result:** ADR-0030 and one unused provider-independent port module freeze a lower-level logical
+  store boundary around exact finalized TASK-061 creation and transition artifacts. Strict frozen
+  identity, complete-policy expectation, original canonical-envelope and history-record wrappers,
+  create/load/compare-and-swap commands, separate bounded audit queries, receipts, current views,
+  pages, closed outcomes, retry dispositions, and the public
+  `validate_continuous_public_trade_stream_audit_page` query/page validator reject coercion, hidden
+  state, malformed bytes/digests/roots, incomplete policy, and cross-command disagreement.
+
+  Create logically owns one atomic current-plus-creation insertion under UUID and natural-identity
+  uniqueness. Compare-and-swap logically owns one exact current replacement plus one immutable
+  transition append with one winner. The finalized transition record is the sole successor source;
+  callers cannot supply a second successor, timestamp, attachment payload, or independent
+  successor digest. Exact historical retries are `DUPLICATE`; stale, missing, mismatched, or
+  competing mutations are `CONFLICT`. Absence, identity conflict, unsupported versions,
+  corruption, anchor conflict, and storage unavailability remain distinct.
+
+  Current views require only constant-size creation/current/direct-predecessor material. Audit
+  results return 1 through 100 new records, use no overlap initially and exactly one predecessor on
+  continuation, and return `AT_TAIL` instead of an empty page. A conforming future adapter must
+  separately prove that it obtains each page without reading beyond the same 100-new-record plus
+  one-overlap bound. Original TASK-061 bytes remain authoritative throughout. Every output is a
+  store-local classification; only accepted receipts, `FOUND`, `PAGE`, and a validated `AT_TAIL`
+  anchor carry bounded structural evidence, while `UNAVAILABLE` carries no coherent
+  classification.
+
+  The port performs no I/O and is not imported by runtime composition. It validates only
+  store-local structure; it does not sample time, construct a successor, access evidence bodies,
+  validate or create an accepted attestation, grant authority, retry automatically, implement a
+  physical store, or claim capacity, durability, recovery, multi-host safety, continuous-operation
+  readiness, deployment, Phase 2 completion, or risk closure. TASK-037 remains blocked and
+  authorization remains denied.
 
 ### TASK-061 — Pure versioned continuous public-trade persistence-record and canonical-codec contracts
 
@@ -1092,11 +1141,6 @@ Acceptance gates:
 
 ## Queued, Not Yet Approved
 
-- TASK-063 may define a design-only continuous public-trade physical stream-store architecture and
-  evidence plan after TASK-062 is `COMPLETE`. It must resolve or explicitly defer exact epoch
-  representation, schema/index and transaction mapping, retention/compaction, migration,
-  backup/restore, crash evidence, and finite capacity prerequisites without adding an adapter,
-  database, schema execution, I/O, runtime, authority, durability, or readiness claim.
 - Implement a physical continuous public-trade stream store only after TASK-063 resolves the
   exact physical architecture and every required epoch, schema/index, transaction, retention,
   migration, backup/restore, crash-evidence, and capacity prerequisite with the required reviews

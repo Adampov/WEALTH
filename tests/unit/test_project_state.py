@@ -122,23 +122,26 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert "continuous_public_trade_stream_persistence_codec_contracts" in state.active_components
     assert "continuous_public_trade_stream_store_port_contracts" in state.active_components
     assert len(state.open_tasks) == 2
-    task_037, task_062 = state.open_tasks
+    task_037, task_063 = state.open_tasks
     assert task_037.task_id == "TASK-037"
     assert task_037.status == "blocked"
     assert task_037.risk_tier == 3
     assert task_037.requires_human_approval is True
-    assert task_062.task_id == "TASK-062"
-    assert task_062.action == "phase2.continuous_public_trade_stream_store_port_contracts"
-    assert task_062.status == "ready"
-    assert task_062.risk_tier == 1
-    assert task_062.requires_human_approval is False
+    assert task_063.task_id == "TASK-063"
+    assert task_063.action == "phase2.continuous_public_trade_stream_physical_store_architecture"
+    assert task_063.status == "ready"
+    assert task_063.risk_tier == 1
+    assert task_063.requires_human_approval is False
     assert state.blockers == (
         "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance "
         "location before independent Risk and Security review and the project-owner decision; "
         "authorization remains denied.",
     )
-    assert state.next_action.task_id == "TASK-062"
-    assert state.next_action.action == "phase2.continuous_public_trade_stream_store_port_contracts"
+    assert state.next_action.task_id == "TASK-063"
+    assert (
+        state.next_action.action
+        == "phase2.continuous_public_trade_stream_physical_store_architecture"
+    )
     assert any(decision.decision_id == "ADR-0029" for decision in state.recent_decisions)
     assert any(decision.decision_id == "ADR-0030" for decision in state.recent_decisions)
 
@@ -265,10 +268,14 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_061_section = completed_section.split("### TASK-061 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
-    task_062_section = next_action_section
+    task_062_section = completed_section.split("### TASK-062 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
+    task_063_section = next_action_section
     next_action_prose = collapse_whitespace(next_action_section)
     task_060_prose = collapse_whitespace(task_060_section)
     task_061_prose = collapse_whitespace(task_061_section)
+    task_062_prose = collapse_whitespace(task_062_section)
     root_readme_prose = collapse_whitespace(root_readme)
     market_data_prose = collapse_whitespace(market_data_contract)
     risk_register_prose = collapse_whitespace(risk_register)
@@ -281,38 +288,68 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    assert (
-        "Exact owner approval naming the pull request and current head commit" in next_action_prose
+    assert "`phase2.continuous_public_trade_stream_physical_store_architecture`" in (
+        task_063_section
     )
-    assert "unused provider-independent logical boundary" in next_action_prose
-    assert "already-finalized TASK-061 creation and transition records" in next_action_prose
-    assert "`validate_continuous_public_trade_stream_audit_page`" in next_action_section
-    assert "TASK-061 canonical bytes as authoritative" in next_action_prose
-    assert "UUID and natural-identity uniqueness" in next_action_prose
-    assert "audit returns of 1 through 100 new records" in next_action_prose
-    assert "No production adapter or fake" in next_action_prose
+    assert "TASK-062 is complete after exact owner approval" in next_action_prose
+    assert "PR #63 merge commit `6b959670e1737bd10585b437786d06408a22e31d`" in (next_action_prose)
+    assert "successful required target-branch CI run `30373228787`" in next_action_prose
+    assert (
+        "architecture, evidence planning, documentation, and coordinated governance only"
+        in next_action_prose
+    )
+    assert "physical stream-store architecture and evidence plan" in next_action_prose
+    assert "exact epoch representation" in next_action_prose
+    assert "transaction/schema/index mapping" in next_action_prose
+    assert "retention/compaction" in next_action_prose
+    assert "migration" in next_action_prose
+    assert "backup/restore" in next_action_prose
+    assert "crash evidence" in next_action_prose
+    assert "finite capacity/performance evidence" in next_action_prose
+    assert "No production source or adapter" in next_action_prose
+    assert "database or schema creation" in next_action_prose
     assert "filesystem/network/provider I/O" in next_action_prose
-    assert "Do not alter TASK-059 behavior or TASK-061 bytes" in next_action_prose
-    assert "TASK-037" in next_action_prose
-    assert "authorization remains denied" in next_action_prose
-    assert "grant no retry or action authority" in next_action_prose
-    assert "returns at most 100 new audit records plus one exact continuation overlap" in (
+    assert "Do not alter TASK-059 behavior, TASK-061 bytes, or TASK-062 port semantics" in (
         next_action_prose
     )
-    assert "future adapter must separately prove the same physical-read bound" in next_action_prose
+    assert "TASK-037" in next_action_prose
+    assert "authorization remains denied" in next_action_prose
     assert (
-        "No physical capability, dependency, lockfile change, runtime import" in next_action_prose
+        "The decision adds no physical capability, I/O, dependency, lockfile change, runtime import"
+        in next_action_prose
     )
-    assert "exact published commit" in next_action_prose
-    assert "verified target-branch merge" in next_action_prose
-    assert "post-merge governance synchronization" in next_action_prose
-    assert "- **Status:** READY" in task_062_section
+    assert "- **Status:** COMPLETE" in task_062_section
     assert "`phase2.continuous_public_trade_stream_store_port_contracts`" in task_062_section
-    assert "TASK-063 may define a design-only continuous public-trade physical stream-store" in (
-        queued_section
-    )
-    assert "after TASK-062 is `COMPLETE`" in queued_section
-    assert "without adding an adapter" in queued_section
+    assert "Owner-approved PR" in task_062_prose
+    assert "accepted head `21c3171de68ee5ec42eeff82ce1171008f2e854b`" in task_062_prose
+    assert "merge commit `6b959670e1737bd10585b437786d06408a22e31d`" in task_062_prose
+    assert "successful required target-branch CI run" in task_062_prose
+    assert "unused provider-independent port module" in task_062_prose
+    assert "exact finalized TASK-061 creation and transition artifacts" in task_062_prose
+    assert "`validate_continuous_public_trade_stream_audit_page`" in task_062_section
+    assert "Original TASK-061 bytes remain authoritative" in task_062_prose
+    assert "UUID and natural-identity uniqueness" in task_062_prose
+    assert "Audit results return 1 through 100 new records" in task_062_prose
+    assert "Exact historical retries are `DUPLICATE`" in task_062_prose
+    assert "competing mutations are `CONFLICT`" in task_062_prose
+    assert (
+        "Absence, identity conflict, unsupported versions, corruption, anchor conflict, and "
+        "storage unavailability remain distinct"
+    ) in task_062_prose
+    assert "Every output is a store-local classification" in task_062_prose
+    assert (
+        "only accepted receipts, `FOUND`, `PAGE`, and a validated `AT_TAIL` anchor carry bounded "
+        "structural evidence"
+    ) in task_062_prose
+    assert "`UNAVAILABLE` carries no coherent classification" in task_062_prose
+    assert "100-new-record plus one-overlap bound" in task_062_prose
+    assert "A conforming future adapter must separately prove" in task_062_prose
+    assert "The port performs no I/O and is not imported by runtime composition" in task_062_prose
+    assert "TASK-063 may define" not in queued_section
+    assert "### TASK-063" not in queued_section
+    assert queued_section.count("\n- ") == 2
+    assert "Implement a physical continuous public-trade stream store" in queued_section
+    assert "Implement continuous public-trade runtime collection" in queued_section
     assert "- **Status:** COMPLETE" in task_061_section
     assert "`phase2.continuous_public_trade_stream_persistence_codec_contracts`" in task_061_section
     assert "side-effect-free domain module" in task_061_prose
@@ -1182,7 +1219,11 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "`UNAVAILABLE` explicitly means that no coherent store-local classification" in (
         root_readme_prose
     )
-    assert "TASK-063 remains queued until TASK-062 is `COMPLETE`" in root_readme_prose
+    assert "TASK-062 is complete only as this unused logical contract increment" in (
+        root_readme_prose
+    )
+    assert "canonical next action is TASK-063" in root_readme_prose
+    assert "TASK-063 remains queued until TASK-062 is `COMPLETE`" not in root_readme_prose
     assert "## Continuous Public-Trade Persistence Records and Codecs (Unused)" in (
         market_data_prose
     )
@@ -1220,7 +1261,11 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "`validate_continuous_public_trade_stream_audit_page`" in market_data_prose
     assert "All outputs are store-local classifications" in market_data_prose
     assert "`UNAVAILABLE` explicitly carries no coherent classification" in market_data_prose
-    assert "TASK-063 remains queued until TASK-062 is `COMPLETE`" in market_data_prose
+    assert "TASK-062 is complete only as this unused logical contract increment" in (
+        market_data_prose
+    )
+    assert "canonical next action is TASK-063" in market_data_prose
+    assert "TASK-063 remains queued until TASK-062 is `COMPLETE`" not in market_data_prose
     assert "# ADR 0029: Continuous Public-Trade Stream Persistence Contract" in adr_0029
     assert "- **Status:** Accepted" in adr_0029
     assert "### Exact durable TASK-059 stream state" in adr_0029
@@ -1394,7 +1439,12 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "six domain-separated digest/history contracts" in risk_register_prose
     assert "TASK-062 now freezes only an unused logical store port" in risk_register_prose
     assert "one-winner compare-and-swap ownership" in risk_register_prose
-    assert "TASK-063 remains queued until TASK-062 is `COMPLETE`" in (risk_register_prose)
+    assert "TASK-063 is now the canonical next design-only" in risk_register_prose
+    assert (
+        "it authorizes no adapter, database, implementation, capacity, durability, or readiness "
+        "claim"
+    ) in risk_register_prose
+    assert "TASK-063 remains queued until TASK-062 is `COMPLETE`" not in risk_register_prose
     assert "TASK-062 adds only strict finalized-record storage commands/results" in (
         risk_register_prose
     )
@@ -1472,7 +1522,9 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "`validate_continuous_public_trade_stream_audit_page` function" in roadmap_prose
     assert "Every output is a store-local classification" in roadmap_prose
     assert "`UNAVAILABLE` carries no coherent classification" in roadmap_prose
-    assert "TASK-063 remains queued until TASK-062 is `COMPLETE`" in roadmap_prose
+    assert "TASK-062 is complete only as this unused logical contract increment" in roadmap_prose
+    assert "TASK-063 is the canonical next action" in roadmap_prose
+    assert "TASK-063 remains queued until TASK-062 is `COMPLETE`" not in roadmap_prose
     assert "grants no physical implementation authority" in roadmap_prose
     assert "The canonical next action is TASK-037" not in roadmap
 
