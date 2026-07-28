@@ -36,7 +36,9 @@ This decision freezes:
 - a dedicated local SQLite database as the proposed physical technology;
 - a non-executable version-one physical descriptor for metadata, current state, immutable history,
   indexes, constraints, and mutation guards;
-- exact signed-64-bit integer epoch-millisecond storage with no datetime or precision projection;
+- exact full-range epoch retention, with stream-start as a signed-64-bit integer projection and
+  current cursor and attachment-window epochs only inside authoritative BLOBs, with no datetime or
+  precision projection;
 - reversible binary UUID and natural-identity keys;
 - canonical-BLOB authority and non-authoritative index/projection rules;
 - coherent create, current-load, compare-and-swap, duplicate, and bounded-audit transaction plans;
@@ -63,7 +65,9 @@ TASK-037 remains blocked and authorization remains denied.
 - Every ADR 0030 public value and operation has one physical mapping or an explicit
   preimplementation prerequisite.
 - Exact TASK-061 bytes remain authoritative and every stored projection is revalidated.
-- `0` through `2**63 - 1` epoch milliseconds remain exact SQLite integers.
+- `0` through `2**63 - 1` epoch milliseconds remain exact: stream-start uses a SQLite integer
+  projection, while current cursor and attachment-window epochs remain inside authoritative
+  TASK-061 BLOBs without scalar projections.
 - Create and compare-and-swap each use one SQLite transaction with exact uniqueness and one-winner
   semantics; no upsert, replacement, repair, or hidden retry exists.
 - Current reads remain constant-size and page-range materialization never exceeds 100 new history

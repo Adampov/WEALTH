@@ -53,6 +53,16 @@ def test_adr_0031_preserves_exact_bytes_identity_and_full_epoch_range() -> None:
         "Every TASK-059 epoch-millisecond coordinate and every causal version is stored"
         not in source
     )
+    assert "exact signed-64-bit integer epoch-millisecond storage" not in source
+    assert "`0` through `2**63 - 1` epoch milliseconds remain exact SQLite integers" not in source
+    assert (
+        "exact full-range epoch retention, with stream-start as a signed-64-bit integer projection"
+        in prose
+    )
+    assert (
+        "`0` through `2**63 - 1` epoch milliseconds remain exact: stream-start uses a SQLite "
+        "integer projection"
+    ) in prose
     assert "No epoch value is converted to `datetime`" in prose
     assert "floating point" in prose
     assert "epoch microseconds" in prose
