@@ -26,6 +26,32 @@ version, candidate child UUID, and effective child-policy fingerprint. The trust
 transition and rolling root bind the resulting successor and creation fingerprint after the single
 clock sample.
 
+## TASK-063 Physical Store Design Treatment
+
+ADR-0031 adds only a design-level treatment and changes no risk state:
+
+- **RISK-001:** a dedicated local SQLite design preserves exact TASK-061 bytes, immutable
+  identity/policy bindings, closed failures, and bounded audits; it adds no provider path,
+  automatic retry, recovery, durability, capacity, or continuous-operation claim.
+- **RISK-002:** canonical records and exact byte projections do not inspect provider payloads,
+  detect schema drift, or grant hold/resume authority. TASK-057 fixtures, parser limits, and the
+  manual pause/review/resume boundary remain required.
+- **RISK-003:** host quota, `max_page_count`, WAL/checkpoint bounds, maximum reader duration,
+  workload, latency, and storage reserve remain mandatory unproved finite gates. A page size or
+  theoretical SQLite limit is not capacity evidence, and the stream store grants no request budget.
+- **RISK-004:** the proposed transaction and deferred witness/tail bindings can make only the
+  dedicated stream database's current row and immutable history row atomic. Market, child,
+  evidence, lifecycle, health, fence, and budget stores remain separate and non-atomic; crash,
+  backup, restore, target-filesystem, and operational evidence remain prerequisites.
+- **RISK-005:** every TASK-059 epoch millisecond and causal version maps exactly to signed-64-bit
+  SQLite `INTEGER` over `0` through `2**63 - 1`, with no datetime, floating-point,
+  epoch-microsecond, truncating, wrapping, or clamping projection. No schema, adapter, database,
+  migration, or operator-data access is executed.
+
+TASK-063 remains the canonical design-only next action until its governed lifecycle completes. It
+authorizes no adapter, database, implementation, capacity, durability, recovery, readiness, or
+operating-mode change. TASK-037 remains blocked and authorization remains denied.
+
 ## Escalation
 
 - A new critical risk, suspected credential exposure, corrupt trusted evidence, or bypassed safety

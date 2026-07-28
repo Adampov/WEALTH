@@ -43,3 +43,4 @@ Each ADR records the context, decision, consequences, alternatives, and follow-u
 - `0028-continuous-public-trade-collection-operating-contract.md`
 - `0029-continuous-public-trade-stream-persistence-contract.md`
 - `0030-continuous-public-trade-stream-store-port-contract.md`
+- `0031-continuous-public-trade-stream-physical-store-architecture.md`

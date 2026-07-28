@@ -524,6 +524,35 @@ retention/compaction, migration, backup/restore, crash evidence, and capacity be
 while granting no physical implementation authority. TASK-037 remains blocked and authorization
 remains denied.
 
+## Continuous Public-Trade Physical Stream-Store Architecture (Design Only)
+
+[ADR-0031](docs/decisions/0031-continuous-public-trade-stream-physical-store-architecture.md)
+selects one dedicated local SQLite generation behind the unused ADR-0030 port, accessed through
+Python's standard-library `sqlite3` binding. The design maps every full-range TASK-059 epoch
+millisecond and causal version to an exact signed-64-bit `INTEGER`; original canonical TASK-061
+record and envelope BLOBs remain authority. A versioned metadata marker, immutable stream identity
+and policy projections, one current row, and append-only history provide the proposed physical
+shape. Explicit `BEGIN IMMEDIATE` writer transactions, WAL snapshot readers, `synchronous=FULL`,
+UUID and reversible binary natural-identity uniqueness, and closed failure mapping preserve the
+logical one-winner contract without adding retry authority.
+
+The stream row carries constraint-bound exact creation-record and current-record witnesses, and
+each transition carries a constraint-bound exact predecessor-record witness. These immutable
+copies let a later-version continuation establish authoritative policy and tail/root state and let
+its overlap or `AT_TAIL` result undergo complete TASK-061 link validation without fetching a second
+logical overlap or exceeding 100 new rows plus one overlap. Deferred tail bindings and exact
+byte-equality guards prevent normal schema writes from splitting current state from immutable
+history. The witnesses are redundant bounded-read corruption evidence, not authority or additional
+page records.
+
+This is a non-executable design and evidence plan only. It creates no schema, database, adapter,
+path, configuration, I/O, runtime, clock, fence, budget, recovery action, durability, capacity, or
+readiness claim. Preserve-all retention, separate-generation migration, verified online backup and
+independent restore, crash/lost-acknowledgement tests, query-bound proof, target-filesystem
+durability evidence, and finite capacity evidence all remain fail-closed prerequisites. TASK-063
+remains the canonical next action until its governed lifecycle completes; TASK-037 remains blocked
+and authorization remains denied.
+
 Operators and monitoring tools can read the separate candle collector-service state through a
 dedicated JSON command:
 

@@ -1141,10 +1141,14 @@ Acceptance gates:
 
 ## Queued, Not Yet Approved
 
-- Implement a physical continuous public-trade stream store only after TASK-063 resolves the
-  exact physical architecture and every required epoch, schema/index, transaction, retention,
-  migration, backup/restore, crash-evidence, and capacity prerequisite with the required reviews
-  and approvals.
+- Promote a test-only TASK-064 SQLite schema, transaction, crash, bounded-query, backup/restore,
+  migration, and capacity evidence harness only after TASK-063 is complete. It must use generated
+  non-operator records under a separately frozen executable schema and add no production adapter,
+  runtime wiring, operator path/data access, durability, capacity, or readiness claim.
+- Implement a production physical continuous public-trade stream-store adapter only after the
+  TASK-064 evidence task passes every ADR-0031 schema, runtime, filesystem, crash, query-bound,
+  backup/restore, migration, retention, and finite-capacity gate with the required reviews and
+  approvals.
 - Implement continuous public-trade runtime collection only through a separately promoted task
   with the complete ADR-0028/0029 operational evidence and approvals.
 
