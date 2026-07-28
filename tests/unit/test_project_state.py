@@ -420,7 +420,9 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     )
     assert "successful required target-branch CI run" in task_063_prose
     assert "dedicated local SQLite generation behind the unused ADR-0030 port" in task_063_prose
-    assert "Only `stream_start_epoch_ms` and causal versions" in task_063_prose
+    assert "Among TASK-059 epoch coordinates, only `stream_start_epoch_ms`" in task_063_prose
+    assert "non-epoch integer policy, version, key, and format fields" in task_063_prose
+    assert "without becoming authority" in task_063_prose
     assert "current cursor and optional attachment-window epochs deliberately have no scalar" in (
         task_063_prose
     )

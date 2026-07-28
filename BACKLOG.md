@@ -257,9 +257,11 @@ Acceptance gates:
   `tests/unit/test_task_063_physical_store_architecture.py`.
 - **Result:** ADR-0031 selects one dedicated local SQLite generation behind the unused ADR-0030
   port and freezes a non-executable physical descriptor and fail-closed preimplementation evidence
-  plan. Original TASK-061 BLOBs remain authoritative. Only `stream_start_epoch_ms` and causal
-  versions receive exact signed-64-bit SQL `INTEGER` projections; current cursor and optional
-  attachment-window epochs deliberately have no scalar columns.
+  plan. Original TASK-061 BLOBs remain authoritative. Among TASK-059 epoch coordinates, only
+  `stream_start_epoch_ms` receives an exact signed-64-bit SQL `INTEGER` projection; current cursor
+  and optional attachment-window epochs deliberately have no scalar columns. Causal versions and
+  the ADR-0031-enumerated non-epoch integer policy, version, key, and format fields also use exact
+  SQL `INTEGER` representations without becoming authority.
 
   The design maps reversible UUID and natural-identity keys, strict metadata, immutable history,
   constraint-bound creation/current/predecessor witnesses, atomic create, one-winner
