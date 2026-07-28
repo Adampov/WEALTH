@@ -238,9 +238,27 @@ surface.
 No port, repository, adapter, SQLite/database/schema, migration, I/O, runtime/network path,
 authority, action, capacity, physical durability, multi-host guarantee, automatic recovery,
 deployment, or readiness was added. TASK-059 behavior, ADR-0028, and the current explicitly invoked
-bounded public-trade flow remain unchanged. TASK-062 is the next safe bounded direction: pure,
-unused logical stream-store port, command, and outcome contracts plus a narrow ADR-0029 consistency
-review, before any physical store decision. TASK-037 remains blocked and authorization remains
+bounded public-trade flow remain unchanged.
+
+ADR-0030 now freezes the current TASK-062 RISK-1 increment as one unused lower-level logical
+stream-store port for finalized TASK-061 records. The contract preserves original canonical bytes,
+exact decoded records, digests, rolling roots, complete identity and policy bindings, one embedded
+successor per compare-and-swap, closed create/load/mutation outcomes, and audit pages of 1 through
+100 new records with at most one predecessor overlap. The public
+`validate_continuous_public_trade_stream_audit_page` function binds every returned page to its exact
+query, complete policy, limit, anchor, and TASK-061 transition links. Current reads remain
+constant-size. Every output is a store-local classification; only accepted receipts, `FOUND`,
+`PAGE`, and a validated `AT_TAIL` anchor carry bounded structural evidence, while `UNAVAILABLE`
+carries no coherent classification. None grants authority or constitutes an accepted attestation.
+
+TASK-062 selects no physical store and adds no adapter, transaction implementation, database,
+schema, path, migration, I/O, clock, evidence-body access, attestation service, fence, budget,
+runtime, retry loop, automatic action, capacity value, durability, recovery, deployment, or
+readiness claim. TASK-063 remains queued until TASK-062 is `COMPLETE`; it is only a proposed
+design-only physical stream-store architecture and evidence plan resolving exact ADR-0027 epoch
+representation, schema/index and transaction mapping, retention/compaction, migration,
+backup/restore, crash evidence, and capacity before any adapter. It remains separately governed and
+grants no physical implementation authority. TASK-037 remains blocked and authorization remains
 denied.
 
 `RISK-005` remains open: the accepted plan selects Python

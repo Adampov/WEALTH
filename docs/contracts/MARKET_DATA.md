@@ -687,10 +687,56 @@ exercise these pure contracts.
 No port, repository, adapter, SQLite/database/schema, migration, I/O, runtime/network path,
 authority, action, capacity, physical durability, multi-host exclusivity, automatic recovery,
 continuous operation, deployment, or Phase 2 readiness was added. TASK-059 behavior and the
-existing explicitly invoked bounded public-trade flow remain unchanged. TASK-062 is the next safe
-bounded direction: pure, unused logical stream-store port, command, and outcome contracts plus a
-narrow ADR-0029 consistency review, before any physical store decision. TASK-037 remains blocked
-and authorization remains denied.
+existing explicitly invoked bounded public-trade flow remain unchanged.
+
+## Continuous Public-Trade Logical Stream-Store Port (Unused)
+
+[ADR-0030](../decisions/0030-continuous-public-trade-stream-store-port-contract.md) freezes the
+TASK-062 boundary as a lower-level atomic logical store protocol for finalized TASK-061 artifacts.
+It does not accept time-independent transition intent. A future trusted mutation boundary remains
+responsible for exact reload, external evidence-body and accepted-attestation validation, one
+trusted UTC clock sample, ATTACH two-pass finalization, and construction of the sole canonical
+creation or transition record.
+
+The unused port values bind complete immutable stream identity, complete effective stream policy,
+the applicable bounded-child policy fingerprint, and original canonical envelope,
+creation-record, or transition-record bytes. Each stored wrapper revalidates those bytes against
+the exact decoded TASK-061 value, domain-separated digest, evidence scope, embedded successor, and
+rolling history root. A compare-and-swap command carries exactly one finalized transition record;
+the successor embedded in that record is authoritative for the store-local commit, and no second
+successor, timestamp, child payload, or successor digest is accepted.
+
+Logical create requires UUID and natural-feed identity uniqueness and owns the future atomic
+insertion of current state with its immutable creation entry and root. Logical compare-and-swap
+matches exact prior version, envelope digest, and history root, then owns one current replacement
+and one immutable transition append with one winner. Duplicate means exact historical byte replay
+without a write; conflicts never create blind reload-and-continue behavior. These are future
+adapter obligations only—TASK-062 implements no transaction or storage technology.
+
+Current load distinguishes `FOUND`, `NOT_FOUND`, `IDENTITY_CONFLICT`, unsupported version,
+corruption, and unavailability while returning only the bounded creation/current/direct-predecessor
+material needed for store-local validation. Audit start returns version-one creation first with no
+overlap. Continuation requires the exact through-version, envelope digest, and rolling-root anchor,
+returns exactly one predecessor overlap plus 1 through 100 new transitions, and returns `AT_TAIL`
+rather than an empty page. A well-formed mismatched anchor is distinct from a corrupt or missing
+retained predecessor. No unbounded iterator, replay, count, lookahead, or page above 100 exists.
+Before returning `PAGE`, a conforming adapter must call
+`validate_continuous_public_trade_stream_audit_page` to bind the page to the exact query, complete
+effective policy, limit, overlap anchor, and every TASK-061 transition link.
+
+All outputs are store-local classifications. Only accepted receipts, `FOUND`, `PAGE`, and a
+validated `AT_TAIL` anchor carry bounded structural evidence; `UNAVAILABLE` explicitly carries no
+coherent classification. No result is an accepted attestation or permission to create a child,
+acquire a fence, reserve budget, call a provider, admit evidence, or mutate a stream.
+`EXACT_REQUEST_ONLY` describes the unchanged shape of any separately governed future attempt after
+unavailable storage; it is not retry authority and defines no retry loop, delay, recovery, or
+permission. TASK-062 adds no physical store, adapter, database, schema, migration, I/O, clock,
+evidence-body access, runtime composition, authority, automatic action, capacity, durability,
+recovery, multi-host guarantee, deployment, or readiness. TASK-063 remains queued until TASK-062 is
+`COMPLETE`; that proposed design-only physical stream-store architecture and evidence plan would
+resolve exact epoch representation, schema/index and transaction mapping, retention/compaction,
+migration, backup/restore, crash evidence, and capacity before any adapter, while granting no
+physical implementation authority. TASK-037 remains blocked and authorization remains denied.
 
 ## Canonical Candle
 

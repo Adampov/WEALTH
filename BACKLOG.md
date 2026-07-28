@@ -12,63 +12,58 @@ promoted through review.
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
-- **Human approval:** NOT REQUIRED — narrow design review, unused storage-agnostic protocols,
-  frozen commands/results, pure fakes, tests, and coordinated governance only; no store, schema,
-  runtime, operator data, permission, or operating-mode change.
-- **Context:** TASK-061 now freezes ADR-0029's exact persistence records, canonical bytes, digests,
-  history roots, and pure load/link validation, but no callable storage boundary exists. ADR-0029
-  requires review before selecting a port. Freezing the logical interface before any physical
-  technology decision keeps SQLite layout, epoch projection, retention, migration, backup,
-  capacity, and crash-evidence questions explicit rather than embedding them in an adapter.
-- **Goal:** Review ADR-0029 narrowly and add one strict, provider-independent, side-effect-free,
-  unused logical stream-store port with closed command/query/outcome contracts for conceptual
-  create, exact-identity current load, versioned compare-and-swap, and bounded history paging.
-- **Scope:** Add the narrow decision update, one unused port module, focused pure-contract tests,
-  and coordinated documentation/governance. Commands and results must bind the complete immutable
-  stream identity, effective stream policy, attached child-policy fingerprint when applicable,
-  exact TASK-061 records/bytes/digests, expected version, prior envelope digest, rolling history
-  root, typed evidence scopes, and bounded audit continuation. Freeze explicit create duplicate and
-  conflict semantics; distinct absence, identity conflict, unsupported-version, corruption, and
-  unavailable-storage outcomes; one-winner compare-and-swap conflict semantics; and audit pages of
-  1 through 100 new records with at most one predecessor overlap. The port grants no authority and
-  performs no work by itself.
+- **Human approval:** NOT REQUIRED for the bounded implementation, verification, review, and draft
+  publication. Exact owner approval naming the pull request and current head commit remains required
+  before merge.
+- **Context:** TASK-061 is complete and freezes the canonical persistence records and bytes.
+  ADR-0029 still has no store port. TASK-062 may define only the unused provider-independent logical
+  boundary that accepts already-finalized TASK-061 creation and transition records.
+- **Goal:** Freeze one strict, bounded, fail-closed logical stream-store protocol with exact retained
+  bytes, atomic ownership obligations, closed outcomes, and deterministic tests, without selecting
+  or implementing physical storage.
+- **Scope:** Add ADR-0030, one unused port module, a deterministic test-only fake/spy, documentation,
+  and coordinated governance. Define strict identity and complete-policy expectations; stored
+  envelope, creation, transition, and history values; create, current-load, compare-and-swap, audit,
+  receipt, result, and retry-disposition contracts; and the public
+  `validate_continuous_public_trade_stream_audit_page` query/page validator. Preserve original
+  TASK-061 canonical bytes as authoritative. Require UUID and natural-identity uniqueness, one
+  logical atomic create, one-winner compare-and-swap, exact historical duplicate classification,
+  constant-size current views, and audit returns of 1 through 100 new records with at most one
+  predecessor overlap.
 - **Files:** `docs/decisions/0030-continuous-public-trade-stream-store-port-contract.md`,
   `docs/decisions/README.md`, `src/wealth/ports/continuous_public_trade_stream_store.py`,
   `tests/unit/test_continuous_public_trade_stream_store_port_contracts.py`, `README.md`,
   `docs/contracts/MARKET_DATA.md`, `docs/ROADMAP.md`, `PROJECT_STATE.json`, `BACKLOG.md`,
   `RISK_REGISTER.md`, and governance tests only.
-- **Constraints:** No adapter, repository implementation, SQLite/DDL/schema/index/migration,
-  physical path or configuration, filesystem/network/provider I/O, runtime composition/import,
-  scheduler/service/CLI/deployment, clock sampling, evidence-body access, outer fence/lease,
-  request-budget use, retry/automatic recovery, child or stream action, operator data, credential,
-  permission, notification, retention/compaction decision, capacity value, durability/recovery,
-  multi-host, readiness, or Phase 2 claim. Do not alter TASK-059 behavior or TASK-061 canonical
-  bytes. Preserve ADR-0027's full-range issue, ADR-0028, TASK-037 denial, and Stage 3.
+- **Constraints:** No production adapter or fake, repository implementation, database, schema,
+  migration, path/configuration, filesystem/network/provider I/O, runtime import, clock, UUID
+  generation, successor construction, evidence-body or attestation access, outer fence/lease,
+  request-budget use, retry/recovery action, credential, permission, capacity/durability/readiness
+  claim, deployment, or operating-mode change. Do not alter TASK-059 behavior or TASK-061 bytes.
+  TASK-037 remains blocked and authorization remains denied.
 
 Acceptance gates:
 
-1. ADR-0030 records the narrow ADR-0029 port review and freezes only logical ownership, commands,
-   queries, results, retry classification, and exclusions; it selects no physical store.
-2. Every value is frozen, strict, bounded, provider-independent, and fail closed. Booleans,
-   polymorphic or coerced scalars, undeclared fields, incomplete identity/policy, malformed
-   digests, illegal limits, and cross-command disagreement are rejected without normalization.
-3. Create, current-load, compare-and-swap, and audit contracts preserve ADR-0029's exact
-   distinctions and consume TASK-061 values without reserializing or weakening their byte rules.
-   Absence is never inferred from corruption, unsupported versions, conflicts, or unavailability.
-4. Mutation contracts require exact prior version, envelope digest, accepted history root, one
-   explicit transition, and the applicable bounded evidence references. They neither sample time
-   nor let a caller bypass the trusted future mutation boundary with an alternate successor.
-5. Audit queries allow only 1 through 100 new records, an exact continuation/root anchor, and at
-   most one predecessor overlap. No method exposes an unbounded history read or replay.
-6. Deterministic pure fake/spy, hostile, mutation, and property tests cover every closed outcome,
-   exact retry versus conflict, stale compare-and-swap, policy reuse with field drift, bounded page
-   edges, model bypass attempts, and method signatures without filesystem, network, clock, or
-   database work.
-7. The module remains unused by runtime composition and adds no dependency, lockfile, physical
-   persistence, authority, automatic action, capacity, durability, recovery, or readiness claim.
-   TASK-037 remains blocked and authorization remains denied.
-8. Documentation, governance assertions, formatting, lint, strict typing, focused and complete
-   tests, lockfile verification, dependency audit, health slice, and CI pass.
+1. ADR-0030 freezes the exact public values, operations, outcomes, retry dispositions, bounded
+   audit state machine, public query/page validator, validation ownership, and safety exclusions.
+2. Original TASK-061 canonical bytes remain authoritative and every decoded value, digest, evidence
+   scope, embedded successor, predecessor link, and rolling root is cross-validated.
+3. Create and compare-and-swap expose only logical atomic ownership; exact duplicate, conflict,
+   absence, identity conflict, anchor conflict, unsupported version, corruption, and unavailability
+   remain distinct and grant no retry or action authority.
+4. Current results require only bounded creation/current/direct-predecessor material. The port
+   returns at most 100 new audit records plus one exact continuation overlap; a future adapter must
+   separately prove the same physical-read bound.
+5. Strict hostile, mutation, signature, concurrency, policy-drift, retained-corruption, boundary,
+   audit, and lifecycle tests pass without database, filesystem, network, provider, or clock work.
+6. No physical capability, dependency, lockfile change, runtime import, authority, action,
+   durability, recovery, capacity, readiness, deployment, Phase 2 claim, or TASK-037 authorization
+   enters the change.
+7. Formatting, lint, strict typing, complete tests, lockfile verification, dependency audit, local
+   health, independent review, final-diff inspection, and CI pass for the exact published commit.
+8. TASK-062 becomes `COMPLETE`, and TASK-063 may become the canonical next action, only after exact
+   merge approval, verified target-branch merge, green required target CI, and a truthful
+   post-merge governance synchronization.
 
 ## Blocked, Awaiting Owner-Supplied Restricted Inputs
 
@@ -1097,10 +1092,15 @@ Acceptance gates:
 
 ## Queued, Not Yet Approved
 
-- Select or implement a physical continuous public-trade stream store only after TASK-062 freezes
-  and verifies the unused logical port/outcome boundary and a separate task resolves epoch
-  representation, schema/indexes, retention, migration, backup/restore, crash evidence, and
-  capacity with the required reviews and approvals.
+- TASK-063 may define a design-only continuous public-trade physical stream-store architecture and
+  evidence plan after TASK-062 is `COMPLETE`. It must resolve or explicitly defer exact epoch
+  representation, schema/index and transaction mapping, retention/compaction, migration,
+  backup/restore, crash evidence, and finite capacity prerequisites without adding an adapter,
+  database, schema execution, I/O, runtime, authority, durability, or readiness claim.
+- Implement a physical continuous public-trade stream store only after TASK-063 resolves the
+  exact physical architecture and every required epoch, schema/index, transaction, retention,
+  migration, backup/restore, crash-evidence, and capacity prerequisite with the required reviews
+  and approvals.
 - Implement continuous public-trade runtime collection only through a separately promoted task
   with the complete ADR-0028/0029 operational evidence and approvals.
 

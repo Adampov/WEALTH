@@ -67,7 +67,8 @@
     "continuous_public_trade_collection_operating_contract",
     "continuous_public_trade_closed_window_planner_contracts",
     "continuous_public_trade_stream_persistence_contract",
-    "continuous_public_trade_stream_persistence_codec_contracts"
+    "continuous_public_trade_stream_persistence_codec_contracts",
+    "continuous_public_trade_stream_store_port_contracts"
   ],
   "active_integrations": [
     "github_actions_ci"
@@ -131,11 +132,6 @@
   ],
   "recent_decisions": [
     {
-      "decision_id": "ADR-0025",
-      "summary": "Compose restart-safe bounded public-trade checkpoint orchestration.",
-      "artifact": "docs/decisions/0025-bounded-public-trade-checkpoint-orchestration.md"
-    },
-    {
       "decision_id": "ADR-0026",
       "summary": "Expose bounded, typed, causally validated public-trade transition history.",
       "artifact": "docs/decisions/0026-typed-public-trade-transition-history.md"
@@ -154,11 +150,16 @@
       "decision_id": "ADR-0029",
       "summary": "Define the conceptual single-host continuous public-trade stream persistence contract.",
       "artifact": "docs/decisions/0029-continuous-public-trade-stream-persistence-contract.md"
+    },
+    {
+      "decision_id": "ADR-0030",
+      "summary": "Freeze the unused logical continuous public-trade stream-store port and closed outcomes.",
+      "artifact": "docs/decisions/0030-continuous-public-trade-stream-store-port-contract.md"
     }
   ],
   "next_action": {
     "task_id": "TASK-062",
     "action": "phase2.continuous_public_trade_stream_store_port_contracts"
   },
-  "last_updated_utc": "2026-07-27T20:06:50Z"
+  "last_updated_utc": "2026-07-28T14:57:03Z"
 }
