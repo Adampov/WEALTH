@@ -363,11 +363,14 @@ atomicity, physical durability, capacity adequacy, multi-host exclusivity, conti
 recovery, deployment, or Phase 2 readiness. ADR-0028 and the current explicitly invoked bounded
 public-trade flow remain unchanged.
 
-## Continuous Public-Trade Stream Persistence Contract (Design Only)
+## Continuous Public-Trade Persistence Records and Codecs (Unused)
 
 [ADR-0029](docs/decisions/0029-continuous-public-trade-stream-persistence-contract.md) defines the
-logical persistence contract that a possible future stream store must satisfy. It does not add a
-port, repository, codec implementation, database, schema, migration, or runtime.
+logical persistence contract that a possible future stream store must satisfy. TASK-061 now
+implements one pure, unused domain module for the strict version-one child-creation payload, stream
+envelope, stream-creation record, stream-transition record, evidence reference/scope, and complete
+stream-policy projection. It does not add a port, repository, adapter, SQLite database, schema,
+migration, I/O, runtime import, network path, authority, action, capacity, durability, or readiness.
 
 The future durable current state is exactly the TASK-059 stream checkpoint: immutable stream and
 market identity, request variant, stream-policy fingerprint and start; exact epoch-millisecond
@@ -380,10 +383,10 @@ The TASK-059 attachment's `creation_fingerprint` is non-invertible. An attach-be
 must therefore atomically retain a new canonical `child_creation_payload` for the complete
 deterministic pristine child plus stream/request binding and explicit versions, including its exact
 UTC creation time and separate bounded-child policy fingerprint. This evidence payload does not
-replace or redefine the existing bounded-child store serializer. A future implementation must
-reject missing bytes, fingerprint disagreement, policy confusion, any child identity/range
-mismatch, or a range that cannot construct the exact existing child model; it may not recreate a
-child from a new clock or current configuration.
+replace or redefine the existing bounded-child store serializer. The pure TASK-061 values and
+validators reject missing bytes, fingerprint disagreement, policy confusion, child
+identity/range mismatch, or a range that cannot construct the exact existing child model; they do
+not recreate a child from a new clock or current configuration.
 
 Conceptual `create` accepts only pristine version-one state, complete policy, governed-create
 reference, and one fixed-UTC command time sampled exactly once by the future mutation boundary's
@@ -438,15 +441,18 @@ Compare-and-swap is not the outer UUID fence. A conflict/lost fence ends the inv
 blind retry and requires the ADR-0028 failed-service/manual-hold decision.
 
 Canonical records use an explicit record type and serialization version separate from the
-TASK-059 model version, causal checkpoint version, and any future physical-store schema. The
-selected profile is exact compact sorted-key UTF-8 JSON with no BOM/newline, exact UUID/enum and
-integer representations, explicit nulls, duplicate/unknown keys rejected, and domain-separated
-SHA-256 child-creation fingerprints. Generic dependency-version JSON output is not the byte
-authority. Six distinct digest contracts cover child creation, stream envelope, stream creation,
-transition record, evidence scope, and rolling history root; an external evidence-body digest
-remains externally supplied. TASK-059 epoch milliseconds remain exact; a future implementation
-must fail closed rather than overflow when a value cannot be projected to ADR-0027 epoch
-microseconds.
+TASK-059 model version, causal checkpoint version, and any future physical-store schema. TASK-061
+implements exact compact sorted-key UTF-8 JSON codecs with no BOM/newline, exact UUID/enum and
+integer representations, explicit nulls, duplicate/unknown keys rejected, and fixed raw,
+child-payload, envelope, successor-hex, string, depth, member, key, and integer-digit bounds.
+Generic dependency-version JSON output is not the byte authority. Six distinct domain-separated
+contracts cover the child-creation fingerprint, stream-envelope digest, stream-creation digest,
+stream-transition digest, evidence-scope digest, and initial/continued rolling history root; an
+external evidence-body digest remains externally supplied. TASK-059 epoch milliseconds remain
+exact, and child material fails closed rather than overflowing when it cannot be represented by
+the existing fixed-UTC child model. Any physical projection to ADR-0027 epoch microseconds remains
+future store work and must also fail closed.
+
 Every datetime in `child_creation_payload` uses exact fixed-UTC six-fractional-digit `Z` text and
 must round-trip from attachment epoch milliseconds without rounding; this still does not alter the
 existing child-store serializer.
@@ -469,9 +475,17 @@ separate and are never described as atomic. Rollback disables the continuous pat
 the existing explicit bounded flow while preserving the exact stream, attachment, child, history,
 hold, evidence, health, lifecycle, fence, and budget records.
 
-This decision adds no automatic creation, pause, resume, recovery, restart, scheduling, provider
-access, capacity, physical-durability, multi-host, deployment, or readiness guarantee. TASK-061 is
-the separately governed pure, unused persistence-record and canonical-codec contract increment.
+TASK-061 is implemented only as that unused pure domain increment. Its pure two-pass attachment
+finalizer preserves TASK-059 planning, and its validators bind the complete effective stream
+policy, immutable identity, attached child policy, exact create/transition evidence scopes, and
+causal predecessor/successor links. Deterministic golden-byte, hostile-input, transition-matrix,
+limit-boundary, and property tests exercise those contracts. No port, repository, adapter,
+SQLite/database/schema, migration, I/O, runtime/network path, authority, action, capacity,
+durability, deployment, or readiness was added; TASK-059 behavior and the explicitly invoked
+bounded public-trade flow remain unchanged.
+
+The next safe bounded direction is TASK-062: pure, unused logical stream-store port, command, and
+outcome contracts plus a narrow ADR-0029 consistency review, before any physical store decision.
 TASK-037 remains blocked and authorization remains denied.
 
 Operators and monitoring tools can read the separate candle collector-service state through a

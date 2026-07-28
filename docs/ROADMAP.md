@@ -223,11 +223,26 @@ SQLite/DDL/schema, migration, runtime, provider, operator data, permission, auto
 capacity, physical-durability, multi-host, recovery, deployment, readiness, or Phase 2 claim was
 added.
 
-TASK-061 is therefore the next bounded RISK-1 increment: pure, unused versioned persistence-record
-and canonical-codec contracts with deterministic hostile and golden-byte tests only. It may not
-add a port, repository, SQLite/schema, migration execution, runtime import, network path,
-scheduler, service, operator data, permission, or automatic action. ADR-0028 and the current
-explicitly invoked bounded public-trade flow remain unchanged.
+TASK-061 is complete as one pure, unused RISK-1 domain increment. It adds strict version-one
+child-creation payload, stream-envelope, stream-creation, stream-transition,
+evidence-reference/evidence-scope, and complete stream-policy projection values; exact compact
+sorted-key UTF-8 JSON codecs with explicit raw and lexical bounds; and six domain-separated
+child/envelope/create/transition/scope/history digest contracts. A pure two-pass attachment
+finalizer joins the unchanged TASK-059 planner to exact child material. Load validators bind full
+effective stream policy field by field, immutable identity and creation evidence, and the effective
+child policy while attached; create-scope, transition-scope, evidence-validity, predecessor/
+successor, recorded-time, and rolling-root validators enforce exact causal links. Deterministic
+golden-byte, hostile-input, every-transition, exact-boundary, and property tests cover this isolated
+surface.
+
+No port, repository, adapter, SQLite/database/schema, migration, I/O, runtime/network path,
+authority, action, capacity, physical durability, multi-host guarantee, automatic recovery,
+deployment, or readiness was added. TASK-059 behavior, ADR-0028, and the current explicitly invoked
+bounded public-trade flow remain unchanged. TASK-062 is the next safe bounded direction: pure,
+unused logical stream-store port, command, and outcome contracts plus a narrow ADR-0029 consistency
+review, before any physical store decision. TASK-037 remains blocked and authorization remains
+denied.
+
 `RISK-005` remains open: the accepted plan selects Python
 datetimes in the fixed `datetime.UTC` zone, fixed microsecond RFC 3339 `Z` text, and derived
 epoch-microsecond SQL projections. New injected clock values are fixed-UTC, and the isolated pure
