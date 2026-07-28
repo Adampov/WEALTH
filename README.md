@@ -484,9 +484,44 @@ SQLite/database/schema, migration, I/O, runtime/network path, authority, action,
 durability, deployment, or readiness was added; TASK-059 behavior and the explicitly invoked
 bounded public-trade flow remain unchanged.
 
-The next safe bounded direction is TASK-062: pure, unused logical stream-store port, command, and
-outcome contracts plus a narrow ADR-0029 consistency review, before any physical store decision.
-TASK-037 remains blocked and authorization remains denied.
+## Continuous Public-Trade Logical Stream-Store Port (Unused)
+
+[ADR-0030](docs/decisions/0030-continuous-public-trade-stream-store-port-contract.md) freezes one
+lower-level logical store boundary for finalized TASK-061 artifacts. The TASK-062 module is an
+unused provider-independent protocol plus strict frozen identity, expectation,
+stored-entry, command, query, continuation, receipt, result, and retry-disposition values. It is
+not an intent processor: a future trusted mutation boundary must perform clock sampling,
+evidence-body and attestation checks, attachment finalization, and construction of the sole
+canonical creation or transition record before calling the port.
+
+Stored wrappers preserve each original canonical TASK-061 byte string beside its exact decoded
+record, envelope, digest, evidence scope, and rolling history root. Compare-and-swap accepts
+exactly one finalized transition record whose embedded successor is the sole successor; it accepts
+no separate timestamp, successor, child payload, or successor digest. Logical create owns the
+future atomic insertion of current state plus its immutable creation entry, while logical
+compare-and-swap owns one exact current replacement plus one immutable transition append. TASK-062
+does not implement either transaction.
+
+Current load returns only a constant-size structurally validated view. Audit uses separate start
+and continuation queries, returns 1 through 100 new records, uses no predecessor overlap on the
+first page and exactly one on a continuation page, and returns `AT_TAIL` instead of an empty page.
+Before returning `PAGE`, a conforming adapter must call the public
+`validate_continuous_public_trade_stream_audit_page` function so the page is bound to the exact
+query, complete effective policy, limit, overlap anchor, and every TASK-061 transition link.
+Closed outcomes keep inserted, updated, duplicate, conflict, absent, identity-conflict,
+anchor-conflict, unsupported-version, corrupt, and unavailable-storage states distinct.
+
+Every output is a store-local classification. Only accepted receipts, `FOUND`, `PAGE`, and a
+validated `AT_TAIL` anchor carry bounded structural evidence; `UNAVAILABLE` explicitly means that
+no coherent store-local classification could be established. No result is external evidence
+validation, an accepted history attestation, authority, a fence, a budget grant, retry permission,
+durability, recovery evidence, or readiness. TASK-062 adds no physical store, adapter, database,
+schema, migration, I/O, clock, runtime import, automatic retry/action, capacity value, or
+operating-mode change. TASK-063 remains queued until TASK-062 is `COMPLETE`; that proposed
+design-only physical stream-store architecture and evidence plan would resolve exact epoch
+representation, schema/index and transaction mapping, retention/compaction, migration,
+backup/restore, crash evidence, and capacity before any adapter, while granting no physical
+implementation authority. TASK-037 remains blocked and authorization remains denied.
 
 Operators and monitoring tools can read the separate candle collector-service state through a
 dedicated JSON command:

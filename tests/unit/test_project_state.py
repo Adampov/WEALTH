@@ -23,6 +23,12 @@ ADR_0029_PATH = (
     / "decisions"
     / "0029-continuous-public-trade-stream-persistence-contract.md"
 )
+ADR_0030_PATH = (
+    REPOSITORY_ROOT
+    / "docs"
+    / "decisions"
+    / "0030-continuous-public-trade-stream-store-port-contract.md"
+)
 
 
 def load_payload() -> dict[str, Any]:
@@ -114,6 +120,7 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert "continuous_public_trade_closed_window_planner_contracts" in state.active_components
     assert "continuous_public_trade_stream_persistence_contract" in state.active_components
     assert "continuous_public_trade_stream_persistence_codec_contracts" in state.active_components
+    assert "continuous_public_trade_stream_store_port_contracts" in state.active_components
     assert len(state.open_tasks) == 2
     task_037, task_062 = state.open_tasks
     assert task_037.task_id == "TASK-037"
@@ -133,6 +140,7 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert state.next_action.task_id == "TASK-062"
     assert state.next_action.action == "phase2.continuous_public_trade_stream_store_port_contracts"
     assert any(decision.decision_id == "ADR-0029" for decision in state.recent_decisions)
+    assert any(decision.decision_id == "ADR-0030" for decision in state.recent_decisions)
 
 
 def test_project_state_references_existing_governance_artifacts() -> None:
@@ -144,6 +152,7 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     roadmap = ROADMAP_PATH.read_text(encoding="utf-8")
     decision_index = DECISION_INDEX_PATH.read_text(encoding="utf-8")
     adr_0029 = ADR_0029_PATH.read_text(encoding="utf-8")
+    adr_0030 = ADR_0030_PATH.read_text(encoding="utf-8")
 
     for decision in state.recent_decisions:
         assert (REPOSITORY_ROOT / decision.artifact).is_file()
@@ -162,6 +171,9 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     )[0]
     completed_section = backlog.split("## Recently Completed", maxsplit=1)[1].split(
         "## Queued, Not Yet Approved", maxsplit=1
+    )[0]
+    queued_section = backlog.split("## Queued, Not Yet Approved", maxsplit=1)[1].split(
+        "## Backlog Rules", maxsplit=1
     )[0]
     task_031_section = completed_section.split("### TASK-031 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
@@ -253,6 +265,7 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_061_section = completed_section.split("### TASK-061 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
+    task_062_section = next_action_section
     next_action_prose = collapse_whitespace(next_action_section)
     task_060_prose = collapse_whitespace(task_060_section)
     task_061_prose = collapse_whitespace(task_061_section)
@@ -261,35 +274,45 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     risk_register_prose = collapse_whitespace(risk_register)
     roadmap_prose = collapse_whitespace(roadmap)
     adr_0029_prose = collapse_whitespace(adr_0029)
+    adr_0030_prose = collapse_whitespace(adr_0030)
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    assert "Pure continuous public-trade logical stream-store port" in next_action_prose
-    assert "TASK-061 now freezes ADR-0029's exact persistence records" in next_action_prose
-    assert "requires review before selecting a port" in next_action_prose
-    assert "before any physical technology decision" in next_action_prose
-    assert "side-effect-free, unused logical stream-store port" in next_action_prose
-    assert "create, exact-identity current load, versioned compare-and-swap" in next_action_prose
-    assert "effective stream policy" in next_action_prose
-    assert "attached child-policy fingerprint" in next_action_prose
-    assert "audit pages of 1 through 100 new records" in next_action_prose
-    assert "No adapter, repository implementation, SQLite/DDL/schema" in next_action_prose
+    assert (
+        "Exact owner approval naming the pull request and current head commit" in next_action_prose
+    )
+    assert "unused provider-independent logical boundary" in next_action_prose
+    assert "already-finalized TASK-061 creation and transition records" in next_action_prose
+    assert "`validate_continuous_public_trade_stream_audit_page`" in next_action_section
+    assert "TASK-061 canonical bytes as authoritative" in next_action_prose
+    assert "UUID and natural-identity uniqueness" in next_action_prose
+    assert "audit returns of 1 through 100 new records" in next_action_prose
+    assert "No production adapter or fake" in next_action_prose
     assert "filesystem/network/provider I/O" in next_action_prose
-    assert "clock sampling" in next_action_prose
-    assert "request-budget use" in next_action_prose
-    assert "retention/compaction decision" in next_action_prose
-    assert "Do not alter TASK-059 behavior or TASK-061 canonical bytes" in next_action_prose
-    assert "ADR-0027" in next_action_prose
-    assert "ADR-0028" in next_action_prose
+    assert "Do not alter TASK-059 behavior or TASK-061 bytes" in next_action_prose
     assert "TASK-037" in next_action_prose
     assert "authorization remains denied" in next_action_prose
-    assert "Absence is never inferred from corruption" in next_action_prose
-    assert "exact prior version, envelope digest, accepted history root" in next_action_prose
-    assert "No method exposes an unbounded history read" in next_action_prose
-    assert "module remains unused by runtime composition" in next_action_prose
+    assert "grant no retry or action authority" in next_action_prose
+    assert "returns at most 100 new audit records plus one exact continuation overlap" in (
+        next_action_prose
+    )
+    assert "future adapter must separately prove the same physical-read bound" in next_action_prose
+    assert (
+        "No physical capability, dependency, lockfile change, runtime import" in next_action_prose
+    )
+    assert "exact published commit" in next_action_prose
+    assert "verified target-branch merge" in next_action_prose
+    assert "post-merge governance synchronization" in next_action_prose
+    assert "- **Status:** READY" in task_062_section
+    assert "`phase2.continuous_public_trade_stream_store_port_contracts`" in task_062_section
+    assert "TASK-063 may define a design-only continuous public-trade physical stream-store" in (
+        queued_section
+    )
+    assert "after TASK-062 is `COMPLETE`" in queued_section
+    assert "without adding an adapter" in queued_section
     assert "- **Status:** COMPLETE" in task_061_section
     assert "`phase2.continuous_public_trade_stream_persistence_codec_contracts`" in task_061_section
     assert "side-effect-free domain module" in task_061_prose
@@ -1115,6 +1138,7 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "no privacy or" in market_data_contract
     assert "total-header-block guarantee" in market_data_contract
     assert "0029-continuous-public-trade-stream-persistence-contract.md" in decision_index
+    assert "0030-continuous-public-trade-stream-store-port-contract.md" in decision_index
     assert "## Continuous Public-Trade Persistence Records and Codecs (Unused)" in (
         root_readme_prose
     )
@@ -1147,10 +1171,18 @@ def test_project_state_references_existing_governance_artifacts() -> None:
         root_readme_prose
     )
     assert "Deterministic golden-byte, hostile-input, transition-matrix" in root_readme_prose
-    assert "The next safe bounded direction is TASK-062" in root_readme_prose
-    assert "pure, unused logical stream-store port, command, and outcome contracts" in (
+    assert "## Continuous Public-Trade Logical Stream-Store Port (Unused)" in root_readme_prose
+    assert "lower-level logical store boundary for finalized TASK-061 artifacts" in (
         root_readme_prose
     )
+    assert "embedded successor is the sole successor" in root_readme_prose
+    assert "returns `AT_TAIL` instead of an empty page" in root_readme_prose
+    assert "`validate_continuous_public_trade_stream_audit_page` function" in root_readme_prose
+    assert "Every output is a store-local classification" in root_readme_prose
+    assert "`UNAVAILABLE` explicitly means that no coherent store-local classification" in (
+        root_readme_prose
+    )
+    assert "TASK-063 remains queued until TASK-062 is `COMPLETE`" in root_readme_prose
     assert "## Continuous Public-Trade Persistence Records and Codecs (Unused)" in (
         market_data_prose
     )
@@ -1174,10 +1206,21 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "pure two-pass proof" in market_data_prose
     assert "trusted instant is the planner's `now`" in market_data_prose
     assert "TASK-061 is complete only as the unused pure domain increment" in market_data_prose
-    assert "TASK-062 is the next safe bounded direction" in market_data_prose
-    assert "pure, unused logical stream-store port, command, and outcome contracts" in (
+    assert "## Continuous Public-Trade Logical Stream-Store Port (Unused)" in market_data_prose
+    assert "lower-level atomic logical store protocol for finalized TASK-061 artifacts" in (
         market_data_prose
     )
+    assert "original canonical envelope, creation-record, or transition-record bytes" in (
+        market_data_prose
+    )
+    assert "no second successor, timestamp, child payload, or successor digest" in (
+        market_data_prose
+    )
+    assert "`EXACT_REQUEST_ONLY` describes the unchanged shape" in market_data_prose
+    assert "`validate_continuous_public_trade_stream_audit_page`" in market_data_prose
+    assert "All outputs are store-local classifications" in market_data_prose
+    assert "`UNAVAILABLE` explicitly carries no coherent classification" in market_data_prose
+    assert "TASK-063 remains queued until TASK-062 is `COMPLETE`" in market_data_prose
     assert "# ADR 0029: Continuous Public-Trade Stream Persistence Contract" in adr_0029
     assert "- **Status:** Accepted" in adr_0029
     assert "### Exact durable TASK-059 stream state" in adr_0029
@@ -1246,6 +1289,30 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "## Retention and Rollback" in adr_0029
     assert "## Safety and Authority Boundary" in adr_0029
     assert "TASK-037 remains blocked and authorization remains denied" in adr_0029_prose
+    assert "# ADR 0030: Continuous Public-Trade Stream Store Port Contract" in adr_0030
+    assert "- **Status:** Accepted" in adr_0030
+    assert "### Boundary selection" in adr_0030
+    assert "lower-level atomic logical store boundary" in adr_0030_prose
+    assert "accepts finalized TASK-061 artifacts" in adr_0030_prose
+    assert "exactly one `ContinuousPublicTradeStreamTransitionRecordV1`" in adr_0030_prose
+    assert "no second successor" in adr_0030_prose
+    assert "### Exact public values" in adr_0030
+    assert "Original canonical bytes remain authoritative" in adr_0030_prose
+    assert "### Logical atomic ownership" in adr_0030
+    assert "There is one winner" in adr_0030_prose
+    assert "### Closed outcomes" in adr_0030
+    assert "`ANCHOR_CONFLICT`" in adr_0030
+    assert "### Bounded current view" in adr_0030
+    assert "### Bounded audit state machine" in adr_0030
+    assert "`validate_continuous_public_trade_stream_audit_page`" in adr_0030
+    assert "absolute maximum of 101 returned history records" in adr_0030_prose
+    assert (
+        "must separately prove that it obtains each page without reading beyond" in adr_0030_prose
+    )
+    assert "### Retry disposition" in adr_0030
+    assert "`EXACT_REQUEST_ONLY` is not retry authority" in adr_0030_prose
+    assert "No result means that external evidence bodies were loaded" in adr_0030_prose
+    assert "TASK-037 remains blocked and authorization remains denied" in adr_0030_prose
     assert "Automatic 301, 302, 303, 307, and 308 redirects are rejected" in risk_register
     assert "process-global opener is untouched" in risk_register
     assert "original initial target must be an absolute credential-free HTTPS URL" in risk_register
@@ -1325,9 +1392,16 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "TASK-061 now implements only an unused persistence-record" in risk_register_prose
     assert "five canonical JSON codecs" in risk_register_prose
     assert "six domain-separated digest/history contracts" in risk_register_prose
-    assert "TASK-062 is the next proposed pure unused logical stream-store port" in (
+    assert "TASK-062 now freezes only an unused logical store port" in risk_register_prose
+    assert "one-winner compare-and-swap ownership" in risk_register_prose
+    assert "TASK-063 remains queued until TASK-062 is `COMPLETE`" in (risk_register_prose)
+    assert "TASK-062 adds only strict finalized-record storage commands/results" in (
         risk_register_prose
     )
+    assert "TASK-062's logical store results and retry dispositions grant no request budget" in (
+        risk_register_prose
+    )
+    assert "TASK-062 now defines only logical atomic create/CAS ownership" in risk_register_prose
     assert "A pause reason alone is not authorization" in risk_register_prose
     assert "stream attachment and compare-and-swap grant no capacity" in risk_register_prose
     assert "complete immutable stream-policy projection in creation evidence" in (
@@ -1393,8 +1467,13 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "strict version-one child-creation payload, stream-envelope, stream-creation" in (
         roadmap_prose
     )
-    assert "TASK-062 is the next safe bounded direction" in roadmap_prose
-    assert "unused logical stream-store port, command, and outcome contracts" in roadmap_prose
+    assert "ADR-0030 now freezes the current TASK-062 RISK-1 increment" in roadmap_prose
+    assert "one embedded successor per compare-and-swap" in roadmap_prose
+    assert "`validate_continuous_public_trade_stream_audit_page` function" in roadmap_prose
+    assert "Every output is a store-local classification" in roadmap_prose
+    assert "`UNAVAILABLE` carries no coherent classification" in roadmap_prose
+    assert "TASK-063 remains queued until TASK-062 is `COMPLETE`" in roadmap_prose
+    assert "grants no physical implementation authority" in roadmap_prose
     assert "The canonical next action is TASK-037" not in roadmap
 
 
