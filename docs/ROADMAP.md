@@ -261,6 +261,25 @@ retention/compaction, migration, backup/restore, crash evidence, and capacity be
 It remains separately governed and grants no physical implementation authority. TASK-037 remains
 blocked and authorization remains denied.
 
+ADR-0031 now records the TASK-063 design-only result: one dedicated local SQLite generation behind
+the unused ADR-0030 port, with Python's standard-library binding, exact signed-64-bit `INTEGER`
+stream-start/version projections, and authoritative original TASK-061 BLOBs for current cursor and
+optional attachment-window epochs that deliberately have no scalar columns. Reversible binary
+identity keys, explicit writer transactions, and bounded snapshot reads complete the proposed
+shape. Constraint-bound creation-record, current-record, and predecessor-record witnesses plus
+deferred current-tail bindings preserve authoritative policy and tail/root state and permit
+complete validation of an arbitrary continuation overlap or `AT_TAIL` without exceeding 100 new
+history rows plus one logical overlap. Exact tail-derived counts avoid signed-64-bit overflow and
+reject short pages that could conceal a retained gap.
+
+This selects only a non-executable physical mapping and fail-closed evidence plan. No schema,
+database, adapter, path, I/O, runtime, durability, recovery, capacity, or readiness exists.
+Preserve-all retention, separate-generation migration and rollback, verified backup and independent
+restore, crash and lost-acknowledgement evidence, bounded-query proof, exact patched runtime and
+filesystem evidence, and finite capacity thresholds remain prerequisites. TASK-063 remains the
+canonical next action until its governed lifecycle completes and grants no implementation
+authority. TASK-037 remains blocked and authorization remains denied.
+
 `RISK-005` remains open: the accepted plan selects Python
 datetimes in the fixed `datetime.UTC` zone, fixed microsecond RFC 3339 `Z` text, and derived
 epoch-microsecond SQL projections. New injected clock values are fixed-UTC, and the isolated pure

@@ -739,6 +739,38 @@ transaction mapping, retention/compaction, migration, backup/restore, crash evid
 before any adapter, while granting no physical implementation authority. TASK-037 remains blocked
 and authorization remains denied.
 
+## Continuous Public-Trade Physical Stream-Store Architecture (Design Only)
+
+[ADR-0031](../decisions/0031-continuous-public-trade-stream-physical-store-architecture.md)
+selects one dedicated local SQLite generation behind the unused logical port and Python's
+standard-library `sqlite3` binding. Full-range TASK-059 epoch milliseconds and causal versions map
+without loss: the SQL-projected stream-start epoch and causal versions use exact signed-64-bit
+`INTEGER` values, while current cursor and optional attachment-window epochs have no scalar
+columns in version one and remain exact inside authoritative original TASK-061 record and envelope
+BLOBs. No epoch may undergo datetime, floating-point, or epoch-microsecond projection. Strict
+metadata, stream/current, immutable-history, UUID, reversible natural-identity, digest, root, and
+policy projections are only access and corruption-detection structures and must reproduce the
+bytes.
+
+The design uses explicit one-writer transactions and bounded snapshot readers. Create proposes one
+atomic current-plus-creation insert; compare-and-swap proposes one atomic transition append plus
+conditional current replacement. Constraint-bound exact creation-record and current-record
+witnesses establish authoritative identity, policy, and tail/root state for later pages, while a
+constraint-bound exact predecessor-record witness on every transition makes arbitrary continuation
+overlaps and `AT_TAIL` fully link-validatable without a hidden second history-row read. Exact count
+arithmetic avoids signed-64-bit overflow and rejects short pages that could hide a retained gap; the
+public bound remains at most 100 new rows plus one overlap. Deferred current-tail bindings and
+byte-equality guards keep normal schema writes coherent. Witnesses are never authority or extra
+logical page records.
+
+ADR-0031 contains no executable schema and creates no database, adapter, path, configuration, I/O,
+runtime, clock, fence, budget, retry or recovery action, durability, capacity, or readiness.
+Preserve-all retention, separate-generation migration, verified backup and independent restore,
+crash/lost-acknowledgement testing, bounded-query proof, exact-runtime and target-filesystem
+evidence, and finite capacity thresholds remain mandatory preimplementation gates. TASK-063 remains
+the canonical next action until its governed lifecycle completes. TASK-037 remains blocked and
+authorization remains denied.
+
 ## Canonical Candle
 
 `CanonicalCandle` represents one final OHLCV interval. Every record includes:

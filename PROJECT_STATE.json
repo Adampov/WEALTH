@@ -68,7 +68,8 @@
     "continuous_public_trade_closed_window_planner_contracts",
     "continuous_public_trade_stream_persistence_contract",
     "continuous_public_trade_stream_persistence_codec_contracts",
-    "continuous_public_trade_stream_store_port_contracts"
+    "continuous_public_trade_stream_store_port_contracts",
+    "continuous_public_trade_stream_physical_store_architecture"
   ],
   "active_integrations": [
     "github_actions_ci"
@@ -155,11 +156,16 @@
       "decision_id": "ADR-0030",
       "summary": "Freeze the unused logical continuous public-trade stream-store port and closed outcomes.",
       "artifact": "docs/decisions/0030-continuous-public-trade-stream-store-port-contract.md"
+    },
+    {
+      "decision_id": "ADR-0031",
+      "summary": "Select the design-only continuous public-trade physical stream-store architecture and preimplementation evidence gates.",
+      "artifact": "docs/decisions/0031-continuous-public-trade-stream-physical-store-architecture.md"
     }
   ],
   "next_action": {
     "task_id": "TASK-063",
     "action": "phase2.continuous_public_trade_stream_physical_store_architecture"
   },
-  "last_updated_utc": "2026-07-28T15:52:09Z"
+  "last_updated_utc": "2026-07-28T16:45:00Z"
 }
