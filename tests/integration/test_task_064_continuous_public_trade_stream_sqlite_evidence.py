@@ -10,10 +10,7 @@ import os
 import selectors
 import signal
 import sqlite3
-import threading
-import time
-import tracemalloc
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -350,30 +347,59 @@ def _truncate_generated_wal(token: harness.StoreToken) -> None:
         harness._close_preserving_primary(connection)
 
 
-def _complete_evidence_gates() -> tuple[tuple[str, harness.EvidenceDisposition, str | None], ...]:
-    return tuple(
-        (name, harness.EvidenceDisposition.PASS, None) for name in harness.GENERATED_EVIDENCE_GATES
-    ) + tuple(
-        (
-            name,
-            harness.EvidenceDisposition.NOT_APPLICABLE,
-            harness.TARGET_NOT_APPLICABLE_REASON,
-        )
-        for name in harness.TARGET_NOT_APPLICABLE_GATES
-    )
+def _corrupt_creation_history_record(
+    token: harness.StoreToken,
+    creation: ContinuousPublicTradeStreamStoredCreationV1,
+) -> None:
+    connection, _ = harness._connect(token, writer=True)
+    try:
+        connection.set_authorizer(None)
+        trigger_row = connection.execute(
+            "SELECT sql FROM sqlite_schema "
+            "WHERE type = 'trigger' AND name = 'trg_history_no_update'"
+        ).fetchone()
+        assert trigger_row is not None
+        trigger_sql = cast(str, trigger_row[0])
+        connection.execute("BEGIN IMMEDIATE").close()
+        try:
+            connection.execute("DROP TRIGGER trg_history_no_update").close()
+            cursor = connection.execute(
+                """
+                UPDATE continuous_public_trade_history
+                SET record_canonical_bytes = ?
+                WHERE stream_row_id = (
+                    SELECT stream_row_id
+                    FROM continuous_public_trade_stream
+                    WHERE stream_uuid = ?
+                )
+                  AND successor_version = 1
+                """,
+                (
+                    b"{malformed-retained-creation",
+                    creation.record.stream_id.bytes,
+                ),
+            )
+            try:
+                assert cursor.rowcount == 1
+            finally:
+                cursor.close()
+            connection.execute(trigger_sql).close()
+            connection.execute("COMMIT").close()
+        except BaseException:
+            connection.execute("ROLLBACK").close()
+            raise
+    finally:
+        connection.close()
 
 
 def _evidence_report(
     summary: harness.VerificationSummary,
     *,
-    backup_manifest: harness.BackupManifest,
     recorded_at: str,
-    query_rows: int,
-    maximum_open_cursors: int,
-    latency_samples_ns: tuple[int, ...] = (1, 2, 3, 4, 5),
-    peak_traced_memory_bytes: int = 0,
+    evidence: harness.GeneratedEvidenceAggregate,
 ) -> harness.EvidenceReport:
     profile = summary.profile
+    workload = evidence.workload_thresholds
     return harness.EvidenceReport(
         report_version=1,
         task_id=harness.TASK_ID,
@@ -406,16 +432,1208 @@ def _evidence_report(
         wal_autocheckpoint_pages=harness.WAL_AUTOCHECKPOINT_PAGES,
         stream_rows=summary.stream_count,
         history_rows=summary.history_count,
-        query_rows=query_rows,
+        query_evidence=workload.query_evidence,
         database_bytes=summary.database_bytes,
         wal_bytes=summary.wal_bytes,
         page_count=summary.page_count,
         freelist_count=summary.freelist_count,
-        maximum_open_cursors=maximum_open_cursors,
-        peak_traced_memory_bytes=peak_traced_memory_bytes,
-        latency_samples_ns=latency_samples_ns,
-        backup_manifest=backup_manifest,
-        gates=_complete_evidence_gates(),
+        maximum_open_cursors=workload.maximum_open_cursors,
+        peak_traced_memory_bytes=workload.peak_traced_memory_bytes,
+        latency_samples_ns=workload.latency_samples_ns,
+        backup_manifest=evidence.backup_restore.backup_manifest,
+        evidence=evidence,
+    )
+
+
+def _capture_rejection(
+    label: str,
+    *,
+    pytest_root: Path | None = None,
+    token: harness.StoreToken | None = None,
+    stream_id: UUID | None = None,
+    natural_key: bytes | None = None,
+    limit: int | None = None,
+    expectation: ContinuousPublicTradeStreamExpectationV1 | None = None,
+) -> tuple[str, harness.HarnessFailureCode]:
+    return harness.capture_harness_rejection(
+        label,
+        pytest_root=pytest_root,
+        token=token,
+        stream_id=stream_id,
+        natural_key=natural_key,
+        limit=limit,
+        expectation=expectation,
+    )
+
+
+def _capture_sqlite_rejection(
+    label: str,
+    connection: sqlite3.Connection,
+    *,
+    parameters: Sequence[object] = (),
+) -> tuple[str, harness.HarnessFailureCode]:
+    return harness.capture_sqlite_rejection(
+        label,
+        connection,
+        parameters=parameters,
+    )
+
+
+def _report_bootstrap_path_evidence(
+    tmp_path: Path,
+    token: harness.StoreToken,
+) -> harness.BootstrapPathEvidence:
+    checks: list[tuple[str, harness.HarnessFailureCode]] = [
+        _capture_rejection(
+            "relative_root",
+            pytest_root=Path("relative"),
+        ),
+        _capture_rejection(
+            "unregistered_root",
+            pytest_root=tmp_path / "unregistered-root",
+        ),
+        _capture_rejection(
+            "reconstructed_root",
+            pytest_root=Path(str(tmp_path)),
+        ),
+        _capture_rejection(
+            "sibling_root",
+            pytest_root=tmp_path.with_name(f"{tmp_path.name}-sibling"),
+        ),
+        _capture_rejection(
+            "nested_root",
+            pytest_root=tmp_path / "nested-root",
+        ),
+    ]
+    alias = tmp_path.with_name(f"{tmp_path.name}-report-alias")
+    alias.symlink_to(tmp_path, target_is_directory=True)
+    try:
+        checks.append(
+            _capture_rejection(
+                "symlink_root",
+                pytest_root=alias,
+            )
+        )
+    finally:
+        alias.unlink()
+
+    checks.append(
+        _capture_rejection(
+            "forged_token",
+            token=replace(token, _nonce=b"\x00" * 32),
+        )
+    )
+
+    node_id = os.environ["PYTEST_CURRENT_TEST"].rsplit(" (", maxsplit=1)[0]
+    scoped_root = tmp_path / "report-scoped-root"
+    scoped_root.mkdir(mode=0o700)
+    with harness._pytest_root_scope(scoped_root, node_id=node_id):
+        scoped_token = harness.bootstrap_store(scoped_root)
+        checks.extend(
+            (
+                _capture_rejection(
+                    "wrong_process_root",
+                    pytest_root=scoped_root,
+                ),
+                _capture_rejection(
+                    "wrong_process_token",
+                    token=scoped_token,
+                ),
+                _capture_rejection(
+                    "wrong_node_root",
+                    pytest_root=scoped_root,
+                ),
+                _capture_rejection(
+                    "wrong_node_token",
+                    token=scoped_token,
+                ),
+            )
+        )
+    checks.extend(
+        (
+            _capture_rejection(
+                "expired_root",
+                pytest_root=scoped_root,
+            ),
+            _capture_rejection(
+                "expired_token",
+                token=scoped_token,
+            ),
+        )
+    )
+    harness._remove_owned_files(scoped_token)
+    scoped_root.rmdir()
+
+    registered_root = tmp_path / "report-replaced-root"
+    registered_root.mkdir(mode=0o700)
+    retained_root = tmp_path / "report-replaced-root-retained"
+    with harness._pytest_root_scope(registered_root, node_id=node_id):
+        registered_root.rename(retained_root)
+        registered_root.mkdir(mode=0o700)
+        try:
+            checks.append(
+                _capture_rejection(
+                    "replaced_registered_root",
+                    pytest_root=registered_root,
+                )
+            )
+        finally:
+            registered_root.rmdir()
+            retained_root.rename(registered_root)
+    registered_root.rmdir()
+
+    hardlink_token = harness.bootstrap_store(tmp_path)
+    hardlink = tmp_path / "forbidden-hardlink.sqlite3"
+    os.link(hardlink_token._database_path, hardlink)
+    try:
+        checks.append(
+            _capture_rejection(
+                "hardlink_database",
+                token=hardlink_token,
+            )
+        )
+    finally:
+        hardlink.unlink()
+
+    unexpected_token = harness.bootstrap_store(tmp_path)
+    unexpected = unexpected_token._generation_root / "unexpected-entry"
+    unexpected.write_bytes(b"not-owned")
+    try:
+        checks.append(
+            _capture_rejection(
+                "unexpected_entry",
+                token=unexpected_token,
+            )
+        )
+    finally:
+        unexpected.unlink()
+
+    readonly_token = harness.bootstrap_store(tmp_path)
+    os.chmod(readonly_token._database_path, 0o400)
+    try:
+        checks.append(
+            _capture_rejection(
+                "readonly_database",
+                token=readonly_token,
+            )
+        )
+    finally:
+        os.chmod(readonly_token._database_path, 0o600)
+
+    root_mode = stat_mode(tmp_path)
+    os.chmod(tmp_path, root_mode ^ 0o020)
+    try:
+        checks.append(
+            _capture_rejection(
+                "widened_root",
+                token=token,
+            )
+        )
+    finally:
+        os.chmod(tmp_path, root_mode)
+
+    missing_token = harness.bootstrap_store(tmp_path)
+    missing_token._database_path.unlink()
+    checks.append(
+        _capture_rejection(
+            "missing_database",
+            token=missing_token,
+        )
+    )
+
+    replaced_token = harness.bootstrap_store(tmp_path)
+    replaced_token._database_path.unlink()
+    replacement_descriptor = os.open(
+        replaced_token._database_path,
+        os.O_CREAT | os.O_EXCL | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    os.close(replacement_descriptor)
+    checks.append(
+        _capture_rejection(
+            "replaced_database",
+            token=replaced_token,
+        )
+    )
+
+    alias_token = harness.bootstrap_store(tmp_path)
+    allowed_alias = alias_token._generation_root / "store.sqlite3-shm"
+    retained_allowed = tmp_path / "report-retained-shm"
+    sentinel = tmp_path / "report-alias-sentinel"
+    sentinel.write_bytes(b"sentinel")
+    if allowed_alias.exists():
+        allowed_alias.rename(retained_allowed)
+    allowed_alias.symlink_to(sentinel)
+    try:
+        checks.append(
+            _capture_rejection(
+                "allowed_name_symlink",
+                token=alias_token,
+            )
+        )
+    finally:
+        allowed_alias.unlink()
+        if retained_allowed.exists():
+            retained_allowed.rename(allowed_alias)
+        sentinel.unlink()
+
+    checks.append(
+        _capture_rejection(
+            "path_resolution_bootstrap",
+            pytest_root=tmp_path,
+        )
+    )
+    resolution_token = harness.bootstrap_store(tmp_path)
+    checks.append(
+        _capture_rejection(
+            "path_resolution_operation",
+            token=resolution_token,
+        )
+    )
+
+    return harness.BootstrapPathEvidence(
+        token=token,
+        rejections=harness.RejectionEvidence(tuple(checks)),
+    )
+
+
+def _report_corruption_evidence(tmp_path: Path) -> harness.RejectionEvidence:
+    checks: list[tuple[str, harness.HarnessFailureCode]] = []
+
+    digest_token = harness.bootstrap_store(tmp_path)
+    digest_connection, _ = harness._connect(digest_token, writer=True)
+    try:
+        digest_connection.set_authorizer(None)
+        digest_connection.execute("BEGIN IMMEDIATE").close()
+        checks.append(
+            _capture_sqlite_rejection(
+                "digest_byte_guard",
+                digest_connection,
+                parameters=(
+                    99_001,
+                    2,
+                    b"sha256:" + (b"0" * 10) + b"\x00" + (b"f" * 53),
+                    0,
+                ),
+            )
+        )
+        digest_connection.execute("ROLLBACK").close()
+    finally:
+        digest_connection.close()
+
+    authorizer_token = harness.bootstrap_store(tmp_path)
+    authorizer_connection, _ = harness._connect(authorizer_token, writer=True)
+    try:
+        checks.append(
+            _capture_sqlite_rejection(
+                "forbidden_schema_sql",
+                authorizer_connection,
+            )
+        )
+    finally:
+        authorizer_connection.close()
+
+    tail_token = harness.bootstrap_store(tmp_path)
+    tail_policy, tail_creation = _creation(seed=4_901)
+    tail_transition = _retain(
+        tail_creation,
+        tail_policy,
+        reason="report-tail-binding",
+    )
+    assert (
+        harness.create_stream(
+            tail_token,
+            tail_creation,
+            tail_policy,
+        ).classification
+        is harness.StoreClassification.INSERTED
+    )
+    tail_connection, _ = harness._connect(tail_token, writer=True)
+    try:
+        tail_connection.execute("BEGIN IMMEDIATE").close()
+        stream = tail_connection.execute(
+            """
+            SELECT stream_row_id
+            FROM continuous_public_trade_stream
+            WHERE stream_uuid = ?
+            """,
+            (tail_creation.record.stream_id.bytes,),
+        ).fetchone()
+        assert stream is not None
+        tail_connection.execute(
+            harness._INSERT_HISTORY_SQL,
+            (
+                stream["stream_row_id"],
+                tail_transition.record.successor_version,
+                b"transition",
+                b"1.0",
+                1,
+                tail_transition.canonical_bytes,
+                tail_transition.record_digest.encode("ascii"),
+                tail_transition.successor_envelope.canonical_bytes,
+                tail_transition.successor_envelope.envelope_digest.encode("ascii"),
+                tail_transition.record.prior_version,
+                tail_transition.record.prior_envelope_digest.encode("ascii"),
+                tail_transition.record.prior_history_root.encode("ascii"),
+                tail_creation.canonical_bytes,
+                tail_creation.record_digest.encode("ascii"),
+                tail_transition.history_root.encode("ascii"),
+            ),
+        ).close()
+        checks.append(
+            _capture_sqlite_rejection(
+                "transition_without_current_tail",
+                tail_connection,
+            )
+        )
+        tail_connection.execute("ROLLBACK").close()
+    finally:
+        tail_connection.close()
+
+    deferred_token = harness.bootstrap_store(tmp_path)
+    _, deferred_creation = _creation(seed=4_902)
+    deferred_connection, _ = harness._connect(deferred_token, writer=True)
+    try:
+        deferred_connection.execute("BEGIN IMMEDIATE").close()
+        _insert_stream_only(deferred_connection, deferred_creation)
+        checks.append(
+            _capture_sqlite_rejection(
+                "stream_without_creation_history",
+                deferred_connection,
+            )
+        )
+        deferred_connection.execute("ROLLBACK").close()
+
+        deferred_connection.execute("BEGIN IMMEDIATE").close()
+        checks.append(
+            _capture_sqlite_rejection(
+                "orphan_creation_history",
+                deferred_connection,
+                parameters=(
+                    99_902,
+                    1,
+                    b"creation",
+                    b"1.0",
+                    1,
+                    deferred_creation.canonical_bytes,
+                    deferred_creation.record_digest.encode("ascii"),
+                    deferred_creation.successor_envelope.canonical_bytes,
+                    deferred_creation.successor_envelope.envelope_digest.encode("ascii"),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    deferred_creation.history_root.encode("ascii"),
+                ),
+            )
+        )
+        deferred_connection.execute("ROLLBACK").close()
+    finally:
+        deferred_connection.close()
+
+    immutable_token = harness.bootstrap_store(tmp_path)
+    immutable_policy, immutable_creation = _creation(seed=4_903)
+    assert (
+        harness.create_stream(
+            immutable_token,
+            immutable_creation,
+            immutable_policy,
+        ).classification
+        is harness.StoreClassification.INSERTED
+    )
+    immutable_connection, _ = harness._connect(immutable_token, writer=True)
+    try:
+        immutable_statements = (
+            (
+                "metadata_update",
+                "UPDATE stream_store_metadata SET page_size = 8192",
+            ),
+            ("metadata_delete", "DELETE FROM stream_store_metadata"),
+            (
+                "history_update",
+                "UPDATE continuous_public_trade_history "
+                "SET serialization_version = 1 WHERE successor_version = 1",
+            ),
+            ("history_delete", "DELETE FROM continuous_public_trade_history"),
+            (
+                "stream_identity_update",
+                "UPDATE continuous_public_trade_stream SET stream_contract_version = 2",
+            ),
+            ("stream_delete", "DELETE FROM continuous_public_trade_stream"),
+            (
+                "current_tail_jump",
+                "UPDATE continuous_public_trade_stream SET current_version = current_version + 2",
+            ),
+        )
+        for label, statement in immutable_statements:
+            del statement
+            checks.append(
+                _capture_sqlite_rejection(
+                    label,
+                    immutable_connection,
+                )
+            )
+    finally:
+        immutable_connection.close()
+
+    predecessor_token = harness.bootstrap_store(tmp_path)
+    predecessor_policy, predecessor_creation = _creation(seed=4_904)
+    predecessor_transition = _retain(
+        predecessor_creation,
+        predecessor_policy,
+        reason="report-predecessor-binding",
+    )
+    assert (
+        harness.create_stream(
+            predecessor_token,
+            predecessor_creation,
+            predecessor_policy,
+        ).classification
+        is harness.StoreClassification.INSERTED
+    )
+    predecessor_connection, _ = harness._connect(predecessor_token, writer=True)
+    stream = predecessor_connection.execute(
+        """
+        SELECT stream_row_id
+        FROM continuous_public_trade_stream
+        WHERE stream_uuid = ?
+        """,
+        (predecessor_creation.record.stream_id.bytes,),
+    ).fetchone()
+    assert stream is not None
+    base_values: list[object] = [
+        stream["stream_row_id"],
+        predecessor_transition.record.successor_version,
+        b"transition",
+        b"1.0",
+        1,
+        predecessor_transition.canonical_bytes,
+        predecessor_transition.record_digest.encode("ascii"),
+        predecessor_transition.successor_envelope.canonical_bytes,
+        predecessor_transition.successor_envelope.envelope_digest.encode("ascii"),
+        predecessor_transition.record.prior_version,
+        predecessor_transition.record.prior_envelope_digest.encode("ascii"),
+        predecessor_transition.record.prior_history_root.encode("ascii"),
+        predecessor_creation.canonical_bytes,
+        predecessor_creation.record_digest.encode("ascii"),
+        predecessor_transition.history_root.encode("ascii"),
+    ]
+    hostile_values: list[tuple[str, list[object]]] = []
+    wrong_predecessor = list(base_values)
+    wrong_predecessor[12] = predecessor_creation.canonical_bytes + b" "
+    hostile_values.append(("wrong_predecessor_bytes", wrong_predecessor))
+    wrong_digest = list(base_values)
+    wrong_digest[13] = _digest("report-wrong-predecessor").encode("ascii")
+    hostile_values.append(("wrong_predecessor_digest", wrong_digest))
+    wrong_root = list(base_values)
+    wrong_root[11] = _digest("report-wrong-root").encode("ascii")
+    hostile_values.append(("wrong_predecessor_root", wrong_root))
+    gap = list(base_values)
+    gap[1] = 3
+    gap[9] = 2
+    hostile_values.append(("history_gap", gap))
+    try:
+        for label, values in hostile_values:
+            predecessor_connection.execute("BEGIN IMMEDIATE").close()
+            checks.append(
+                _capture_sqlite_rejection(
+                    label,
+                    predecessor_connection,
+                    parameters=values,
+                )
+            )
+            predecessor_connection.execute("ROLLBACK").close()
+    finally:
+        predecessor_connection.close()
+
+    unsupported_token = harness.bootstrap_store(tmp_path)
+    unsupported_connection, _ = harness._connect(unsupported_token, writer=True)
+    try:
+        unsupported_connection.execute("PRAGMA user_version = 2").close()
+    finally:
+        unsupported_connection.close()
+    checks.append(
+        _capture_rejection(
+            "unsupported_generation",
+            token=unsupported_token,
+        )
+    )
+
+    zero_token = harness.bootstrap_store(tmp_path)
+    zero_connection, _ = harness._connect(zero_token, writer=True)
+    try:
+        zero_connection.execute("PRAGMA user_version = 0").close()
+    finally:
+        zero_connection.close()
+    checks.append(
+        _capture_rejection(
+            "malformed_generation",
+            token=zero_token,
+        )
+    )
+
+    short_token = harness.bootstrap_store(tmp_path)
+    short_connection, _ = harness._connect(short_token, writer=True)
+    try:
+        short_connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").close()
+    finally:
+        short_connection.close()
+    os.truncate(short_token._database_path, harness.PAGE_SIZE - 1)
+    checks.append(
+        _capture_rejection(
+            "short_page",
+            token=short_token,
+        )
+    )
+
+    overflow_token = harness.bootstrap_store(tmp_path)
+    overflow_policy, overflow_creation = _creation(seed=4_905)
+    assert (
+        harness.create_stream(
+            overflow_token,
+            overflow_creation,
+            overflow_policy,
+        ).classification
+        is harness.StoreClassification.INSERTED
+    )
+    checks.append(
+        _capture_rejection(
+            "audit_limit_overflow",
+            token=overflow_token,
+            stream_id=overflow_creation.record.stream_id,
+            natural_key=_natural_key(overflow_creation),
+            limit=101,
+        )
+    )
+
+    retained_token = harness.bootstrap_store(tmp_path)
+    retained_policy, retained_creation = _creation(seed=4_906)
+    assert (
+        harness.create_stream(
+            retained_token,
+            retained_creation,
+            retained_policy,
+        ).classification
+        is harness.StoreClassification.INSERTED
+    )
+    _corrupt_creation_history_record(retained_token, retained_creation)
+    checks.append(
+        _capture_rejection(
+            "retained_history_canonical_bytes",
+            token=retained_token,
+        )
+    )
+
+    two_candidate_token = harness.bootstrap_store(tmp_path)
+    two_policy_a, two_creation_a = _creation(seed=4_907)
+    two_policy_b, two_creation_b = _creation(seed=4_908)
+    assert (
+        harness.create_stream(
+            two_candidate_token,
+            two_creation_a,
+            two_policy_a,
+        ).classification
+        is harness.StoreClassification.INSERTED
+    )
+    assert (
+        harness.create_stream(
+            two_candidate_token,
+            two_creation_b,
+            two_policy_b,
+        ).classification
+        is harness.StoreClassification.INSERTED
+    )
+    _corrupt_creation_history_record(two_candidate_token, two_creation_b)
+    checks.append(
+        _capture_rejection(
+            "two_candidate_corrupt_precedence",
+            token=two_candidate_token,
+            stream_id=two_creation_a.record.stream_id,
+            natural_key=_natural_key(two_creation_b),
+            limit=100,
+        )
+    )
+
+    expectation_token = harness.bootstrap_store(tmp_path)
+    expectation_policy, expectation_creation = _creation(seed=4_909)
+    assert (
+        harness.create_stream(
+            expectation_token,
+            expectation_creation,
+            expectation_policy,
+        ).classification
+        is harness.StoreClassification.INSERTED
+    )
+    _corrupt_creation_history_record(expectation_token, expectation_creation)
+    checks.append(
+        _capture_rejection(
+            "expectation_conflict_corrupt_precedence",
+            token=expectation_token,
+            stream_id=expectation_creation.record.stream_id,
+            natural_key=_natural_key(expectation_creation),
+            limit=100,
+            expectation=_expectation(
+                expectation_policy,
+                expectation_creation,
+                source="report-mismatching-source",
+            ),
+        )
+    )
+
+    return harness.RejectionEvidence(tuple(checks))
+
+
+def _report_fresh_process_evidence(
+    tmp_path: Path,
+) -> harness.FreshProcessEvidenceAggregate:
+    create_faults: list[harness.FaultEvidence] = []
+    for offset, seam in enumerate(harness._CREATE_KILL_SEAM_ORDER):
+        token = harness.bootstrap_store(tmp_path)
+        policy, creation = _creation(seed=5_000 + offset)
+        create_faults.append(
+            harness.fresh_process_kill_evidence(
+                token,
+                seam=seam,
+                creation=creation,
+                policy=policy,
+                natural_key=_natural_key(creation),
+            )
+        )
+
+    compare_and_swap_faults: list[harness.FaultEvidence] = []
+    for offset, seam in enumerate(harness._CAS_KILL_SEAM_ORDER):
+        token = harness.bootstrap_store(tmp_path)
+        policy, creation = _creation(seed=5_100 + offset)
+        transition = _retain(
+            creation,
+            policy,
+            reason=f"report-cas-fault-{offset}",
+        )
+        assert harness.create_stream(token, creation, policy).classification is (
+            harness.StoreClassification.INSERTED
+        )
+        compare_and_swap_faults.append(
+            harness.fresh_process_kill_evidence(
+                token,
+                seam=seam,
+                transition=transition,
+                natural_key=_natural_key(creation),
+            )
+        )
+
+    result_code_faults = tuple(
+        harness.sqlite_result_code_fault_evidence(
+            harness.bootstrap_store(tmp_path),
+            seam=seam,
+        )
+        for seam in ("readonly", "busy")
+    )
+
+    during_token = harness.bootstrap_store(tmp_path)
+    during_policy, during_creation = _creation(seed=5_200)
+    during_transition = _retain(
+        during_creation,
+        during_policy,
+        reason="report-true-during-commit",
+    )
+    assert (
+        harness.create_stream(
+            during_token,
+            during_creation,
+            during_policy,
+        ).classification
+        is harness.StoreClassification.INSERTED
+    )
+    during_commit = harness.true_during_commit_evidence(
+        during_token,
+        transition=during_transition,
+        natural_key=_natural_key(during_creation),
+    )
+
+    ioerr_token = harness.bootstrap_store(tmp_path)
+    ioerr_policy, ioerr_creation = _creation(seed=5_201)
+    ioerr_transition = _retain(
+        ioerr_creation,
+        ioerr_policy,
+        reason="report-ioerr",
+    )
+    assert (
+        harness.create_stream(
+            ioerr_token,
+            ioerr_creation,
+            ioerr_policy,
+        ).classification
+        is harness.StoreClassification.INSERTED
+    )
+    ioerr = harness.ioerr_write_evidence(
+        ioerr_token,
+        transition=ioerr_transition,
+        natural_key=_natural_key(ioerr_creation),
+    )
+
+    full_token = harness.bootstrap_store(tmp_path)
+    full_policy, full_creation = _creation(seed=5_202)
+    full_transition = _retain(
+        full_creation,
+        full_policy,
+        reason="report-full",
+    )
+    assert (
+        harness.create_stream(
+            full_token,
+            full_creation,
+            full_policy,
+        ).classification
+        is harness.StoreClassification.INSERTED
+    )
+    full = harness.max_page_count_evidence(
+        full_token,
+        transition=full_transition,
+        natural_key=_natural_key(full_creation),
+    )
+
+    create_contention_token = harness.bootstrap_store(tmp_path)
+    create_contention_policy, create_contention = _creation(seed=5_300)
+    create_contention_evidence = harness.fresh_process_writer_contention_evidence(
+        create_contention_token,
+        operation="create",
+        creation=create_contention,
+        policy=create_contention_policy,
+        natural_key=_natural_key(create_contention),
+    )
+    cas_contention_token = harness.bootstrap_store(tmp_path)
+    cas_contention_policy, cas_contention = _creation(seed=5_301)
+    cas_contention_transition = _retain(
+        cas_contention,
+        cas_contention_policy,
+        reason="report-cas-contention",
+    )
+    assert (
+        harness.create_stream(
+            cas_contention_token,
+            cas_contention,
+            cas_contention_policy,
+        ).classification
+        is harness.StoreClassification.INSERTED
+    )
+    cas_contention_evidence = harness.fresh_process_writer_contention_evidence(
+        cas_contention_token,
+        operation="compare_and_swap",
+        transition=cas_contention_transition,
+        natural_key=_natural_key(cas_contention),
+    )
+
+    duplicate_create_token = harness.bootstrap_store(tmp_path)
+    duplicate_create_policy, duplicate_create = _creation(seed=5_400)
+    duplicate_create_evidence = harness.fresh_process_two_writer_evidence(
+        duplicate_create_token,
+        operation="create",
+        creations=(duplicate_create, duplicate_create),
+        policy=duplicate_create_policy,
+    )
+    conflict_create_token = harness.bootstrap_store(tmp_path)
+    conflict_create_policy, conflict_create = _creation(seed=5_401)
+    _, competing_create = _creation(
+        seed=5_401,
+        stream_id_seed=54_010,
+        identity_seed=5_401,
+    )
+    conflict_create_evidence = harness.fresh_process_two_writer_evidence(
+        conflict_create_token,
+        operation="create",
+        creations=(conflict_create, competing_create),
+        policy=conflict_create_policy,
+    )
+    duplicate_cas_token = harness.bootstrap_store(tmp_path)
+    duplicate_cas_policy, duplicate_cas_creation = _creation(seed=5_402)
+    duplicate_cas = _retain(
+        duplicate_cas_creation,
+        duplicate_cas_policy,
+        reason="report-duplicate-cas",
+    )
+    assert (
+        harness.create_stream(
+            duplicate_cas_token,
+            duplicate_cas_creation,
+            duplicate_cas_policy,
+        ).classification
+        is harness.StoreClassification.INSERTED
+    )
+    duplicate_cas_evidence = harness.fresh_process_two_writer_evidence(
+        duplicate_cas_token,
+        operation="compare_and_swap",
+        transitions=(duplicate_cas, duplicate_cas),
+    )
+    conflict_cas_token = harness.bootstrap_store(tmp_path)
+    conflict_cas_policy, conflict_cas_creation = _creation(seed=5_403)
+    accepted_cas = _retain(
+        conflict_cas_creation,
+        conflict_cas_policy,
+        reason="report-accepted-cas",
+    )
+    competing_cas = _retain(
+        conflict_cas_creation,
+        conflict_cas_policy,
+        reason="report-competing-cas",
+    )
+    assert (
+        harness.create_stream(
+            conflict_cas_token,
+            conflict_cas_creation,
+            conflict_cas_policy,
+        ).classification
+        is harness.StoreClassification.INSERTED
+    )
+    conflict_cas_evidence = harness.fresh_process_two_writer_evidence(
+        conflict_cas_token,
+        operation="compare_and_swap",
+        transitions=(accepted_cas, competing_cas),
+    )
+
+    wal_token = harness.bootstrap_store(tmp_path)
+    wal_policy, wal_creation = _creation(seed=5_500)
+    assert (
+        harness.create_stream(
+            wal_token,
+            wal_creation,
+            wal_policy,
+        ).classification
+        is harness.StoreClassification.INSERTED
+    )
+    wal_transitions: list[ContinuousPublicTradeStreamStoredTransitionV1] = []
+    wal_prior: ContinuousPublicTradeStreamStoredHistoryEntryV1 = wal_creation
+    for offset in range(8):
+        transition = _retain(
+            wal_prior,
+            wal_policy,
+            reason=f"report-wal-{offset}",
+        )
+        wal_transitions.append(transition)
+        wal_prior = transition
+    wal = harness.wal_concurrency_evidence(
+        wal_token,
+        transitions=wal_transitions,
+        natural_key=_natural_key(wal_creation),
+    )
+
+    return harness.FreshProcessEvidenceAggregate(
+        create_faults=tuple(create_faults),
+        compare_and_swap_faults=tuple(compare_and_swap_faults),
+        result_code_faults=result_code_faults,
+        true_during_commit=during_commit,
+        ioerr_write=ioerr,
+        max_page_count=full,
+        writer_contentions=(
+            create_contention_evidence,
+            cas_contention_evidence,
+        ),
+        two_writers=(
+            duplicate_create_evidence,
+            conflict_create_evidence,
+            duplicate_cas_evidence,
+            conflict_cas_evidence,
+        ),
+        wal_concurrency=wal,
+    )
+
+
+def _report_atomicity_evidence(
+    tmp_path: Path,
+    fresh_process: harness.FreshProcessEvidenceAggregate,
+) -> harness.AtomicityClassificationEvidence:
+    token = harness.bootstrap_store(tmp_path)
+    policy, creation = _creation(seed=5_600)
+    inserted = harness.create_stream(token, creation, policy)
+    duplicate_create = harness.create_stream(token, creation, policy)
+    _, competing_creation = _creation(
+        seed=5_600,
+        stream_id_seed=56_001,
+        identity_seed=5_600,
+    )
+    conflicting_create = harness.create_stream(
+        token,
+        competing_creation,
+        policy,
+    )
+    accepted = _retain(
+        creation,
+        policy,
+        reason="report-accepted-atomicity",
+    )
+    competing = _retain(
+        creation,
+        policy,
+        reason="report-competing-atomicity",
+    )
+    updated = harness.compare_and_swap_stream(token, accepted)
+    duplicate_compare_and_swap = harness.compare_and_swap_stream(token, accepted)
+    conflicting_compare_and_swap = harness.compare_and_swap_stream(token, competing)
+    return harness.AtomicityClassificationEvidence(
+        mutations=(
+            inserted,
+            duplicate_create,
+            conflicting_create,
+            updated,
+            duplicate_compare_and_swap,
+            conflicting_compare_and_swap,
+        ),
+        two_writers=fresh_process.two_writers,
+        unknown_acknowledgements=(
+            fresh_process.create_faults[-1],
+            fresh_process.compare_and_swap_faults[-1],
+        ),
+    )
+
+
+def _report_bounded_query_evidence(
+    token: harness.StoreToken,
+    creation: ContinuousPublicTradeStreamStoredCreationV1,
+    tmp_path: Path,
+) -> tuple[harness.CurrentSlice, harness.BoundedQueryEvidenceAggregate]:
+    natural_key = _natural_key(creation)
+    projection = harness.load_current(
+        token,
+        stream_id=creation.record.stream_id,
+        natural_key=natural_key,
+    )
+    missing_policy, missing_creation = _creation(seed=5_700)
+    del missing_policy
+    missing = harness.load_current(
+        token,
+        stream_id=missing_creation.record.stream_id,
+        natural_key=_natural_key(missing_creation),
+    )
+    initial_one = harness.audit_history(
+        token,
+        stream_id=creation.record.stream_id,
+        natural_key=natural_key,
+        limit=1,
+    )
+    harness.audit_history(
+        token,
+        stream_id=creation.record.stream_id,
+        natural_key=natural_key,
+        limit=10,
+    )
+    continued_one = harness.audit_history(
+        token,
+        stream_id=creation.record.stream_id,
+        natural_key=natural_key,
+        limit=1,
+        continuation=(
+            creation.record.successor_version,
+            creation.successor_envelope.envelope_digest,
+            creation.history_root,
+        ),
+    )
+    assert projection.current is not None
+    tail = projection.current
+    at_tail = harness.audit_history(
+        token,
+        stream_id=creation.record.stream_id,
+        natural_key=natural_key,
+        limit=100,
+        continuation=(
+            tail.record.successor_version,
+            tail.successor_envelope.envelope_digest,
+            tail.history_root,
+        ),
+    )
+    anchor_conflict = harness.audit_history(
+        token,
+        stream_id=creation.record.stream_id,
+        natural_key=natural_key,
+        limit=1,
+        continuation=(
+            creation.record.successor_version,
+            _digest("report-wrong-audit-anchor"),
+            creation.history_root,
+        ),
+    )
+
+    conflict_token = harness.bootstrap_store(tmp_path)
+    conflict_policy_a, conflict_creation_a = _creation(seed=5_701)
+    conflict_policy_b, conflict_creation_b = _creation(seed=5_702)
+    assert (
+        harness.create_stream(
+            conflict_token,
+            conflict_creation_a,
+            conflict_policy_a,
+        ).classification
+        is harness.StoreClassification.INSERTED
+    )
+    assert (
+        harness.create_stream(
+            conflict_token,
+            conflict_creation_b,
+            conflict_policy_b,
+        ).classification
+        is harness.StoreClassification.INSERTED
+    )
+    current_conflict = harness.load_current(
+        conflict_token,
+        stream_id=conflict_creation_a.record.stream_id,
+        natural_key=_natural_key(conflict_creation_b),
+    )
+    audit_conflict = harness.audit_history(
+        conflict_token,
+        stream_id=conflict_creation_a.record.stream_id,
+        natural_key=_natural_key(conflict_creation_b),
+        limit=100,
+    )
+
+    maximum_token = harness.bootstrap_store(tmp_path)
+    maximum_policy, maximum_creation = _creation(seed=5_703)
+    assert (
+        harness.create_stream(
+            maximum_token,
+            maximum_creation,
+            maximum_policy,
+        ).classification
+        is harness.StoreClassification.INSERTED
+    )
+    maximum_prior: ContinuousPublicTradeStreamStoredHistoryEntryV1 = maximum_creation
+    for offset in range(102):
+        maximum_transition = _retain(
+            maximum_prior,
+            maximum_policy,
+            reason=f"report-maximum-query-{offset:03d}",
+        )
+        assert (
+            harness.compare_and_swap_stream(
+                maximum_token,
+                maximum_transition,
+            ).classification
+            is harness.StoreClassification.UPDATED
+        )
+        maximum_prior = maximum_transition
+        if (offset + 1) % 20 == 0:
+            _truncate_generated_wal(maximum_token)
+    initial_hundred = harness.audit_history(
+        maximum_token,
+        stream_id=maximum_creation.record.stream_id,
+        natural_key=_natural_key(maximum_creation),
+        limit=100,
+    )
+    continued_hundred = harness.audit_history(
+        maximum_token,
+        stream_id=maximum_creation.record.stream_id,
+        natural_key=_natural_key(maximum_creation),
+        limit=100,
+        continuation=(
+            maximum_creation.record.successor_version,
+            maximum_creation.successor_envelope.envelope_digest,
+            maximum_creation.history_root,
+        ),
+    )
+    plans = harness.query_plan_evidence(
+        maximum_token,
+        stream_id=maximum_creation.record.stream_id,
+        natural_key=_natural_key(maximum_creation),
+    )
+    plan_names = (
+        "identity",
+        "current",
+        "audit_initial_1",
+        "audit_continuation_1",
+        "audit_initial_100",
+        "audit_continuation_100",
+    )
+    return projection, harness.BoundedQueryEvidenceAggregate(
+        queries=(
+            ("current_found", projection.classification, projection.query_evidence),
+            ("current_not_found", missing.classification, missing.query_evidence),
+            (
+                "current_identity_conflict",
+                current_conflict.classification,
+                current_conflict.query_evidence,
+            ),
+            (
+                "audit_identity_conflict",
+                audit_conflict.classification,
+                audit_conflict.query_evidence,
+            ),
+            ("audit_initial_1", initial_one.classification, initial_one.query_evidence),
+            (
+                "audit_continuation_1",
+                continued_one.classification,
+                continued_one.query_evidence,
+            ),
+            (
+                "audit_initial_100",
+                initial_hundred.classification,
+                initial_hundred.query_evidence,
+            ),
+            (
+                "audit_continuation_100",
+                continued_hundred.classification,
+                continued_hundred.query_evidence,
+            ),
+            ("audit_at_tail", at_tail.classification, at_tail.query_evidence),
+            (
+                "audit_anchor_conflict",
+                anchor_conflict.classification,
+                anchor_conflict.query_evidence,
+            ),
+        ),
+        plans=tuple((name, plans[name]) for name in plan_names),
+    )
+
+
+def _report_generation_copy_evidence(
+    source: harness.StoreToken,
+    tmp_path: Path,
+) -> harness.GenerationCopyEvidence:
+    source_summary = harness.verify_store(source)
+    source_generation_id = harness._generation_evidence_id(source)
+    source_tails = harness._tail_manifest(source)
+    destination = harness.same_format_generation_copy(source, tmp_path)
+    return harness.GenerationCopyEvidence(
+        source_token=source,
+        destination_token=destination,
+        source_generation_id=source_generation_id,
+        destination_generation_id=harness._generation_evidence_id(destination),
+        source_summary=source_summary,
+        destination_summary=harness.verify_store(destination),
+        source_tails=source_tails,
+        destination_tails=harness._tail_manifest(destination),
+    )
+
+
+def _report_concurrent_backup_evidence(
+    tmp_path: Path,
+) -> harness.ConcurrentBackupEvidence:
+    source = harness.bootstrap_store(tmp_path)
+    policy, creation = _creation(seed=5_800)
+    second = _retain(
+        creation,
+        policy,
+        reason="report-concurrent-backup-prior",
+    )
+    assert (
+        harness.create_stream(source, creation, policy).classification
+        is harness.StoreClassification.INSERTED
+    )
+    assert (
+        harness.compare_and_swap_stream(source, second).classification
+        is harness.StoreClassification.UPDATED
+    )
+    transitions: list[ContinuousPublicTradeStreamStoredTransitionV1] = []
+    prior: ContinuousPublicTradeStreamStoredHistoryEntryV1 = second
+    for offset in range(16):
+        transition = _retain(
+            prior,
+            policy,
+            reason=f"report-concurrent-backup-{offset:02d}-" + ("x" * 96),
+        )
+        transitions.append(transition)
+        prior = transition
+    return harness.concurrent_write_backup_evidence(
+        source,
+        tmp_path,
+        transitions=tuple(transitions),
+        evidence_recorded_at_utc="2026-07-29T06:47:00.000000Z",
     )
 
 
@@ -865,7 +2083,59 @@ def test_create_and_identity_conflicts_validate_both_retained_streams(
         limit=100,
     )
     assert audit_conflict.classification is harness.StoreClassification.IDENTITY_CONFLICT
+    assert audit_conflict.query_evidence.stream_rows == 2
+    assert audit_conflict.query_evidence.history_rows == 2
+    assert audit_conflict.query_evidence.decoded_rows == 2
     assert harness.verify_store(token).stream_count == 2
+
+
+def test_audit_identity_conflict_cannot_mask_corrupt_candidate_history(
+    tmp_path: Path,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    policy_a, creation_a = _creation(seed=301)
+    policy_b, creation_b = _creation(seed=302)
+    assert harness.create_stream(token, creation_a, policy_a).classification is (
+        harness.StoreClassification.INSERTED
+    )
+    assert harness.create_stream(token, creation_b, policy_b).classification is (
+        harness.StoreClassification.INSERTED
+    )
+    _corrupt_creation_history_record(token, creation_b)
+
+    with pytest.raises(harness.HarnessFailure) as corrupt:
+        harness.audit_history(
+            token,
+            stream_id=creation_a.record.stream_id,
+            natural_key=_natural_key(creation_b),
+            limit=100,
+        )
+    assert corrupt.value.code is harness.HarnessFailureCode.CORRUPT
+
+
+def test_audit_expectation_conflict_cannot_mask_corrupt_candidate_history(
+    tmp_path: Path,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    policy, creation = _creation(seed=303)
+    assert harness.create_stream(token, creation, policy).classification is (
+        harness.StoreClassification.INSERTED
+    )
+    _corrupt_creation_history_record(token, creation)
+
+    with pytest.raises(harness.HarnessFailure) as corrupt:
+        harness.audit_history(
+            token,
+            stream_id=creation.record.stream_id,
+            natural_key=_natural_key(creation),
+            limit=100,
+            expectation=_expectation(
+                policy,
+                creation,
+                source="coherent-but-different-source",
+            ),
+        )
+    assert corrupt.value.code is harness.HarnessFailureCode.CORRUPT
 
 
 def test_compare_and_swap_competing_successor_and_historical_duplicate(
@@ -1137,106 +2407,6 @@ def test_online_backup_restore_generation_copy_and_report(tmp_path: Path) -> Non
     assert restored_manifest.per_stream_tails == manifest.per_stream_tails
     assert harness.verify_store(restored).history_count == 2
     assert harness.verify_store(copied).history_count == 2
-
-    backup_summary = harness.verify_store(backup)
-    maximum_open_cursors = harness.measured_open_cursor_evidence(
-        backup,
-        stream_id=creation.record.stream_id,
-        natural_key=_natural_key(creation),
-    )
-    complete_report = _evidence_report(
-        backup_summary,
-        backup_manifest=manifest,
-        recorded_at=manifest.evidence_recorded_at_utc,
-        query_rows=0,
-        maximum_open_cursors=maximum_open_cursors,
-    )
-    with pytest.raises(harness.HarnessFailure) as incomplete:
-        harness.write_evidence_report(
-            tmp_path,
-            report=replace(complete_report, gates=complete_report.gates[:-1]),
-        )
-    assert incomplete.value.code is harness.HarnessFailureCode.CORRUPT
-    with pytest.raises(harness.HarnessFailure) as arbitrary_pragma:
-        harness.write_evidence_report(
-            tmp_path,
-            report=replace(
-                complete_report,
-                connection_profiles=(
-                    replace(
-                        complete_report.connection_profiles[0],
-                        pragmas=(
-                            *complete_report.connection_profiles[0].pragmas,
-                            ("path", str(tmp_path)),
-                        ),
-                    ),
-                    complete_report.connection_profiles[1],
-                ),
-            ),
-        )
-    assert arbitrary_pragma.value.code is harness.HarnessFailureCode.CORRUPT
-    with pytest.raises(harness.HarnessFailure) as malformed_manifest:
-        harness.write_evidence_report(
-            tmp_path,
-            report=replace(
-                complete_report,
-                backup_manifest=replace(
-                    manifest,
-                    destination_history_rows=manifest.destination_history_rows + 1,
-                ),
-            ),
-        )
-    assert malformed_manifest.value.code is harness.HarnessFailureCode.CORRUPT
-    forged_source_page_count = (
-        manifest.source_page_count + 1 if manifest.source_page_count < harness.MAX_PAGE_COUNT else 1
-    )
-    with pytest.raises(harness.HarnessFailure) as forged_page_count:
-        harness.write_evidence_report(
-            tmp_path,
-            report=replace(
-                complete_report,
-                backup_manifest=replace(
-                    manifest,
-                    source_page_count=forged_source_page_count,
-                ),
-            ),
-        )
-    assert forged_page_count.value.code is harness.HarnessFailureCode.CORRUPT
-    with pytest.raises(harness.HarnessFailure) as malformed_report_time:
-        harness.write_evidence_report(
-            tmp_path,
-            report=replace(
-                complete_report,
-                evidence_recorded_at_utc="2026-07-29T06:00:00Z",
-            ),
-        )
-    assert malformed_report_time.value.code is harness.HarnessFailureCode.CORRUPT
-    report = harness.write_evidence_report(
-        tmp_path,
-        report=complete_report,
-    )
-    assert report.parent == tmp_path
-    assert stat_mode(report) == 0o600
-    assert str(tmp_path) not in report.read_text(encoding="utf-8")
-    report_document = json.loads(report.read_text(encoding="utf-8"))
-    assert report_document["backup_manifest"] == {
-        "source_generation_id": manifest.source_generation_id,
-        "destination_generation_id": manifest.destination_generation_id,
-        "schema_fingerprint": manifest.schema_fingerprint,
-        "sqlite_source_id": manifest.sqlite_source_id,
-        "page_size": manifest.page_size,
-        "source_page_count": manifest.source_page_count,
-        "destination_page_count": manifest.destination_page_count,
-        "checkpoint_outcome": [0, 0, 0],
-        "finalization_outcome": manifest.finalization_outcome,
-        "evidence_recorded_at_utc": manifest.evidence_recorded_at_utc,
-        "source_streams": manifest.source_streams,
-        "source_history_rows": manifest.source_history_rows,
-        "destination_streams": manifest.destination_streams,
-        "destination_history_rows": manifest.destination_history_rows,
-        "files": [list(item) for item in manifest.files],
-        "per_stream_tails": [list(item) for item in manifest.per_stream_tails],
-    }
 
 
 def test_online_backup_rejects_malformed_evidence_time_before_destination(
@@ -2006,9 +3176,14 @@ def test_path_token_and_permission_guards_fail_closed(tmp_path: Path) -> None:
         harness.verify_store(forged)
     assert invalid.value.code is harness.HarnessFailureCode.INVALID_TOKEN
 
-    hardlink = token._database_path.with_name("forbidden-hardlink.sqlite3")
+    hardlink = tmp_path / "forbidden-hardlink.sqlite3"
     os.link(token._database_path, hardlink)
     try:
+        assert set(os.listdir(token._generation_root)) <= {
+            "store.sqlite3",
+            "store.sqlite3-wal",
+            "store.sqlite3-shm",
+        }
         with pytest.raises(harness.HarnessFailure) as linked:
             harness.verify_store(token)
         assert linked.value.code is harness.HarnessFailureCode.UNAVAILABLE
@@ -2060,6 +3235,23 @@ def test_path_token_and_permission_guards_fail_closed(tmp_path: Path) -> None:
     with pytest.raises(harness.HarnessFailure) as swapped:
         harness.verify_store(replaced)
     assert swapped.value.code is harness.HarnessFailureCode.UNAVAILABLE
+
+
+def test_rejection_capture_does_not_accept_caller_callbacks(tmp_path: Path) -> None:
+    def caller_callback() -> object:
+        raise sqlite3.IntegrityError("caller-manufactured")
+
+    with pytest.raises(TypeError):
+        cast(Any, harness.capture_harness_rejection)(
+            "relative_root",
+            invoke=caller_callback,
+        )
+    with pytest.raises(TypeError):
+        cast(Any, harness.capture_sqlite_rejection)(
+            "digest_byte_guard",
+            invoke=caller_callback,
+        )
+    assert not (tmp_path / "task064-evidence.json").exists()
 
 
 def test_live_connection_path_revalidation_is_lock_neutral(tmp_path: Path) -> None:
@@ -3239,54 +4431,98 @@ def test_online_backup_remains_coherent_during_one_concurrent_append(
     assert harness.compare_and_swap_stream(source, second).classification is (
         harness.StoreClassification.UPDATED
     )
-    source_page_count_before = harness.verify_store(source).page_count
-    start_writer = threading.Event()
-    writer_done = threading.Event()
-    writer_outcome: list[harness.StoreClassification] = []
-    writer_errors: list[BaseException] = []
+    evidence = harness.concurrent_write_backup_evidence(
+        source,
+        tmp_path,
+        transitions=tuple(concurrent_transitions),
+        evidence_recorded_at_utc="2026-07-29T06:15:00.000000Z",
+    )
+    assert evidence.source_token is source
+    assert evidence.progress_observations == 1
+    assert len(evidence.writer_mutations) == harness.CONCURRENT_BACKUP_TRANSITIONS
+    assert all(
+        mutation.classification is harness.StoreClassification.UPDATED
+        for mutation in evidence.writer_mutations
+    )
+    assert evidence.source_after.page_count > evidence.source_before.page_count
+    assert (
+        evidence.source_before.page_count
+        <= evidence.backup_manifest.source_page_count
+        <= evidence.source_after.page_count
+    )
+    assert evidence.backup_summary.history_count == (
+        evidence.backup_manifest.destination_history_rows
+    )
 
-    def writer() -> None:
-        try:
-            if not start_writer.wait(timeout=40):
-                raise AssertionError("bounded backup writer was never started")
-            for transition in concurrent_transitions:
-                writer_outcome.append(
-                    harness.compare_and_swap_stream(source, transition).classification
-                )
-        except BaseException as error:
-            writer_errors.append(error)
-        finally:
-            writer_done.set()
 
-    thread = threading.Thread(target=writer)
-    thread.start()
-
-    def backup_progress() -> None:
-        start_writer.set()
-        if not writer_done.wait(timeout=40):
-            raise AssertionError("bounded backup writer did not finish")
-
-    try:
-        backup, manifest = harness.online_backup(
-            source,
-            tmp_path,
-            evidence_recorded_at_utc="2026-07-29T06:15:00.000000Z",
-            progress_hook=backup_progress,
+def test_concurrent_backup_ready_failure_reaps_exact_child(
+    tmp_path: Path,
+) -> None:
+    source = harness.bootstrap_store(tmp_path)
+    policy, creation = _creation(seed=27)
+    second = _retain(creation, policy)
+    assert harness.create_stream(source, creation, policy).classification is (
+        harness.StoreClassification.INSERTED
+    )
+    assert harness.compare_and_swap_stream(source, second).classification is (
+        harness.StoreClassification.UPDATED
+    )
+    transitions: list[ContinuousPublicTradeStreamStoredTransitionV1] = []
+    prior: ContinuousPublicTradeStreamStoredHistoryEntryV1 = second
+    for index in range(harness.CONCURRENT_BACKUP_TRANSITIONS):
+        transition = _retain(
+            prior,
+            policy,
+            reason=f"ready-failure-{index:02d}-" + ("x" * 96),
         )
-    finally:
-        start_writer.set()
-        thread.join(timeout=40)
-    assert not thread.is_alive()
-    assert not writer_errors
-    assert writer_outcome == [harness.StoreClassification.UPDATED] * len(concurrent_transitions)
-    assert 2 <= manifest.source_history_rows <= 2 + len(concurrent_transitions)
-    backup_summary = harness.verify_store(backup)
-    assert backup_summary.history_count == manifest.source_history_rows
-    assert manifest.source_page_count == manifest.destination_page_count
-    assert manifest.destination_page_count == backup_summary.page_count
-    source_summary = harness.verify_store(source)
-    assert source_summary.history_count == 2 + len(concurrent_transitions)
-    assert source_summary.page_count > source_page_count_before
+        transitions.append(transition)
+        prior = transition
+    before = harness.verify_store(source)
+    generation_names = {
+        path.name
+        for path in tmp_path.iterdir()
+        if path.is_dir() and path.name.startswith("continuous-public-trade-v1-")
+    }
+    real_fork = os.fork
+    parent_child_ids: list[int] = []
+
+    def recording_fork() -> int:
+        process_id = real_fork()
+        if process_id > 0:
+            parent_child_ids.append(process_id)
+        return process_id
+
+    real_read_packet = harness._read_process_packet
+
+    def fail_ready(stage: str, descriptor: int, size: int) -> bytes:
+        if stage == "concurrent_backup_ready":
+            raise OSError(errno.EIO, "injected ready failure")
+        return real_read_packet(stage, descriptor, size)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(os, "fork", recording_fork)
+        patch.setattr(harness, "_read_process_packet", fail_ready)
+        with pytest.raises(harness.HarnessFailure) as rejected:
+            harness.concurrent_write_backup_evidence(
+                source,
+                tmp_path,
+                transitions=tuple(transitions),
+                evidence_recorded_at_utc="2026-07-29T06:16:00.000000Z",
+            )
+    assert rejected.value.code is harness.HarnessFailureCode.UNPROVEN
+    assert len(parent_child_ids) == 1
+    with pytest.raises(ChildProcessError):
+        os.waitpid(parent_child_ids[0], os.WNOHANG)
+    after = harness.verify_store(source)
+    assert (after.stream_count, after.history_count) == (
+        before.stream_count,
+        before.history_count,
+    )
+    assert {
+        path.name
+        for path in tmp_path.iterdir()
+        if path.is_dir() and path.name.startswith("continuous-public-trade-v1-")
+    } == generation_names
 
 
 def test_finite_typical_workload_measurements_and_sanitized_report(
@@ -3297,84 +4533,515 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
         ("typical", 3, 9, 10),
         ("maximum_query", 1, 103, 100),
     )
+    evidence_run = harness.begin_generated_evidence_run(tmp_path)
     token = harness.bootstrap_store(tmp_path)
     retained: list[
         tuple[
             ContinuousPublicTradeStreamStoredCreationV1,
             bytes,
+            ContinuousPublicTradeStreamStoredHistoryEntryV1,
         ]
     ] = []
     for offset in range(3):
         policy, creation = _creation(seed=harness.WORKLOAD_SEED + offset)
-        assert harness.create_stream(token, creation, policy).classification is (
-            harness.StoreClassification.INSERTED
-        )
+        created = harness.create_stream(token, creation, policy)
+        assert created.classification is harness.StoreClassification.INSERTED
         prior: ContinuousPublicTradeStreamStoredHistoryEntryV1 = creation
         for _ in range(8):
             transition = _retain(prior, policy)
-            assert (
-                harness.compare_and_swap_stream(
-                    token,
-                    transition,
-                ).classification
-                is harness.StoreClassification.UPDATED
+            updated = harness.compare_and_swap_stream(
+                token,
+                transition,
             )
+            assert updated.classification is harness.StoreClassification.UPDATED
             prior = transition
-        retained.append((creation, _natural_key(creation)))
+        retained.append((creation, _natural_key(creation), prior))
 
-    latency_samples: list[int] = []
-    for _ in range(harness.WORKLOAD_RUNS):
-        started = time.monotonic_ns()
-        loaded = harness.load_current(
-            token,
-            stream_id=retained[0][0].record.stream_id,
-            natural_key=retained[0][1],
+    concurrent_transitions: list[ContinuousPublicTradeStreamStoredTransitionV1] = []
+    concurrent_prior = retained[0][2]
+    first_policy = _policy(harness.WORKLOAD_SEED)
+    for offset in range(harness.CONCURRENT_BACKUP_TRANSITIONS):
+        concurrent_transition = _retain(
+            concurrent_prior,
+            first_policy,
+            reason=f"report-concurrent-primary-{offset:02d}-" + ("x" * 96),
         )
-        latency_samples.append(time.monotonic_ns() - started)
-        assert loaded.classification is harness.StoreClassification.FOUND
-        assert loaded.query_evidence.history_rows == 3
-
-    tracemalloc.start()
-    try:
-        measured = harness.load_current(
-            token,
-            stream_id=retained[0][0].record.stream_id,
-            natural_key=retained[0][1],
-        )
-        _, peak_memory = tracemalloc.get_traced_memory()
-    finally:
-        tracemalloc.stop()
-    assert measured.classification is harness.StoreClassification.FOUND
-    assert measured.query_evidence.history_rows == 3
-    report_token, report_manifest = harness.online_backup(
+        concurrent_transitions.append(concurrent_transition)
+        concurrent_prior = concurrent_transition
+    backup_restore = harness.collect_backup_restore_evidence(
+        evidence_run,
         token,
         tmp_path,
-        evidence_recorded_at_utc="2026-07-29T06:45:00.000000Z",
+        transitions=tuple(concurrent_transitions),
+        backup_recorded_at_utc="2026-07-29T06:45:00.000000Z",
+        restore_recorded_at_utc="2026-07-29T06:46:00.000000Z",
     )
-    summary = harness.verify_store(report_token)
-    assert len(latency_samples) == harness.WORKLOAD_RUNS
-    assert max(latency_samples) <= harness.MAX_OPERATION_LATENCY_NS
-    assert peak_memory <= harness.MAX_TEST_TRACED_MEMORY_BYTES
-    assert summary.database_bytes <= harness.MAX_TEST_DATABASE_BYTES
-    assert summary.wal_bytes <= harness.MAX_TEST_WAL_BYTES
-    maximum_open_cursors = harness.measured_open_cursor_evidence(
+    report_token = backup_restore.backup_token
+    report_manifest = backup_restore.backup_manifest
+    restore_manifest = backup_restore.restore_manifest
+    summary = harness.collect_schema_identity_evidence(evidence_run, report_token)
+    with harness.bootstrap_path_operation_scope(evidence_run):
+        _report_bootstrap_path_evidence(tmp_path, report_token)
+    bootstrap_path = harness.finalize_bootstrap_path_evidence(
+        evidence_run,
+        report_token,
+    )
+    runtime_controls = harness.collect_runtime_connection_controls_evidence(
+        evidence_run,
+        report_token,
+        summary,
+    )
+    projection = harness.collect_projection_roundtrip_evidence(
+        evidence_run,
         report_token,
         stream_id=retained[0][0].record.stream_id,
         natural_key=retained[0][1],
     )
-    report = harness.write_evidence_report(
+    with harness.schema_corruption_operation_scope(evidence_run):
+        _report_corruption_evidence(tmp_path)
+    corruption = harness.finalize_schema_corruption_evidence(
+        evidence_run,
+        report_token,
+    )
+    with harness.fresh_process_operation_scope(evidence_run):
+        _report_fresh_process_evidence(tmp_path)
+    fresh_process = harness.finalize_fresh_process_evidence(
+        evidence_run,
+        report_token,
+    )
+    with harness.atomicity_operation_scope(evidence_run):
+        _report_atomicity_evidence(tmp_path, fresh_process)
+    atomicity = harness.finalize_atomicity_evidence(
+        evidence_run,
+        report_token,
+    )
+    with harness.bounded_query_operation_scope(evidence_run):
+        _report_bounded_query_evidence(
+            report_token,
+            retained[0][0],
+            tmp_path,
+        )
+    bounded_queries = harness.finalize_bounded_query_evidence(
+        evidence_run,
+        report_token,
+    )
+    closed_mapping = harness.collect_closed_error_mapping_evidence(
+        evidence_run,
+        report_token,
+    )
+    generation_copy = harness.collect_generation_copy_evidence(
+        evidence_run,
+        report_token,
         tmp_path,
-        report=_evidence_report(
-            summary,
-            backup_manifest=report_manifest,
-            recorded_at=report_manifest.evidence_recorded_at_utc,
-            query_rows=4,
-            maximum_open_cursors=maximum_open_cursors,
-            peak_traced_memory_bytes=peak_memory,
-            latency_samples_ns=tuple(latency_samples),
+    )
+    workload = harness.collect_workload_threshold_evidence(
+        evidence_run,
+        report_token,
+        stream_id=retained[0][0].record.stream_id,
+        natural_key=retained[0][1],
+    )
+    assert len(workload.latency_samples_ns) == harness.WORKLOAD_RUNS
+    assert max(workload.latency_samples_ns) <= harness.MAX_OPERATION_LATENCY_NS
+    assert workload.peak_traced_memory_bytes <= harness.MAX_TEST_TRACED_MEMORY_BYTES
+    assert summary.database_bytes <= harness.MAX_TEST_DATABASE_BYTES
+    assert summary.wal_bytes <= harness.MAX_TEST_WAL_BYTES
+    evidence = harness.GeneratedEvidenceAggregate(
+        schema_identity=summary,
+        bootstrap_path_ownership=bootstrap_path,
+        runtime_connection_controls=runtime_controls,
+        projection_roundtrip=projection,
+        schema_constraints_corruption=corruption,
+        atomicity_classification=atomicity,
+        fresh_process_faults=fresh_process,
+        bounded_queries=bounded_queries,
+        closed_error_mapping=closed_mapping,
+        backup_restore=backup_restore,
+        generation_copy=generation_copy,
+        workload_thresholds=workload,
+    )
+    complete_report = _evidence_report(
+        summary,
+        recorded_at=report_manifest.evidence_recorded_at_utc,
+        evidence=evidence,
+    )
+    evidence_receipt = harness.seal_generated_evidence_run(
+        evidence_run,
+        evidence=evidence,
+    )
+    report_path = tmp_path / "task064-evidence.json"
+    backup_file_name, backup_file_size, backup_file_digest = report_manifest.files[0]
+    forged_backup_digest = _digest("forged-report-backup-file")
+    assert forged_backup_digest != backup_file_digest
+    forged_backup_manifest = replace(
+        report_manifest,
+        files=(
+            (backup_file_name, backup_file_size, forged_backup_digest),
+            *report_manifest.files[1:],
         ),
     )
+    restore_file_name, restore_file_size, restore_file_digest = restore_manifest.files[0]
+    forged_restore_digest = _digest("forged-report-restore-file")
+    assert forged_restore_digest != restore_file_digest
+    forged_restore_manifest = replace(
+        restore_manifest,
+        files=(
+            (restore_file_name, restore_file_size, forged_restore_digest),
+            *restore_manifest.files[1:],
+        ),
+    )
+
+    hostile_evidence = (
+        replace(
+            evidence,
+            fresh_process_faults=replace(
+                fresh_process,
+                create_faults=fresh_process.create_faults[:-1],
+            ),
+        ),
+        replace(
+            evidence,
+            fresh_process_faults=replace(
+                fresh_process,
+                create_faults=(
+                    *fresh_process.create_faults[:-1],
+                    fresh_process.create_faults[0],
+                ),
+            ),
+        ),
+        replace(
+            evidence,
+            fresh_process_faults=replace(
+                fresh_process,
+                create_faults=(
+                    fresh_process.create_faults[1],
+                    fresh_process.create_faults[0],
+                    *fresh_process.create_faults[2:],
+                ),
+            ),
+        ),
+        replace(
+            evidence,
+            fresh_process_faults=replace(
+                fresh_process,
+                create_faults=(
+                    replace(
+                        fresh_process.create_faults[0],
+                        disposition=harness.EvidenceDisposition.FAIL,
+                        reason="observed_failure",
+                    ),
+                    *fresh_process.create_faults[1:],
+                ),
+            ),
+        ),
+        replace(
+            evidence,
+            schema_constraints_corruption=harness.RejectionEvidence(()),
+        ),
+        replace(
+            evidence,
+            generation_copy=replace(
+                generation_copy,
+                destination_tails=(),
+            ),
+        ),
+        replace(
+            evidence,
+            backup_restore=replace(
+                evidence.backup_restore,
+                backup_manifest=forged_backup_manifest,
+            ),
+        ),
+        replace(
+            evidence,
+            backup_restore=replace(
+                evidence.backup_restore,
+                restore_manifest=forged_restore_manifest,
+            ),
+        ),
+    )
+    for hostile in hostile_evidence:
+        with pytest.raises(harness.HarnessFailure) as rejected:
+            harness.write_evidence_report(
+                tmp_path,
+                receipt=evidence_receipt,
+                report=_evidence_report(
+                    summary,
+                    recorded_at=report_manifest.evidence_recorded_at_utc,
+                    evidence=hostile,
+                ),
+            )
+        assert rejected.value.code is harness.HarnessFailureCode.CORRUPT
+        assert not report_path.exists()
+
+    malformed_query = replace(
+        workload.query_evidence,
+        decoded_rows=workload.query_evidence.decoded_rows - 1,
+    )
+    malformed_query_evidence = replace(
+        evidence,
+        projection_roundtrip=replace(
+            projection,
+            query_evidence=malformed_query,
+        ),
+        bounded_queries=replace(
+            bounded_queries,
+            queries=(
+                (
+                    "current_found",
+                    projection.classification,
+                    malformed_query,
+                ),
+                *bounded_queries.queries[1:],
+            ),
+        ),
+        workload_thresholds=replace(
+            evidence.workload_thresholds,
+            query_evidence=malformed_query,
+        ),
+    )
+    with pytest.raises(harness.HarnessFailure) as malformed_query_rejected:
+        harness.write_evidence_report(
+            tmp_path,
+            receipt=evidence_receipt,
+            report=_evidence_report(
+                summary,
+                recorded_at=report_manifest.evidence_recorded_at_utc,
+                evidence=malformed_query_evidence,
+            ),
+        )
+    assert malformed_query_rejected.value.code is harness.HarnessFailureCode.CORRUPT
+    assert not report_path.exists()
+
+    with pytest.raises(harness.HarnessFailure) as arbitrary_pragma:
+        harness.write_evidence_report(
+            tmp_path,
+            receipt=evidence_receipt,
+            report=replace(
+                complete_report,
+                connection_profiles=(
+                    replace(
+                        complete_report.connection_profiles[0],
+                        pragmas=(
+                            *complete_report.connection_profiles[0].pragmas,
+                            ("path", str(tmp_path)),
+                        ),
+                    ),
+                    complete_report.connection_profiles[1],
+                ),
+            ),
+        )
+    assert arbitrary_pragma.value.code is harness.HarnessFailureCode.CORRUPT
+    assert not report_path.exists()
+    with pytest.raises(harness.HarnessFailure) as malformed_manifest:
+        harness.write_evidence_report(
+            tmp_path,
+            receipt=evidence_receipt,
+            report=replace(
+                complete_report,
+                backup_manifest=replace(
+                    report_manifest,
+                    destination_history_rows=report_manifest.destination_history_rows + 1,
+                ),
+            ),
+        )
+    assert malformed_manifest.value.code is harness.HarnessFailureCode.CORRUPT
+    assert not report_path.exists()
+    forged_source_page_count = (
+        report_manifest.source_page_count + 1
+        if report_manifest.source_page_count < harness.MAX_PAGE_COUNT
+        else 1
+    )
+    with pytest.raises(harness.HarnessFailure) as forged_page_count:
+        harness.write_evidence_report(
+            tmp_path,
+            receipt=evidence_receipt,
+            report=replace(
+                complete_report,
+                backup_manifest=replace(
+                    report_manifest,
+                    source_page_count=forged_source_page_count,
+                ),
+            ),
+        )
+    assert forged_page_count.value.code is harness.HarnessFailureCode.CORRUPT
+    assert not report_path.exists()
+    with pytest.raises(harness.HarnessFailure) as malformed_report_time:
+        harness.write_evidence_report(
+            tmp_path,
+            receipt=evidence_receipt,
+            report=replace(
+                complete_report,
+                evidence_recorded_at_utc="2026-07-29T06:45:00Z",
+            ),
+        )
+    assert malformed_report_time.value.code is harness.HarnessFailureCode.CORRUPT
+    assert not report_path.exists()
+
+    def assert_no_report_staging_file() -> None:
+        assert not tuple(tmp_path.glob(".task064-evidence-*.tmp"))
+
+    real_write = os.write
+    write_calls = 0
+
+    def partial_report_write(descriptor: int, payload: Any) -> int:
+        nonlocal write_calls
+        write_calls += 1
+        if write_calls == 1:
+            partial_size = max(1, len(payload) // 2)
+            return real_write(descriptor, payload[:partial_size])
+        raise OSError(errno.EIO, "injected report write failure")
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(os, "write", partial_report_write)
+        with pytest.raises(harness.HarnessFailure) as partial_write:
+            harness.write_evidence_report(
+                tmp_path,
+                receipt=evidence_receipt,
+                report=complete_report,
+            )
+    assert partial_write.value.code is harness.HarnessFailureCode.UNAVAILABLE
+    assert not report_path.exists()
+    assert_no_report_staging_file()
+
+    real_fsync = os.fsync
+    fsync_calls = 0
+
+    def fail_first_report_fsync(descriptor: int) -> None:
+        nonlocal fsync_calls
+        fsync_calls += 1
+        if fsync_calls == 1:
+            raise OSError(errno.EIO, "injected report fsync failure")
+        real_fsync(descriptor)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(os, "fsync", fail_first_report_fsync)
+        with pytest.raises(harness.HarnessFailure) as staged_fsync:
+            harness.write_evidence_report(
+                tmp_path,
+                receipt=evidence_receipt,
+                report=complete_report,
+            )
+    assert staged_fsync.value.code is harness.HarnessFailureCode.UNAVAILABLE
+    assert not report_path.exists()
+    assert_no_report_staging_file()
+
+    real_validate_receipt = harness._validate_evidence_receipt
+    receipt_validation_calls = 0
+
+    def fail_final_receipt_validation(*args: Any, **kwargs: Any) -> Any:
+        nonlocal receipt_validation_calls
+        receipt_validation_calls += 1
+        if receipt_validation_calls == 3:
+            raise harness.HarnessFailure(harness.HarnessFailureCode.CORRUPT)
+        return real_validate_receipt(*args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            harness,
+            "_validate_evidence_receipt",
+            fail_final_receipt_validation,
+        )
+        with pytest.raises(harness.HarnessFailure) as final_receipt_recheck:
+            harness.write_evidence_report(
+                tmp_path,
+                receipt=evidence_receipt,
+                report=complete_report,
+            )
+    assert final_receipt_recheck.value.code is harness.HarnessFailureCode.CORRUPT
+    assert not report_path.exists()
+    assert_no_report_staging_file()
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            os,
+            "link",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                OSError(errno.EIO, "injected report publish failure")
+            ),
+        )
+        with pytest.raises(harness.HarnessFailure) as publish_failure:
+            harness.write_evidence_report(
+                tmp_path,
+                receipt=evidence_receipt,
+                report=complete_report,
+            )
+    assert publish_failure.value.code is harness.HarnessFailureCode.UNAVAILABLE
+    assert not report_path.exists()
+    assert_no_report_staging_file()
+
+    collision_bytes = b"preexisting-report-sentinel\n"
+    report_path.write_bytes(collision_bytes)
+    try:
+        with pytest.raises(harness.HarnessFailure) as report_collision:
+            harness.write_evidence_report(
+                tmp_path,
+                receipt=evidence_receipt,
+                report=complete_report,
+            )
+        assert report_collision.value.code is harness.HarnessFailureCode.UNAVAILABLE
+        assert report_path.read_bytes() == collision_bytes
+        assert_no_report_staging_file()
+    finally:
+        report_path.unlink()
+
+    report = harness.write_evidence_report(
+        tmp_path,
+        receipt=evidence_receipt,
+        report=complete_report,
+    )
+    assert report == report_path
+    assert stat_mode(report) == 0o600
+    assert report.stat().st_nlink == 1
+    assert_no_report_staging_file()
     report_text = report.read_text(encoding="utf-8")
     assert str(tmp_path) not in report_text
     username = os.environ.get("USER")
     assert username is None or username not in report_text
+    report_document = json.loads(report_text)
+    assert report_document["measurements"]["query_rows"] == (
+        workload.query_evidence.stream_rows + workload.query_evidence.history_rows
+    )
+    assert report_document["gates"] == [
+        *[
+            {
+                "name": name,
+                "disposition": harness.EvidenceDisposition.PASS.value,
+                "reason": None,
+            }
+            for name in harness.GENERATED_EVIDENCE_GATES
+        ],
+        *[
+            {
+                "name": name,
+                "disposition": harness.EvidenceDisposition.NOT_APPLICABLE.value,
+                "reason": harness.TARGET_NOT_APPLICABLE_REASON,
+            }
+            for name in harness.TARGET_NOT_APPLICABLE_GATES
+        ],
+    ]
+    assert report_document["backup_manifest"] == {
+        "source_generation_id": report_manifest.source_generation_id,
+        "destination_generation_id": report_manifest.destination_generation_id,
+        "schema_fingerprint": report_manifest.schema_fingerprint,
+        "sqlite_source_id": report_manifest.sqlite_source_id,
+        "page_size": report_manifest.page_size,
+        "source_page_count": report_manifest.source_page_count,
+        "destination_page_count": report_manifest.destination_page_count,
+        "checkpoint_outcome": [0, 0, 0],
+        "finalization_outcome": report_manifest.finalization_outcome,
+        "evidence_recorded_at_utc": report_manifest.evidence_recorded_at_utc,
+        "source_streams": report_manifest.source_streams,
+        "source_history_rows": report_manifest.source_history_rows,
+        "destination_streams": report_manifest.destination_streams,
+        "destination_history_rows": report_manifest.destination_history_rows,
+        "files": [list(item) for item in report_manifest.files],
+        "per_stream_tails": [list(item) for item in report_manifest.per_stream_tails],
+    }
+    with pytest.raises(harness.HarnessFailure) as consumed_receipt:
+        harness.write_evidence_report(
+            tmp_path,
+            receipt=evidence_receipt,
+            report=complete_report,
+        )
+    assert consumed_receipt.value.code is harness.HarnessFailureCode.CORRUPT
+    assert report.read_text(encoding="utf-8") == report_text

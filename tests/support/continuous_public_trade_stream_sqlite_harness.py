@@ -10,6 +10,7 @@ import ctypes
 import errno
 import hashlib
 import json
+import math
 import mmap
 import os
 import resource
@@ -21,14 +22,16 @@ import stat
 import struct
 import sys
 import time
+import tracemalloc
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from datetime import UTC, datetime
-from enum import StrEnum
+from enum import Enum, StrEnum
+from functools import wraps
 from pathlib import Path
-from typing import Any, Final, cast
+from typing import Any, Final, ParamSpec, TypeVar, cast
 from uuid import UUID
 
 from wealth.domain.continuous_public_trade import (
@@ -118,6 +121,7 @@ MAX_TEST_TRACED_MEMORY_BYTES: Final = 64 * 1024 * 1024
 MAX_TEST_OPEN_CURSORS: Final = 8
 WORKLOAD_SEED: Final = 64_064
 WORKLOAD_RUNS: Final = 5
+CONCURRENT_BACKUP_TRANSITIONS: Final = 16
 MAX_OPERATION_LATENCY_NS: Final = 2_000_000_000
 WORKLOAD_MATRIX: Final = (
     ("minimum", 1, 1, 1),
@@ -386,6 +390,102 @@ class StoreToken:
 
 
 @dataclass(frozen=True, slots=True)
+class _EvidenceObservation:
+    """One exact whole-gate collector return retained for the pytest scope."""
+
+    value: object
+    payload_digest: str
+    registration: _ActivePytestRoot
+    producer: _EvidenceProducer
+    run: _EvidenceRun
+    process_id: int
+    token_roles: tuple[tuple[str, bytes], ...]
+    private_receipt_digest: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _EvidenceProducer:
+    """Closure-only whole-gate producer authority with one immutable slot."""
+
+    capability: object
+    name: str
+    gate: str
+    ordinal: int
+
+
+@dataclass(frozen=True, slots=True)
+class _RejectionScenario:
+    """Fixed rejection label, outcome, and authorized executor contract."""
+
+    capability: object
+    label: str
+    kind: str
+    code: HarnessFailureCode
+    executor_names: tuple[str, ...]
+    normalized_sql: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _RejectionObservation:
+    """Actual rejection bound to one registered scenario capability."""
+
+    scenario: _RejectionScenario
+    code: HarnessFailureCode
+    sqlite_errorcode: int | None
+    run: _EvidenceRun
+    process_id: int
+    ordinal: int
+    target_nonce: bytes | None
+    call_digest: str
+
+
+@dataclass(slots=True)
+class _RejectionCollectorState:
+    """Exact scenario sequence owned by one active whole-gate collector."""
+
+    run: _EvidenceRun
+    gate: str
+    scenarios: tuple[_RejectionScenario, ...]
+    observations: list[_RejectionObservation]
+
+
+@dataclass(frozen=True, slots=True)
+class _OperationObservation:
+    """One closure-issued low-level executor result in a fixed gate scope."""
+
+    producer_name: str
+    operation_tag: str
+    result: object
+    payload_digest: str
+    sequence: int
+    token_nonces: tuple[bytes, ...]
+
+
+@dataclass(slots=True)
+class _GateOperationState:
+    """Low-level receipts captured for one exact gate and run."""
+
+    run: _EvidenceRun
+    gate: str
+    observations: list[_OperationObservation]
+
+
+@dataclass(slots=True)
+class _EvidenceLedger:
+    """Private per-pytest-root evidence state; never shared across test scopes."""
+
+    nonce: bytes
+    observations: dict[int, _EvidenceObservation]
+    operation_runs: dict[str, tuple[_OperationObservation, ...]]
+    rejection_runs: dict[str, tuple[_RejectionObservation, ...]]
+    run: _EvidenceRun | None = None
+    receipt: _EvidenceReceipt | None = None
+    recording: bool = False
+    consumed: bool = False
+    closed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class _ActivePytestRoot:
     """Fixture-scoped authority for one repository-controlled pytest root."""
 
@@ -399,6 +499,37 @@ class _ActivePytestRoot:
     node_id: str
     nonce: bytes
     revocation_flag: mmap.mmap
+    evidence_ledger: _EvidenceLedger
+
+
+@dataclass(frozen=True, slots=True)
+class _EvidenceRun:
+    """Unforgeable object-identity capability for one active evidence execution."""
+
+    _constructor: object
+    _pytest_registration: _ActivePytestRoot
+    _nonce: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class _GateEvidenceReceipt:
+    """One sealed generated-gate payload bound to its exact live object."""
+
+    _constructor: object
+    gate: str
+    payload: object
+    payload_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class _EvidenceReceipt:
+    """Consume-on-success authority for one exact generated evidence aggregate."""
+
+    _constructor: object
+    run: _EvidenceRun
+    evidence: GeneratedEvidenceAggregate
+    evidence_digest: str
+    gates: tuple[_GateEvidenceReceipt, ...]
 
 
 @dataclass(slots=True)
@@ -560,6 +691,125 @@ class WalConcurrencyEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class RejectionEvidence:
+    """Exact ordered sanitized rejection or closed-mapping observations."""
+
+    checks: tuple[tuple[str, HarnessFailureCode], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class BootstrapPathEvidence:
+    """Live bootstrap authority plus exact hostile-boundary rejections."""
+
+    token: StoreToken
+    rejections: RejectionEvidence
+
+
+@dataclass(frozen=True, slots=True)
+class FreshProcessEvidenceAggregate:
+    """Actual returned packets for the complete generated process-fault matrix."""
+
+    create_faults: tuple[FaultEvidence, ...]
+    compare_and_swap_faults: tuple[FaultEvidence, ...]
+    result_code_faults: tuple[FaultEvidence, ...]
+    true_during_commit: FaultEvidence
+    ioerr_write: FaultEvidence
+    max_page_count: FaultEvidence
+    writer_contentions: tuple[WriterContentionEvidence, ...]
+    two_writers: tuple[TwoWriterEvidence, ...]
+    wal_concurrency: WalConcurrencyEvidence
+
+
+@dataclass(frozen=True, slots=True)
+class BoundedQueryEvidenceAggregate:
+    """Actual bounded query packets and their exact planner observations."""
+
+    queries: tuple[tuple[str, StoreClassification, QueryEvidence], ...]
+    plans: tuple[tuple[str, tuple[str, ...]], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AtomicityClassificationEvidence:
+    """Committed writes plus duplicate/conflict and unknown-ack classifications."""
+
+    mutations: tuple[MutationEvidence, ...]
+    two_writers: tuple[TwoWriterEvidence, ...]
+    unknown_acknowledgements: tuple[FaultEvidence, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ConcurrentBackupEvidence:
+    """One backup snapshot overlapped by actual committed source mutations."""
+
+    source_token: StoreToken
+    backup_token: StoreToken
+    backup_manifest: BackupManifest
+    source_before: VerificationSummary
+    source_after: VerificationSummary
+    backup_summary: VerificationSummary
+    writer_mutations: tuple[MutationEvidence, ...]
+    progress_observations: int
+    writer_process_boundary: str
+
+
+@dataclass(frozen=True, slots=True)
+class BackupRestoreEvidence:
+    """Cross-validated source, backup, and isolated-restore observations."""
+
+    source_token: StoreToken
+    backup_token: StoreToken
+    restore_token: StoreToken
+    backup_manifest: BackupManifest
+    restore_manifest: BackupManifest
+    source_summary: VerificationSummary
+    backup_summary: VerificationSummary
+    restore_summary: VerificationSummary
+    concurrent_write: ConcurrentBackupEvidence
+
+
+@dataclass(frozen=True, slots=True)
+class GenerationCopyEvidence:
+    """Same-format generation-copy identity, summary, and tail observations."""
+
+    source_token: StoreToken
+    destination_token: StoreToken
+    source_generation_id: str
+    destination_generation_id: str
+    source_summary: VerificationSummary
+    destination_summary: VerificationSummary
+    source_tails: tuple[tuple[str, int, str, str], ...]
+    destination_tails: tuple[tuple[str, int, str, str], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class WorkloadEvidence:
+    """Actual finite-workload query and resource measurements."""
+
+    query_evidence: QueryEvidence
+    maximum_open_cursors: int
+    peak_traced_memory_bytes: int
+    latency_samples_ns: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class GeneratedEvidenceAggregate:
+    """Named generated-gate evidence; callers never supply gate dispositions."""
+
+    schema_identity: VerificationSummary
+    bootstrap_path_ownership: BootstrapPathEvidence
+    runtime_connection_controls: tuple[ConnectionControlProfile, ...]
+    projection_roundtrip: CurrentSlice
+    schema_constraints_corruption: RejectionEvidence
+    atomicity_classification: AtomicityClassificationEvidence
+    fresh_process_faults: FreshProcessEvidenceAggregate
+    bounded_queries: BoundedQueryEvidenceAggregate
+    closed_error_mapping: RejectionEvidence
+    backup_restore: BackupRestoreEvidence
+    generation_copy: GenerationCopyEvidence
+    workload_thresholds: WorkloadEvidence
+
+
+@dataclass(frozen=True, slots=True)
 class EvidenceReport:
     """Strict sanitized generated report contract."""
 
@@ -594,7 +844,7 @@ class EvidenceReport:
     wal_autocheckpoint_pages: int
     stream_rows: int
     history_rows: int
-    query_rows: int
+    query_evidence: QueryEvidence
     database_bytes: int
     wal_bytes: int
     page_count: int
@@ -603,7 +853,7 @@ class EvidenceReport:
     peak_traced_memory_bytes: int
     latency_samples_ns: tuple[int, ...]
     backup_manifest: BackupManifest
-    gates: tuple[tuple[str, EvidenceDisposition, str | None], ...]
+    evidence: GeneratedEvidenceAggregate
 
 
 @dataclass(frozen=True, slots=True)
@@ -668,12 +918,555 @@ class _OperationPathSnapshot:
 
 _TOKEN_REGISTRY: dict[bytes, _RegisteredIdentity] = {}
 _ACTIVE_PYTEST_ROOTS: dict[int, _ActivePytestRoot] = {}
+_REVOKED_PYTEST_ROOTS: dict[int, _ActivePytestRoot] = {}
 _CONNECTION_PATH_SNAPSHOTS: dict[int, _OperationPathSnapshot] = {}
+_CONNECTION_EVIDENCE_BINDINGS: dict[int, tuple[bytes, bool]] = {}
 _ACTIVE_CURSOR_MEASUREMENT: ContextVar[CursorMeasurement | None] = ContextVar(
     "task064_cursor_measurement",
     default=None,
 )
+_ACTIVE_EVIDENCE_RUN: ContextVar[_EvidenceRun | None] = ContextVar(
+    "task064_evidence_run",
+    default=None,
+)
+_ACTIVE_REJECTION_COLLECTOR: ContextVar[_RejectionCollectorState | None] = ContextVar(
+    "task064_rejection_collector",
+    default=None,
+)
+_ACTIVE_GATE_OPERATIONS: ContextVar[_GateOperationState | None] = ContextVar(
+    "task064_gate_operations",
+    default=None,
+)
+_ACTIVE_OPERATION_EXECUTOR_DEPTH: ContextVar[int] = ContextVar(
+    "task064_operation_executor_depth",
+    default=0,
+)
+_EVIDENCE_CAPABILITY_CONSTRUCTOR: Final = object()
 _GENERATION_COUNTER = 0
+
+_Parameters = ParamSpec("_Parameters")
+_Result = TypeVar("_Result")
+
+
+def _normalized_evidence_payload(value: object) -> object:
+    """Return a strict type-tagged value suitable for a private payload digest."""
+
+    if value is None:
+        return ["none"]
+    if isinstance(value, Enum):
+        return [
+            "enum",
+            f"{type(value).__module__}.{type(value).__qualname__}",
+            value.value,
+        ]
+    if type(value) is bool:
+        return ["bool", value]
+    if type(value) is int:
+        return ["int", value]
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        return ["float", value.hex()]
+    if type(value) is str:
+        return ["str", value]
+    if type(value) is bytes:
+        return ["bytes", value.hex()]
+    if isinstance(value, UUID):
+        return ["uuid", str(value)]
+    if isinstance(value, Path):
+        return ["path", str(value)]
+    if isinstance(value, datetime):
+        return ["datetime", value.isoformat()]
+    if type(value) in (
+        ContinuousPublicTradeStreamStoredCreationV1,
+        ContinuousPublicTradeStreamStoredTransitionV1,
+    ):
+        try:
+            stored_value = cast(
+                ContinuousPublicTradeStreamStoredCreationV1
+                | ContinuousPublicTradeStreamStoredTransitionV1,
+                value,
+            )
+            dumped = stored_value.model_dump(mode="json")
+        except (AttributeError, TypeError, ValueError):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+        return [
+            "pydantic",
+            f"{type(value).__module__}.{type(value).__qualname__}",
+            _normalized_evidence_payload(dumped),
+        ]
+    if type(value) is tuple:
+        return ["tuple", [_normalized_evidence_payload(item) for item in value]]
+    if type(value) is list:
+        return ["list", [_normalized_evidence_payload(item) for item in value]]
+    if isinstance(value, Mapping):
+        normalized_items = [
+            (
+                _normalized_evidence_payload(key),
+                _normalized_evidence_payload(item),
+            )
+            for key, item in value.items()
+        ]
+        normalized_items.sort(
+            key=lambda item: json.dumps(
+                item[0],
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        return ["mapping", normalized_items]
+    if is_dataclass(value) and not isinstance(value, type):
+        return [
+            "dataclass",
+            f"{type(value).__module__}.{type(value).__qualname__}",
+            [
+                [field.name, _normalized_evidence_payload(getattr(value, field.name))]
+                for field in fields(value)
+            ],
+        ]
+    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+
+
+def _evidence_payload_digest(value: object) -> str:
+    try:
+        raw = json.dumps(
+            _normalized_evidence_payload(value),
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+    except (AttributeError, TypeError, ValueError):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _collect_evidence_registrations(
+    value: object,
+    registrations: list[_ActivePytestRoot],
+    token_nonces: list[bytes],
+) -> None:
+    if type(value) is StoreToken:
+        registered = _TOKEN_REGISTRY.get(value._nonce)
+        if registered is None:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        if registered.pytest_registration not in registrations:
+            registrations.append(registered.pytest_registration)
+        if value._nonce not in token_nonces:
+            token_nonces.append(value._nonce)
+        return
+    if isinstance(value, Path):
+        registration = _ACTIVE_PYTEST_ROOTS.get(id(value))
+        if registration is not None and registration not in registrations:
+            registrations.append(registration)
+        return
+    if is_dataclass(value) and not isinstance(value, type):
+        for field in fields(value):
+            _collect_evidence_registrations(
+                getattr(value, field.name),
+                registrations,
+                token_nonces,
+            )
+        return
+    if type(value) in (tuple, list):
+        for item in cast(tuple[object, ...] | list[object], value):
+            _collect_evidence_registrations(item, registrations, token_nonces)
+        return
+    if isinstance(value, Mapping):
+        for item in value.values():
+            _collect_evidence_registrations(item, registrations, token_nonces)
+
+
+_GATE_PRODUCERS: dict[int, tuple[str, str, int]] = {}
+_GATE_COLLECTORS_FROZEN = False
+_OPERATION_PRODUCERS: dict[int, str] = {}
+_OPERATION_PRODUCERS_FROZEN = False
+_GATE_OPERATION_ALLOWLIST: Final = {
+    "fresh_process_faults": frozenset(
+        {
+            "bootstrap_store",
+            "create_stream",
+            "fresh_process_kill_evidence",
+            "sqlite_result_code_fault_evidence",
+            "true_during_commit_evidence",
+            "ioerr_write_evidence",
+            "max_page_count_evidence",
+            "fresh_process_writer_contention_evidence",
+            "fresh_process_two_writer_evidence",
+            "wal_concurrency_evidence",
+        }
+    ),
+    "atomicity_classification": frozenset(
+        {"bootstrap_store", "create_stream", "compare_and_swap_stream"}
+    ),
+    "bounded_queries": frozenset(
+        {
+            "bootstrap_store",
+            "create_stream",
+            "compare_and_swap_stream",
+            "load_current",
+            "audit_history",
+            "query_plan_evidence",
+        }
+    ),
+}
+_FRESH_OPERATION_PRODUCER_SEQUENCE: Final = (
+    *(("bootstrap_store", "fresh_process_kill_evidence") * 5),
+    *(("bootstrap_store", "create_stream", "fresh_process_kill_evidence") * 5),
+    *(("bootstrap_store", "sqlite_result_code_fault_evidence") * 2),
+    "bootstrap_store",
+    "create_stream",
+    "true_during_commit_evidence",
+    "bootstrap_store",
+    "create_stream",
+    "ioerr_write_evidence",
+    "bootstrap_store",
+    "create_stream",
+    "max_page_count_evidence",
+    "bootstrap_store",
+    "fresh_process_writer_contention_evidence",
+    "bootstrap_store",
+    "create_stream",
+    "fresh_process_writer_contention_evidence",
+    *(("bootstrap_store", "fresh_process_two_writer_evidence") * 2),
+    *(("bootstrap_store", "create_stream", "fresh_process_two_writer_evidence") * 2),
+    "bootstrap_store",
+    "create_stream",
+    "wal_concurrency_evidence",
+)
+_ATOMICITY_OPERATION_PRODUCER_SEQUENCE: Final = (
+    "bootstrap_store",
+    "create_stream",
+    "create_stream",
+    "create_stream",
+    "compare_and_swap_stream",
+    "compare_and_swap_stream",
+    "compare_and_swap_stream",
+)
+_BOUNDED_OPERATION_PRODUCER_SEQUENCE: Final = (
+    "load_current",
+    "load_current",
+    *(("audit_history",) * 5),
+    "bootstrap_store",
+    "create_stream",
+    "create_stream",
+    "load_current",
+    "audit_history",
+    "bootstrap_store",
+    "create_stream",
+    *(("compare_and_swap_stream",) * 102),
+    "audit_history",
+    "audit_history",
+    "query_plan_evidence",
+)
+_GATE_OPERATION_PRODUCER_SEQUENCES: Final = {
+    "fresh_process_faults": _FRESH_OPERATION_PRODUCER_SEQUENCE,
+    "atomicity_classification": _ATOMICITY_OPERATION_PRODUCER_SEQUENCE,
+    "bounded_queries": _BOUNDED_OPERATION_PRODUCER_SEQUENCE,
+}
+
+
+def _operation_evidence_tag(
+    producer_name: str,
+    arguments: tuple[object, ...],
+    keywords: Mapping[str, object],
+    result: object,
+) -> str:
+    if producer_name == "fresh_process_kill_evidence":
+        operation = "create" if keywords.get("creation") is not None else "compare_and_swap"
+        return f"{operation}:{keywords.get('seam')}"
+    if producer_name == "sqlite_result_code_fault_evidence":
+        return cast(str, keywords.get("seam"))
+    if producer_name in {
+        "fresh_process_writer_contention_evidence",
+        "fresh_process_two_writer_evidence",
+    }:
+        operation_value = keywords.get("operation")
+        if type(operation_value) is not str:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        outcomes = getattr(result, "outcomes", None)
+        suffix = (
+            ""
+            if outcomes is None
+            else ":"
+            + ",".join(
+                outcome.value if isinstance(outcome, Enum) else str(outcome) for outcome in outcomes
+            )
+        )
+        return f"{operation_value}{suffix}"
+    if producer_name in {
+        "true_during_commit_evidence",
+        "ioerr_write_evidence",
+        "max_page_count_evidence",
+        "wal_concurrency_evidence",
+        "query_plan_evidence",
+    }:
+        return producer_name
+    if producer_name in {"create_stream", "compare_and_swap_stream", "load_current"}:
+        classification = getattr(result, "classification", None)
+        if not isinstance(classification, Enum):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        classification_value = classification.value
+        if type(classification_value) is not str:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        return classification_value
+    if producer_name == "bootstrap_store":
+        if type(result) is not StoreToken:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        return "bootstrap_store"
+    if producer_name == "audit_history":
+        classification = getattr(result, "classification", None)
+        if not isinstance(classification, Enum):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        return (
+            f"{classification.value}:limit={keywords.get('limit')}:"
+            f"continuation={keywords.get('continuation') is not None}"
+        )
+    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+
+
+def _operation_evidence_executor(  # noqa: UP047 - ParamSpec preserves signatures.
+    function: Callable[_Parameters, _Result],
+) -> Callable[_Parameters, _Result]:
+    """Bind a low-level executor to a closure-held receipt producer."""
+
+    if _OPERATION_PRODUCERS_FROZEN:
+        raise RuntimeError("TASK064 operation producers are frozen")
+    capability = object()
+    producer_name = function.__name__
+    _OPERATION_PRODUCERS[id(capability)] = producer_name
+
+    @wraps(function)
+    def wrapped(
+        *args: _Parameters.args,
+        **kwargs: _Parameters.kwargs,
+    ) -> _Result:
+        state = _ACTIVE_GATE_OPERATIONS.get()
+        depth = _ACTIVE_OPERATION_EXECUTOR_DEPTH.get()
+        if state is None or depth > 0:
+            return function(*args, **kwargs)
+        _validated_evidence_run(state.run)
+        expected_sequence = _GATE_OPERATION_PRODUCER_SEQUENCES.get(state.gate)
+        allowed = _GATE_OPERATION_ALLOWLIST.get(state.gate)
+        if (
+            _ACTIVE_EVIDENCE_RUN.get() is not state.run
+            or _OPERATION_PRODUCERS.get(id(capability)) != producer_name
+            or expected_sequence is None
+            or allowed is None
+            or producer_name not in allowed
+            or len(state.observations) >= len(expected_sequence)
+            or expected_sequence[len(state.observations)] != producer_name
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        registration = state.run._pytest_registration
+        registrations: list[_ActivePytestRoot] = []
+        token_nonces: list[bytes] = []
+        for value in (
+            *cast(tuple[object, ...], args),
+            *cast(Mapping[str, object], kwargs).values(),
+        ):
+            _collect_evidence_registrations(
+                value,
+                registrations,
+                token_nonces,
+            )
+        if registrations and any(observed is not registration for observed in registrations):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        depth_token = _ACTIVE_OPERATION_EXECUTOR_DEPTH.set(depth + 1)
+        try:
+            result = function(*args, **kwargs)
+        finally:
+            _ACTIVE_OPERATION_EXECUTOR_DEPTH.reset(depth_token)
+        result_registrations: list[_ActivePytestRoot] = []
+        result_token_nonces: list[bytes] = []
+        _collect_evidence_registrations(
+            result,
+            result_registrations,
+            result_token_nonces,
+        )
+        if any(observed is not registration for observed in result_registrations):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        for nonce in result_token_nonces:
+            if nonce not in token_nonces:
+                token_nonces.append(nonce)
+        state.observations.append(
+            _OperationObservation(
+                producer_name=producer_name,
+                operation_tag=_operation_evidence_tag(
+                    producer_name,
+                    cast(tuple[object, ...], args),
+                    cast(Mapping[str, object], kwargs),
+                    result,
+                ),
+                result=result,
+                payload_digest=_evidence_payload_digest(result),
+                sequence=len(state.observations),
+                token_nonces=tuple(token_nonces),
+            )
+        )
+        return result
+
+    return wrapped
+
+
+def _private_gate_receipt_digest(
+    run: _EvidenceRun,
+    gate: str,
+) -> str | None:
+    """Bind one whole-gate result to its exact private operation/rejection receipts."""
+
+    ledger = _validated_evidence_run(run)
+    operations = ledger.operation_runs.get(gate)
+    rejections = ledger.rejection_runs.get(gate)
+    if operations is None and rejections is None:
+        return None
+    return _evidence_payload_digest(
+        (
+            gate,
+            run._nonce,
+            ()
+            if operations is None
+            else tuple(
+                (
+                    observation.producer_name,
+                    observation.operation_tag,
+                    observation.payload_digest,
+                    observation.sequence,
+                    observation.token_nonces,
+                )
+                for observation in operations
+            ),
+            ()
+            if rejections is None
+            else tuple(
+                (
+                    id(observation.scenario.capability),
+                    observation.scenario.label,
+                    observation.code,
+                    observation.sqlite_errorcode,
+                    observation.process_id,
+                    observation.ordinal,
+                    observation.target_nonce,
+                    observation.call_digest,
+                )
+                for observation in rejections
+            ),
+        )
+    )
+
+
+def _whole_gate_collector(
+    gate: str,
+    *,
+    token_roles: Callable[
+        [tuple[object, ...], Mapping[str, object], object],
+        tuple[tuple[str, StoreToken], ...],
+    ],
+) -> Callable[
+    [Callable[_Parameters, _Result]],
+    Callable[_Parameters, _Result],
+]:
+    """Create one frozen closure-held producer for one generated gate slot."""
+
+    if (
+        _GATE_COLLECTORS_FROZEN
+        or gate not in GENERATED_EVIDENCE_GATES
+        or not callable(token_roles)
+        or any(metadata[1] == gate for metadata in _GATE_PRODUCERS.values())
+    ):
+        raise RuntimeError("invalid TASK064 gate collector registration")
+    producer = _EvidenceProducer(
+        capability=object(),
+        name="",
+        gate=gate,
+        ordinal=GENERATED_EVIDENCE_GATES.index(gate),
+    )
+
+    def decorate(
+        function: Callable[_Parameters, _Result],
+    ) -> Callable[_Parameters, _Result]:
+        registered = _EvidenceProducer(
+            capability=producer.capability,
+            name=function.__name__,
+            gate=producer.gate,
+            ordinal=producer.ordinal,
+        )
+        producer_metadata = (
+            registered.name,
+            registered.gate,
+            registered.ordinal,
+        )
+        _GATE_PRODUCERS[id(registered.capability)] = producer_metadata
+
+        @wraps(function)
+        def wrapped(
+            *args: _Parameters.args,
+            **kwargs: _Parameters.kwargs,
+        ) -> _Result:
+            if not args or type(args[0]) is not _EvidenceRun:
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            run = args[0]
+            ledger = _validated_evidence_run(run)
+            if (
+                _GATE_PRODUCERS.get(id(registered.capability)) != producer_metadata
+                or _ACTIVE_EVIDENCE_RUN.get() is not run
+                or ledger.closed
+                or ledger.consumed
+                or not ledger.recording
+                or registered.ordinal in ledger.observations
+            ):
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            result = function(*args, **kwargs)
+            registrations: list[_ActivePytestRoot] = []
+            token_nonces: list[bytes] = []
+            for value in (
+                *args[1:],
+                *cast(Mapping[str, object], kwargs).values(),
+                result,
+            ):
+                _collect_evidence_registrations(
+                    value,
+                    registrations,
+                    token_nonces,
+                )
+            registration = run._pytest_registration
+            named_tokens = token_roles(
+                args[1:],
+                cast(Mapping[str, object], kwargs),
+                result,
+            )
+            if (
+                any(observed is not registration for observed in registrations)
+                or registration.process_id != os.getpid()
+                or _ACTIVE_PYTEST_ROOTS.get(id(registration.path_object)) is not registration
+                or type(named_tokens) is not tuple
+                or not named_tokens
+                or len(named_tokens) != len({name for name, _ in named_tokens})
+                or any(
+                    type(name) is not str
+                    or not name
+                    or type(token) is not StoreToken
+                    or _TOKEN_REGISTRY.get(token._nonce) is None
+                    or _TOKEN_REGISTRY[token._nonce].pytest_registration is not registration
+                    for name, token in named_tokens
+                )
+            ):
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            ledger.observations[registered.ordinal] = _EvidenceObservation(
+                value=result,
+                payload_digest=_evidence_payload_digest(result),
+                registration=registration,
+                producer=registered,
+                run=run,
+                process_id=os.getpid(),
+                token_roles=tuple((name, token._nonce) for name, token in named_tokens),
+                private_receipt_digest=_private_gate_receipt_digest(run, registered.gate),
+            )
+            return result
+
+        return wrapped
+
+    return decorate
 
 
 def _close_descriptors(descriptors: Sequence[int]) -> None:
@@ -779,6 +1572,17 @@ def _read_process_packet(_stage: str, descriptor: int, size: int) -> bytes:
         return bytes(payload)
     finally:
         selector.close()
+
+
+def _write_process_packet(descriptor: int, payload: bytes) -> None:
+    """Write one finite child packet without accepting a partial acknowledgement."""
+
+    view = memoryview(payload)
+    while view:
+        written = os.write(descriptor, view)
+        if written <= 0:
+            raise OSError(errno.EIO, "short process packet write")
+        view = view[written:]
 
 
 def _unproven_process_fault(seam: str, *, reason: str) -> FaultEvidence:
@@ -1212,20 +2016,36 @@ def _pytest_root_scope(
         node_id=node_id,
         nonce=secrets.token_bytes(32),
         revocation_flag=revocation_flag,
+        evidence_ledger=_EvidenceLedger(
+            nonce=secrets.token_bytes(32),
+            observations={},
+            operation_runs={},
+            rejection_runs={},
+        ),
     )
     key = id(pytest_root)
     if key in _ACTIVE_PYTEST_ROOTS:
         revocation_flag.close()
         raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+    _REVOKED_PYTEST_ROOTS.pop(key, None)
     _ACTIVE_PYTEST_ROOTS[key] = identity
     try:
         yield
     finally:
+        identity.evidence_ledger.closed = True
+        identity.evidence_ledger.recording = False
+        identity.evidence_ledger.observations.clear()
+        identity.evidence_ledger.operation_runs.clear()
+        identity.evidence_ledger.rejection_runs.clear()
+        active_run = _ACTIVE_EVIDENCE_RUN.get()
+        if active_run is not None and active_run._pytest_registration is identity:
+            _ACTIVE_EVIDENCE_RUN.set(None)
         with suppress(IndexError, OSError, ValueError):
             identity.revocation_flag[0] = 1
             identity.revocation_flag.flush()
         if _ACTIVE_PYTEST_ROOTS.get(key) is identity:
             del _ACTIVE_PYTEST_ROOTS[key]
+        _REVOKED_PYTEST_ROOTS[key] = identity
         with suppress(OSError, ValueError):
             identity.revocation_flag.close()
 
@@ -1265,6 +2085,880 @@ def _validate_bootstrap_root(pytest_root: Path) -> Path:
     if resolved != active.resolved_path:
         raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
     return resolved
+
+
+def begin_generated_evidence_run(pytest_root: Path) -> _EvidenceRun:
+    """Begin the only report-capable evidence run for this exact pytest scope."""
+
+    _validate_bootstrap_root(pytest_root)
+    registration = _ACTIVE_PYTEST_ROOTS[id(pytest_root)]
+    ledger = registration.evidence_ledger
+    if (
+        ledger.closed
+        or ledger.consumed
+        or ledger.recording
+        or ledger.run is not None
+        or ledger.receipt is not None
+        or ledger.observations
+        or ledger.operation_runs
+        or ledger.rejection_runs
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    run = _EvidenceRun(
+        _constructor=_EVIDENCE_CAPABILITY_CONSTRUCTOR,
+        _pytest_registration=registration,
+        _nonce=secrets.token_bytes(32),
+    )
+    ledger.run = run
+    ledger.recording = True
+    _ACTIVE_EVIDENCE_RUN.set(run)
+    return run
+
+
+def _validated_evidence_run(run: _EvidenceRun) -> _EvidenceLedger:
+    if (
+        type(run) is not _EvidenceRun
+        or run._constructor is not _EVIDENCE_CAPABILITY_CONSTRUCTOR
+        or type(run._nonce) is not bytes
+        or len(run._nonce) != 32
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    registration = run._pytest_registration
+    _validate_bootstrap_root(registration.path_object)
+    ledger = registration.evidence_ledger
+    if (
+        ledger.closed
+        or ledger.consumed
+        or ledger.run is not run
+        or registration.process_id != os.getpid()
+        or type(ledger.nonce) is not bytes
+        or len(ledger.nonce) != 32
+        or (ledger.recording and _ACTIVE_EVIDENCE_RUN.get() is not run)
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    return ledger
+
+
+def _traceback_contains_harness_executor(
+    error: BaseException,
+    executor_names: tuple[str, ...],
+) -> bool:
+    expected_file = os.path.normcase(os.path.abspath(__file__))
+    traceback = error.__traceback__
+    while traceback is not None:
+        frame = traceback.tb_frame
+        if (
+            os.path.normcase(os.path.abspath(frame.f_code.co_filename)) == expected_file
+            and frame.f_code.co_name in executor_names
+        ):
+            return True
+        traceback = traceback.tb_next
+    return False
+
+
+def _active_rejection_recording_ledger() -> _EvidenceLedger:
+    """Validate outer receipt authority without masking an intentional root fault."""
+
+    run = _ACTIVE_EVIDENCE_RUN.get()
+    if (
+        run is None
+        or type(run) is not _EvidenceRun
+        or run._constructor is not _EVIDENCE_CAPABILITY_CONSTRUCTOR
+        or type(run._nonce) is not bytes
+        or len(run._nonce) != 32
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    registration = run._pytest_registration
+    ledger = registration.evidence_ledger
+    if (
+        ledger.run is not run
+        or not ledger.recording
+        or ledger.receipt is not None
+        or ledger.closed
+        or ledger.consumed
+        or registration.process_id != os.getpid()
+        or _ACTIVE_PYTEST_ROOTS.get(id(registration.path_object)) is not registration
+        or os.environ.get("PYTEST_CURRENT_TEST", "").rsplit(" (", maxsplit=1)[0]
+        != registration.node_id
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    return ledger
+
+
+def capture_harness_rejection(
+    label: str,
+    *,
+    pytest_root: Path | None = None,
+    token: StoreToken | None = None,
+    stream_id: UUID | None = None,
+    natural_key: bytes | None = None,
+    limit: int | None = None,
+    expectation: ContinuousPublicTradeStreamExpectationV1 | None = None,
+) -> tuple[str, HarnessFailureCode]:
+    """Execute one fixed harness-owned rejection scenario and record its result."""
+
+    _active_rejection_recording_ledger()
+    state = _ACTIVE_REJECTION_COLLECTOR.get()
+    if (
+        state is None
+        or state.run is not _ACTIVE_EVIDENCE_RUN.get()
+        or len(state.observations) >= len(state.scenarios)
+        or type(label) is not str
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    scenario = state.scenarios[len(state.observations)]
+    if (
+        scenario.kind != "harness"
+        or scenario.label != label
+        or _REGISTERED_REJECTION_SCENARIOS.get(label) is not scenario
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+
+    executor_name = scenario.executor_names[0] if len(scenario.executor_names) == 1 else None
+    if executor_name == "bootstrap_store":
+        if (
+            not isinstance(pytest_root, Path)
+            or token is not None
+            or stream_id is not None
+            or natural_key is not None
+            or limit is not None
+            or expectation is not None
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    elif executor_name == "verify_store":
+        if (
+            type(token) is not StoreToken
+            or pytest_root is not None
+            or stream_id is not None
+            or natural_key is not None
+            or limit is not None
+            or expectation is not None
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    elif executor_name == "audit_history":
+        expected_limit = 101 if label == "audit_limit_overflow" else 100
+        if (
+            type(token) is not StoreToken
+            or pytest_root is not None
+            or type(stream_id) is not UUID
+            or type(natural_key) is not bytes
+            or limit != expected_limit
+            or (
+                label == "expectation_conflict_corrupt_precedence"
+                and type(expectation) is not ContinuousPublicTradeStreamExpectationV1
+            )
+            or (label != "expectation_conflict_corrupt_precedence" and expectation is not None)
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    else:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+
+    outer_registration = state.run._pytest_registration
+    target_registration = None if pytest_root is None else _ACTIVE_PYTEST_ROOTS.get(id(pytest_root))
+    token_registration = None if token is None else _TOKEN_REGISTRY.get(token._nonce)
+    if label == "relative_root" and pytest_root != Path("relative"):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if label == "unregistered_root" and (
+        pytest_root is None
+        or not pytest_root.is_absolute()
+        or target_registration is not None
+        or pytest_root.parent != outer_registration.path_object
+        or pytest_root.name != "unregistered-root"
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if label == "reconstructed_root" and (
+        pytest_root is None
+        or pytest_root is outer_registration.path_object
+        or pytest_root != outer_registration.path_object
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if label == "sibling_root" and (
+        pytest_root is None
+        or pytest_root.parent != outer_registration.path_object.parent
+        or pytest_root.name != f"{outer_registration.path_object.name}-sibling"
+        or target_registration is not None
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if label == "nested_root" and (
+        pytest_root is None
+        or pytest_root.parent != outer_registration.path_object
+        or pytest_root.name != "nested-root"
+        or target_registration is not None
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if label == "symlink_root" and (pytest_root is None or not pytest_root.is_symlink()):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if label == "forged_token" and (
+        token is None or token._nonce != b"\x00" * 32 or token_registration is not None
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if label in {
+        "wrong_process_root",
+        "wrong_node_root",
+        "replaced_registered_root",
+    } and (target_registration is None or target_registration is outer_registration):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if label in {"wrong_process_token", "wrong_node_token"} and (
+        token_registration is None or token_registration.pytest_registration is outer_registration
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    revoked_target = None if pytest_root is None else _REVOKED_PYTEST_ROOTS.get(id(pytest_root))
+    if label == "expired_root" and (
+        target_registration is not None
+        or revoked_target is None
+        or revoked_target.path_object is not pytest_root
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if label == "expired_token" and (
+        token_registration is None
+        or _ACTIVE_PYTEST_ROOTS.get(id(token_registration.pytest_registration.path_object))
+        is token_registration.pytest_registration
+        or _REVOKED_PYTEST_ROOTS.get(id(token_registration.pytest_registration.path_object))
+        is not token_registration.pytest_registration
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if label in {
+        "hardlink_database",
+        "unexpected_entry",
+        "readonly_database",
+        "widened_root",
+        "missing_database",
+        "replaced_database",
+        "allowed_name_symlink",
+        "path_resolution_operation",
+        "unsupported_generation",
+        "malformed_generation",
+        "short_page",
+        "retained_history_canonical_bytes",
+    } and (
+        token_registration is None
+        or token_registration.pytest_registration is not outer_registration
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if label == "hardlink_database" and token is not None:
+        try:
+            database_details = token._database_path.lstat()
+            external_details = (token._pytest_root / "forbidden-hardlink.sqlite3").lstat()
+            if (
+                database_details.st_nlink != 2
+                or external_details.st_nlink != 2
+                or external_details.st_dev != database_details.st_dev
+                or external_details.st_ino != database_details.st_ino
+                or set(os.listdir(token._generation_root))
+                - {
+                    _DATABASE_BASENAME,
+                    f"{_DATABASE_BASENAME}-wal",
+                    f"{_DATABASE_BASENAME}-shm",
+                }
+            ):
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        except OSError:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+    if (
+        label == "unexpected_entry"
+        and token is not None
+        and not (token._generation_root / "unexpected-entry").is_file()
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if label == "readonly_database" and token is not None:
+        try:
+            if stat.S_IMODE(token._database_path.lstat().st_mode) != 0o400:
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        except OSError:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+    if label == "widened_root":
+        try:
+            if (
+                stat.S_IMODE(outer_registration.path_object.lstat().st_mode)
+                == outer_registration.mode
+            ):
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        except OSError:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+    if label == "missing_database" and token is not None and token._database_path.exists():
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if label == "replaced_database" and token is not None:
+        try:
+            details = token._database_path.lstat()
+            if details.st_dev == token._device and details.st_ino == token._inode:
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        except OSError:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+    if (
+        label == "allowed_name_symlink"
+        and token is not None
+        and not (token._generation_root / f"{_DATABASE_BASENAME}-shm").is_symlink()
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if label == "short_page" and token is not None:
+        try:
+            if token._database_path.stat().st_size >= PAGE_SIZE:
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        except OSError:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+    if label in {"unsupported_generation", "malformed_generation"} and token is not None:
+        descriptor = -1
+        try:
+            descriptor = os.open(
+                token._database_path,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
+            )
+            header = os.pread(descriptor, 4, 60)
+        except OSError:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+        finally:
+            if descriptor >= 0:
+                with suppress(OSError):
+                    os.close(descriptor)
+        expected_version = 2 if label == "unsupported_generation" else 0
+        if len(header) != 4 or struct.unpack(">I", header)[0] != expected_version:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if label == "path_resolution_bootstrap" and pytest_root is not outer_registration.path_object:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if executor_name == "audit_history" and (
+        token_registration is None
+        or token_registration.pytest_registration is not outer_registration
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if label == "expectation_conflict_corrupt_precedence" and (
+        expectation is None
+        or expectation.identity.stream_id != stream_id
+        or expectation.identity.source != "report-mismatching-source"
+        or _natural_key_from_expectation(expectation) == natural_key
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if label in {
+        "retained_history_canonical_bytes",
+        "two_candidate_corrupt_precedence",
+        "expectation_conflict_corrupt_precedence",
+    }:
+        if token is None:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        predicate_connection, _ = _connect(token, writer=False)
+        try:
+            if label == "retained_history_canonical_bytes":
+                predicate_row = _fetch_one(
+                    predicate_connection,
+                    """
+                    SELECT
+                        COUNT(*) AS candidate_count,
+                        SUM(history.record_canonical_bytes = ?) AS malformed_count
+                    FROM continuous_public_trade_stream AS stream
+                    JOIN continuous_public_trade_history AS history
+                      ON history.stream_row_id = stream.stream_row_id
+                     AND history.successor_version = 1
+                    """,
+                    (b"{malformed-retained-creation",),
+                )
+                expected_candidates = 1
+            else:
+                predicate_row = _fetch_one(
+                    predicate_connection,
+                    """
+                    SELECT
+                        COUNT(*) AS candidate_count,
+                        SUM(history.record_canonical_bytes = ?) AS malformed_count
+                    FROM continuous_public_trade_stream AS stream
+                    JOIN continuous_public_trade_history AS history
+                      ON history.stream_row_id = stream.stream_row_id
+                     AND history.successor_version = 1
+                    WHERE stream.stream_uuid = ?
+                       OR stream.natural_identity_key = ?
+                    """,
+                    (
+                        b"{malformed-retained-creation",
+                        cast(UUID, stream_id).bytes,
+                        cast(bytes, natural_key),
+                    ),
+                )
+                expected_candidates = 2 if label == "two_candidate_corrupt_precedence" else 1
+            _verify_operation_authority(predicate_connection, token)
+            if (
+                predicate_row["candidate_count"] != expected_candidates
+                or predicate_row["malformed_count"] != 1
+            ):
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        finally:
+            _close_preserving_primary(predicate_connection)
+
+    original_getpid = os.getpid
+    original_node = os.environ.get("PYTEST_CURRENT_TEST")
+    original_resolve = Path.resolve
+
+    def fail_resolve(_path: Path, *, strict: bool = False) -> Path:
+        del strict
+        raise FileNotFoundError("sanitized-report-path-probe")
+
+    try:
+        if label in {"wrong_process_root", "wrong_process_token"}:
+            os.getpid = lambda: -1
+        elif label in {"wrong_node_root", "wrong_node_token"}:
+            os.environ["PYTEST_CURRENT_TEST"] = (
+                f"{state.run._pytest_registration.node_id}::wrong (call)"
+            )
+        elif label in {"path_resolution_bootstrap", "path_resolution_operation"}:
+            Path.resolve = fail_resolve  # type: ignore[method-assign,assignment]
+
+        if executor_name == "bootstrap_store":
+            bootstrap_store(cast(Path, pytest_root))
+        elif executor_name == "verify_store":
+            verify_store(cast(StoreToken, token))
+        else:
+            audit_history(
+                cast(StoreToken, token),
+                stream_id=cast(UUID, stream_id),
+                natural_key=cast(bytes, natural_key),
+                limit=cast(int, limit),
+                expectation=expectation,
+            )
+    except HarnessFailure as error:
+        if error.code is not scenario.code or not _traceback_contains_harness_executor(
+            error,
+            scenario.executor_names,
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+        state.observations.append(
+            _RejectionObservation(
+                scenario=scenario,
+                code=error.code,
+                sqlite_errorcode=error.sqlite_errorcode,
+                run=state.run,
+                process_id=state.run._pytest_registration.process_id,
+                ordinal=len(state.observations),
+                target_nonce=None if token is None else token._nonce,
+                call_digest=_evidence_payload_digest(
+                    (
+                        label,
+                        None if pytest_root is None else str(pytest_root),
+                        None if token is None else token._nonce,
+                        stream_id,
+                        natural_key,
+                        limit,
+                        expectation is not None,
+                    )
+                ),
+            )
+        )
+        return label, error.code
+    finally:
+        os.getpid = original_getpid
+        if original_node is None:
+            os.environ.pop("PYTEST_CURRENT_TEST", None)
+        else:
+            os.environ["PYTEST_CURRENT_TEST"] = original_node
+        Path.resolve = original_resolve  # type: ignore[method-assign]
+    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+
+
+def capture_sqlite_rejection(
+    label: str,
+    connection: sqlite3.Connection,
+    *,
+    parameters: Sequence[object] = (),
+) -> tuple[str, HarnessFailureCode]:
+    """Execute one fixed SQL rejection scenario and record its exact result code."""
+
+    _active_rejection_recording_ledger()
+    state = _ACTIVE_REJECTION_COLLECTOR.get()
+    if (
+        state is None
+        or state.run is not _ACTIVE_EVIDENCE_RUN.get()
+        or len(state.observations) >= len(state.scenarios)
+        or type(label) is not str
+        or type(connection) is not _MeteredConnection
+        or isinstance(parameters, (str, bytes, bytearray))
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    scenario = state.scenarios[len(state.observations)]
+    if (
+        scenario.kind != "sqlite"
+        or scenario.label != label
+        or _REGISTERED_REJECTION_SCENARIOS.get(label) is not scenario
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    binding = _CONNECTION_EVIDENCE_BINDINGS.get(id(connection))
+    if (
+        binding is None
+        or not binding[1]
+        or id(connection) not in _CONNECTION_PATH_SNAPSHOTS
+        or _TOKEN_REGISTRY.get(binding[0]) is None
+        or _TOKEN_REGISTRY[binding[0]].pytest_registration is not state.run._pytest_registration
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    parameter_tuple = tuple(parameters)
+    immutable_statements = {
+        "metadata_update": "UPDATE stream_store_metadata SET page_size = 8192",
+        "metadata_delete": "DELETE FROM stream_store_metadata",
+        "history_update": (
+            "UPDATE continuous_public_trade_history "
+            "SET serialization_version = 1 WHERE successor_version = 1"
+        ),
+        "history_delete": "DELETE FROM continuous_public_trade_history",
+        "stream_identity_update": (
+            "UPDATE continuous_public_trade_stream SET stream_contract_version = 2"
+        ),
+        "stream_delete": "DELETE FROM continuous_public_trade_stream",
+        "current_tail_jump": (
+            "UPDATE continuous_public_trade_stream SET current_version = current_version + 2"
+        ),
+    }
+    if label == "digest_byte_guard":
+        statement = """
+            INSERT INTO stream_tail_commit_guard (
+                stream_row_id,
+                successor_version,
+                record_digest,
+                unresolved_singleton_key
+            ) VALUES (?, ?, ?, ?)
+        """
+        expected_parameter_count = 4
+    elif label == "forbidden_schema_sql":
+        statement = "DROP TRIGGER trg_history_no_delete"
+        expected_parameter_count = 0
+    elif label in {"transition_without_current_tail", "stream_without_creation_history"}:
+        statement = "COMMIT"
+        expected_parameter_count = 0
+    elif label in {
+        "orphan_creation_history",
+        "wrong_predecessor_bytes",
+        "wrong_predecessor_digest",
+        "wrong_predecessor_root",
+        "history_gap",
+    }:
+        statement = _INSERT_HISTORY_SQL
+        expected_parameter_count = 15
+    elif label in immutable_statements:
+        statement = immutable_statements[label]
+        expected_parameter_count = 0
+    else:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if len(parameter_tuple) != expected_parameter_count:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if label == "digest_byte_guard" and parameter_tuple != (
+        99_001,
+        2,
+        b"sha256:" + (b"0" * 10) + b"\x00" + (b"f" * 53),
+        0,
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if label in {"transition_without_current_tail", "stream_without_creation_history"}:
+        if not connection.in_transaction:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        stream_count = cast(
+            int,
+            _fetch_one(
+                connection,
+                "SELECT COUNT(*) FROM continuous_public_trade_stream",
+            )[0],
+        )
+        history_count = cast(
+            int,
+            _fetch_one(
+                connection,
+                "SELECT COUNT(*) FROM continuous_public_trade_history",
+            )[0],
+        )
+        guard_count = cast(
+            int,
+            _fetch_one(connection, "SELECT COUNT(*) FROM stream_tail_commit_guard")[0],
+        )
+        expected_counts = (1, 2, 1) if label == "transition_without_current_tail" else (1, 0, 0)
+        if (stream_count, history_count, guard_count) != expected_counts:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if label == "orphan_creation_history" and (
+        parameter_tuple[0] != 99_902
+        or parameter_tuple[1] != 1
+        or parameter_tuple[2:5] != (b"creation", b"1.0", 1)
+        or any(item is not None for item in parameter_tuple[9:14])
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if label in {
+        "wrong_predecessor_bytes",
+        "wrong_predecessor_digest",
+        "wrong_predecessor_root",
+        "history_gap",
+    }:
+        retained = _fetch_one(
+            connection,
+            """
+            SELECT
+                current_version,
+                current_record_canonical_bytes,
+                current_record_digest,
+                current_history_root
+            FROM continuous_public_trade_stream
+            WHERE stream_row_id = ?
+            """,
+            (parameter_tuple[0],),
+        )
+        current_version = retained["current_version"]
+        retained_bytes = retained["current_record_canonical_bytes"]
+        retained_digest = retained["current_record_digest"]
+        retained_root = retained["current_history_root"]
+        exact_common = (
+            parameter_tuple[1] == 2
+            and parameter_tuple[9] == current_version
+            and parameter_tuple[11] == retained_root
+            and parameter_tuple[12] == retained_bytes
+            and parameter_tuple[13] == retained_digest
+        )
+        if label == "wrong_predecessor_bytes":
+            valid = (
+                parameter_tuple[1] == 2
+                and parameter_tuple[9] == current_version
+                and parameter_tuple[11] == retained_root
+                and type(parameter_tuple[12]) is bytes
+                and parameter_tuple[12].endswith(b" ")
+                and parameter_tuple[12] != retained_bytes
+                and parameter_tuple[13] == retained_digest
+            )
+        elif label == "wrong_predecessor_digest":
+            valid = (
+                parameter_tuple[1] == 2
+                and parameter_tuple[9] == current_version
+                and parameter_tuple[11] == retained_root
+                and parameter_tuple[12] == retained_bytes
+                and parameter_tuple[13] != retained_digest
+            )
+        elif label == "wrong_predecessor_root":
+            valid = (
+                parameter_tuple[1] == 2
+                and parameter_tuple[9] == current_version
+                and parameter_tuple[11] != retained_root
+                and parameter_tuple[12] == retained_bytes
+                and parameter_tuple[13] == retained_digest
+            )
+        else:
+            valid = (
+                parameter_tuple[1] == 3
+                and parameter_tuple[9] == current_version + 1
+                and parameter_tuple[11] == retained_root
+                and parameter_tuple[12] == retained_bytes
+                and parameter_tuple[13] == retained_digest
+            )
+        if not valid or (label != "history_gap" and exact_common):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    try:
+        connection.execute(statement, parameter_tuple).close()
+    except sqlite3.Error as error:
+        sqlite_errorcode = getattr(error, "sqlite_errorcode", None)
+        code = sqlite_result_failure_code(sqlite_errorcode)
+        expected_sqlite_errorcode = {
+            "digest_byte_guard": 275,  # SQLITE_CONSTRAINT_CHECK
+            "forbidden_schema_sql": 23,  # SQLITE_AUTH
+            "transition_without_current_tail": 787,  # SQLITE_CONSTRAINT_FOREIGNKEY
+            "stream_without_creation_history": 787,
+            "orphan_creation_history": 1811,  # SQLITE_CONSTRAINT_TRIGGER
+            "metadata_update": 1811,
+            "metadata_delete": 1811,
+            "history_update": 1811,
+            "history_delete": 1811,
+            "stream_identity_update": 1811,
+            "stream_delete": 1811,
+            "current_tail_jump": 1811,
+            "wrong_predecessor_bytes": 1811,
+            "wrong_predecessor_digest": 1811,
+            "wrong_predecessor_root": 1811,
+            "history_gap": 1811,
+        }[label]
+        if (
+            type(sqlite_errorcode) is not int
+            or sqlite_errorcode != expected_sqlite_errorcode
+            or code is not scenario.code
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+        state.observations.append(
+            _RejectionObservation(
+                scenario=scenario,
+                code=code,
+                sqlite_errorcode=sqlite_errorcode,
+                run=state.run,
+                process_id=state.run._pytest_registration.process_id,
+                ordinal=len(state.observations),
+                target_nonce=binding[0],
+                call_digest=_evidence_payload_digest(
+                    (label, binding[0], statement, parameter_tuple)
+                ),
+            )
+        )
+        return label, code
+    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+
+
+def _generated_gate_payloads(
+    evidence: GeneratedEvidenceAggregate,
+) -> tuple[tuple[str, object], ...]:
+    return (
+        ("schema_identity", evidence.schema_identity),
+        ("bootstrap_path_ownership", evidence.bootstrap_path_ownership),
+        ("runtime_connection_controls", evidence.runtime_connection_controls),
+        ("projection_roundtrip", evidence.projection_roundtrip),
+        ("schema_constraints_corruption", evidence.schema_constraints_corruption),
+        ("atomicity_classification", evidence.atomicity_classification),
+        ("fresh_process_faults", evidence.fresh_process_faults),
+        ("bounded_queries", evidence.bounded_queries),
+        ("closed_error_mapping", evidence.closed_error_mapping),
+        ("backup_restore", evidence.backup_restore),
+        ("generation_copy", evidence.generation_copy),
+        ("workload_thresholds", evidence.workload_thresholds),
+    )
+
+
+def _expected_gate_token_roles(
+    evidence: GeneratedEvidenceAggregate,
+) -> tuple[tuple[tuple[str, bytes], ...], ...]:
+    report_token = evidence.bootstrap_path_ownership.token
+    backup = evidence.backup_restore
+    generation_copy = evidence.generation_copy
+    report_role = (("report", report_token._nonce),)
+    return (
+        report_role,
+        report_role,
+        report_role,
+        report_role,
+        report_role,
+        report_role,
+        report_role,
+        report_role,
+        report_role,
+        (
+            ("source", backup.source_token._nonce),
+            ("backup", backup.backup_token._nonce),
+            ("restore", backup.restore_token._nonce),
+        ),
+        (
+            ("source", generation_copy.source_token._nonce),
+            ("destination", generation_copy.destination_token._nonce),
+        ),
+        report_role,
+    )
+
+
+def seal_generated_evidence_run(
+    run: _EvidenceRun,
+    *,
+    evidence: GeneratedEvidenceAggregate,
+) -> _EvidenceReceipt:
+    """Seal execution-backed gate payloads into one consume-on-success receipt."""
+
+    ledger = _validated_evidence_run(run)
+    if (
+        not ledger.recording
+        or ledger.receipt is not None
+        or type(evidence) is not GeneratedEvidenceAggregate
+        or _ACTIVE_EVIDENCE_RUN.get() is not run
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    bootstrap = evidence.bootstrap_path_ownership
+    if type(bootstrap) is not BootstrapPathEvidence:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    try:
+        registered = _require_token(bootstrap.token)
+    except HarnessFailure:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+    if registered.pytest_registration is not run._pytest_registration:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if (
+        type(bootstrap.rejections) is not RejectionEvidence
+        or type(evidence.schema_constraints_corruption) is not RejectionEvidence
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+
+    gate_payloads = _generated_gate_payloads(evidence)
+    if tuple(name for name, _ in gate_payloads) != GENERATED_EVIDENCE_GATES:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if set(ledger.observations) != set(range(len(GENERATED_EVIDENCE_GATES))):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    gate_receipts_list: list[_GateEvidenceReceipt] = []
+    seen_payload_identities: set[int] = set()
+    expected_token_roles = _expected_gate_token_roles(evidence)
+    for ordinal, (name, payload) in enumerate(gate_payloads):
+        observation = ledger.observations[ordinal]
+        if (
+            observation.value is not payload
+            or observation.payload_digest != _evidence_payload_digest(payload)
+            or observation.registration is not run._pytest_registration
+            or observation.run is not run
+            or observation.process_id != os.getpid()
+            or observation.producer.gate != name
+            or observation.producer.ordinal != ordinal
+            or observation.producer.name == ""
+            or id(payload) in seen_payload_identities
+            or observation.token_roles != expected_token_roles[ordinal]
+            or observation.private_receipt_digest != _private_gate_receipt_digest(run, name)
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        seen_payload_identities.add(id(payload))
+        gate_receipts_list.append(
+            _GateEvidenceReceipt(
+                _constructor=_EVIDENCE_CAPABILITY_CONSTRUCTOR,
+                gate=name,
+                payload=payload,
+                payload_digest=observation.payload_digest,
+            )
+        )
+    gate_receipts = tuple(gate_receipts_list)
+    receipt = _EvidenceReceipt(
+        _constructor=_EVIDENCE_CAPABILITY_CONSTRUCTOR,
+        run=run,
+        evidence=evidence,
+        evidence_digest=_evidence_payload_digest(evidence),
+        gates=gate_receipts,
+    )
+    ledger.receipt = receipt
+    ledger.recording = False
+    _ACTIVE_EVIDENCE_RUN.set(None)
+    return receipt
+
+
+def _validate_evidence_receipt(
+    pytest_root: Path,
+    receipt: _EvidenceReceipt,
+    evidence: GeneratedEvidenceAggregate,
+    *,
+    require_exact_evidence: bool,
+) -> _EvidenceLedger:
+    _validate_bootstrap_root(pytest_root)
+    if (
+        type(receipt) is not _EvidenceReceipt
+        or receipt._constructor is not _EVIDENCE_CAPABILITY_CONSTRUCTOR
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    ledger = _validated_evidence_run(receipt.run)
+    registration = receipt.run._pytest_registration
+    gate_payloads = _generated_gate_payloads(evidence)
+    if (
+        registration.path_object is not pytest_root
+        or ledger.receipt is not receipt
+        or ledger.recording
+        or ledger.closed
+        or ledger.consumed
+        or len(receipt.gates) != len(GENERATED_EVIDENCE_GATES)
+        or tuple(gate.gate for gate in receipt.gates) != GENERATED_EVIDENCE_GATES
+        or any(
+            type(gate) is not _GateEvidenceReceipt
+            or gate._constructor is not _EVIDENCE_CAPABILITY_CONSTRUCTOR
+            for gate in receipt.gates
+        )
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if require_exact_evidence:
+        if receipt.evidence is not evidence or receipt.evidence_digest != _evidence_payload_digest(
+            evidence
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        for receipt_gate, (name, payload) in zip(
+            receipt.gates,
+            gate_payloads,
+            strict=True,
+        ):
+            if (
+                receipt_gate.gate != name
+                or receipt_gate.payload is not payload
+                or receipt_gate.payload_digest != _evidence_payload_digest(payload)
+            ):
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    return ledger
 
 
 def _validate_private_generation(path: Path) -> None:
@@ -1720,6 +3414,7 @@ class _MeteredConnection(sqlite3.Connection):
             registry.discard(cursor)
 
     def close(self) -> None:
+        _CONNECTION_EVIDENCE_BINDINGS.pop(id(self), None)
         snapshot = _CONNECTION_PATH_SNAPSHOTS.pop(id(self), None)
         try:
             registry = tuple(getattr(self, "_task064_open_cursors", ()))
@@ -2088,6 +3783,7 @@ def _connect(
                 for name, _ in _LIMITS
             ),
         )
+        _CONNECTION_EVIDENCE_BINDINGS[id(connection)] = (token._nonce, writer)
         return connection, profile
     except sqlite3.Error as error:
         failure = _sqlite_failure(error)
@@ -2247,6 +3943,7 @@ def _remove_owned_files(token: StoreToken) -> None:
                 os.close(root_descriptor)
 
 
+@_operation_evidence_executor
 def bootstrap_store(pytest_root: Path) -> StoreToken:
     """Create one empty, private, same-bootstrap-owned version-one generation."""
 
@@ -2615,6 +4312,7 @@ def _verify_integrity(connection: sqlite3.Connection) -> None:
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
 
 
+@_operation_evidence_executor
 def verify_store(token: StoreToken) -> VerificationSummary:
     """Fresh-open format, schema, integrity, FK, and full-history verification."""
 
@@ -3469,6 +5167,7 @@ def _rollback_best_effort(connection: sqlite3.Connection) -> None:
 def _close_best_effort(connection: sqlite3.Connection | None) -> None:
     if connection is None:
         return
+    _CONNECTION_EVIDENCE_BINDINGS.pop(id(connection), None)
     snapshot = _CONNECTION_PATH_SNAPSHOTS.pop(id(connection), None)
     try:
         with suppress(BaseException):
@@ -3478,6 +5177,7 @@ def _close_best_effort(connection: sqlite3.Connection | None) -> None:
 
 
 def _close_checked(connection: sqlite3.Connection) -> None:
+    _CONNECTION_EVIDENCE_BINDINGS.pop(id(connection), None)
     snapshot = _CONNECTION_PATH_SNAPSHOTS.pop(id(connection), None)
     try:
         connection.close()
@@ -3660,6 +5360,7 @@ def _invoke_seam(
         hook(name)
 
 
+@_operation_evidence_executor
 def create_stream(
     token: StoreToken,
     creation: ContinuousPublicTradeStreamStoredCreationV1,
@@ -3829,6 +5530,7 @@ def _history_rows_for_current(
     )
 
 
+@_operation_evidence_executor
 def load_current(
     token: StoreToken,
     *,
@@ -3947,6 +5649,7 @@ def load_current(
         _close_preserving_primary(connection)
 
 
+@_operation_evidence_executor
 def compare_and_swap_stream(
     token: StoreToken,
     transition: ContinuousPublicTradeStreamStoredTransitionV1,
@@ -4240,26 +5943,25 @@ def compare_and_swap_stream(
         _close_preserving_primary(connection)
 
 
-_CREATE_KILL_SEAMS: Final = frozenset(
-    {
-        "before_transaction",
-        "after_lock",
-        "between_stream_insert_and_creation_insert",
-        "between_creation_insert_and_create_commit",
-        "after_commit_before_acknowledgement",
-    }
+_CREATE_KILL_SEAM_ORDER: Final = (
+    "before_transaction",
+    "after_lock",
+    "between_stream_insert_and_creation_insert",
+    "between_creation_insert_and_create_commit",
+    "after_commit_before_acknowledgement",
 )
-_CAS_KILL_SEAMS: Final = frozenset(
-    {
-        "before_transaction",
-        "after_lock",
-        "between_transition_insert_and_current_update",
-        "between_current_update_and_compare_and_swap_commit",
-        "after_commit_before_acknowledgement",
-    }
+_CAS_KILL_SEAM_ORDER: Final = (
+    "before_transaction",
+    "after_lock",
+    "between_transition_insert_and_current_update",
+    "between_current_update_and_compare_and_swap_commit",
+    "after_commit_before_acknowledgement",
 )
+_CREATE_KILL_SEAMS: Final = frozenset(_CREATE_KILL_SEAM_ORDER)
+_CAS_KILL_SEAMS: Final = frozenset(_CAS_KILL_SEAM_ORDER)
 
 
+@_operation_evidence_executor
 def sqlite_result_code_fault_evidence(
     token: StoreToken,
     *,
@@ -4526,6 +6228,7 @@ _WRITER_PACKET_OUTCOMES: Final = {
 }
 
 
+@_operation_evidence_executor
 def fresh_process_writer_contention_evidence(
     token: StoreToken,
     *,
@@ -4847,6 +6550,7 @@ def fresh_process_writer_contention_evidence(
     )
 
 
+@_operation_evidence_executor
 def fresh_process_two_writer_evidence(
     token: StoreToken,
     *,
@@ -5042,6 +6746,7 @@ def fresh_process_two_writer_evidence(
     )
 
 
+@_operation_evidence_executor
 def fresh_process_kill_evidence(
     token: StoreToken,
     *,
@@ -5236,6 +6941,7 @@ def fresh_process_kill_evidence(
     )
 
 
+@_operation_evidence_executor
 def true_during_commit_evidence(
     token: StoreToken,
     *,
@@ -5504,6 +7210,7 @@ def true_during_commit_evidence(
     )
 
 
+@_operation_evidence_executor
 def ioerr_write_evidence(
     token: StoreToken,
     *,
@@ -5650,6 +7357,7 @@ def ioerr_write_evidence(
     )
 
 
+@_operation_evidence_executor
 def max_page_count_evidence(
     token: StoreToken,
     *,
@@ -5764,6 +7472,7 @@ def max_page_count_evidence(
     )
 
 
+@_operation_evidence_executor
 def wal_concurrency_evidence(
     token: StoreToken,
     *,
@@ -6385,6 +8094,7 @@ def audit_bounds(
     )
 
 
+@_operation_evidence_executor
 def audit_history(
     token: StoreToken,
     *,
@@ -6433,6 +8143,12 @@ def audit_history(
         ),
         "COMMIT",
     )
+    conflict_statements = (
+        "BEGIN",
+        "identity candidates LIMIT 3",
+        "audit identity current history LIMIT 3 per identity candidate",
+        "COMMIT",
+    )
     stream_rows = 0
     history_rows = 0
     decoded_rows = 0
@@ -6456,8 +8172,11 @@ def audit_history(
                 QueryEvidence(statements, stream_rows, history_rows, decoded_rows),
             )
         if len(candidates) != 1:
-            for candidate in candidates:
-                _validate_stream_witnesses(candidate)
+            _, history_rows = _validate_identity_candidates(
+                connection,
+                candidates,
+            )
+            decoded_rows = history_rows
             _verify_operation_authority(connection, token)
             connection.execute("COMMIT").close()
             return AuditSlice(
@@ -6465,7 +8184,12 @@ def audit_history(
                 (),
                 0,
                 0,
-                QueryEvidence(statements, stream_rows, history_rows, decoded_rows),
+                QueryEvidence(
+                    conflict_statements,
+                    stream_rows,
+                    history_rows,
+                    decoded_rows,
+                ),
             )
         stream = candidates[0]
         creation, current_envelope = _validate_stream_witnesses(stream)
@@ -6473,6 +8197,11 @@ def audit_history(
             stream["stream_uuid"] != stream_id.bytes
             or stream["natural_identity_key"] != natural_key
         ):
+            _, history_rows = _validate_identity_candidates(
+                connection,
+                candidates,
+            )
+            decoded_rows = history_rows
             _verify_operation_authority(connection, token)
             connection.execute("COMMIT").close()
             return AuditSlice(
@@ -6480,13 +8209,23 @@ def audit_history(
                 (),
                 0,
                 0,
-                QueryEvidence(statements, stream_rows, history_rows, decoded_rows),
+                QueryEvidence(
+                    conflict_statements,
+                    stream_rows,
+                    history_rows,
+                    decoded_rows,
+                ),
             )
         if exact_expectation is not None and not _expectation_matches_retained(
             exact_expectation,
             creation,
             current_envelope,
         ):
+            _, history_rows = _validate_identity_candidates(
+                connection,
+                candidates,
+            )
+            decoded_rows = history_rows
             _verify_operation_authority(connection, token)
             connection.execute("COMMIT").close()
             return AuditSlice(
@@ -6494,7 +8233,12 @@ def audit_history(
                 (),
                 0,
                 0,
-                QueryEvidence(statements, stream_rows, history_rows, decoded_rows),
+                QueryEvidence(
+                    conflict_statements,
+                    stream_rows,
+                    history_rows,
+                    decoded_rows,
+                ),
             )
         stream_row_id = _require_exact_int(
             stream["stream_row_id"],
@@ -6965,6 +8709,7 @@ class TestOnlySQLiteStreamStorePrototype:
         )
 
 
+@_operation_evidence_executor
 def query_plan_evidence(
     token: StoreToken,
     *,
@@ -7091,6 +8836,62 @@ def measured_open_cursor_evidence(
         raise HarnessFailure(HarnessFailureCode.BOUNDS_EXCEEDED)
     _require_token(token)
     return measurement.maximum
+
+
+@_operation_evidence_executor
+def measured_report_workload_evidence(
+    token: StoreToken,
+    *,
+    stream_id: UUID,
+    natural_key: bytes,
+) -> WorkloadEvidence:
+    """Execute and bind the exact finite latency, memory, and cursor workload."""
+
+    latency_samples: list[int] = []
+    for _ in range(WORKLOAD_RUNS):
+        started = time.monotonic_ns()
+        loaded = load_current(
+            token,
+            stream_id=stream_id,
+            natural_key=natural_key,
+        )
+        elapsed = time.monotonic_ns() - started
+        if (
+            loaded.classification is not StoreClassification.FOUND
+            or not 0 <= elapsed <= MAX_OPERATION_LATENCY_NS
+        ):
+            raise HarnessFailure(HarnessFailureCode.BOUNDS_EXCEEDED)
+        latency_samples.append(elapsed)
+
+    tracemalloc.start()
+    try:
+        measured = load_current(
+            token,
+            stream_id=stream_id,
+            natural_key=natural_key,
+        )
+        _, peak_memory = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    maximum_open_cursors = measured_open_cursor_evidence(
+        token,
+        stream_id=stream_id,
+        natural_key=natural_key,
+    )
+    if (
+        measured.classification is not StoreClassification.FOUND
+        or measured.query_evidence.history_rows != 3
+        or not 0 <= peak_memory <= MAX_TEST_TRACED_MEMORY_BYTES
+        or not 1 <= maximum_open_cursors <= MAX_TEST_OPEN_CURSORS
+    ):
+        raise HarnessFailure(HarnessFailureCode.BOUNDS_EXCEEDED)
+    _require_token(token)
+    return WorkloadEvidence(
+        query_evidence=measured.query_evidence,
+        maximum_open_cursors=maximum_open_cursors,
+        peak_traced_memory_bytes=peak_memory,
+        latency_samples_ns=tuple(latency_samples),
+    )
 
 
 def _tail_manifest(
@@ -7307,6 +9108,7 @@ def _generation_evidence_id(token: StoreToken) -> str:
     return f"sha256:{hashlib.sha256(payload).hexdigest()}"
 
 
+@_operation_evidence_executor
 def online_backup(
     source: StoreToken,
     pytest_root: Path,
@@ -7462,6 +9264,225 @@ def online_backup(
         raise
 
 
+@_operation_evidence_executor
+def concurrent_write_backup_evidence(
+    source: StoreToken,
+    pytest_root: Path,
+    *,
+    transitions: tuple[ContinuousPublicTradeStreamStoredTransitionV1, ...],
+    evidence_recorded_at_utc: str,
+) -> ConcurrentBackupEvidence:
+    """Run one online backup while a bounded writer commits exact transitions."""
+
+    if (
+        type(transitions) is not tuple
+        or len(transitions) != CONCURRENT_BACKUP_TRANSITIONS
+        or any(
+            type(transition) is not ContinuousPublicTradeStreamStoredTransitionV1
+            for transition in transitions
+        )
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    source_before = verify_store(source)
+    if not hasattr(os, "fork") or _CONNECTION_PATH_SNAPSHOTS:
+        raise HarnessFailure(HarnessFailureCode.UNPROVEN)
+    exact_transitions = tuple(_validated_transition(item) for item in transitions)
+    cas_statements = (
+        "BEGIN IMMEDIATE",
+        "stream UUID lookup LIMIT 2",
+        "history predecessor/successor LIMIT 2",
+        "current history LIMIT 3",
+        "INSERT transition history",
+        "UPDATE current CAS",
+        "COMMIT",
+    )
+    record_size = 2 + hashlib.sha256().digest_size
+    result_packet_size = 1 + (CONCURRENT_BACKUP_TRANSITIONS * record_size)
+    try:
+        control_pipe, result_pipe = _open_pipes(2)
+    except OSError:
+        raise HarnessFailure(HarnessFailureCode.UNPROVEN) from None
+    control_read, control_write = control_pipe
+    result_read, result_write = result_pipe
+    try:
+        process_id = os.fork()
+    except OSError:
+        _close_descriptors((control_read, control_write, result_read, result_write))
+        raise HarnessFailure(HarnessFailureCode.UNPROVEN) from None
+    if process_id == 0:
+        os.close(control_write)
+        os.close(result_read)
+        _ACTIVE_EVIDENCE_RUN.set(None)
+        _ACTIVE_GATE_OPERATIONS.set(None)
+        _ACTIVE_REJECTION_COLLECTOR.set(None)
+        _ACTIVE_OPERATION_EXECUTOR_DEPTH.set(0)
+        exit_code = 70
+        try:
+            _write_process_packet(result_write, b"R")
+            if os.read(control_read, 1) != b"S":
+                raise HarnessFailure(HarnessFailureCode.UNPROVEN)
+            packet = bytearray(b"P")
+            for transition in exact_transitions:
+                mutation = compare_and_swap_stream(source, transition)
+                if (
+                    type(mutation) is not MutationEvidence
+                    or mutation.classification is not StoreClassification.UPDATED
+                    or mutation.statements != cas_statements
+                    or type(mutation.rows_materialized) is not int
+                    or not 0 <= mutation.rows_materialized <= 5
+                    or mutation.committed is not True
+                ):
+                    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+                packet.extend(struct.pack(">H", mutation.rows_materialized))
+                packet.extend(bytes.fromhex(_evidence_payload_digest(mutation)))
+            if len(packet) != result_packet_size:
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            _write_process_packet(result_write, bytes(packet))
+            exit_code = 0
+        except BaseException:
+            with suppress(OSError):
+                _write_process_packet(result_write, b"F")
+        finally:
+            _close_descriptors((control_read, result_write))
+        os._exit(exit_code)
+
+    try:
+        os.close(control_read)
+        control_read = -1
+        os.close(result_write)
+        result_write = -1
+        ready = _read_process_packet("concurrent_backup_ready", result_read, 1)
+        if ready != b"R":
+            raise HarnessFailure(HarnessFailureCode.UNPROVEN)
+    except BaseException as error:
+        _close_descriptors(
+            tuple(
+                descriptor
+                for descriptor in (
+                    control_read,
+                    control_write,
+                    result_read,
+                    result_write,
+                )
+                if descriptor >= 0
+            )
+        )
+        if not _terminate_and_reap_processes((process_id,)):
+            raise HarnessFailure(HarnessFailureCode.UNPROVEN) from error
+        if isinstance(error, HarnessFailure):
+            raise
+        raise HarnessFailure(HarnessFailureCode.UNPROVEN) from error
+
+    progress_observations = 0
+    writer_packet = b""
+
+    def observe_progress() -> None:
+        nonlocal control_write, progress_observations, writer_packet
+        progress_observations += 1
+        if progress_observations != 1 or control_write < 0:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        _write_process_packet(control_write, b"S")
+        os.close(control_write)
+        control_write = -1
+        writer_packet = _read_process_packet(
+            "concurrent_backup_result",
+            result_read,
+            result_packet_size,
+        )
+        if len(writer_packet) != result_packet_size:
+            raise HarnessFailure(HarnessFailureCode.UNPROVEN)
+
+    backup_token: StoreToken | None = None
+    try:
+        backup_token, backup_manifest = online_backup(
+            source,
+            pytest_root,
+            evidence_recorded_at_utc=evidence_recorded_at_utc,
+            progress_hook=observe_progress,
+        )
+        status = _wait_for_owned_process(process_id)
+        if (
+            status is None
+            or not os.WIFEXITED(status)
+            or os.WEXITSTATUS(status) != 0
+            or progress_observations != 1
+            or not writer_packet.startswith(b"P")
+        ):
+            raise HarnessFailure(HarnessFailureCode.UNPROVEN)
+        writer_mutations: list[MutationEvidence] = []
+        offset = 1
+        for _ in range(CONCURRENT_BACKUP_TRANSITIONS):
+            rows_materialized = struct.unpack(
+                ">H",
+                writer_packet[offset : offset + 2],
+            )[0]
+            offset += 2
+            observed_digest = writer_packet[offset : offset + hashlib.sha256().digest_size]
+            offset += hashlib.sha256().digest_size
+            mutation = MutationEvidence(
+                classification=StoreClassification.UPDATED,
+                statements=cas_statements,
+                rows_materialized=rows_materialized,
+                committed=True,
+            )
+            if not 0 <= rows_materialized <= 5 or observed_digest != bytes.fromhex(
+                _evidence_payload_digest(mutation)
+            ):
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            writer_mutations.append(mutation)
+        if offset != len(writer_packet):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        source_after = verify_store(source)
+        backup_summary = verify_store(backup_token)
+        if (
+            source_after.stream_count != source_before.stream_count
+            or source_after.history_count != source_before.history_count + len(transitions)
+            or source_after.page_count <= source_before.page_count
+            or not (
+                source_before.history_count
+                <= backup_manifest.source_history_rows
+                <= source_after.history_count
+            )
+            or not (
+                source_before.page_count
+                <= backup_manifest.source_page_count
+                <= source_after.page_count
+            )
+            or backup_summary.history_count != backup_manifest.destination_history_rows
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        return ConcurrentBackupEvidence(
+            source_token=source,
+            backup_token=backup_token,
+            backup_manifest=backup_manifest,
+            source_before=source_before,
+            source_after=source_after,
+            backup_summary=backup_summary,
+            writer_mutations=tuple(writer_mutations),
+            progress_observations=progress_observations,
+            writer_process_boundary="one-forked-progress-triggered-writer",
+        )
+    except BaseException:
+        if backup_token is not None:
+            _remove_owned_files(backup_token)
+        raise
+    finally:
+        _close_descriptors(
+            tuple(
+                descriptor
+                for descriptor in (
+                    control_read,
+                    control_write,
+                    result_read,
+                    result_write,
+                )
+                if descriptor >= 0
+            )
+        )
+        if not _terminate_and_reap_processes((process_id,)):
+            raise HarnessFailure(HarnessFailureCode.UNPROVEN)
+
+
 def _complete_history(
     token: StoreToken,
     *,
@@ -7507,6 +9528,7 @@ def _complete_history(
     return tuple(entries)
 
 
+@_operation_evidence_executor
 def same_format_generation_copy(
     source: StoreToken,
     pytest_root: Path,
@@ -7596,24 +9618,1612 @@ def same_format_generation_copy(
         raise
 
 
-def _validate_report_backup_manifest(report: EvidenceReport) -> None:
-    manifest = report.backup_manifest
+@_operation_evidence_executor
+def closed_error_mapping_evidence() -> RejectionEvidence:
+    """Return the exact frozen numeric result-code mapping observations."""
+
+    codes = (*sorted(_CORRUPT_RESULT_CODES | _OPERATIONAL_RESULT_CODES), -1)
+    return RejectionEvidence(tuple((str(code), sqlite_result_failure_code(code)) for code in codes))
+
+
+_OPERATION_PRODUCERS_FROZEN = True
+
+
+def _registered_rejection_scenario(
+    label: str,
+    *,
+    kind: str,
+    code: HarnessFailureCode,
+    executor_names: tuple[str, ...] = (),
+) -> _RejectionScenario:
+    return _RejectionScenario(
+        capability=object(),
+        label=label,
+        kind=kind,
+        code=code,
+        executor_names=executor_names,
+    )
+
+
+_BOOTSTRAP_REJECTION_CONTRACT: Final = (
+    ("relative_root", HarnessFailureCode.INVALID_BOOTSTRAP_ROOT, "bootstrap_store"),
+    ("unregistered_root", HarnessFailureCode.INVALID_BOOTSTRAP_ROOT, "bootstrap_store"),
+    ("reconstructed_root", HarnessFailureCode.INVALID_BOOTSTRAP_ROOT, "bootstrap_store"),
+    ("sibling_root", HarnessFailureCode.INVALID_BOOTSTRAP_ROOT, "bootstrap_store"),
+    ("nested_root", HarnessFailureCode.INVALID_BOOTSTRAP_ROOT, "bootstrap_store"),
+    ("symlink_root", HarnessFailureCode.INVALID_BOOTSTRAP_ROOT, "bootstrap_store"),
+    ("forged_token", HarnessFailureCode.INVALID_TOKEN, "verify_store"),
+    ("wrong_process_root", HarnessFailureCode.INVALID_BOOTSTRAP_ROOT, "bootstrap_store"),
+    ("wrong_process_token", HarnessFailureCode.INVALID_TOKEN, "verify_store"),
+    ("wrong_node_root", HarnessFailureCode.INVALID_BOOTSTRAP_ROOT, "bootstrap_store"),
+    ("wrong_node_token", HarnessFailureCode.INVALID_TOKEN, "verify_store"),
+    ("expired_root", HarnessFailureCode.INVALID_BOOTSTRAP_ROOT, "bootstrap_store"),
+    ("expired_token", HarnessFailureCode.INVALID_TOKEN, "verify_store"),
+    (
+        "replaced_registered_root",
+        HarnessFailureCode.INVALID_BOOTSTRAP_ROOT,
+        "bootstrap_store",
+    ),
+    ("hardlink_database", HarnessFailureCode.UNAVAILABLE, "verify_store"),
+    ("unexpected_entry", HarnessFailureCode.UNAVAILABLE, "verify_store"),
+    ("readonly_database", HarnessFailureCode.UNAVAILABLE, "verify_store"),
+    ("widened_root", HarnessFailureCode.UNAVAILABLE, "verify_store"),
+    ("missing_database", HarnessFailureCode.UNAVAILABLE, "verify_store"),
+    ("replaced_database", HarnessFailureCode.UNAVAILABLE, "verify_store"),
+    ("allowed_name_symlink", HarnessFailureCode.UNAVAILABLE, "verify_store"),
+    (
+        "path_resolution_bootstrap",
+        HarnessFailureCode.INVALID_BOOTSTRAP_ROOT,
+        "bootstrap_store",
+    ),
+    ("path_resolution_operation", HarnessFailureCode.UNAVAILABLE, "verify_store"),
+)
+_CORRUPTION_REJECTION_CONTRACT: Final = (
+    ("digest_byte_guard", HarnessFailureCode.UNAVAILABLE, "sqlite"),
+    ("forbidden_schema_sql", HarnessFailureCode.UNAVAILABLE, "sqlite"),
+    ("transition_without_current_tail", HarnessFailureCode.UNAVAILABLE, "sqlite"),
+    ("stream_without_creation_history", HarnessFailureCode.UNAVAILABLE, "sqlite"),
+    ("orphan_creation_history", HarnessFailureCode.UNAVAILABLE, "sqlite"),
+    ("metadata_update", HarnessFailureCode.UNAVAILABLE, "sqlite"),
+    ("metadata_delete", HarnessFailureCode.UNAVAILABLE, "sqlite"),
+    ("history_update", HarnessFailureCode.UNAVAILABLE, "sqlite"),
+    ("history_delete", HarnessFailureCode.UNAVAILABLE, "sqlite"),
+    ("stream_identity_update", HarnessFailureCode.UNAVAILABLE, "sqlite"),
+    ("stream_delete", HarnessFailureCode.UNAVAILABLE, "sqlite"),
+    ("current_tail_jump", HarnessFailureCode.UNAVAILABLE, "sqlite"),
+    ("wrong_predecessor_bytes", HarnessFailureCode.UNAVAILABLE, "sqlite"),
+    ("wrong_predecessor_digest", HarnessFailureCode.UNAVAILABLE, "sqlite"),
+    ("wrong_predecessor_root", HarnessFailureCode.UNAVAILABLE, "sqlite"),
+    ("history_gap", HarnessFailureCode.UNAVAILABLE, "sqlite"),
+    ("unsupported_generation", HarnessFailureCode.UNSUPPORTED_VERSION, "verify_store"),
+    ("malformed_generation", HarnessFailureCode.CORRUPT, "verify_store"),
+    ("short_page", HarnessFailureCode.CORRUPT, "verify_store"),
+    ("audit_limit_overflow", HarnessFailureCode.CORRUPT, "audit_history"),
+    ("retained_history_canonical_bytes", HarnessFailureCode.CORRUPT, "verify_store"),
+    (
+        "two_candidate_corrupt_precedence",
+        HarnessFailureCode.CORRUPT,
+        "audit_history",
+    ),
+    (
+        "expectation_conflict_corrupt_precedence",
+        HarnessFailureCode.CORRUPT,
+        "audit_history",
+    ),
+)
+
+_REGISTERED_REJECTION_SCENARIOS: Final = {
+    label: _registered_rejection_scenario(
+        label,
+        kind=("sqlite" if executor == "sqlite" else "harness"),
+        code=code,
+        executor_names=(() if executor == "sqlite" else (executor,)),
+    )
+    for label, code, executor in (
+        *_BOOTSTRAP_REJECTION_CONTRACT,
+        *_CORRUPTION_REJECTION_CONTRACT,
+    )
+}
+
+
+@contextmanager
+def _fixed_gate_operation_scope(
+    run: _EvidenceRun,
+    *,
+    gate: str,
+    rejection_contract: Sequence[tuple[str, HarnessFailureCode, str]] = (),
+) -> Iterator[None]:
+    ledger = _validated_evidence_run(run)
+    ordinal = GENERATED_EVIDENCE_GATES.index(gate)
+    if (
+        _ACTIVE_EVIDENCE_RUN.get() is not run
+        or _ACTIVE_GATE_OPERATIONS.get() is not None
+        or _ACTIVE_REJECTION_COLLECTOR.get() is not None
+        or gate in ledger.operation_runs
+        or gate in ledger.rejection_runs
+        or ordinal in ledger.observations
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    operation_state = _GateOperationState(run=run, gate=gate, observations=[])
+    operation_token = (
+        _ACTIVE_GATE_OPERATIONS.set(operation_state)
+        if gate in _GATE_OPERATION_PRODUCER_SEQUENCES
+        else None
+    )
+    rejection_state: _RejectionCollectorState | None = None
+    rejection_token = None
+    if rejection_contract:
+        rejection_state = _RejectionCollectorState(
+            run=run,
+            gate=gate,
+            scenarios=tuple(
+                _REGISTERED_REJECTION_SCENARIOS[label] for label, _, _ in rejection_contract
+            ),
+            observations=[],
+        )
+        rejection_token = _ACTIVE_REJECTION_COLLECTOR.set(rejection_state)
+    completed = False
+    try:
+        yield
+        if rejection_state is not None and len(rejection_state.observations) != len(
+            rejection_state.scenarios
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        completed = True
+    finally:
+        if rejection_token is not None:
+            _ACTIVE_REJECTION_COLLECTOR.reset(rejection_token)
+        if operation_token is not None:
+            _ACTIVE_GATE_OPERATIONS.reset(operation_token)
+        if completed:
+            expected_sequence = _GATE_OPERATION_PRODUCER_SEQUENCES.get(gate, ())
+            if (
+                tuple(observation.producer_name for observation in operation_state.observations)
+                != expected_sequence
+            ):
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            ledger.operation_runs[gate] = tuple(operation_state.observations)
+            ledger.rejection_runs[gate] = (
+                () if rejection_state is None else tuple(rejection_state.observations)
+            )
+
+
+@contextmanager
+def bootstrap_path_operation_scope(run: _EvidenceRun) -> Iterator[None]:
+    with _fixed_gate_operation_scope(
+        run,
+        gate="bootstrap_path_ownership",
+        rejection_contract=_BOOTSTRAP_REJECTION_CONTRACT,
+    ):
+        yield
+
+
+@contextmanager
+def schema_corruption_operation_scope(run: _EvidenceRun) -> Iterator[None]:
+    with _fixed_gate_operation_scope(
+        run,
+        gate="schema_constraints_corruption",
+        rejection_contract=_CORRUPTION_REJECTION_CONTRACT,
+    ):
+        yield
+
+
+@contextmanager
+def fresh_process_operation_scope(run: _EvidenceRun) -> Iterator[None]:
+    with _fixed_gate_operation_scope(run, gate="fresh_process_faults"):
+        yield
+
+
+@contextmanager
+def atomicity_operation_scope(run: _EvidenceRun) -> Iterator[None]:
+    with _fixed_gate_operation_scope(run, gate="atomicity_classification"):
+        yield
+
+
+@contextmanager
+def bounded_query_operation_scope(run: _EvidenceRun) -> Iterator[None]:
+    with _fixed_gate_operation_scope(run, gate="bounded_queries"):
+        yield
+
+
+def _report_token_role(
+    arguments: tuple[object, ...],
+    _keywords: Mapping[str, object],
+    _result: object,
+) -> tuple[tuple[str, StoreToken], ...]:
+    if not arguments or type(arguments[0]) is not StoreToken:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    return (("report", arguments[0]),)
+
+
+def _backup_token_roles(
+    _arguments: tuple[object, ...],
+    _keywords: Mapping[str, object],
+    result: object,
+) -> tuple[tuple[str, StoreToken], ...]:
+    if type(result) is not BackupRestoreEvidence:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    return (
+        ("source", result.source_token),
+        ("backup", result.backup_token),
+        ("restore", result.restore_token),
+    )
+
+
+def _generation_copy_token_roles(
+    _arguments: tuple[object, ...],
+    _keywords: Mapping[str, object],
+    result: object,
+) -> tuple[tuple[str, StoreToken], ...]:
+    if type(result) is not GenerationCopyEvidence:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    return (
+        ("source", result.source_token),
+        ("destination", result.destination_token),
+    )
+
+
+def _validated_rejection_run(
+    run: _EvidenceRun,
+    *,
+    gate: str,
+    contract: Sequence[tuple[str, HarnessFailureCode, str]],
+) -> tuple[_RejectionObservation, ...]:
+    """Validate one exact private rejection receipt sequence."""
+
+    observations = _validated_evidence_run(run).rejection_runs.get(gate)
+    if observations is None or len(observations) != len(contract):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    for ordinal, (observation, (label, code, executor)) in enumerate(
+        zip(observations, contract, strict=True)
+    ):
+        try:
+            call_digest = bytes.fromhex(observation.call_digest)
+        except (TypeError, ValueError):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+        if (
+            observation.run is not run
+            or observation.process_id != run._pytest_registration.process_id
+            or observation.ordinal != ordinal
+            or observation.scenario is not _REGISTERED_REJECTION_SCENARIOS.get(label)
+            or observation.scenario.label != label
+            or observation.scenario.code is not code
+            or observation.scenario.kind != ("sqlite" if executor == "sqlite" else "harness")
+            or observation.code is not code
+            or len(call_digest) != hashlib.sha256().digest_size
+            or (
+                executor == "sqlite"
+                and (
+                    type(observation.sqlite_errorcode) is not int
+                    or observation.target_nonce is None
+                )
+            )
+            or (executor == "bootstrap_store" and observation.target_nonce is not None)
+            or (executor in {"verify_store", "audit_history"} and observation.target_nonce is None)
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    return observations
+
+
+@_whole_gate_collector("schema_identity", token_roles=_report_token_role)
+def collect_schema_identity_evidence(
+    run: _EvidenceRun,
+    report_token: StoreToken,
+) -> VerificationSummary:
+    del run
+    return verify_store(report_token)
+
+
+@_whole_gate_collector("bootstrap_path_ownership", token_roles=_report_token_role)
+def finalize_bootstrap_path_evidence(
+    run: _EvidenceRun,
+    report_token: StoreToken,
+) -> BootstrapPathEvidence:
+    observations = _validated_rejection_run(
+        run,
+        gate="bootstrap_path_ownership",
+        contract=_BOOTSTRAP_REJECTION_CONTRACT,
+    )
+    by_label = {observation.scenario.label: observation for observation in observations}
+    scoped_nonce = by_label["wrong_process_token"].target_nonce
+    if (
+        scoped_nonce is None
+        or by_label["wrong_node_token"].target_nonce != scoped_nonce
+        or by_label["expired_token"].target_nonce != scoped_nonce
+        or by_label["forged_token"].target_nonce != b"\x00" * 32
+        or by_label["widened_root"].target_nonce != report_token._nonce
+        or len(
+            {
+                cast(bytes, by_label[label].target_nonce)
+                for label in (
+                    "hardlink_database",
+                    "unexpected_entry",
+                    "readonly_database",
+                    "missing_database",
+                    "replaced_database",
+                    "allowed_name_symlink",
+                    "path_resolution_operation",
+                )
+            }
+        )
+        != 7
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    return BootstrapPathEvidence(
+        token=report_token,
+        rejections=RejectionEvidence(
+            tuple((observation.scenario.label, observation.code) for observation in observations)
+        ),
+    )
+
+
+@_whole_gate_collector("runtime_connection_controls", token_roles=_report_token_role)
+def collect_runtime_connection_controls_evidence(
+    run: _EvidenceRun,
+    report_token: StoreToken,
+    summary: VerificationSummary,
+) -> tuple[ConnectionControlProfile, ...]:
+    ledger = _validated_evidence_run(run)
+    schema_observation = ledger.observations.get(0)
+    if (
+        schema_observation is None
+        or schema_observation.value is not summary
+        or _require_token(report_token).pytest_registration is not run._pytest_registration
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    return summary.connection_profiles
+
+
+@_whole_gate_collector("projection_roundtrip", token_roles=_report_token_role)
+def collect_projection_roundtrip_evidence(
+    run: _EvidenceRun,
+    report_token: StoreToken,
+    *,
+    stream_id: UUID,
+    natural_key: bytes,
+) -> CurrentSlice:
+    del run
+    return load_current(
+        report_token,
+        stream_id=stream_id,
+        natural_key=natural_key,
+    )
+
+
+@_whole_gate_collector("schema_constraints_corruption", token_roles=_report_token_role)
+def finalize_schema_corruption_evidence(
+    run: _EvidenceRun,
+    report_token: StoreToken,
+) -> RejectionEvidence:
+    del report_token
+    observations = _validated_rejection_run(
+        run,
+        gate="schema_constraints_corruption",
+        contract=_CORRUPTION_REJECTION_CONTRACT,
+    )
+    by_label = {observation.scenario.label: observation for observation in observations}
+    if (
+        by_label["stream_without_creation_history"].target_nonce
+        != by_label["orphan_creation_history"].target_nonce
+        or len(
+            {
+                by_label[label].target_nonce
+                for label in (
+                    "metadata_update",
+                    "metadata_delete",
+                    "history_update",
+                    "history_delete",
+                    "stream_identity_update",
+                    "stream_delete",
+                    "current_tail_jump",
+                )
+            }
+        )
+        != 1
+        or len(
+            {
+                by_label[label].target_nonce
+                for label in (
+                    "wrong_predecessor_bytes",
+                    "wrong_predecessor_digest",
+                    "wrong_predecessor_root",
+                    "history_gap",
+                )
+            }
+        )
+        != 1
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    return RejectionEvidence(
+        tuple((observation.scenario.label, observation.code) for observation in observations)
+    )
+
+
+@_whole_gate_collector("fresh_process_faults", token_roles=_report_token_role)
+def finalize_fresh_process_evidence(
+    run: _EvidenceRun,
+    report_token: StoreToken,
+) -> FreshProcessEvidenceAggregate:
+    observations = _validated_evidence_run(run).operation_runs.get("fresh_process_faults")
+    if observations is None:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    report_nonce = report_token._nonce
+    observed_store_nonces: set[bytes] = set()
+    active_store_nonce: bytes | None = None
+    for index, observation in enumerate(observations):
+        if observation.sequence != index:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        if observation.producer_name == "bootstrap_store":
+            if (
+                len(observation.token_nonces) != 1
+                or observation.token_nonces[0] == report_nonce
+                or observation.token_nonces[0] in observed_store_nonces
+            ):
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            active_store_nonce = observation.token_nonces[0]
+            observed_store_nonces.add(active_store_nonce)
+        elif active_store_nonce is None or observation.token_nonces != (active_store_nonce,):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    evidence_observations = tuple(
+        observation
+        for observation in observations
+        if observation.producer_name
+        not in {
+            "bootstrap_store",
+            "create_stream",
+        }
+    )
+    expected_sequence = (
+        *(("fresh_process_kill_evidence", f"create:{seam}") for seam in _CREATE_KILL_SEAM_ORDER),
+        *(
+            ("fresh_process_kill_evidence", f"compare_and_swap:{seam}")
+            for seam in _CAS_KILL_SEAM_ORDER
+        ),
+        ("sqlite_result_code_fault_evidence", "readonly"),
+        ("sqlite_result_code_fault_evidence", "busy"),
+        ("true_during_commit_evidence", "true_during_commit_evidence"),
+        ("ioerr_write_evidence", "ioerr_write_evidence"),
+        ("max_page_count_evidence", "max_page_count_evidence"),
+        ("fresh_process_writer_contention_evidence", "create"),
+        ("fresh_process_writer_contention_evidence", "compare_and_swap"),
+        (
+            "fresh_process_two_writer_evidence",
+            "create:INSERTED,DUPLICATE",
+        ),
+        (
+            "fresh_process_two_writer_evidence",
+            "create:INSERTED,CONFLICT",
+        ),
+        (
+            "fresh_process_two_writer_evidence",
+            "compare_and_swap:UPDATED,DUPLICATE",
+        ),
+        (
+            "fresh_process_two_writer_evidence",
+            "compare_and_swap:UPDATED,CONFLICT",
+        ),
+        ("wal_concurrency_evidence", "wal_concurrency_evidence"),
+    )
+    if (
+        tuple(
+            (observation.producer_name, observation.operation_tag)
+            for observation in evidence_observations
+        )
+        != expected_sequence
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    by_producer: dict[str, list[object]] = {}
+    for observation in evidence_observations:
+        if observation.payload_digest != _evidence_payload_digest(observation.result):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        by_producer.setdefault(observation.producer_name, []).append(observation.result)
+    kill = by_producer.get("fresh_process_kill_evidence", [])
+    result_codes = by_producer.get("sqlite_result_code_fault_evidence", [])
+    during = by_producer.get("true_during_commit_evidence", [])
+    ioerr = by_producer.get("ioerr_write_evidence", [])
+    full = by_producer.get("max_page_count_evidence", [])
+    contentions = by_producer.get("fresh_process_writer_contention_evidence", [])
+    two_writers = by_producer.get("fresh_process_two_writer_evidence", [])
+    wal = by_producer.get("wal_concurrency_evidence", [])
+    if tuple(
+        len(values)
+        for values in (
+            kill,
+            result_codes,
+            during,
+            ioerr,
+            full,
+            contentions,
+            two_writers,
+            wal,
+        )
+    ) != (10, 2, 1, 1, 1, 2, 4, 1):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    return FreshProcessEvidenceAggregate(
+        create_faults=cast(tuple[FaultEvidence, ...], tuple(kill[:5])),
+        compare_and_swap_faults=cast(tuple[FaultEvidence, ...], tuple(kill[5:])),
+        result_code_faults=cast(tuple[FaultEvidence, ...], tuple(result_codes)),
+        true_during_commit=cast(FaultEvidence, during[0]),
+        ioerr_write=cast(FaultEvidence, ioerr[0]),
+        max_page_count=cast(FaultEvidence, full[0]),
+        writer_contentions=cast(
+            tuple[WriterContentionEvidence, ...],
+            tuple(contentions),
+        ),
+        two_writers=cast(tuple[TwoWriterEvidence, ...], tuple(two_writers)),
+        wal_concurrency=cast(WalConcurrencyEvidence, wal[0]),
+    )
+
+
+@_whole_gate_collector("atomicity_classification", token_roles=_report_token_role)
+def finalize_atomicity_evidence(
+    run: _EvidenceRun,
+    report_token: StoreToken,
+) -> AtomicityClassificationEvidence:
+    ledger = _validated_evidence_run(run)
+    fresh_observation = ledger.observations.get(
+        GENERATED_EVIDENCE_GATES.index("fresh_process_faults")
+    )
+    operations = ledger.operation_runs.get("atomicity_classification")
+    if (
+        fresh_observation is None
+        or type(fresh_observation.value) is not FreshProcessEvidenceAggregate
+        or operations is None
+        or len(operations) != len(_ATOMICITY_OPERATION_PRODUCER_SEQUENCE)
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    atomicity_nonce = operations[0].token_nonces
+    if (
+        len(atomicity_nonce) != 1
+        or atomicity_nonce[0] == report_token._nonce
+        or any(
+            operation.sequence != index or operation.token_nonces != atomicity_nonce
+            for index, operation in enumerate(operations)
+        )
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    mutation_operations = tuple(
+        operation for operation in operations if operation.producer_name != "bootstrap_store"
+    )
+    creates = tuple(
+        cast(MutationEvidence, observation.result)
+        for observation in mutation_operations
+        if observation.producer_name == "create_stream"
+    )
+    swaps = tuple(
+        cast(MutationEvidence, observation.result)
+        for observation in mutation_operations
+        if observation.producer_name == "compare_and_swap_stream"
+    )
+    if (
+        tuple(
+            (observation.producer_name, observation.operation_tag)
+            for observation in mutation_operations
+        )
+        != (
+            ("create_stream", "INSERTED"),
+            ("create_stream", "DUPLICATE"),
+            ("create_stream", "CONFLICT"),
+            ("compare_and_swap_stream", "UPDATED"),
+            ("compare_and_swap_stream", "DUPLICATE"),
+            ("compare_and_swap_stream", "CONFLICT"),
+        )
+        or len(creates) != 3
+        or len(swaps) != 3
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    fresh = fresh_observation.value
+    return AtomicityClassificationEvidence(
+        mutations=(*creates, *swaps),
+        two_writers=fresh.two_writers,
+        unknown_acknowledgements=(
+            fresh.create_faults[-1],
+            fresh.compare_and_swap_faults[-1],
+        ),
+    )
+
+
+@_whole_gate_collector("bounded_queries", token_roles=_report_token_role)
+def finalize_bounded_query_evidence(
+    run: _EvidenceRun,
+    report_token: StoreToken,
+) -> BoundedQueryEvidenceAggregate:
+    ledger = _validated_evidence_run(run)
+    projection_observation = ledger.observations.get(
+        GENERATED_EVIDENCE_GATES.index("projection_roundtrip")
+    )
+    operations = ledger.operation_runs.get("bounded_queries")
+    if (
+        projection_observation is None
+        or type(projection_observation.value) is not CurrentSlice
+        or operations is None
+        or len(operations) != len(_BOUNDED_OPERATION_PRODUCER_SEQUENCE)
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    report_nonce = report_token._nonce
+    conflict_nonce = operations[7].token_nonces
+    maximum_nonce = operations[12].token_nonces
+    if (
+        any(operation.sequence != index for index, operation in enumerate(operations))
+        or any(operation.token_nonces != (report_nonce,) for operation in operations[:7])
+        or len(conflict_nonce) != 1
+        or conflict_nonce[0] == report_nonce
+        or any(operation.token_nonces != conflict_nonce for operation in operations[7:12])
+        or len(maximum_nonce) != 1
+        or maximum_nonce[0] in {report_nonce, conflict_nonce[0]}
+        or any(operation.token_nonces != maximum_nonce for operation in operations[12:])
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    query_operations = tuple(
+        operation
+        for operation in operations
+        if operation.producer_name
+        in {
+            "load_current",
+            "audit_history",
+            "query_plan_evidence",
+        }
+    )
+    if tuple(
+        (observation.producer_name, observation.operation_tag) for observation in query_operations
+    ) != (
+        ("load_current", "FOUND"),
+        ("load_current", "NOT_FOUND"),
+        ("audit_history", "PAGE:limit=1:continuation=False"),
+        ("audit_history", "PAGE:limit=10:continuation=False"),
+        ("audit_history", "PAGE:limit=1:continuation=True"),
+        ("audit_history", "AT_TAIL:limit=100:continuation=True"),
+        ("audit_history", "ANCHOR_CONFLICT:limit=1:continuation=True"),
+        ("load_current", "IDENTITY_CONFLICT"),
+        ("audit_history", "IDENTITY_CONFLICT:limit=100:continuation=False"),
+        ("audit_history", "PAGE:limit=100:continuation=False"),
+        ("audit_history", "PAGE:limit=100:continuation=True"),
+        ("query_plan_evidence", "query_plan_evidence"),
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    loads = [
+        cast(CurrentSlice, observation.result)
+        for observation in query_operations
+        if observation.producer_name == "load_current"
+    ]
+    audits = [
+        cast(AuditSlice, observation.result)
+        for observation in query_operations
+        if observation.producer_name == "audit_history"
+    ]
+    plans = [
+        cast(dict[str, tuple[str, ...]], observation.result)
+        for observation in query_operations
+        if observation.producer_name == "query_plan_evidence"
+    ]
+    if len(loads) != 3 or len(audits) != 8 or len(plans) != 1:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    projection = projection_observation.value
+    if loads[0] != projection:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    (
+        initial_one,
+        _,
+        continued_one,
+        at_tail,
+        anchor_conflict,
+        audit_conflict,
+        initial_hundred,
+        continued_hundred,
+    ) = audits
+    plan_names = (
+        "identity",
+        "current",
+        "audit_initial_1",
+        "audit_continuation_1",
+        "audit_initial_100",
+        "audit_continuation_100",
+    )
+    return BoundedQueryEvidenceAggregate(
+        queries=(
+            ("current_found", projection.classification, projection.query_evidence),
+            ("current_not_found", loads[1].classification, loads[1].query_evidence),
+            (
+                "current_identity_conflict",
+                loads[2].classification,
+                loads[2].query_evidence,
+            ),
+            (
+                "audit_identity_conflict",
+                audit_conflict.classification,
+                audit_conflict.query_evidence,
+            ),
+            ("audit_initial_1", initial_one.classification, initial_one.query_evidence),
+            (
+                "audit_continuation_1",
+                continued_one.classification,
+                continued_one.query_evidence,
+            ),
+            (
+                "audit_initial_100",
+                initial_hundred.classification,
+                initial_hundred.query_evidence,
+            ),
+            (
+                "audit_continuation_100",
+                continued_hundred.classification,
+                continued_hundred.query_evidence,
+            ),
+            ("audit_at_tail", at_tail.classification, at_tail.query_evidence),
+            (
+                "audit_anchor_conflict",
+                anchor_conflict.classification,
+                anchor_conflict.query_evidence,
+            ),
+        ),
+        plans=tuple((name, plans[0][name]) for name in plan_names),
+    )
+
+
+@_whole_gate_collector("closed_error_mapping", token_roles=_report_token_role)
+def collect_closed_error_mapping_evidence(
+    run: _EvidenceRun,
+    report_token: StoreToken,
+) -> RejectionEvidence:
+    del run, report_token
+    return closed_error_mapping_evidence()
+
+
+@_whole_gate_collector("backup_restore", token_roles=_backup_token_roles)
+def collect_backup_restore_evidence(
+    run: _EvidenceRun,
+    source_token: StoreToken,
+    pytest_root: Path,
+    *,
+    transitions: tuple[ContinuousPublicTradeStreamStoredTransitionV1, ...],
+    backup_recorded_at_utc: str,
+    restore_recorded_at_utc: str,
+) -> BackupRestoreEvidence:
+    del run
+    concurrent: ConcurrentBackupEvidence | None = None
+    restore_token: StoreToken | None = None
+    try:
+        concurrent = concurrent_write_backup_evidence(
+            source_token,
+            pytest_root,
+            transitions=transitions,
+            evidence_recorded_at_utc=backup_recorded_at_utc,
+        )
+        restore_token, restore_manifest = online_backup(
+            concurrent.backup_token,
+            pytest_root,
+            evidence_recorded_at_utc=restore_recorded_at_utc,
+        )
+        restore_summary = verify_store(restore_token)
+        if (
+            concurrent.source_token is not source_token
+            or concurrent.source_after != verify_store(source_token)
+            or restore_manifest.source_generation_id
+            != concurrent.backup_manifest.destination_generation_id
+            or restore_summary.stream_count != concurrent.backup_summary.stream_count
+            or restore_summary.history_count != concurrent.backup_summary.history_count
+            or _tail_manifest(restore_token) != concurrent.backup_manifest.per_stream_tails
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        return BackupRestoreEvidence(
+            source_token=source_token,
+            backup_token=concurrent.backup_token,
+            restore_token=restore_token,
+            backup_manifest=concurrent.backup_manifest,
+            restore_manifest=restore_manifest,
+            source_summary=concurrent.source_after,
+            backup_summary=concurrent.backup_summary,
+            restore_summary=restore_summary,
+            concurrent_write=concurrent,
+        )
+    except BaseException:
+        if restore_token is not None:
+            _remove_owned_files(restore_token)
+        if concurrent is not None:
+            _remove_owned_files(concurrent.backup_token)
+        raise
+
+
+@_whole_gate_collector("generation_copy", token_roles=_generation_copy_token_roles)
+def collect_generation_copy_evidence(
+    run: _EvidenceRun,
+    report_token: StoreToken,
+    pytest_root: Path,
+) -> GenerationCopyEvidence:
+    del run
+    destination = same_format_generation_copy(report_token, pytest_root)
+    return GenerationCopyEvidence(
+        source_token=report_token,
+        destination_token=destination,
+        source_generation_id=_generation_evidence_id(report_token),
+        destination_generation_id=_generation_evidence_id(destination),
+        source_summary=verify_store(report_token),
+        destination_summary=verify_store(destination),
+        source_tails=_tail_manifest(report_token),
+        destination_tails=_tail_manifest(destination),
+    )
+
+
+@_whole_gate_collector("workload_thresholds", token_roles=_report_token_role)
+def collect_workload_threshold_evidence(
+    run: _EvidenceRun,
+    report_token: StoreToken,
+    *,
+    stream_id: UUID,
+    natural_key: bytes,
+) -> WorkloadEvidence:
+    del run
+    return measured_report_workload_evidence(
+        report_token,
+        stream_id=stream_id,
+        natural_key=natural_key,
+    )
+
+
+_GATE_COLLECTORS_FROZEN = True
+
+
+def _validated_report_query_rows(evidence: QueryEvidence) -> int:
+    if (
+        type(evidence) is not QueryEvidence
+        or type(evidence.statements) is not tuple
+        or not evidence.statements
+        or any(type(statement) is not str or not statement for statement in evidence.statements)
+        or any(
+            type(value) is not int or value < 0
+            for value in (
+                evidence.stream_rows,
+                evidence.history_rows,
+                evidence.decoded_rows,
+            )
+        )
+        or evidence.decoded_rows != evidence.history_rows
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    return evidence.stream_rows + evidence.history_rows
+
+
+def _validate_rejection_evidence(
+    evidence: RejectionEvidence,
+    expected: tuple[tuple[str, HarnessFailureCode], ...],
+) -> None:
+    if (
+        type(evidence) is not RejectionEvidence
+        or type(evidence.checks) is not tuple
+        or evidence.checks != expected
+        or any(
+            type(item) is not tuple
+            or len(item) != 2
+            or type(item[0]) is not str
+            or type(item[1]) is not HarnessFailureCode
+            for item in evidence.checks
+        )
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+
+
+def _validate_pass_fault(
+    evidence: FaultEvidence,
+    *,
+    seam: str,
+    sqlite_errorcode: int | None = None,
+    reopened_state: ReopenedState | None = None,
+) -> None:
+    if (
+        type(evidence) is not FaultEvidence
+        or evidence.seam != seam
+        or evidence.disposition is not EvidenceDisposition.PASS
+        or evidence.reason is not None
+        or evidence.sqlite_errorcode != sqlite_errorcode
+        or (reopened_state is not None and evidence.reopened_state is not reopened_state)
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+
+
+def _validate_fresh_process_report_evidence(
+    evidence: FreshProcessEvidenceAggregate,
+) -> None:
+    if (
+        type(evidence) is not FreshProcessEvidenceAggregate
+        or type(evidence.create_faults) is not tuple
+        or type(evidence.compare_and_swap_faults) is not tuple
+        or type(evidence.result_code_faults) is not tuple
+        or tuple(item.seam for item in evidence.create_faults) != _CREATE_KILL_SEAM_ORDER
+        or tuple(item.seam for item in evidence.compare_and_swap_faults) != _CAS_KILL_SEAM_ORDER
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    for seam, fault in zip(
+        _CREATE_KILL_SEAM_ORDER,
+        evidence.create_faults,
+        strict=True,
+    ):
+        _validate_pass_fault(
+            fault,
+            seam=seam,
+            reopened_state=(
+                ReopenedState.NEW
+                if seam == "after_commit_before_acknowledgement"
+                else ReopenedState.OLD
+            ),
+        )
+        if fault.acknowledgement_bytes != 0 or fault.observed_syscall != "fork/SIGKILL":
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    for seam, fault in zip(
+        _CAS_KILL_SEAM_ORDER,
+        evidence.compare_and_swap_faults,
+        strict=True,
+    ):
+        _validate_pass_fault(
+            fault,
+            seam=seam,
+            reopened_state=(
+                ReopenedState.NEW
+                if seam == "after_commit_before_acknowledgement"
+                else ReopenedState.OLD
+            ),
+        )
+        if fault.acknowledgement_bytes != 0 or fault.observed_syscall != "fork/SIGKILL":
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if len(evidence.result_code_faults) != 2:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    for fault, seam, code in zip(
+        evidence.result_code_faults,
+        ("readonly", "busy"),
+        (sqlite3.SQLITE_READONLY, sqlite3.SQLITE_BUSY),
+        strict=True,
+    ):
+        _validate_pass_fault(
+            fault,
+            seam=seam,
+            sqlite_errorcode=code,
+            reopened_state=ReopenedState.OLD,
+        )
+        if fault.acknowledgement_bytes != 4:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    _validate_pass_fault(
+        evidence.true_during_commit,
+        seam="true_during_commit",
+    )
+    if (
+        evidence.true_during_commit.reopened_state not in {ReopenedState.OLD, ReopenedState.NEW}
+        or evidence.true_during_commit.acknowledgement_bytes != 0
+        or evidence.true_during_commit.observed_syscall
+        != "pwrite64(wal-frame-header)/pwrite64(wal-page-entry)"
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    _validate_pass_fault(
+        evidence.ioerr_write,
+        seam="sqlite_ioerr_write",
+        sqlite_errorcode=778,
+        reopened_state=ReopenedState.OLD,
+    )
+    _validate_pass_fault(
+        evidence.max_page_count,
+        seam="max_page_count",
+        sqlite_errorcode=sqlite3.SQLITE_FULL,
+        reopened_state=ReopenedState.OLD,
+    )
+    expected_contentions = (
+        (
+            "create",
+            StoreClassification.INSERTED,
+            (1, 1),
+        ),
+        (
+            "compare_and_swap",
+            StoreClassification.UPDATED,
+            (1, 2),
+        ),
+    )
+    if type(evidence.writer_contentions) is not tuple or len(evidence.writer_contentions) != len(
+        expected_contentions
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    for contention, (operation, winner, counts) in zip(
+        evidence.writer_contentions,
+        expected_contentions,
+        strict=True,
+    ):
+        if (
+            type(contention) is not WriterContentionEvidence
+            or contention.operation != operation
+            or contention.winner_outcome is not winner
+            or contention.contender_outcome is not HarnessFailureCode.UNAVAILABLE
+            or contention.contender_sqlite_errorcode != sqlite3.SQLITE_BUSY
+            or contention.disposition is not EvidenceDisposition.PASS
+            or contention.process_boundary != "two-forked-overlapping-writers"
+            or (contention.stream_count, contention.history_count) != counts
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    expected_two_writer = (
+        (
+            "create",
+            (
+                StoreClassification.INSERTED,
+                StoreClassification.DUPLICATE,
+            ),
+            (1, 1),
+        ),
+        (
+            "create",
+            (
+                StoreClassification.INSERTED,
+                StoreClassification.CONFLICT,
+            ),
+            (1, 1),
+        ),
+        (
+            "compare_and_swap",
+            (
+                StoreClassification.UPDATED,
+                StoreClassification.DUPLICATE,
+            ),
+            (1, 2),
+        ),
+        (
+            "compare_and_swap",
+            (
+                StoreClassification.UPDATED,
+                StoreClassification.CONFLICT,
+            ),
+            (1, 2),
+        ),
+    )
+    if type(evidence.two_writers) is not tuple or len(evidence.two_writers) != len(
+        expected_two_writer
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    for two_writer, (operation, outcomes, counts) in zip(
+        evidence.two_writers,
+        expected_two_writer,
+        strict=True,
+    ):
+        if (
+            type(two_writer) is not TwoWriterEvidence
+            or two_writer.operation != operation
+            or two_writer.outcomes != outcomes
+            or two_writer.disposition is not EvidenceDisposition.PASS
+            or two_writer.process_boundary != "two-forked-sequential-classifiers"
+            or (two_writer.stream_count, two_writer.history_count) != counts
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    wal = evidence.wal_concurrency
+    if (
+        type(wal) is not WalConcurrencyEvidence
+        or wal.disposition is not EvidenceDisposition.PASS
+        or wal.initial_version != 1
+        or wal.reader_snapshot_version != 1
+        or wal.final_version != 9
+        or wal.writes != 8
+        or not wal.checkpoint_samples
+        or any(
+            type(sample) is not tuple
+            or len(sample) != 3
+            or any(type(value) is not int or value < 0 for value in sample)
+            or sample[2] > sample[1]
+            for sample in wal.checkpoint_samples
+        )
+        or not 0 < wal.maximum_wal_bytes <= MAX_TEST_WAL_BYTES
+        or wal.process_boundary != "three-forked-role-children"
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+
+
+def _validate_bounded_query_report_evidence(
+    evidence: BoundedQueryEvidenceAggregate,
+    projection: CurrentSlice,
+) -> None:
+    expected_queries = (
+        ("current_found", StoreClassification.FOUND, 1, 3, 3),
+        ("current_not_found", StoreClassification.NOT_FOUND, 0, 0, 0),
+        (
+            "current_identity_conflict",
+            StoreClassification.IDENTITY_CONFLICT,
+            2,
+            2,
+            2,
+        ),
+        (
+            "audit_identity_conflict",
+            StoreClassification.IDENTITY_CONFLICT,
+            2,
+            2,
+            2,
+        ),
+        ("audit_initial_1", StoreClassification.PAGE, 1, 1, 1),
+        ("audit_continuation_1", StoreClassification.PAGE, 1, 2, 2),
+        ("audit_initial_100", StoreClassification.PAGE, 1, 100, 100),
+        ("audit_continuation_100", StoreClassification.PAGE, 1, 101, 101),
+        ("audit_at_tail", StoreClassification.AT_TAIL, 1, 1, 1),
+        (
+            "audit_anchor_conflict",
+            StoreClassification.ANCHOR_CONFLICT,
+            1,
+            2,
+            2,
+        ),
+    )
+    expected_plan_names = (
+        "identity",
+        "current",
+        "audit_initial_1",
+        "audit_continuation_1",
+        "audit_initial_100",
+        "audit_continuation_100",
+    )
+    if (
+        type(evidence) is not BoundedQueryEvidenceAggregate
+        or type(evidence.queries) is not tuple
+        or len(evidence.queries) != len(expected_queries)
+        or any(
+            type(item) is not tuple
+            or len(item) != 3
+            or type(item[0]) is not str
+            or type(item[1]) is not StoreClassification
+            or type(item[2]) is not QueryEvidence
+            for item in evidence.queries
+        )
+        or evidence.queries[0]
+        != (
+            "current_found",
+            StoreClassification.FOUND,
+            projection.query_evidence,
+        )
+        or type(evidence.plans) is not tuple
+        or tuple(name for name, _ in evidence.plans) != expected_plan_names
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    for observed, expected in zip(evidence.queries, expected_queries, strict=True):
+        name, classification, query = observed
+        expected_name, expected_classification, stream_rows, history_rows, decoded_rows = expected
+        _validated_report_query_rows(query)
+        if (
+            name != expected_name
+            or classification is not expected_classification
+            or query.stream_rows != stream_rows
+            or query.history_rows != history_rows
+            or query.decoded_rows != decoded_rows
+            or (
+                name.startswith("audit_")
+                and not any("audit" in statement for statement in query.statements)
+            )
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    for name, details in evidence.plans:
+        if (
+            type(name) is not str
+            or type(details) is not tuple
+            or not details
+            or any(type(detail) is not str or not detail for detail in details)
+            or any("SCAN continuous_public_trade_history" in detail for detail in details)
+            or (
+                name != "identity"
+                and not any("ux_cpt_history_stream_version" in detail for detail in details)
+            )
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    identity_plan = " ".join(dict(evidence.plans)["identity"])
+    if (
+        "ux_cpt_stream_uuid" not in identity_plan
+        or "ux_cpt_stream_natural_key" not in identity_plan
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+
+
+def _derived_report_gates(
+    root: Path,
+    report: EvidenceReport,
+) -> tuple[tuple[str, EvidenceDisposition, str | None], ...]:
+    evidence = report.evidence
+    if type(evidence) is not GeneratedEvidenceAggregate:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    bootstrap = evidence.bootstrap_path_ownership
+    if type(bootstrap) is not BootstrapPathEvidence:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    try:
+        registered = _require_token(bootstrap.token)
+        observed_summary = verify_store(bootstrap.token)
+    except HarnessFailure:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+    summary = evidence.schema_identity
+    profile = summary.profile
+    if (
+        registered.pytest_root != root
+        or type(summary) is not VerificationSummary
+        or observed_summary != summary
+        or report.schema_fingerprint != summary.schema_fingerprint
+        or report.python_version != profile.python_version
+        or report.sqlite_version != profile.sqlite_version
+        or report.sqlite_source_id != profile.sqlite_source_id
+        or report.threadsafety != profile.threadsafety
+        or report.compile_options != profile.compile_options
+        or report.connection_profiles != summary.connection_profiles
+        or evidence.runtime_connection_controls != summary.connection_profiles
+        or report.stream_rows != summary.stream_count
+        or report.history_rows != summary.history_count
+        or report.database_bytes != summary.database_bytes
+        or report.wal_bytes != summary.wal_bytes
+        or report.page_count != summary.page_count
+        or report.freelist_count != summary.freelist_count
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    _validate_rejection_evidence(
+        bootstrap.rejections,
+        (
+            ("relative_root", HarnessFailureCode.INVALID_BOOTSTRAP_ROOT),
+            ("unregistered_root", HarnessFailureCode.INVALID_BOOTSTRAP_ROOT),
+            ("reconstructed_root", HarnessFailureCode.INVALID_BOOTSTRAP_ROOT),
+            ("sibling_root", HarnessFailureCode.INVALID_BOOTSTRAP_ROOT),
+            ("nested_root", HarnessFailureCode.INVALID_BOOTSTRAP_ROOT),
+            ("symlink_root", HarnessFailureCode.INVALID_BOOTSTRAP_ROOT),
+            ("forged_token", HarnessFailureCode.INVALID_TOKEN),
+            ("wrong_process_root", HarnessFailureCode.INVALID_BOOTSTRAP_ROOT),
+            ("wrong_process_token", HarnessFailureCode.INVALID_TOKEN),
+            ("wrong_node_root", HarnessFailureCode.INVALID_BOOTSTRAP_ROOT),
+            ("wrong_node_token", HarnessFailureCode.INVALID_TOKEN),
+            ("expired_root", HarnessFailureCode.INVALID_BOOTSTRAP_ROOT),
+            ("expired_token", HarnessFailureCode.INVALID_TOKEN),
+            ("replaced_registered_root", HarnessFailureCode.INVALID_BOOTSTRAP_ROOT),
+            ("hardlink_database", HarnessFailureCode.UNAVAILABLE),
+            ("unexpected_entry", HarnessFailureCode.UNAVAILABLE),
+            ("readonly_database", HarnessFailureCode.UNAVAILABLE),
+            ("widened_root", HarnessFailureCode.UNAVAILABLE),
+            ("missing_database", HarnessFailureCode.UNAVAILABLE),
+            ("replaced_database", HarnessFailureCode.UNAVAILABLE),
+            ("allowed_name_symlink", HarnessFailureCode.UNAVAILABLE),
+            ("path_resolution_bootstrap", HarnessFailureCode.INVALID_BOOTSTRAP_ROOT),
+            ("path_resolution_operation", HarnessFailureCode.UNAVAILABLE),
+        ),
+    )
+    projection = evidence.projection_roundtrip
+    if (
+        type(projection) is not CurrentSlice
+        or projection.classification is not StoreClassification.FOUND
+        or projection.creation is None
+        or projection.current is None
+        or projection.current.record.stream_id != projection.creation.record.stream_id
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    _validated_report_query_rows(projection.query_evidence)
+    record = projection.creation.record
+    try:
+        observed_projection = load_current(
+            bootstrap.token,
+            stream_id=record.stream_id,
+            natural_key=natural_identity_key(
+                source=record.source,
+                venue=record.venue,
+                instrument=record.instrument,
+                provider_symbol=record.provider_symbol,
+                instrument_type=record.instrument_type.value,
+                request_variant=record.request_variant,
+            ),
+        )
+    except HarnessFailure:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+    if observed_projection != projection:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    _validate_rejection_evidence(
+        evidence.schema_constraints_corruption,
+        (
+            ("digest_byte_guard", HarnessFailureCode.UNAVAILABLE),
+            ("forbidden_schema_sql", HarnessFailureCode.UNAVAILABLE),
+            ("transition_without_current_tail", HarnessFailureCode.UNAVAILABLE),
+            ("stream_without_creation_history", HarnessFailureCode.UNAVAILABLE),
+            ("orphan_creation_history", HarnessFailureCode.UNAVAILABLE),
+            ("metadata_update", HarnessFailureCode.UNAVAILABLE),
+            ("metadata_delete", HarnessFailureCode.UNAVAILABLE),
+            ("history_update", HarnessFailureCode.UNAVAILABLE),
+            ("history_delete", HarnessFailureCode.UNAVAILABLE),
+            ("stream_identity_update", HarnessFailureCode.UNAVAILABLE),
+            ("stream_delete", HarnessFailureCode.UNAVAILABLE),
+            ("current_tail_jump", HarnessFailureCode.UNAVAILABLE),
+            ("wrong_predecessor_bytes", HarnessFailureCode.UNAVAILABLE),
+            ("wrong_predecessor_digest", HarnessFailureCode.UNAVAILABLE),
+            ("wrong_predecessor_root", HarnessFailureCode.UNAVAILABLE),
+            ("history_gap", HarnessFailureCode.UNAVAILABLE),
+            ("unsupported_generation", HarnessFailureCode.UNSUPPORTED_VERSION),
+            ("malformed_generation", HarnessFailureCode.CORRUPT),
+            ("short_page", HarnessFailureCode.CORRUPT),
+            ("audit_limit_overflow", HarnessFailureCode.CORRUPT),
+            ("retained_history_canonical_bytes", HarnessFailureCode.CORRUPT),
+            ("two_candidate_corrupt_precedence", HarnessFailureCode.CORRUPT),
+            (
+                "expectation_conflict_corrupt_precedence",
+                HarnessFailureCode.CORRUPT,
+            ),
+        ),
+    )
+    atomicity = evidence.atomicity_classification
+    if type(atomicity) is not AtomicityClassificationEvidence:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    mutations = atomicity.mutations
+    expected_mutation_classifications = (
+        StoreClassification.INSERTED,
+        StoreClassification.DUPLICATE,
+        StoreClassification.CONFLICT,
+        StoreClassification.UPDATED,
+        StoreClassification.DUPLICATE,
+        StoreClassification.CONFLICT,
+    )
+    if (
+        type(mutations) is not tuple
+        or len(mutations) != len(expected_mutation_classifications)
+        or tuple(item.classification for item in mutations) != expected_mutation_classifications
+        or any(
+            type(item) is not MutationEvidence
+            or item.committed is not True
+            or type(item.rows_materialized) is not int
+            or not 0 <= item.rows_materialized <= 5
+            or type(item.statements) is not tuple
+            or not item.statements
+            or item.statements[0] != "BEGIN IMMEDIATE"
+            or item.statements[-1] != "COMMIT"
+            for item in mutations
+        )
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    _validate_fresh_process_report_evidence(evidence.fresh_process_faults)
+    fresh_process = evidence.fresh_process_faults
+    if (
+        atomicity.two_writers != fresh_process.two_writers
+        or atomicity.unknown_acknowledgements
+        != (
+            fresh_process.create_faults[-1],
+            fresh_process.compare_and_swap_faults[-1],
+        )
+        or any(
+            type(fault) is not FaultEvidence
+            or fault.seam != "after_commit_before_acknowledgement"
+            or fault.disposition is not EvidenceDisposition.PASS
+            or fault.reopened_state is not ReopenedState.NEW
+            or fault.acknowledgement_bytes != 0
+            for fault in atomicity.unknown_acknowledgements
+        )
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    _validate_bounded_query_report_evidence(
+        evidence.bounded_queries,
+        projection,
+    )
+    _validate_rejection_evidence(
+        evidence.closed_error_mapping,
+        closed_error_mapping_evidence().checks,
+    )
+    backup = evidence.backup_restore
+    if type(backup) is not BackupRestoreEvidence:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    concurrent = backup.concurrent_write
+    if (
+        type(concurrent) is not ConcurrentBackupEvidence
+        or type(backup.backup_manifest) is not BackupManifest
+        or type(backup.restore_manifest) is not BackupManifest
+        or type(backup.source_summary) is not VerificationSummary
+        or type(backup.backup_summary) is not VerificationSummary
+        or type(backup.restore_summary) is not VerificationSummary
+        or type(concurrent.source_before) is not VerificationSummary
+        or type(concurrent.source_after) is not VerificationSummary
+        or type(concurrent.backup_summary) is not VerificationSummary
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    try:
+        backup_source_registration = _require_token(backup.source_token)
+        _require_token(backup.backup_token)
+        _require_token(backup.restore_token)
+        observed_backup_source_summary = verify_store(backup.source_token)
+        observed_backup_summary = verify_store(backup.backup_token)
+        observed_restore_summary = verify_store(backup.restore_token)
+        observed_backup_files = _closed_file_manifest(backup.backup_token)
+        observed_restore_files = _closed_file_manifest(backup.restore_token)
+        observed_backup_tails = _tail_manifest(backup.backup_token)
+        observed_restore_tails = _tail_manifest(backup.restore_token)
+        _validate_live_backup_manifest(
+            backup.backup_manifest,
+            source_token=backup.source_token,
+            destination_token=backup.backup_token,
+            source_summary=concurrent.source_before,
+            destination_summary=backup.backup_summary,
+            destination_files=observed_backup_files,
+            destination_tails=observed_backup_tails,
+            require_exact_source_snapshot=False,
+        )
+        _validate_live_backup_manifest(
+            backup.restore_manifest,
+            source_token=backup.backup_token,
+            destination_token=backup.restore_token,
+            source_summary=backup.backup_summary,
+            destination_summary=backup.restore_summary,
+            destination_files=observed_restore_files,
+            destination_tails=observed_restore_tails,
+            require_exact_source_snapshot=True,
+        )
+    except HarnessFailure:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+    if (
+        backup.backup_token is not bootstrap.token
+        or backup_source_registration.pytest_registration is not registered.pytest_registration
+        or backup.backup_manifest != report.backup_manifest
+        or concurrent.source_token is not backup.source_token
+        or concurrent.backup_token is not backup.backup_token
+        or concurrent.backup_manifest != backup.backup_manifest
+        or concurrent.backup_summary != backup.backup_summary
+        or backup.source_summary != observed_backup_source_summary
+        or backup.source_summary != concurrent.source_after
+        or backup.backup_summary != observed_backup_summary
+        or backup.restore_summary != observed_restore_summary
+        or backup.backup_summary != summary
+        or backup.backup_manifest.destination_streams != backup.backup_summary.stream_count
+        or backup.backup_manifest.destination_history_rows != backup.backup_summary.history_count
+        or backup.backup_manifest.destination_page_count != backup.backup_summary.page_count
+        or backup.restore_manifest.source_generation_id
+        != backup.backup_manifest.destination_generation_id
+        or backup.restore_manifest.source_streams != backup.backup_summary.stream_count
+        or backup.restore_manifest.source_history_rows != backup.backup_summary.history_count
+        or backup.restore_manifest.destination_streams != backup.restore_summary.stream_count
+        or backup.restore_manifest.destination_history_rows != backup.restore_summary.history_count
+        or backup.restore_manifest.source_page_count != backup.backup_summary.page_count
+        or backup.restore_manifest.destination_page_count != backup.restore_summary.page_count
+        or backup.source_summary.schema_fingerprint != summary.schema_fingerprint
+        or backup.restore_summary.schema_fingerprint != summary.schema_fingerprint
+        or backup.source_summary.profile != summary.profile
+        or backup.restore_summary.profile != summary.profile
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    try:
+        concurrent_source_registration = _require_token(concurrent.source_token)
+        _require_token(concurrent.backup_token)
+        observed_concurrent_source = verify_store(concurrent.source_token)
+        observed_concurrent_backup = verify_store(concurrent.backup_token)
+        observed_concurrent_files = _closed_file_manifest(concurrent.backup_token)
+        observed_concurrent_tails = _tail_manifest(concurrent.backup_token)
+        _validate_live_backup_manifest(
+            concurrent.backup_manifest,
+            source_token=concurrent.source_token,
+            destination_token=concurrent.backup_token,
+            source_summary=concurrent.source_before,
+            destination_summary=concurrent.backup_summary,
+            destination_files=observed_concurrent_files,
+            destination_tails=observed_concurrent_tails,
+            require_exact_source_snapshot=False,
+        )
+    except HarnessFailure:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+    if (
+        concurrent_source_registration.pytest_registration is not registered.pytest_registration
+        or concurrent.source_token is concurrent.backup_token
+        or concurrent.source_after != observed_concurrent_source
+        or concurrent.backup_summary != observed_concurrent_backup
+        or concurrent.source_before.profile != summary.profile
+        or concurrent.source_after.profile != summary.profile
+        or concurrent.backup_summary.profile != summary.profile
+        or concurrent.source_before.schema_fingerprint != summary.schema_fingerprint
+        or concurrent.source_after.schema_fingerprint != summary.schema_fingerprint
+        or concurrent.backup_summary.schema_fingerprint != summary.schema_fingerprint
+        or concurrent.progress_observations != 1
+        or type(concurrent.progress_observations) is not int
+        or concurrent.writer_process_boundary != "one-forked-progress-triggered-writer"
+        or type(concurrent.writer_mutations) is not tuple
+        or len(concurrent.writer_mutations) != CONCURRENT_BACKUP_TRANSITIONS
+        or any(
+            type(mutation) is not MutationEvidence
+            or mutation.classification is not StoreClassification.UPDATED
+            or mutation.committed is not True
+            or mutation.statements
+            != (
+                "BEGIN IMMEDIATE",
+                "stream UUID lookup LIMIT 2",
+                "history predecessor/successor LIMIT 2",
+                "current history LIMIT 3",
+                "INSERT transition history",
+                "UPDATE current CAS",
+                "COMMIT",
+            )
+            or type(mutation.rows_materialized) is not int
+            or not 0 <= mutation.rows_materialized <= 5
+            for mutation in concurrent.writer_mutations
+        )
+        or concurrent.source_before.stream_count != concurrent.source_after.stream_count
+        or concurrent.source_before.stream_count != concurrent.backup_summary.stream_count
+        or concurrent.source_after.history_count
+        != concurrent.source_before.history_count + len(concurrent.writer_mutations)
+        or concurrent.source_after.page_count <= concurrent.source_before.page_count
+        or not (
+            concurrent.source_before.history_count
+            <= concurrent.backup_manifest.source_history_rows
+            <= concurrent.source_after.history_count
+        )
+        or not (
+            concurrent.source_before.page_count
+            <= concurrent.backup_manifest.source_page_count
+            <= concurrent.source_after.page_count
+        )
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    generation_copy = evidence.generation_copy
+    if type(generation_copy) is not GenerationCopyEvidence:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    try:
+        _require_token(generation_copy.source_token)
+        _require_token(generation_copy.destination_token)
+        observed_copy_source_summary = verify_store(generation_copy.source_token)
+        observed_copy_destination_summary = verify_store(generation_copy.destination_token)
+        observed_copy_source_id = _generation_evidence_id(generation_copy.source_token)
+        observed_copy_destination_id = _generation_evidence_id(
+            generation_copy.destination_token,
+        )
+        observed_copy_source_tails = _tail_manifest(generation_copy.source_token)
+        observed_copy_destination_tails = _tail_manifest(
+            generation_copy.destination_token,
+        )
+    except HarnessFailure:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+    if (
+        generation_copy.source_token is not bootstrap.token
+        or generation_copy.source_generation_id == generation_copy.destination_generation_id
+        or generation_copy.source_generation_id != report.backup_manifest.destination_generation_id
+        or generation_copy.source_tails != report.backup_manifest.per_stream_tails
+        or generation_copy.source_generation_id != observed_copy_source_id
+        or generation_copy.destination_generation_id != observed_copy_destination_id
+        or generation_copy.source_summary != observed_copy_source_summary
+        or generation_copy.destination_summary != observed_copy_destination_summary
+        or generation_copy.source_tails != observed_copy_source_tails
+        or generation_copy.destination_tails != observed_copy_destination_tails
+        or generation_copy.source_summary != summary
+        or type(generation_copy.destination_summary) is not VerificationSummary
+        or generation_copy.destination_summary.profile != summary.profile
+        or generation_copy.destination_summary.schema_fingerprint != summary.schema_fingerprint
+        or (
+            generation_copy.destination_summary.stream_count,
+            generation_copy.destination_summary.history_count,
+        )
+        != (summary.stream_count, summary.history_count)
+        or type(generation_copy.source_tails) is not tuple
+        or not generation_copy.source_tails
+        or generation_copy.source_tails != generation_copy.destination_tails
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    _digest_bytes(generation_copy.source_generation_id)
+    _digest_bytes(generation_copy.destination_generation_id)
+    workload = evidence.workload_thresholds
+    if (
+        type(workload) is not WorkloadEvidence
+        or workload.query_evidence != projection.query_evidence
+        or report.query_evidence != workload.query_evidence
+        or report.maximum_open_cursors != workload.maximum_open_cursors
+        or report.peak_traced_memory_bytes != workload.peak_traced_memory_bytes
+        or report.latency_samples_ns != workload.latency_samples_ns
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    _validated_report_query_rows(workload.query_evidence)
+    return tuple(
+        (name, EvidenceDisposition.PASS, None) for name in GENERATED_EVIDENCE_GATES
+    ) + tuple(
+        (
+            name,
+            EvidenceDisposition.NOT_APPLICABLE,
+            TARGET_NOT_APPLICABLE_REASON,
+        )
+        for name in TARGET_NOT_APPLICABLE_GATES
+    )
+
+
+def _validate_backup_manifest_shape(manifest: BackupManifest) -> None:
+    """Validate the complete closed-file manifest vocabulary and bounds."""
+
     if (
         type(manifest) is not BackupManifest
-        or manifest.schema_fingerprint != report.schema_fingerprint
-        or manifest.sqlite_source_id != report.sqlite_source_id
-        or manifest.page_size != report.page_size
+        or type(manifest.schema_fingerprint) is not str
+        or type(manifest.sqlite_source_id) is not str
+        or manifest.page_size != PAGE_SIZE
         or type(manifest.page_size) is not int
         or type(manifest.source_page_count) is not int
         or not 1 <= manifest.source_page_count <= MAX_PAGE_COUNT
         or type(manifest.destination_page_count) is not int
         or manifest.source_page_count != manifest.destination_page_count
-        or manifest.destination_page_count != report.page_count
         or type(manifest.checkpoint_outcome) is not tuple
         or manifest.checkpoint_outcome != (0, 0, 0)
         or any(type(value) is not int for value in manifest.checkpoint_outcome)
         or type(manifest.finalization_outcome) is not str
-        or manifest.evidence_recorded_at_utc != report.evidence_recorded_at_utc
         or type(manifest.source_streams) is not int
         or manifest.source_streams < 0
         or type(manifest.source_history_rows) is not int
@@ -7624,8 +11234,6 @@ def _validate_report_backup_manifest(report: EvidenceReport) -> None:
         or manifest.destination_history_rows < 0
         or manifest.source_streams != manifest.destination_streams
         or manifest.source_history_rows != manifest.destination_history_rows
-        or manifest.destination_streams != report.stream_rows
-        or manifest.destination_history_rows != report.history_rows
         or type(manifest.files) is not tuple
         or any(type(item) is not tuple or len(item) != 3 for item in manifest.files)
         or type(manifest.per_stream_tails) is not tuple
@@ -7689,23 +11297,91 @@ def _validate_report_backup_manifest(report: EvidenceReport) -> None:
         prior_stream_id = stream_id
 
 
+def _validate_report_backup_manifest(report: EvidenceReport) -> None:
+    manifest = report.backup_manifest
+    _validate_backup_manifest_shape(manifest)
+    if (
+        manifest.schema_fingerprint != report.schema_fingerprint
+        or manifest.sqlite_source_id != report.sqlite_source_id
+        or manifest.page_size != report.page_size
+        or manifest.destination_page_count != report.page_count
+        or manifest.evidence_recorded_at_utc != report.evidence_recorded_at_utc
+        or manifest.destination_streams != report.stream_rows
+        or manifest.destination_history_rows != report.history_rows
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+
+
+def _validate_live_backup_manifest(
+    manifest: BackupManifest,
+    *,
+    source_token: StoreToken,
+    destination_token: StoreToken,
+    source_summary: VerificationSummary,
+    destination_summary: VerificationSummary,
+    destination_files: tuple[tuple[str, int, str], ...],
+    destination_tails: tuple[tuple[str, int, str, str], ...],
+    require_exact_source_snapshot: bool,
+) -> None:
+    """Bind every manifest field to live source/destination identities and profiles."""
+
+    _validate_backup_manifest_shape(manifest)
+    if (
+        type(source_token) is not StoreToken
+        or type(destination_token) is not StoreToken
+        or type(source_summary) is not VerificationSummary
+        or type(destination_summary) is not VerificationSummary
+        or type(destination_files) is not tuple
+        or type(destination_tails) is not tuple
+        or type(require_exact_source_snapshot) is not bool
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    source_registration = _require_token(source_token)
+    destination_registration = _require_token(destination_token)
+    if (
+        source_registration.pytest_registration is not destination_registration.pytest_registration
+        or manifest.source_generation_id != _generation_evidence_id(source_token)
+        or manifest.destination_generation_id != _generation_evidence_id(destination_token)
+        or manifest.schema_fingerprint != source_summary.schema_fingerprint
+        or manifest.schema_fingerprint != destination_summary.schema_fingerprint
+        or manifest.sqlite_source_id != source_summary.profile.sqlite_source_id
+        or manifest.sqlite_source_id != destination_summary.profile.sqlite_source_id
+        or source_summary.profile != destination_summary.profile
+        or manifest.page_size != PAGE_SIZE
+        or manifest.source_page_count != destination_summary.page_count
+        or manifest.destination_page_count != destination_summary.page_count
+        or manifest.source_streams != destination_summary.stream_count
+        or manifest.source_history_rows != destination_summary.history_count
+        or manifest.destination_streams != destination_summary.stream_count
+        or manifest.destination_history_rows != destination_summary.history_count
+        or manifest.files != destination_files
+        or manifest.per_stream_tails != destination_tails
+        or (
+            require_exact_source_snapshot
+            and (
+                manifest.source_page_count != source_summary.page_count
+                or manifest.source_streams != source_summary.stream_count
+                or manifest.source_history_rows != source_summary.history_count
+            )
+        )
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+
+
 def write_evidence_report(
     pytest_root: Path,
     *,
+    receipt: _EvidenceReceipt,
     report: EvidenceReport,
 ) -> Path:
     """Write canonical generated evidence beneath one validated pytest root only."""
 
     root = _validate_bootstrap_root(pytest_root)
-    expected_gates = tuple(
-        (name, EvidenceDisposition.PASS, None) for name in GENERATED_EVIDENCE_GATES
-    ) + tuple(
-        (
-            name,
-            EvidenceDisposition.NOT_APPLICABLE,
-            TARGET_NOT_APPLICABLE_REASON,
-        )
-        for name in TARGET_NOT_APPLICABLE_GATES
+    receipt_ledger = _validate_evidence_receipt(
+        pytest_root,
+        receipt,
+        report.evidence,
+        require_exact_evidence=False,
     )
     if (
         type(report) is not EvidenceReport
@@ -7754,18 +11430,18 @@ def write_evidence_report(
         or type(report.maximum_page_count) is not int
         or report.wal_autocheckpoint_pages != WAL_AUTOCHECKPOINT_PAGES
         or type(report.wal_autocheckpoint_pages) is not int
-        or report.gates != expected_gates
     ):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     _validated_evidence_timestamp(report.evidence_recorded_at_utc)
     _validate_report_backup_manifest(report)
+    gates = _derived_report_gates(root, report)
+    query_rows = _validated_report_query_rows(report.query_evidence)
     if (
         any(
             type(value) is not int or value < 0
             for value in (
                 report.stream_rows,
                 report.history_rows,
-                report.query_rows,
                 report.database_bytes,
                 report.wal_bytes,
                 report.page_count,
@@ -7840,7 +11516,7 @@ def write_evidence_report(
         "measurements": {
             "stream_rows": report.stream_rows,
             "history_rows": report.history_rows,
-            "query_rows": report.query_rows,
+            "query_rows": query_rows,
             "database_bytes": report.database_bytes,
             "wal_bytes": report.wal_bytes,
             "page_count": report.page_count,
@@ -7873,12 +11549,19 @@ def write_evidence_report(
                 "disposition": disposition.value,
                 "reason": reason,
             }
-            for name, disposition, reason in report.gates
+            for name, disposition, reason in gates
         ],
     }
     raw = canonical_descriptor_bytes(document) + b"\n"
+    _validate_evidence_receipt(
+        pytest_root,
+        receipt,
+        report.evidence,
+        require_exact_evidence=True,
+    )
     report_name = "task064-evidence.json"
     path = root / report_name
+    stage_name = f".task064-evidence-{secrets.token_hex(16)}.tmp"
     flags = (
         os.O_CREAT
         | os.O_EXCL
@@ -7887,6 +11570,10 @@ def write_evidence_report(
         | getattr(os, "O_CLOEXEC", 0)
     )
     root_descriptor = -1
+    stage_descriptor = -1
+    stage_created = False
+    published = False
+    stage_details: os.stat_result | None = None
     try:
         directory_flags = (
             os.O_RDONLY
@@ -7905,24 +11592,138 @@ def write_evidence_report(
             or not stat.S_ISDIR(root_details.st_mode)
         ):
             raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
-        descriptor = os.open(report_name, flags, 0o600, dir_fd=root_descriptor)
-        try:
-            os.fchmod(descriptor, 0o600)
-            view = memoryview(raw)
-            while view:
-                written = os.write(descriptor, view)
-                if written <= 0:
-                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-                view = view[written:]
-        finally:
-            with suppress(OSError):
-                os.close(descriptor)
-    except HarnessFailure:
+        stage_descriptor = os.open(stage_name, flags, 0o600, dir_fd=root_descriptor)
+        stage_created = True
+        os.fchmod(stage_descriptor, 0o600)
+        view = memoryview(raw)
+        while view:
+            written = os.write(stage_descriptor, view)
+            if written <= 0:
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            view = view[written:]
+        os.fsync(stage_descriptor)
+        stage_details = os.fstat(stage_descriptor)
+        if (
+            not stat.S_ISREG(stage_details.st_mode)
+            or stage_details.st_dev != root_details.st_dev
+            or stage_details.st_uid != active_root.uid
+            or stat.S_IMODE(stage_details.st_mode) != 0o600
+            or stage_details.st_nlink != 1
+            or stage_details.st_size != len(raw)
+        ):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        os.close(stage_descriptor)
+        stage_descriptor = -1
+
+        final_ledger = _validate_evidence_receipt(
+            pytest_root,
+            receipt,
+            report.evidence,
+            require_exact_evidence=True,
+        )
+        if final_ledger is not receipt_ledger:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        final_root_details = os.fstat(root_descriptor)
+        if (
+            final_root_details.st_dev != root_details.st_dev
+            or final_root_details.st_ino != root_details.st_ino
+            or final_root_details.st_uid != root_details.st_uid
+            or stat.S_IMODE(final_root_details.st_mode) != stat.S_IMODE(root_details.st_mode)
+        ):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        os.link(
+            stage_name,
+            report_name,
+            src_dir_fd=root_descriptor,
+            dst_dir_fd=root_descriptor,
+            follow_symlinks=False,
+        )
+        published = True
+        os.unlink(stage_name, dir_fd=root_descriptor)
+        stage_created = False
+        os.fsync(root_descriptor)
+        final_details = os.stat(
+            report_name,
+            dir_fd=root_descriptor,
+            follow_symlinks=False,
+        )
+        if (
+            stage_details is None
+            or final_details.st_dev != stage_details.st_dev
+            or final_details.st_ino != stage_details.st_ino
+            or final_details.st_uid != stage_details.st_uid
+            or final_details.st_size != len(raw)
+            or final_details.st_nlink != 1
+            or not stat.S_ISREG(final_details.st_mode)
+            or stat.S_IMODE(final_details.st_mode) != 0o600
+        ):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+    except BaseException as error:
+        cleanup_ok = True
+        if stage_descriptor >= 0:
+            try:
+                os.close(stage_descriptor)
+            except OSError:
+                cleanup_ok = False
+            stage_descriptor = -1
+        if root_descriptor >= 0 and published and stage_details is not None:
+            try:
+                final_details = os.stat(
+                    report_name,
+                    dir_fd=root_descriptor,
+                    follow_symlinks=False,
+                )
+                if (
+                    final_details.st_dev != stage_details.st_dev
+                    or final_details.st_ino != stage_details.st_ino
+                ):
+                    cleanup_ok = False
+                else:
+                    os.unlink(report_name, dir_fd=root_descriptor)
+                    published = False
+            except OSError:
+                cleanup_ok = False
+        if root_descriptor >= 0 and stage_created and stage_details is not None:
+            try:
+                pending_details = os.stat(
+                    stage_name,
+                    dir_fd=root_descriptor,
+                    follow_symlinks=False,
+                )
+                if (
+                    pending_details.st_dev != stage_details.st_dev
+                    or pending_details.st_ino != stage_details.st_ino
+                ):
+                    cleanup_ok = False
+                else:
+                    os.unlink(stage_name, dir_fd=root_descriptor)
+                    stage_created = False
+            except OSError:
+                cleanup_ok = False
+        elif root_descriptor >= 0 and stage_created:
+            try:
+                os.unlink(stage_name, dir_fd=root_descriptor)
+                stage_created = False
+            except OSError:
+                cleanup_ok = False
+        if root_descriptor >= 0:
+            try:
+                os.fsync(root_descriptor)
+            except OSError:
+                cleanup_ok = False
+        if not cleanup_ok:
+            receipt_ledger.consumed = True
+        if isinstance(error, HarnessFailure):
+            raise
+        if isinstance(error, (MemoryError, OSError)):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
         raise
-    except OSError:
-        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
     finally:
+        if stage_descriptor >= 0:
+            with suppress(OSError):
+                os.close(stage_descriptor)
         if root_descriptor >= 0:
             with suppress(OSError):
                 os.close(root_descriptor)
+    receipt_ledger.consumed = True
     return path
