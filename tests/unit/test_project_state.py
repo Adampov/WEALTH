@@ -35,6 +35,12 @@ ADR_0031_PATH = (
     / "decisions"
     / "0031-continuous-public-trade-stream-physical-store-architecture.md"
 )
+ADR_0032_PATH = (
+    REPOSITORY_ROOT
+    / "docs"
+    / "decisions"
+    / "0032-continuous-public-trade-stream-sqlite-schema-evidence-harness.md"
+)
 
 
 def load_payload() -> dict[str, Any]:
@@ -128,6 +134,9 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert "continuous_public_trade_stream_persistence_codec_contracts" in state.active_components
     assert "continuous_public_trade_stream_store_port_contracts" in state.active_components
     assert "continuous_public_trade_stream_physical_store_architecture" in (state.active_components)
+    assert "continuous_public_trade_stream_sqlite_schema_evidence_harness" in (
+        state.active_components
+    )
     assert len(state.open_tasks) == 2
     task_037, task_064 = state.open_tasks
     assert task_037.task_id == "TASK-037"
@@ -152,6 +161,7 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert any(decision.decision_id == "ADR-0029" for decision in state.recent_decisions)
     assert any(decision.decision_id == "ADR-0030" for decision in state.recent_decisions)
     assert any(decision.decision_id == "ADR-0031" for decision in state.recent_decisions)
+    assert any(decision.decision_id == "ADR-0032" for decision in state.recent_decisions)
 
 
 def test_project_state_references_existing_governance_artifacts() -> None:
@@ -165,6 +175,7 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     adr_0029 = ADR_0029_PATH.read_text(encoding="utf-8")
     adr_0030 = ADR_0030_PATH.read_text(encoding="utf-8")
     adr_0031 = ADR_0031_PATH.read_text(encoding="utf-8")
+    adr_0032 = ADR_0032_PATH.read_text(encoding="utf-8")
 
     for decision in state.recent_decisions:
         assert (REPOSITORY_ROOT / decision.artifact).is_file()
@@ -297,22 +308,27 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     adr_0029_prose = collapse_whitespace(adr_0029)
     adr_0030_prose = collapse_whitespace(adr_0030)
     adr_0031_prose = collapse_whitespace(adr_0031)
+    adr_0032_prose = collapse_whitespace(adr_0032)
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    assert "- **Contract generation:** 2" in next_action_section
+    assert "- **Contract generation:** 3" in next_action_section
     assert "`FROZEN`" in next_action_section
     assert (
         "`2ba9d4d70bde04c5225649d1c3e4f70e86b5085c46a370ffcfbe716887bef836`" in next_action_section
     )
+    assert (
+        "`5c48f313870bc729b3e8fcc66777df086c3bd9cde4e3818703aed285ad3570dc`" in next_action_section
+    )
     assert "`SUPERSEDED` before any writable activation" in next_action_prose
-    assert "Generation-1 read-only research and review outputs are retained as evidence only" in (
+    assert "`SUPERSEDED` during writable activation, before any result commit" in next_action_prose
+    assert "Generation-1 and generation-2 research, implementation, test, and review outputs" in (
         next_action_prose
     )
-    assert "revalidated and rebound to generation 2" in next_action_prose
+    assert "revalidated and rebound to generation 3" in next_action_prose
     assert "`phase2.continuous_public_trade_stream_sqlite_schema_evidence_harness`" in (
         task_064_section
     )
@@ -1297,6 +1313,7 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "0029-continuous-public-trade-stream-persistence-contract.md" in decision_index
     assert "0030-continuous-public-trade-stream-store-port-contract.md" in decision_index
     assert "0031-continuous-public-trade-stream-physical-store-architecture.md" in decision_index
+    assert "0032-continuous-public-trade-stream-sqlite-schema-evidence-harness.md" in decision_index
     assert "## Continuous Public-Trade Persistence Records and Codecs (Unused)" in (
         root_readme_prose
     )
@@ -1526,6 +1543,48 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "predecessor witness is deliberate bounded-read redundancy" in adr_0031_prose
     assert "This ADR intentionally contains no executable DDL" in adr_0031_prose
     assert "TASK-037" in adr_0031_prose
+    assert "# ADR 0032: Continuous Public-Trade Stream SQLite Schema and Evidence Harness" in (
+        adr_0032
+    )
+    assert "- **Status:** Accepted" in adr_0032
+    assert "generation 3 with normalized SHA-256" in adr_0032_prose
+    assert "86e3650608f2f1c96a9aa272b2b9cd597bc3d5ac188a39937afb974536d11ccb" in (adr_0032)
+    assert "`0x57505431`" in adr_0032
+    assert "sha256:0410c1f08390a411c73427b3d07c542f3d1828def7c6adebab51cd57375355b3" in adr_0032
+    assert "Python `3.13.14`, SQLite `3.53.1`" in adr_0032_prose
+    assert "ordinary rowid tables, as selected by ADR 0031" in adr_0032_prose
+    assert "at most five history rows" in adr_0032_prose
+    assert "at most three current history rows per candidate" in adr_0032_prose
+    assert "`maximum_contract_shape`" in adr_0032
+    assert "all twelve must be `PASS` with no reason" in adr_0032_prose
+    assert "all seven must be `NOT_APPLICABLE`" in adr_0032_prose
+    assert "ordered exact observed reader and writer" in adr_0032_prose
+    assert "complete cross-validated backup manifest" in adr_0032_prose
+    assert "hostile same-UID TOCTOU" in adr_0032_prose
+    assert "exact owner merge authorization naming that pull request and its current head SHA" in (
+        adr_0032_prose
+    )
+    assert "## Continuous Public-Trade SQLite Schema and Evidence Harness (Test Only)" in (
+        root_readme
+    )
+    assert "Only the test bootstrap can create a generation" in root_readme_prose
+    assert "A plain path grants no authority" in root_readme_prose
+    assert "complete source/destination generation" in root_readme_prose
+    assert "TASK-064 remains `READY` and the canonical next action" in root_readme_prose
+    assert "exact owner authorization naming the PR and current head SHA" in root_readme_prose
+    assert "## Continuous Public-Trade SQLite Schema and Evidence Harness (Test Only)" in (
+        market_data_contract
+    )
+    assert "Current load uses at most three history rows" in market_data_prose
+    assert "Generated evidence binds ordered exact reader/writer control profiles" in (
+        market_data_prose
+    )
+    assert "complete backup manifest" in market_data_prose
+    assert "ADR-0032 now freezes the TASK-064 candidate" in roadmap_prose
+    assert "they are not yet `REVIEW_READY` or `COMPLETE`" in roadmap_prose
+    assert "## TASK-064 Test-only Schema and Evidence-Harness Treatment" in risk_register
+    assert "changes no risk state" in risk_register_prose
+    assert "All five risks retain their existing state" in risk_register_prose
     assert "Automatic 301, 302, 303, 307, and 308 redirects are rejected" in risk_register
     assert "process-global opener is untouched" in risk_register
     assert "original initial target must be an absolute credential-free HTTPS URL" in risk_register

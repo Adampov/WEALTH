@@ -282,6 +282,28 @@ generated databases under pytest temporary directories, with no production adapt
 operator path/data access, durability, capacity, recovery, or readiness claim. TASK-037 remains
 blocked and authorization remains denied.
 
+ADR-0032 now freezes the TASK-064 candidate's isolated executable version-one test schema,
+application ID `0x57505431`, descriptor fingerprint
+`sha256:0410c1f08390a411c73427b3d07c542f3d1828def7c6adebab51cd57375355b3`,
+exact Python/SQLite runtime controls, atomic create/CAS guard protocol, finite current/duplicate/
+identity/audit query budgets, process-fault matrix, online backup/restore, same-format copy, and
+record/workload thresholds. The exact TASK-062-shaped facade and every generated database remain
+under the exact fixture-scoped TASK-064 pytest registrations. Descriptor-relative bootstrap and
+pinned generation checks cover cooperating same-UID processes only; hostile same-UID TOCTOU and
+target/VFS isolation remain independent production blockers. Reports bind ordered exact
+reader/writer controls, measured cursor bounds, and the complete source/destination backup
+manifest; no production source imports the harness.
+
+This candidate implementation and evidence remain under validation; they are not yet
+`REVIEW_READY` or `COMPLETE` and are not a completion transition. TASK-064 remains `READY` and the
+canonical next action until publication-bound exact-head Engineering/Security/QA review and
+draft-PR CI pass, the owner authorizes the exact PR and current head SHA, the candidate merges,
+required target-branch CI succeeds, and separate synchronized completion governance is merged.
+Target filesystem/power-loss, hostile same-UID path races, production runtime/path/VFS,
+operational capacity/checkpoint/latency, backup/retention/RPO/RTO, monitoring/recovery,
+incompatible migration, and readiness remain unproved and cannot be inferred from generated
+tests. Phase 2 remains incomplete, and TASK-037 remains blocked with authorization denied.
+
 `RISK-005` remains open: the accepted plan selects Python
 datetimes in the fixed `datetime.UTC` zone, fixed microsecond RFC 3339 `Z` text, and derived
 epoch-microsecond SQL projections. New injected clock values are fixed-UTC, and the isolated pure

@@ -12,12 +12,17 @@ promoted through review.
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
-- **Contract generation:** 2 — `FROZEN`. Generation 1, normalized SHA-256
+- **Contract generation:** 3 — `FROZEN`. Generation 1, normalized SHA-256
   `2ba9d4d70bde04c5225649d1c3e4f70e86b5085c46a370ffcfbe716887bef836`, was
   `SUPERSEDED` before any writable activation because its SQL `INTEGER` projection constraint
-  contradicted accepted ADR-0031. Generation-1 read-only research and review outputs are retained
-  as evidence only: they may inform generation 2 but cannot be integrated or counted as
-  generation-2 review or acceptance evidence unless revalidated and rebound to generation 2.
+  contradicted accepted ADR-0031. Generation 2, normalized SHA-256
+  `5c48f313870bc729b3e8fcc66777df086c3bd9cde4e3818703aed285ad3570dc`, was
+  `SUPERSEDED` during writable activation, before any result commit, after independent review
+  proved that a plain `Path` cannot authenticate pytest provenance and the standard-library
+  SQLite binding cannot provide descriptor-pinned main/WAL/SHM opens. Generation-1 and
+  generation-2 research, implementation, test, and review outputs are evidence only: they may
+  inform generation 3 but cannot be integrated or counted as generation-3 acceptance evidence
+  unless revalidated and rebound to generation 3.
 - **Human approval:** NOT REQUIRED for the bounded test-only implementation, verification, review,
   and draft publication. Exact owner approval naming the pull request and current head commit
   remains required before merge.
@@ -38,8 +43,11 @@ promoted through review.
   fingerprint, and generated fixtures; and test-only bootstrap/open, transaction, validation,
   corruption, subprocess crash, bounded-query, online-backup/restore, same-format generation-copy,
   and finite synthetic-workload evidence helpers. Exercise only generated non-operator databases
-  beneath pytest temporary directories. Coordinate documentation and governance without importing
-  the harness from production source.
+  beneath pytest temporary directories from the two exact repository-owned TASK-064 test modules.
+  The generated evidence assumes a controlled pytest process and cooperating same-UID processes;
+  hostile same-UID replacement, target-host isolation, and descriptor-capable VFS evidence are
+  explicitly outside this test-only task and remain production blockers. Coordinate documentation
+  and governance without importing the harness from production source.
 - **Files:** `docs/decisions/0032-continuous-public-trade-stream-sqlite-schema-evidence-harness.md`,
   `docs/decisions/README.md`, `tests/fixtures/continuous_public_trade_stream_store/v1/schema.sql`,
   `tests/fixtures/continuous_public_trade_stream_store/v1/schema_descriptor.json`,
@@ -58,17 +66,27 @@ promoted through review.
   deletion or compaction, credential, permission, notification, dependency or lockfile change,
   deployment, operational capacity, durability, recovery/readiness, operating-mode, Phase 2
   completion, or risk-closure claim. Every operated database must have been created by the same
-  test bootstrap beneath its pytest temporary root. Test-only monotonic timing, an injected or
-  externally recorded evidence timestamp, and cleanup of pytest-owned temporary artifacts are
-  allowed only for the declared evidence. Production code must never import the harness; test
-  support may import only standard-library modules and the frozen pure TASK-061/062 types and
-  validators. No extension loading, `ATTACH`, `writable_schema`, caller-supplied SQL, UDF or
-  collation dependency, shared cache, or caller-controlled URI-option injection. Operation opens
-  may use only a correctly encoded, harness-internally constructed `file:` URI for the already
-  validated same-bootstrap-owned database with the sole fixed option `mode=rw`; callers may supply
-  neither a URI nor URI/query options. This narrow construction prevents missing-file creation and
-  does not relax the ban on URI-option injection. Do not alter TASK-059 behavior, TASK-061 bytes or
-  digest domains, TASK-062 port semantics, or ADR-0031.
+  test bootstrap beneath an actively registered pytest temporary root from one of the two exact
+  allowed TASK-064 test modules. A plain path grants no authority: the harness requires a
+  fixture-scoped process-local registration bound to the exact pytest node, path object, PID,
+  resolved root, device, inode, UID, mode, and a random nonce, and revokes it when the fixture
+  exits. The harness opens the root and generation through validated directory descriptors,
+  creates through `openat`-style relative operations, rejects every observed main/WAL/SHM alias or
+  unexpected entry before and after open, and keeps the generation descriptor pinned for the
+  connection lifetime. This controlled-test evidence does not claim protection against a hostile
+  same-UID process racing the standard-library SQLite pathname open; that residual is recorded as
+  target/deployment `NOT_APPLICABLE` evidence and independently blocks production use. Test-only
+  monotonic timing, an injected or externally recorded evidence timestamp, and cleanup of
+  pytest-owned temporary artifacts are allowed only for the declared evidence. Production code
+  must never import the harness; test support may import only standard-library modules and the
+  frozen pure TASK-061/062 types and validators. No extension loading, `ATTACH`, `writable_schema`,
+  caller-supplied SQL, UDF or collation dependency, shared cache, or caller-controlled URI-option
+  injection. Operation opens may use only a correctly encoded, harness-internally constructed
+  `file:` URI for the descriptor-pinned generation and already validated database with the sole
+  fixed option `mode=rw`; callers may supply neither a URI nor URI/query options. This narrow
+  construction prevents missing-file creation and does not relax the ban on URI-option injection.
+  Do not alter TASK-059 behavior, TASK-061 bytes or digest domains, TASK-062 port semantics, or
+  ADR-0031.
 
   SQL `INTEGER` columns are permitted only for (a) schema-local singleton and internal row keys,
   internal foreign keys, and physical-format, schema-generation, natural-key-version, and page-size
@@ -102,9 +120,14 @@ Acceptance gates:
 1. ADR-0032 freezes the exact non-colliding `application_id`, executable DDL, ordered descriptor
    canonicalization, domain-separated golden SHA-256 fingerprint, object inventory, constraints,
    indexes, triggers, bootstrap/open contract, and closed SQLite extended-result-code matrix.
-2. Only an explicit test bootstrap may create a database, and only beneath a pytest-provided
-   temporary directory. Every operation open requires an existing regular database and must never
-   create a missing file, follow an alias, or access an operator path.
+2. Only an explicit test bootstrap under the active fixture-scoped registration may create a
+   database, and only beneath the exact registered pytest temporary directory. Unregistered,
+   reconstructed, sibling, nested, expired, wrong-node, wrong-PID, replaced, or aliased roots are
+   rejected before mutation. Every operation open requires the registered existing regular
+   database, uses the pinned generation descriptor, and rejects an observed main/WAL/SHM alias,
+   hard link, non-regular file, replacement, or unexpected entry before and after open. Generated
+   PASS evidence is limited to this controlled pytest/cooperating-process threat model; hostile
+   same-UID TOCTOU and target-host/VFS isolation are not claimed and remain production blockers.
 3. Every coherent operation verifies exact `application_id`, `user_version`, metadata marker,
    schema fingerprint, UTF-8 encoding, 4,096-byte pages, WAL, `synchronous=FULL` writers, foreign
    keys on, shared cache never enabled, `read_uncommitted` off, `trusted_schema` off, busy timeout
@@ -132,7 +155,10 @@ Acceptance gates:
    stream insert and creation insert; between creation insert and create commit; between transition
    insert and current update; between current update and compare-and-swap commit; true during
    commit; after commit before acknowledgement; writer/checkpointer concurrency; disk full or
-   `max_page_count`; readonly; busy/locked; and injected I/O failure. A new-connection reopen
+   `max_page_count`; readonly; one-attempt busy contention; and injected I/O failure. Because
+   shared cache and schema DDL are prohibited, raw `SQLITE_LOCKED` is unreachable on the compliant
+   operation path and must not be manufactured by disabling controls; the closed numeric matrix
+   proves every `SQLITE_LOCKED*` code maps fail-closed to sanitized `UNAVAILABLE`. A new-connection reopen
    verifies application/format/schema identity, `integrity_check`, empty `foreign_key_check`,
    bounded current state, and complete paginated history/root state, and may establish only exact
    old, new, duplicate, or unavailable state. No mocked before-commit or after-commit substitute
@@ -168,8 +194,10 @@ Acceptance gates:
     minimum/typical/maximum record-size and workload/concurrency matrix, test-local
     `max_page_count` and checkpoint parameters, long-reader WAL-starvation/growth case, and memory
     and open-cursor bounds. Reports record the exact contract digest, runtime/source ID, compile
-    options, PRAGMAs, sanitized environment class, row/query counts, database/WAL/page/freelist
-    sizes, cursor bounds, latency samples, and the four-state disposition for every gate. Generated
+    options, exact observed reader and writer DBCONFIG/limit/PRAGMA profiles, sanitized environment
+    class, row/query counts, database/WAL/page/freelist sizes, measured Python DB-API cursor bounds,
+    latency samples, complete backup-manifest bindings and injected fixed-UTC evidence times, and
+    the four-state disposition for every gate. Generated
     JSON reports exist only beneath pytest temporary directories. The durable evidence channel is
     the draft PR plus exact CI check/run logs bound after publication to the immutable candidate
     head SHA; it records no user path, host/user name, device serial, credential, or operator
