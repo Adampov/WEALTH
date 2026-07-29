@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import errno
 import hashlib
@@ -10,6 +11,7 @@ import os
 import selectors
 import signal
 import sqlite3
+import time
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -1341,34 +1343,79 @@ def _report_fresh_process_evidence(
 def _report_atomicity_evidence(
     tmp_path: Path,
     fresh_process: harness.FreshProcessEvidenceAggregate,
+    *,
+    substitute_semantics: bool = False,
 ) -> harness.AtomicityClassificationEvidence:
     token = harness.bootstrap_store(tmp_path)
-    policy, creation = _creation(seed=5_600)
-    inserted = harness.create_stream(token, creation, policy)
-    duplicate_create = harness.create_stream(token, creation, policy)
-    _, competing_creation = _creation(
-        seed=5_600,
-        stream_id_seed=56_001,
-        identity_seed=5_600,
+    policy_a, creation_a = _creation(seed=5_600)
+    inserted = harness.create_stream(token, creation_a, policy_a)
+    transition_a_v2 = _retain(
+        creation_a,
+        policy_a,
+        reason="report-atomicity-a-v2",
+    )
+    updated = harness.compare_and_swap_stream(token, transition_a_v2)
+    transition_a_v3 = _retain(
+        transition_a_v2,
+        policy_a,
+        reason="report-atomicity-a-v3",
+    )
+    harness.compare_and_swap_stream(token, transition_a_v3)
+    duplicate_create = harness.create_stream(token, creation_a, policy_a)
+    duplicate_compare_and_swap = harness.compare_and_swap_stream(token, transition_a_v3)
+
+    policy_b, creation_b = _creation(seed=5_601)
+    harness.create_stream(token, creation_b, policy_b)
+    transition_b_v2 = _retain(
+        creation_b,
+        policy_b,
+        reason="report-atomicity-b-v2",
+    )
+    harness.compare_and_swap_stream(token, transition_b_v2)
+    transition_b_v3 = _retain(
+        transition_b_v2,
+        policy_b,
+        reason="report-atomicity-b-v3",
+    )
+    harness.compare_and_swap_stream(token, transition_b_v3)
+
+    mixed_policy, mixed_creation = (
+        _creation(
+            seed=5_601,
+            stream_id_seed=5_601,
+            identity_seed=5_600,
+        )
+        if substitute_semantics
+        else _creation(
+            seed=5_600,
+            stream_id_seed=5_600,
+            identity_seed=5_601,
+        )
     )
     conflicting_create = harness.create_stream(
         token,
-        competing_creation,
-        policy,
+        mixed_creation,
+        mixed_policy,
     )
-    accepted = _retain(
-        creation,
-        policy,
-        reason="report-accepted-atomicity",
+    conflict_prior, conflict_policy, conflict_expectation = (
+        (transition_b_v3, policy_b, _expectation(policy_a, creation_a))
+        if substitute_semantics
+        else (transition_a_v3, policy_a, _expectation(policy_b, creation_b))
     )
-    competing = _retain(
-        creation,
-        policy,
-        reason="report-competing-atomicity",
+    conflict_transition = _retain(
+        conflict_prior,
+        conflict_policy,
+        reason=(
+            "report-atomicity-substituted-v4-conflict"
+            if substitute_semantics
+            else "report-atomicity-a-v4-conflict"
+        ),
     )
-    updated = harness.compare_and_swap_stream(token, accepted)
-    duplicate_compare_and_swap = harness.compare_and_swap_stream(token, accepted)
-    conflicting_compare_and_swap = harness.compare_and_swap_stream(token, competing)
+    conflicting_compare_and_swap = harness.compare_and_swap_stream(
+        token,
+        conflict_transition,
+        expectation=conflict_expectation,
+    )
     return harness.AtomicityClassificationEvidence(
         mutations=(
             inserted,
@@ -1463,6 +1510,24 @@ def _report_bounded_query_evidence(
         ).classification
         is harness.StoreClassification.INSERTED
     )
+    conflict_a_v2 = _retain(
+        conflict_creation_a,
+        conflict_policy_a,
+        reason="report-bounded-conflict-a-v2",
+    )
+    assert (
+        harness.compare_and_swap_stream(conflict_token, conflict_a_v2).classification
+        is harness.StoreClassification.UPDATED
+    )
+    conflict_a_v3 = _retain(
+        conflict_a_v2,
+        conflict_policy_a,
+        reason="report-bounded-conflict-a-v3",
+    )
+    assert (
+        harness.compare_and_swap_stream(conflict_token, conflict_a_v3).classification
+        is harness.StoreClassification.UPDATED
+    )
     assert (
         harness.create_stream(
             conflict_token,
@@ -1470,6 +1535,24 @@ def _report_bounded_query_evidence(
             conflict_policy_b,
         ).classification
         is harness.StoreClassification.INSERTED
+    )
+    conflict_b_v2 = _retain(
+        conflict_creation_b,
+        conflict_policy_b,
+        reason="report-bounded-conflict-b-v2",
+    )
+    assert (
+        harness.compare_and_swap_stream(conflict_token, conflict_b_v2).classification
+        is harness.StoreClassification.UPDATED
+    )
+    conflict_b_v3 = _retain(
+        conflict_b_v2,
+        conflict_policy_b,
+        reason="report-bounded-conflict-b-v3",
+    )
+    assert (
+        harness.compare_and_swap_stream(conflict_token, conflict_b_v3).classification
+        is harness.StoreClassification.UPDATED
     )
     current_conflict = harness.load_current(
         conflict_token,
@@ -1731,6 +1814,11 @@ def test_create_cas_current_and_bounded_audit_round_trip(tmp_path: Path) -> None
     assert harness.compare_and_swap_stream(token, third).classification is (
         harness.StoreClassification.UPDATED
     )
+    historical_duplicate = harness.compare_and_swap_stream(token, third)
+    assert historical_duplicate.classification is harness.StoreClassification.DUPLICATE
+    assert historical_duplicate.stream_rows == 1
+    assert historical_duplicate.history_rows == 5
+    assert historical_duplicate.rows_materialized == 6
     current = harness.load_current(
         token,
         stream_id=creation.record.stream_id,
@@ -2041,6 +2129,19 @@ def test_create_and_identity_conflicts_validate_both_retained_streams(
     assert harness.create_stream(token, creation_b, policy_b).classification is (
         harness.StoreClassification.INSERTED
     )
+    prior_a: ContinuousPublicTradeStreamStoredHistoryEntryV1 = creation_a
+    prior_b: ContinuousPublicTradeStreamStoredHistoryEntryV1 = creation_b
+    for version in (2, 3):
+        transition_a = _retain(prior_a, policy_a, reason=f"mature-conflict-a-v{version}")
+        transition_b = _retain(prior_b, policy_b, reason=f"mature-conflict-b-v{version}")
+        assert harness.compare_and_swap_stream(token, transition_a).classification is (
+            harness.StoreClassification.UPDATED
+        )
+        assert harness.compare_and_swap_stream(token, transition_b).classification is (
+            harness.StoreClassification.UPDATED
+        )
+        prior_a = transition_a
+        prior_b = transition_b
 
     same_uuid_policy, same_uuid = _creation(
         seed=32,
@@ -2075,7 +2176,8 @@ def test_create_and_identity_conflicts_validate_both_retained_streams(
     )
     assert two_row_conflict.classification is harness.StoreClassification.IDENTITY_CONFLICT
     assert two_row_conflict.query_evidence.stream_rows == 2
-    assert two_row_conflict.query_evidence.history_rows == 2
+    assert two_row_conflict.query_evidence.history_rows == 6
+    assert two_row_conflict.query_evidence.decoded_rows == 6
     audit_conflict = harness.audit_history(
         token,
         stream_id=creation_a.record.stream_id,
@@ -2084,8 +2186,8 @@ def test_create_and_identity_conflicts_validate_both_retained_streams(
     )
     assert audit_conflict.classification is harness.StoreClassification.IDENTITY_CONFLICT
     assert audit_conflict.query_evidence.stream_rows == 2
-    assert audit_conflict.query_evidence.history_rows == 2
-    assert audit_conflict.query_evidence.decoded_rows == 2
+    assert audit_conflict.query_evidence.history_rows == 6
+    assert audit_conflict.query_evidence.decoded_rows == 6
     assert harness.verify_store(token).stream_count == 2
 
 
@@ -2407,6 +2509,325 @@ def test_online_backup_restore_generation_copy_and_report(tmp_path: Path) -> Non
     assert restored_manifest.per_stream_tails == manifest.per_stream_tails
     assert harness.verify_store(restored).history_count == 2
     assert harness.verify_store(copied).history_count == 2
+
+
+def test_report_collectors_reject_cross_root_before_delegate_and_preserve_slots(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def exact_inventory(root: Path) -> tuple[tuple[str, str, int, str], ...]:
+        result: list[tuple[str, str, int, str]] = []
+        for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
+            details = path.lstat()
+            if path.is_file():
+                result.append(
+                    (
+                        path.relative_to(root).as_posix(),
+                        "file",
+                        details.st_size,
+                        hashlib.sha256(path.read_bytes()).hexdigest(),
+                    )
+                )
+            else:
+                result.append(
+                    (
+                        path.relative_to(root).as_posix(),
+                        "directory",
+                        details.st_mode,
+                        "",
+                    )
+                )
+        return tuple(result)
+
+    def generation_set(root: Path) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                path.relative_to(root).as_posix()
+                for path in root.rglob("continuous-public-trade-v1-*")
+                if path.is_dir()
+            )
+        )
+
+    run = harness.begin_generated_evidence_run(tmp_path)
+    source = harness.bootstrap_store(tmp_path)
+    policy, creation = _creation(seed=2_401)
+    prior = _retain(
+        creation,
+        policy,
+        reason="collector-preflight-prior-" + ("x" * 96),
+    )
+    assert harness.create_stream(source, creation, policy).classification is (
+        harness.StoreClassification.INSERTED
+    )
+    assert harness.compare_and_swap_stream(source, prior).classification is (
+        harness.StoreClassification.UPDATED
+    )
+    transitions: list[ContinuousPublicTradeStreamStoredTransitionV1] = []
+    for index in range(harness.CONCURRENT_BACKUP_TRANSITIONS):
+        transition = _retain(
+            prior,
+            policy,
+            reason=f"collector-preflight-{index:02d}-" + ("x" * 96),
+        )
+        transitions.append(transition)
+        prior = transition
+    exact_transitions = tuple(transitions)
+    ledger = harness._validated_evidence_run(run)
+
+    chain_calls = 0
+    backup_calls = 0
+    copy_calls = 0
+    real_chain = harness._validated_applicable_transition_chain
+    real_backup = harness.concurrent_write_backup_evidence
+    real_copy = harness.same_format_generation_copy
+
+    def counted_chain(
+        token: harness.StoreToken,
+        candidate: object,
+    ) -> tuple[ContinuousPublicTradeStreamStoredTransitionV1, ...]:
+        nonlocal chain_calls
+        chain_calls += 1
+        return real_chain(token, candidate)
+
+    def counted_backup(
+        token: harness.StoreToken,
+        root: Path,
+        *,
+        transitions: tuple[ContinuousPublicTradeStreamStoredTransitionV1, ...],
+        evidence_recorded_at_utc: str,
+    ) -> harness.ConcurrentBackupEvidence:
+        nonlocal backup_calls
+        backup_calls += 1
+        return real_backup(
+            token,
+            root,
+            transitions=transitions,
+            evidence_recorded_at_utc=evidence_recorded_at_utc,
+        )
+
+    def counted_copy(
+        token: harness.StoreToken,
+        root: Path,
+    ) -> harness.StoreToken:
+        nonlocal copy_calls
+        copy_calls += 1
+        return real_copy(token, root)
+
+    monkeypatch.setattr(harness, "_validated_applicable_transition_chain", counted_chain)
+    monkeypatch.setattr(harness, "concurrent_write_backup_evidence", counted_backup)
+    monkeypatch.setattr(harness, "same_format_generation_copy", counted_copy)
+
+    node_id = os.environ["PYTEST_CURRENT_TEST"].rsplit(" (", maxsplit=1)[0]
+    foreign_backup_root = tmp_path / "foreign-backup-root"
+    foreign_backup_root.mkdir(mode=0o700)
+    with harness._pytest_root_scope(foreign_backup_root, node_id=node_id):
+        foreign_source = harness.bootstrap_store(foreign_backup_root)
+        before_summary = harness.verify_store(source)
+        before_tails = harness._tail_manifest(source)
+        before_manifest = harness._closed_file_manifest(source)
+        before_inventory = exact_inventory(tmp_path)
+        before_generations = generation_set(tmp_path)
+        before_ledger = (
+            dict(ledger.observations),
+            dict(ledger.operation_runs),
+            dict(ledger.rejection_runs),
+        )
+        for candidate_token, candidate_root in (
+            (foreign_source, tmp_path),
+            (source, foreign_backup_root),
+            (foreign_source, foreign_backup_root),
+        ):
+            with pytest.raises(harness.HarnessFailure) as rejected:
+                harness.collect_backup_restore_evidence(
+                    run,
+                    candidate_token,
+                    candidate_root,
+                    transitions=exact_transitions,
+                    backup_recorded_at_utc="2026-07-29T06:35:00.000000Z",
+                    restore_recorded_at_utc="2026-07-29T06:36:00.000000Z",
+                )
+            assert rejected.value.code is harness.HarnessFailureCode.CORRUPT
+        assert (chain_calls, backup_calls) == (0, 0)
+        assert exact_inventory(tmp_path) == before_inventory
+        assert generation_set(tmp_path) == before_generations
+        assert harness._closed_file_manifest(source) == before_manifest
+        assert harness._tail_manifest(source) == before_tails
+        assert harness.verify_store(source) == before_summary
+        assert (
+            dict(ledger.observations),
+            dict(ledger.operation_runs),
+            dict(ledger.rejection_runs),
+        ) == before_ledger
+
+    backup_restore = harness.collect_backup_restore_evidence(
+        run,
+        source,
+        tmp_path,
+        transitions=exact_transitions,
+        backup_recorded_at_utc="2026-07-29T06:35:00.000000Z",
+        restore_recorded_at_utc="2026-07-29T06:36:00.000000Z",
+    )
+    assert (chain_calls, backup_calls) == (3, 1)
+    report_token = backup_restore.backup_token
+
+    foreign_copy_root = tmp_path / "foreign-copy-root"
+    foreign_copy_root.mkdir(mode=0o700)
+    with harness._pytest_root_scope(foreign_copy_root, node_id=node_id):
+        foreign_report = harness.bootstrap_store(foreign_copy_root)
+        before_summary = harness.verify_store(report_token)
+        before_tails = harness._tail_manifest(report_token)
+        before_manifest = harness._closed_file_manifest(report_token)
+        before_inventory = exact_inventory(tmp_path)
+        before_generations = generation_set(tmp_path)
+        before_ledger = (
+            dict(ledger.observations),
+            dict(ledger.operation_runs),
+            dict(ledger.rejection_runs),
+        )
+        for candidate_token, candidate_root in (
+            (foreign_report, tmp_path),
+            (report_token, foreign_copy_root),
+            (foreign_report, foreign_copy_root),
+        ):
+            with pytest.raises(harness.HarnessFailure) as rejected:
+                harness.collect_generation_copy_evidence(
+                    run,
+                    candidate_token,
+                    candidate_root,
+                )
+            assert rejected.value.code is harness.HarnessFailureCode.CORRUPT
+        assert copy_calls == 0
+        assert exact_inventory(tmp_path) == before_inventory
+        assert generation_set(tmp_path) == before_generations
+        assert harness._closed_file_manifest(report_token) == before_manifest
+        assert harness._tail_manifest(report_token) == before_tails
+        assert harness.verify_store(report_token) == before_summary
+        assert (
+            dict(ledger.observations),
+            dict(ledger.operation_runs),
+            dict(ledger.rejection_runs),
+        ) == before_ledger
+
+    copy_ordinal = harness.GENERATED_EVIDENCE_GATES.index("generation_copy")
+    before_inventory = exact_inventory(tmp_path)
+    before_generations = generation_set(tmp_path)
+    before_ledger = (
+        dict(ledger.observations),
+        dict(ledger.operation_runs),
+        dict(ledger.rejection_runs),
+    )
+    real_generation_id = harness._generation_evidence_id
+
+    def fail_generation_id(_token: harness.StoreToken) -> str:
+        raise harness.HarnessFailure(harness.HarnessFailureCode.CORRUPT)
+
+    monkeypatch.setattr(harness, "_generation_evidence_id", fail_generation_id)
+    with pytest.raises(harness.HarnessFailure) as local_post_copy_failure:
+        harness.collect_generation_copy_evidence(
+            run,
+            report_token,
+            tmp_path,
+        )
+    assert local_post_copy_failure.value.code is harness.HarnessFailureCode.CORRUPT
+    assert copy_calls == 1
+    assert exact_inventory(tmp_path) == before_inventory
+    assert generation_set(tmp_path) == before_generations
+    assert copy_ordinal not in ledger.observations
+    assert (
+        dict(ledger.observations),
+        dict(ledger.operation_runs),
+        dict(ledger.rejection_runs),
+    ) == before_ledger
+    monkeypatch.setattr(harness, "_generation_evidence_id", real_generation_id)
+
+    real_evidence_digest = harness._evidence_payload_digest
+
+    def fail_generation_copy_digest(value: object) -> str:
+        if type(value) is harness.GenerationCopyEvidence:
+            raise harness.HarnessFailure(harness.HarnessFailureCode.CORRUPT)
+        return real_evidence_digest(value)
+
+    monkeypatch.setattr(
+        harness,
+        "_evidence_payload_digest",
+        fail_generation_copy_digest,
+    )
+    with pytest.raises(harness.HarnessFailure) as post_return_failure:
+        harness.collect_generation_copy_evidence(
+            run,
+            report_token,
+            tmp_path,
+        )
+    assert post_return_failure.value.code is harness.HarnessFailureCode.CORRUPT
+    assert copy_calls == 2
+    assert exact_inventory(tmp_path) == before_inventory
+    assert generation_set(tmp_path) == before_generations
+    assert copy_ordinal not in ledger.observations
+    assert (
+        dict(ledger.observations),
+        dict(ledger.operation_runs),
+        dict(ledger.rejection_runs),
+    ) == before_ledger
+    monkeypatch.setattr(harness, "_evidence_payload_digest", real_evidence_digest)
+
+    copied = harness.collect_generation_copy_evidence(
+        run,
+        report_token,
+        tmp_path,
+    )
+    assert copy_calls == 3
+    assert copied.source_token is report_token
+    assert copied.destination_tails == copied.source_tails
+    assert (
+        copied.destination_summary.stream_count,
+        copied.destination_summary.history_count,
+        copied.destination_summary.schema_fingerprint,
+        copied.destination_summary.page_count,
+    ) == (
+        copied.source_summary.stream_count,
+        copied.source_summary.history_count,
+        copied.source_summary.schema_fingerprint,
+        copied.source_summary.page_count,
+    )
+
+    removed_tokens: list[harness.StoreToken] = []
+    real_remove_new_token = harness._remove_new_collector_token
+
+    def remove_then_signal_first_failure(
+        active_run: Any,
+        token: object,
+        *,
+        retained_nonces: frozenset[bytes],
+    ) -> None:
+        assert type(token) is harness.StoreToken
+        removed_tokens.append(token)
+        real_remove_new_token(
+            active_run,
+            token,
+            retained_nonces=retained_nonces,
+        )
+        if len(removed_tokens) == 1:
+            raise harness.HarnessFailure(harness.HarnessFailureCode.UNAVAILABLE)
+
+    monkeypatch.setattr(
+        harness,
+        "_remove_new_collector_token",
+        remove_then_signal_first_failure,
+    )
+    with pytest.raises(harness.HarnessFailure) as total_cleanup:
+        harness._rollback_backup_restore_outputs(
+            run,
+            {"source_token": source},
+            backup_restore,
+        )
+    assert total_cleanup.value.code is harness.HarnessFailureCode.UNAVAILABLE
+    assert removed_tokens == [
+        backup_restore.restore_token,
+        backup_restore.backup_token,
+    ]
+    assert harness.verify_store(source).history_count == (
+        backup_restore.source_summary.history_count
+    )
 
 
 def test_online_backup_rejects_malformed_evidence_time_before_destination(
@@ -3886,6 +4307,239 @@ def test_fresh_process_competing_cas_writers_classify_update_then_conflict(
     assert harness.verify_store(token).history_count == 2
 
 
+def test_process_lifecycle_helpers_are_bounded_exact_and_fail_closed(
+    tmp_path: Path,
+) -> None:
+    source = Path(harness.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    waitpid_sites: list[tuple[str, ast.Call]] = []
+
+    class WaitpidVisitor(ast.NodeVisitor):
+        current_function = ""
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            prior = self.current_function
+            self.current_function = node.name
+            self.generic_visit(node)
+            self.current_function = prior
+
+        def visit_Call(self, node: ast.Call) -> None:
+            if (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "os"
+                and node.func.attr == "waitpid"
+            ):
+                waitpid_sites.append((self.current_function, node))
+            self.generic_visit(node)
+
+    WaitpidVisitor().visit(tree)
+    assert waitpid_sites
+    assert {function for function, _ in waitpid_sites} <= {
+        "_wait_for_owned_process_event",
+        "_terminate_and_reap_processes",
+    }
+    assert all(
+        len(call.args) == 2
+        and not (isinstance(call.args[1], ast.Constant) and call.args[1].value == 0)
+        for _, call in waitpid_sites
+    )
+    assert "os.WNOHANG" in source
+    assert "os.WUNTRACED" in source
+
+    real_waitpid = os.waitpid
+    system_calls: list[tuple[str, int]] = []
+
+    def forbidden_waitpid(process_id: int, options: int) -> tuple[int, int]:
+        system_calls.append(("wait", process_id))
+        return real_waitpid(process_id, options)
+
+    def forbidden_kill(process_id: int, signal_number: int) -> None:
+        del signal_number
+        system_calls.append(("kill", process_id))
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(os, "waitpid", forbidden_waitpid)
+        patch.setattr(os, "kill", forbidden_kill)
+        for invalid_process_id in (0, -1, True):
+            with pytest.raises(harness.HarnessFailure) as invalid_wait:
+                harness._wait_for_owned_process_event(cast(Any, invalid_process_id))
+            assert invalid_wait.value.code is harness.HarnessFailureCode.CORRUPT
+            with pytest.raises(harness.HarnessFailure) as invalid_terminate:
+                harness._terminate_and_reap_processes((cast(Any, invalid_process_id),))
+            assert invalid_terminate.value.code is harness.HarnessFailureCode.CORRUPT
+    assert not system_calls
+
+    child_process_id = os.fork()
+    if child_process_id == 0:
+        os._exit(0)
+    interrupted = False
+
+    def interrupt_once(process_id: int, options: int) -> tuple[int, int]:
+        nonlocal interrupted
+        if not interrupted:
+            interrupted = True
+            raise InterruptedError
+        return real_waitpid(process_id, options)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(os, "waitpid", interrupt_once)
+        child_status = harness._wait_for_owned_process(
+            child_process_id,
+            timeout_seconds=1.0,
+        )
+    assert interrupted
+    assert child_status is not None
+    assert os.WIFEXITED(child_status)
+    assert os.WEXITSTATUS(child_status) == 0
+    with pytest.raises(ChildProcessError):
+        os.waitpid(child_process_id, os.WNOHANG)
+
+    ticks = -0.01
+
+    def advancing_monotonic() -> float:
+        nonlocal ticks
+        ticks += 0.01
+        return ticks
+
+    def always_interrupted(_process_id: int, _options: int) -> tuple[int, int]:
+        raise InterruptedError
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(os, "waitpid", always_interrupted)
+        patch.setattr(time, "monotonic", advancing_monotonic)
+        assert (
+            harness._wait_for_owned_process_event(
+                123_456,
+                timeout_seconds=0.02,
+            )
+            is None
+        )
+
+    stopped_status = (signal.SIGSTOP << 8) | 0x7F
+    assert os.WIFSTOPPED(stopped_status)
+    observed_options: list[int] = []
+
+    def stopped_waitpid(process_id: int, options: int) -> tuple[int, int]:
+        observed_options.append(options)
+        return process_id, stopped_status
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(os, "waitpid", stopped_waitpid)
+        assert (
+            harness._wait_for_owned_process_event(
+                123_457,
+                include_stopped=True,
+            )
+            == stopped_status
+        )
+    assert observed_options == [os.WNOHANG | os.WUNTRACED]
+
+    ticks = -0.01
+    nonterminal_observations = 0
+
+    def stopped_then_pending(process_id: int, options: int) -> tuple[int, int]:
+        nonlocal nonterminal_observations
+        del options
+        nonterminal_observations += 1
+        return (process_id, stopped_status) if nonterminal_observations == 1 else (0, 0)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(os, "waitpid", stopped_then_pending)
+        patch.setattr(time, "monotonic", advancing_monotonic)
+        assert (
+            harness._wait_for_owned_process_event(
+                123_458,
+                timeout_seconds=0.02,
+            )
+            is None
+        )
+    assert nonterminal_observations >= 1
+
+    stopped_child = os.fork()
+    if stopped_child == 0:
+        os.kill(os.getpid(), signal.SIGSTOP)
+        os._exit(99)
+    observed_stop = harness._wait_for_owned_process_event(
+        stopped_child,
+        timeout_seconds=1.0,
+        include_stopped=True,
+    )
+    assert observed_stop is not None
+    assert os.WIFSTOPPED(observed_stop)
+    assert harness._terminate_and_reap_processes((stopped_child,))
+    with pytest.raises(ChildProcessError):
+        os.waitpid(stopped_child, os.WNOHANG)
+
+    descriptor_count_before = len(os.listdir("/proc/self/fd"))
+    read_descriptor, write_descriptor = os.pipe()
+    stalled_process_id = os.fork()
+    if stalled_process_id == 0:
+        os.close(read_descriptor)
+        os.write(write_descriptor, b"R")
+        while True:
+            signal.pause()
+    os.close(write_descriptor)
+    assert harness._read_process_packet("stalled_child_ready", read_descriptor, 1) == b"R"
+    assert (
+        harness._wait_or_terminate_owned_process(
+            stalled_process_id,
+            timeout_seconds=0.05,
+        )
+        is None
+    )
+    os.close(read_descriptor)
+    with pytest.raises(ChildProcessError):
+        os.waitpid(stalled_process_id, os.WNOHANG)
+    assert len(os.listdir("/proc/self/fd")) == descriptor_count_before
+
+    reaped_process_id = os.fork()
+    if reaped_process_id == 0:
+        os._exit(0)
+    real_terminate = harness._terminate_and_reap_processes
+
+    def reap_then_report_false(process_ids: Sequence[int]) -> bool:
+        assert real_terminate(process_ids)
+        return False
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            harness,
+            "_terminate_and_reap_processes",
+            reap_then_report_false,
+        )
+        with pytest.raises(harness.HarnessFailure) as uncertain_reap:
+            harness._finalize_process_resources((), (reaped_process_id,))
+    assert uncertain_reap.value.code is harness.HarnessFailureCode.UNAVAILABLE
+    with pytest.raises(ChildProcessError):
+        os.waitpid(reaped_process_id, os.WNOHANG)
+
+    descriptor_count_before = len(os.listdir("/proc/self/fd"))
+    read_descriptor, write_descriptor = os.pipe()
+    cleanup_process_id = os.fork()
+    if cleanup_process_id == 0:
+        while True:
+            signal.pause()
+    real_close_descriptors = harness._close_descriptors
+
+    def close_then_report_false(descriptors: Sequence[int]) -> bool:
+        assert real_close_descriptors(descriptors)
+        return False
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(harness, "_close_descriptors", close_then_report_false)
+        with pytest.raises(harness.HarnessFailure) as uncertain_descriptors:
+            harness._finalize_process_resources(
+                (read_descriptor, write_descriptor),
+                (cleanup_process_id,),
+            )
+    assert uncertain_descriptors.value.code is harness.HarnessFailureCode.UNAVAILABLE
+    with pytest.raises(ChildProcessError):
+        os.waitpid(cleanup_process_id, os.WNOHANG)
+    assert len(os.listdir("/proc/self/fd")) == descriptor_count_before
+    assert tmp_path.is_dir()
+
+
 def test_partial_multichild_fork_failures_are_bounded_and_unproven(
     tmp_path: Path,
 ) -> None:
@@ -4265,6 +4919,52 @@ def test_injected_ioerr_write_reopens_exact_old_state(
     assert evidence.acknowledgement_bytes == 0
 
 
+def test_ioerr_evidence_rejects_nonzero_child_exit_after_exact_reap(
+    tmp_path: Path,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    policy, creation = _creation(seed=230)
+    transition = _retain(creation, policy)
+    assert harness.create_stream(token, creation, policy).classification is (
+        harness.StoreClassification.INSERTED
+    )
+    real_wait = harness._wait_or_terminate_owned_process
+    reaped_process_ids: list[int] = []
+
+    def return_nonzero_after_reap(
+        process_id: int,
+        *,
+        timeout_seconds: float = 10.0,
+    ) -> int | None:
+        status = real_wait(process_id, timeout_seconds=timeout_seconds)
+        assert status is not None
+        reaped_process_ids.append(process_id)
+        return 1 << 8
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            harness,
+            "_wait_or_terminate_owned_process",
+            return_nonzero_after_reap,
+        )
+        evidence = harness.ioerr_write_evidence(
+            token,
+            transition=transition,
+            natural_key=_natural_key(creation),
+        )
+    assert evidence.disposition is harness.EvidenceDisposition.UNPROVEN
+    assert evidence.reason == "ioerr_child_protocol_failed"
+    assert len(reaped_process_ids) == 1
+    with pytest.raises(ChildProcessError):
+        os.waitpid(reaped_process_ids[0], os.WNOHANG)
+    current = harness.load_current(
+        token,
+        stream_id=creation.record.stream_id,
+        natural_key=_natural_key(creation),
+    )
+    assert current.current == creation
+
+
 def test_max_page_count_reports_sqlite_full_and_exact_old_state(
     tmp_path: Path,
 ) -> None:
@@ -4609,11 +5309,79 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
         evidence_run,
         report_token,
     )
+    evidence_ledger = harness._validated_evidence_run(evidence_run)
+    atomicity_ordinal = harness.GENERATED_EVIDENCE_GATES.index("atomicity_classification")
+    with harness.atomicity_operation_scope(evidence_run):
+        _report_atomicity_evidence(
+            tmp_path,
+            fresh_process,
+            substitute_semantics=True,
+        )
+    substituted_semantics = evidence_ledger.operation_runs["atomicity_classification"]
+    assert tuple(
+        (
+            cast(harness.MutationEvidence, substituted_semantics[index].result).classification,
+            cast(harness.MutationEvidence, substituted_semantics[index].result).stream_rows,
+            cast(harness.MutationEvidence, substituted_semantics[index].result).history_rows,
+        )
+        for index in (9, 10)
+    ) == (
+        (harness.StoreClassification.CONFLICT, 2, 6),
+        (harness.StoreClassification.CONFLICT, 2, 6),
+    )
+    with pytest.raises(harness.HarnessFailure) as semantic_substitution:
+        harness.finalize_atomicity_evidence(evidence_run, report_token)
+    assert semantic_substitution.value.code is harness.HarnessFailureCode.CORRUPT
+    assert atomicity_ordinal not in evidence_ledger.observations
+    evidence_ledger.operation_runs.pop("atomicity_classification")
+    evidence_ledger.rejection_runs.pop("atomicity_classification")
+
     with harness.atomicity_operation_scope(evidence_run):
         _report_atomicity_evidence(tmp_path, fresh_process)
+    atomicity_operations = evidence_ledger.operation_runs["atomicity_classification"]
+    historical_binding_substitution = list(atomicity_operations)
+    historical_binding_substitution[5] = replace(
+        historical_binding_substitution[5],
+        input_binding=atomicity_operations[8].input_binding,
+        input_digest=atomicity_operations[8].input_digest,
+    )
+    evidence_ledger.operation_runs["atomicity_classification"] = tuple(
+        historical_binding_substitution
+    )
+    with pytest.raises(harness.HarnessFailure) as historical_substitution:
+        harness.finalize_atomicity_evidence(evidence_run, report_token)
+    assert historical_substitution.value.code is harness.HarnessFailureCode.CORRUPT
+    assert atomicity_ordinal not in evidence_ledger.observations
+    evidence_ledger.operation_runs["atomicity_classification"] = atomicity_operations
+    for operation_index, substituted_tag in (
+        (5, "DUPLICATE:stream_rows=1:history_rows=5"),
+        (9, "CONFLICT:stream_rows=2:history_rows=6"),
+        (10, "CONFLICT:stream_rows=2:history_rows=6"),
+    ):
+        substituted_operations = list(atomicity_operations)
+        substituted_operations[operation_index] = replace(
+            substituted_operations[operation_index],
+            operation_tag=substituted_tag,
+        )
+        evidence_ledger.operation_runs["atomicity_classification"] = tuple(substituted_operations)
+        with pytest.raises(harness.HarnessFailure) as semantic_substitution:
+            harness.finalize_atomicity_evidence(evidence_run, report_token)
+        assert semantic_substitution.value.code is harness.HarnessFailureCode.CORRUPT
+        assert atomicity_ordinal not in evidence_ledger.observations
+    evidence_ledger.operation_runs["atomicity_classification"] = atomicity_operations
     atomicity = harness.finalize_atomicity_evidence(
         evidence_run,
         report_token,
+    )
+    assert tuple(
+        (item.classification, item.stream_rows, item.history_rows) for item in atomicity.mutations
+    ) == (
+        (harness.StoreClassification.INSERTED, 0, 0),
+        (harness.StoreClassification.DUPLICATE, 1, 3),
+        (harness.StoreClassification.CONFLICT, 2, 6),
+        (harness.StoreClassification.UPDATED, 1, 2),
+        (harness.StoreClassification.DUPLICATE, 1, 5),
+        (harness.StoreClassification.CONFLICT, 2, 6),
     )
     with harness.bounded_query_operation_scope(evidence_run):
         _report_bounded_query_evidence(
@@ -4625,6 +5393,28 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
         evidence_run,
         report_token,
     )
+    assert tuple(
+        (
+            bounded_queries.queries[index][2].stream_rows,
+            bounded_queries.queries[index][2].history_rows,
+            bounded_queries.queries[index][2].decoded_rows,
+        )
+        for index in (2, 3)
+    ) == ((2, 6, 6), (2, 6, 6))
+    shallow_queries = list(bounded_queries.queries)
+    for index in (2, 3):
+        name, classification, query = shallow_queries[index]
+        shallow_queries[index] = (
+            name,
+            classification,
+            replace(query, history_rows=2, decoded_rows=2),
+        )
+    with pytest.raises(harness.HarnessFailure) as shallow_conflicts:
+        harness._validate_bounded_query_report_evidence(
+            replace(bounded_queries, queries=tuple(shallow_queries)),
+            projection,
+        )
+    assert shallow_conflicts.value.code is harness.HarnessFailureCode.CORRUPT
     closed_mapping = harness.collect_closed_error_mapping_evidence(
         evidence_run,
         report_token,
@@ -4669,6 +5459,16 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
         evidence=evidence,
     )
     report_path = tmp_path / "task064-evidence.json"
+    with pytest.raises(harness.HarnessFailure) as wrong_report_type:
+        harness.write_evidence_report(
+            tmp_path,
+            receipt=evidence_receipt,
+            report=cast(Any, object()),
+        )
+    assert wrong_report_type.value.code is harness.HarnessFailureCode.CORRUPT
+    assert not report_path.exists()
+    assert not tuple(tmp_path.glob(".task064-evidence-*.tmp"))
+    assert not evidence_ledger.consumed
     backup_file_name, backup_file_size, backup_file_digest = report_manifest.files[0]
     forged_backup_digest = _digest("forged-report-backup-file")
     assert forged_backup_digest != backup_file_digest
@@ -4736,6 +5536,38 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
         replace(
             evidence,
             schema_constraints_corruption=harness.RejectionEvidence(()),
+        ),
+        replace(
+            evidence,
+            atomicity_classification=replace(
+                atomicity,
+                mutations=(
+                    *atomicity.mutations[:4],
+                    replace(atomicity.mutations[4], stream_rows=2, history_rows=4),
+                    atomicity.mutations[5],
+                ),
+            ),
+        ),
+        replace(
+            evidence,
+            atomicity_classification=replace(
+                atomicity,
+                mutations=(
+                    *atomicity.mutations[:2],
+                    replace(atomicity.mutations[2], history_rows=2),
+                    *atomicity.mutations[3:],
+                ),
+            ),
+        ),
+        replace(
+            evidence,
+            atomicity_classification=replace(
+                atomicity,
+                mutations=(
+                    *atomicity.mutations[:5],
+                    replace(atomicity.mutations[5], history_rows=2),
+                ),
+            ),
         ),
         replace(
             evidence,
@@ -4968,6 +5800,25 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
     assert publish_failure.value.code is harness.HarnessFailureCode.UNAVAILABLE
     assert not report_path.exists()
     assert_no_report_staging_file()
+
+    real_link = os.link
+
+    def link_then_fail(*args: Any, **kwargs: Any) -> None:
+        real_link(*args, **kwargs)
+        raise OSError(errno.EIO, "injected post-link report publish failure")
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(os, "link", link_then_fail)
+        with pytest.raises(harness.HarnessFailure) as post_link_failure:
+            harness.write_evidence_report(
+                tmp_path,
+                receipt=evidence_receipt,
+                report=complete_report,
+            )
+    assert post_link_failure.value.code is harness.HarnessFailureCode.UNAVAILABLE
+    assert not report_path.exists()
+    assert_no_report_staging_file()
+    assert not evidence_ledger.consumed
 
     collision_bytes = b"preexisting-report-sentinel\n"
     report_path.write_bytes(collision_bytes)

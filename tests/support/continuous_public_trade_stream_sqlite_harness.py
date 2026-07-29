@@ -9,6 +9,7 @@ from __future__ import annotations
 import ctypes
 import errno
 import hashlib
+import inspect
 import json
 import math
 import mmap
@@ -450,11 +451,26 @@ class _RejectionCollectorState:
 
 
 @dataclass(frozen=True, slots=True)
+class _MutationOperationBinding:
+    """Exact mutation inputs retained by a closure-issued operation receipt."""
+
+    stored_record: (
+        ContinuousPublicTradeStreamStoredCreationV1 | ContinuousPublicTradeStreamStoredTransitionV1
+    )
+    policy_digest: str | None
+    expectation_identity: tuple[object, ...] | None
+    expectation_policy_digest: str | None
+    expectation_child_policy_fingerprint: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class _OperationObservation:
     """One closure-issued low-level executor result in a fixed gate scope."""
 
     producer_name: str
     operation_tag: str
+    input_binding: _MutationOperationBinding | None
+    input_digest: str | None
     result: object
     payload_digest: str
     sequence: int
@@ -862,8 +878,15 @@ class MutationEvidence:
 
     classification: StoreClassification
     statements: tuple[str, ...]
-    rows_materialized: int
+    stream_rows: int
+    history_rows: int
     committed: bool
+
+    @property
+    def rows_materialized(self) -> int:
+        """Return the computed total without creating a forgeable third count."""
+
+        return self.stream_rows + self.history_rows
 
 
 @dataclass(frozen=True, slots=True)
@@ -1073,8 +1096,84 @@ def _collect_evidence_registrations(
             _collect_evidence_registrations(item, registrations, token_nonces)
         return
     if isinstance(value, Mapping):
-        for item in value.values():
+        for key, item in value.items():
+            _collect_evidence_registrations(key, registrations, token_nonces)
             _collect_evidence_registrations(item, registrations, token_nonces)
+
+
+def _validate_collector_value_registration(
+    value: object,
+    registration: _ActivePytestRoot,
+) -> None:
+    """Fail before authority-bearing work when a value crosses pytest scopes."""
+
+    if type(value) is StoreToken:
+        registered = _TOKEN_REGISTRY.get(value._nonce)
+        if (
+            registered is None
+            or registered.pytest_registration is not registration
+            or _require_token(value) is not registered
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        return
+    if isinstance(value, Path):
+        if (
+            value is not registration.path_object
+            or _ACTIVE_PYTEST_ROOTS.get(id(value)) is not registration
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        _validate_bootstrap_root(value)
+        return
+    if is_dataclass(value) and not isinstance(value, type):
+        for field in fields(value):
+            _validate_collector_value_registration(
+                getattr(value, field.name),
+                registration,
+            )
+        return
+    if type(value) in (tuple, list):
+        for item in cast(tuple[object, ...] | list[object], value):
+            _validate_collector_value_registration(item, registration)
+        return
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            _validate_collector_value_registration(key, registration)
+            _validate_collector_value_registration(item, registration)
+
+
+def _validate_collector_value_authority(
+    value: object,
+    registration: _ActivePytestRoot,
+) -> None:
+    """Reject foreign registrations before any token or filesystem validation."""
+
+    if type(value) is StoreToken:
+        registered = _TOKEN_REGISTRY.get(value._nonce)
+        if registered is None or registered.pytest_registration is not registration:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        return
+    if isinstance(value, Path):
+        if (
+            value is not registration.path_object
+            or _ACTIVE_PYTEST_ROOTS.get(id(value)) is not registration
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        return
+    if is_dataclass(value) and not isinstance(value, type):
+        for field in fields(value):
+            _validate_collector_value_authority(
+                getattr(value, field.name),
+                registration,
+            )
+        return
+    if type(value) in (tuple, list):
+        for item in cast(tuple[object, ...] | list[object], value):
+            _validate_collector_value_authority(item, registration)
+        return
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            _validate_collector_value_authority(key, registration)
+            _validate_collector_value_authority(item, registration)
 
 
 _GATE_PRODUCERS: dict[int, tuple[str, str, int]] = {}
@@ -1137,10 +1236,14 @@ _FRESH_OPERATION_PRODUCER_SEQUENCE: Final = (
 _ATOMICITY_OPERATION_PRODUCER_SEQUENCE: Final = (
     "bootstrap_store",
     "create_stream",
+    "compare_and_swap_stream",
+    "compare_and_swap_stream",
     "create_stream",
+    "compare_and_swap_stream",
     "create_stream",
     "compare_and_swap_stream",
     "compare_and_swap_stream",
+    "create_stream",
     "compare_and_swap_stream",
 )
 _BOUNDED_OPERATION_PRODUCER_SEQUENCE: Final = (
@@ -1149,7 +1252,11 @@ _BOUNDED_OPERATION_PRODUCER_SEQUENCE: Final = (
     *(("audit_history",) * 5),
     "bootstrap_store",
     "create_stream",
+    "compare_and_swap_stream",
+    "compare_and_swap_stream",
     "create_stream",
+    "compare_and_swap_stream",
+    "compare_and_swap_stream",
     "load_current",
     "audit_history",
     "bootstrap_store",
@@ -1166,11 +1273,155 @@ _GATE_OPERATION_PRODUCER_SEQUENCES: Final = {
 }
 
 
+def _policy_input_digest(policy: object) -> str:
+    """Canonicalize only the exact frozen TASK061 policy input."""
+
+    if type(policy) is not ContinuousPublicTradePolicy:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    try:
+        payload = project_continuous_public_trade_policy(policy).model_dump(mode="json")
+    except (AttributeError, TypeError, ValueError):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+    return _evidence_payload_digest(payload)
+
+
+def _stored_creation_policy_digest(
+    creation: ContinuousPublicTradeStreamStoredCreationV1,
+) -> str:
+    try:
+        payload = creation.record.stream_policy.model_dump(mode="json")
+    except (AttributeError, TypeError, ValueError):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+    return _evidence_payload_digest(payload)
+
+
+def _stored_creation_identity_binding(
+    creation: ContinuousPublicTradeStreamStoredCreationV1,
+) -> tuple[object, ...]:
+    record = creation.record
+    return (
+        1,
+        record.stream_id,
+        record.source,
+        record.venue,
+        record.instrument,
+        record.provider_symbol,
+        record.instrument_type.value,
+        record.request_variant,
+        record.stream_policy.policy_fingerprint,
+        record.stream_start_epoch_ms,
+    )
+
+
+def _stored_creation_natural_key(
+    creation: ContinuousPublicTradeStreamStoredCreationV1,
+) -> bytes:
+    record = creation.record
+    return natural_identity_key(
+        source=record.source,
+        venue=record.venue,
+        instrument=record.instrument,
+        provider_symbol=record.provider_symbol,
+        instrument_type=record.instrument_type.value,
+        request_variant=record.request_variant,
+    )
+
+
+def _transition_follows_binding(
+    prior: ContinuousPublicTradeStreamStoredHistoryEntryV1,
+    transition: ContinuousPublicTradeStreamStoredTransitionV1,
+) -> bool:
+    return bool(
+        transition.record.stream_id == prior.record.stream_id
+        and transition.record.prior_version == prior.record.successor_version
+        and transition.record.successor_version == prior.record.successor_version + 1
+        and transition.record.prior_envelope_digest == prior.successor_envelope.envelope_digest
+        and transition.record.prior_history_root == prior.history_root
+    )
+
+
+def _expectation_identity_binding(
+    expectation: ContinuousPublicTradeStreamExpectationV1,
+) -> tuple[object, ...]:
+    identity = expectation.identity
+    return (
+        identity.stream_contract_version,
+        identity.stream_id,
+        identity.source,
+        identity.venue,
+        identity.instrument,
+        identity.provider_symbol,
+        identity.instrument_type.value,
+        identity.request_variant,
+        identity.policy_fingerprint,
+        identity.stream_start_epoch_ms,
+    )
+
+
+def _mutation_operation_binding(
+    producer_name: str,
+    arguments: Mapping[str, object],
+) -> _MutationOperationBinding | None:
+    """Bind exact mutation inputs without accepting a caller-supplied case label."""
+
+    if producer_name == "create_stream":
+        creation = arguments.get("creation")
+        policy = arguments.get("policy")
+        if (
+            type(creation) is not ContinuousPublicTradeStreamStoredCreationV1
+            or type(policy) is not ContinuousPublicTradePolicy
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        exact_creation = creation
+        policy_digest = _policy_input_digest(policy)
+        if policy_digest != _stored_creation_policy_digest(exact_creation):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        return _MutationOperationBinding(
+            stored_record=exact_creation,
+            policy_digest=policy_digest,
+            expectation_identity=None,
+            expectation_policy_digest=None,
+            expectation_child_policy_fingerprint=None,
+        )
+    if producer_name == "compare_and_swap_stream":
+        transition = arguments.get("transition")
+        expectation = arguments.get("expectation")
+        if type(transition) is not ContinuousPublicTradeStreamStoredTransitionV1 or (
+            expectation is not None
+            and type(expectation) is not ContinuousPublicTradeStreamExpectationV1
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        exact_expectation = expectation
+        return _MutationOperationBinding(
+            stored_record=transition,
+            policy_digest=None,
+            expectation_identity=(
+                None
+                if exact_expectation is None
+                else _expectation_identity_binding(exact_expectation)
+            ),
+            expectation_policy_digest=(
+                None
+                if exact_expectation is None
+                else _policy_input_digest(exact_expectation.effective_stream_policy)
+            ),
+            expectation_child_policy_fingerprint=(
+                None
+                if exact_expectation is None
+                else exact_expectation.effective_child_policy_fingerprint
+            ),
+        )
+    return None
+
+
 def _operation_evidence_tag(
     producer_name: str,
     arguments: tuple[object, ...],
     keywords: Mapping[str, object],
     result: object,
+    *,
+    gate: str,
+    sequence: int,
 ) -> str:
     if producer_name == "fresh_process_kill_evidence":
         operation = "create" if keywords.get("creation") is not None else "compare_and_swap"
@@ -1202,7 +1453,42 @@ def _operation_evidence_tag(
         "query_plan_evidence",
     }:
         return producer_name
-    if producer_name in {"create_stream", "compare_and_swap_stream", "load_current"}:
+    if producer_name in {"create_stream", "compare_and_swap_stream"}:
+        if type(result) is not MutationEvidence:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        semantic_case: str | None = None
+        if (
+            gate == "atomicity_classification"
+            and sequence == 5
+            and producer_name == "compare_and_swap_stream"
+            and result.classification is StoreClassification.DUPLICATE
+            and (result.stream_rows, result.history_rows) == (1, 5)
+        ):
+            semantic_case = "historical_duplicate_mature"
+        elif (
+            gate == "atomicity_classification"
+            and sequence == 9
+            and producer_name == "create_stream"
+            and result.classification is StoreClassification.CONFLICT
+            and (result.stream_rows, result.history_rows) == (2, 6)
+        ):
+            semantic_case = "create_two_candidate_conflict_mature"
+        elif (
+            gate == "atomicity_classification"
+            and sequence == 10
+            and producer_name == "compare_and_swap_stream"
+            and result.classification is StoreClassification.CONFLICT
+            and (result.stream_rows, result.history_rows) == (2, 6)
+            and type(keywords.get("expectation")) is ContinuousPublicTradeStreamExpectationV1
+        ):
+            semantic_case = "cas_expectation_two_candidate_conflict_mature"
+        prefix = (
+            result.classification.value
+            if semantic_case is None
+            else f"{semantic_case}:{result.classification.value}"
+        )
+        return f"{prefix}:stream_rows={result.stream_rows}:history_rows={result.history_rows}"
+    if producer_name == "load_current":
         classification = getattr(result, "classification", None)
         if not isinstance(classification, Enum):
             raise HarnessFailure(HarnessFailureCode.CORRUPT)
@@ -1234,6 +1520,7 @@ def _operation_evidence_executor(  # noqa: UP047 - ParamSpec preserves signature
         raise RuntimeError("TASK064 operation producers are frozen")
     capability = object()
     producer_name = function.__name__
+    function_signature = inspect.signature(function)
     _OPERATION_PRODUCERS[id(capability)] = producer_name
 
     @wraps(function)
@@ -1258,6 +1545,16 @@ def _operation_evidence_executor(  # noqa: UP047 - ParamSpec preserves signature
             or expected_sequence[len(state.observations)] != producer_name
         ):
             raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        try:
+            bound = function_signature.bind(*args, **kwargs)
+        except TypeError:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+        bound.apply_defaults()
+        input_binding = _mutation_operation_binding(
+            producer_name,
+            bound.arguments,
+        )
+        input_digest = None if input_binding is None else _evidence_payload_digest(input_binding)
         registration = state.run._pytest_registration
         registrations: list[_ActivePytestRoot] = []
         token_nonces: list[bytes] = []
@@ -1297,7 +1594,11 @@ def _operation_evidence_executor(  # noqa: UP047 - ParamSpec preserves signature
                     cast(tuple[object, ...], args),
                     cast(Mapping[str, object], kwargs),
                     result,
+                    gate=state.gate,
+                    sequence=len(state.observations),
                 ),
+                input_binding=input_binding,
+                input_digest=input_digest,
                 result=result,
                 payload_digest=_evidence_payload_digest(result),
                 sequence=len(state.observations),
@@ -1330,6 +1631,7 @@ def _private_gate_receipt_digest(
                 (
                     observation.producer_name,
                     observation.operation_tag,
+                    observation.input_digest,
                     observation.payload_digest,
                     observation.sequence,
                     observation.token_nonces,
@@ -1359,9 +1661,23 @@ def _whole_gate_collector(
     gate: str,
     *,
     token_roles: Callable[
-        [tuple[object, ...], Mapping[str, object], object],
+        [Mapping[str, object], object],
         tuple[tuple[str, StoreToken], ...],
     ],
+    preflight: (
+        Callable[
+            [_EvidenceRun, Mapping[str, object]],
+            None,
+        ]
+        | None
+    ) = None,
+    rollback_outputs: (
+        Callable[
+            [_EvidenceRun, Mapping[str, object], object],
+            None,
+        ]
+        | None
+    ) = None,
 ) -> Callable[
     [Callable[_Parameters, _Result]],
     Callable[_Parameters, _Result],
@@ -1372,6 +1688,8 @@ def _whole_gate_collector(
         _GATE_COLLECTORS_FROZEN
         or gate not in GENERATED_EVIDENCE_GATES
         or not callable(token_roles)
+        or (preflight is not None and not callable(preflight))
+        or (rollback_outputs is not None and not callable(rollback_outputs))
         or any(metadata[1] == gate for metadata in _GATE_PRODUCERS.values())
     ):
         raise RuntimeError("invalid TASK064 gate collector registration")
@@ -1385,6 +1703,7 @@ def _whole_gate_collector(
     def decorate(
         function: Callable[_Parameters, _Result],
     ) -> Callable[_Parameters, _Result]:
+        function_signature = inspect.signature(function)
         registered = _EvidenceProducer(
             capability=producer.capability,
             name=function.__name__,
@@ -1403,9 +1722,15 @@ def _whole_gate_collector(
             *args: _Parameters.args,
             **kwargs: _Parameters.kwargs,
         ) -> _Result:
-            if not args or type(args[0]) is not _EvidenceRun:
+            try:
+                bound = function_signature.bind(*args, **kwargs)
+            except TypeError:
+                raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+            bound.apply_defaults()
+            run_value = bound.arguments.get("run")
+            if type(run_value) is not _EvidenceRun:
                 raise HarnessFailure(HarnessFailureCode.CORRUPT)
-            run = args[0]
+            run = run_value
             ledger = _validated_evidence_run(run)
             if (
                 _GATE_PRODUCERS.get(id(registered.capability)) != producer_metadata
@@ -1416,52 +1741,64 @@ def _whole_gate_collector(
                 or registered.ordinal in ledger.observations
             ):
                 raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            invocation = {name: value for name, value in bound.arguments.items() if name != "run"}
+            registration = run._pytest_registration
+            for name, value in invocation.items():
+                if name.endswith("_token") and type(value) is not StoreToken:
+                    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+                if name == "pytest_root" and not isinstance(value, Path):
+                    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+                _validate_collector_value_authority(value, registration)
+            for value in invocation.values():
+                _validate_collector_value_registration(value, registration)
+            if preflight is not None:
+                preflight(run, invocation)
             result = function(*args, **kwargs)
             registrations: list[_ActivePytestRoot] = []
             token_nonces: list[bytes] = []
-            for value in (
-                *args[1:],
-                *cast(Mapping[str, object], kwargs).values(),
-                result,
-            ):
-                _collect_evidence_registrations(
-                    value,
-                    registrations,
-                    token_nonces,
+            try:
+                _validate_collector_value_registration(result, registration)
+                for value in (*invocation.values(), result):
+                    _collect_evidence_registrations(
+                        value,
+                        registrations,
+                        token_nonces,
+                    )
+                named_tokens = token_roles(invocation, result)
+                if (
+                    any(observed is not registration for observed in registrations)
+                    or registration.process_id != os.getpid()
+                    or _ACTIVE_PYTEST_ROOTS.get(id(registration.path_object)) is not registration
+                    or type(named_tokens) is not tuple
+                    or not named_tokens
+                    or len(named_tokens) != len({name for name, _ in named_tokens})
+                    or any(
+                        type(name) is not str
+                        or not name
+                        or type(token) is not StoreToken
+                        or _require_token(token).pytest_registration is not registration
+                        for name, token in named_tokens
+                    )
+                ):
+                    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+                observation = _EvidenceObservation(
+                    value=result,
+                    payload_digest=_evidence_payload_digest(result),
+                    registration=registration,
+                    producer=registered,
+                    run=run,
+                    process_id=os.getpid(),
+                    token_roles=tuple((name, token._nonce) for name, token in named_tokens),
+                    private_receipt_digest=_private_gate_receipt_digest(run, registered.gate),
                 )
-            registration = run._pytest_registration
-            named_tokens = token_roles(
-                args[1:],
-                cast(Mapping[str, object], kwargs),
-                result,
-            )
-            if (
-                any(observed is not registration for observed in registrations)
-                or registration.process_id != os.getpid()
-                or _ACTIVE_PYTEST_ROOTS.get(id(registration.path_object)) is not registration
-                or type(named_tokens) is not tuple
-                or not named_tokens
-                or len(named_tokens) != len({name for name, _ in named_tokens})
-                or any(
-                    type(name) is not str
-                    or not name
-                    or type(token) is not StoreToken
-                    or _TOKEN_REGISTRY.get(token._nonce) is None
-                    or _TOKEN_REGISTRY[token._nonce].pytest_registration is not registration
-                    for name, token in named_tokens
-                )
-            ):
-                raise HarnessFailure(HarnessFailureCode.CORRUPT)
-            ledger.observations[registered.ordinal] = _EvidenceObservation(
-                value=result,
-                payload_digest=_evidence_payload_digest(result),
-                registration=registration,
-                producer=registered,
-                run=run,
-                process_id=os.getpid(),
-                token_roles=tuple((name, token._nonce) for name, token in named_tokens),
-                private_receipt_digest=_private_gate_receipt_digest(run, registered.gate),
-            )
+            except BaseException:
+                if rollback_outputs is not None:
+                    try:
+                        rollback_outputs(run, invocation, result)
+                    except BaseException:
+                        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+                raise
+            ledger.observations[registered.ordinal] = observation
             return result
 
         return wrapped
@@ -1469,10 +1806,27 @@ def _whole_gate_collector(
     return decorate
 
 
-def _close_descriptors(descriptors: Sequence[int]) -> None:
-    for descriptor in descriptors:
-        with suppress(OSError):
+def _close_descriptors(descriptors: Sequence[int]) -> bool:
+    """Close each exact owned descriptor once and report any cleanup uncertainty."""
+
+    cleanup_ok = True
+    for descriptor in dict.fromkeys(descriptors):
+        try:
             os.close(descriptor)
+        except OSError:
+            cleanup_ok = False
+    return cleanup_ok
+
+
+def _close_descriptors_checked(
+    descriptors: Sequence[int],
+    *,
+    code: HarnessFailureCode = HarnessFailureCode.UNAVAILABLE,
+) -> None:
+    """Close exact parent-owned descriptors or fail closed."""
+
+    if not _close_descriptors(descriptors):
+        raise HarnessFailure(code)
 
 
 def _open_pipes(count: int) -> tuple[tuple[int, int], ...]:
@@ -1481,46 +1835,81 @@ def _open_pipes(count: int) -> tuple[tuple[int, int], ...]:
         for _ in range(count):
             pipes.append(os.pipe())
     except OSError:
-        _close_descriptors(tuple(descriptor for pipe in pipes for descriptor in pipe))
+        if not _close_descriptors(tuple(descriptor for pipe in pipes for descriptor in pipe)):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
         raise
     return tuple(pipes)
 
 
-def _wait_for_owned_process(process_id: int, *, timeout_seconds: float = 10.0) -> int | None:
-    """Boundedly reap one exact child without ever signaling a numeric PID."""
+def _wait_for_owned_process_event(
+    process_id: int,
+    *,
+    timeout_seconds: float = 10.0,
+    include_stopped: bool = False,
+) -> int | None:
+    """Boundedly observe one exact child exit or requested traced-stop event."""
 
+    if type(process_id) is not int or process_id <= 0:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
     deadline = time.monotonic() + timeout_seconds
+    options = os.WNOHANG | (os.WUNTRACED if include_stopped else 0)
     while True:
         try:
-            waited_process_id, status = os.waitpid(process_id, os.WNOHANG)
+            waited_process_id, status = os.waitpid(process_id, options)
         except InterruptedError:
+            if time.monotonic() >= deadline:
+                return None
             continue
         except (ChildProcessError, OSError):
             return None
         if waited_process_id == process_id:
-            return status
+            if os.WIFEXITED(status) or os.WIFSIGNALED(status):
+                return status
+            if include_stopped and os.WIFSTOPPED(status):
+                return status
         if time.monotonic() >= deadline:
             return None
         time.sleep(0.01)
 
 
+def _wait_for_owned_process(process_id: int, *, timeout_seconds: float = 10.0) -> int | None:
+    """Boundedly reap one exact child without ever signaling a numeric PID."""
+
+    return _wait_for_owned_process_event(
+        process_id,
+        timeout_seconds=timeout_seconds,
+        include_stopped=False,
+    )
+
+
 def _terminate_and_reap_processes(process_ids: Sequence[int]) -> bool:
     """Kill and boundedly reap only PIDs still proven to be our unreaped children."""
 
+    exact_process_ids = tuple(dict.fromkeys(process_ids))
+    if any(type(process_id) is not int or process_id <= 0 for process_id in exact_process_ids):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
     remaining: set[int] = set()
     cleanup_ok = True
-    for process_id in dict.fromkeys(process_ids):
+    ownership_deadline = time.monotonic() + 10.0
+    for process_id in exact_process_ids:
         while True:
             try:
-                waited_process_id, _ = os.waitpid(process_id, os.WNOHANG)
+                waited_process_id, status = os.waitpid(process_id, os.WNOHANG)
             except InterruptedError:
+                if time.monotonic() >= ownership_deadline:
+                    cleanup_ok = False
+                    remaining.add(process_id)
+                    break
                 continue
             except ChildProcessError:
                 break
             except OSError:
                 cleanup_ok = False
+                remaining.add(process_id)
                 break
             if waited_process_id == process_id:
+                if not (os.WIFEXITED(status) or os.WIFSIGNALED(status)):
+                    remaining.add(process_id)
                 break
             remaining.add(process_id)
             break
@@ -1536,21 +1925,57 @@ def _terminate_and_reap_processes(process_ids: Sequence[int]) -> bool:
         for process_id in tuple(remaining):
             while True:
                 try:
-                    waited_process_id, _ = os.waitpid(process_id, os.WNOHANG)
+                    waited_process_id, status = os.waitpid(process_id, os.WNOHANG)
                 except InterruptedError:
+                    if time.monotonic() >= deadline:
+                        cleanup_ok = False
+                        break
                     continue
                 except ChildProcessError:
                     remaining.discard(process_id)
                 except OSError:
                     cleanup_ok = False
-                    remaining.discard(process_id)
                 else:
-                    if waited_process_id == process_id:
+                    if waited_process_id == process_id and (
+                        os.WIFEXITED(status) or os.WIFSIGNALED(status)
+                    ):
                         remaining.discard(process_id)
                 break
         if remaining:
             time.sleep(0.01)
     return cleanup_ok and not remaining
+
+
+def _finalize_process_resources(
+    descriptors: Sequence[int],
+    process_ids: Sequence[int],
+    *,
+    code: HarnessFailureCode = HarnessFailureCode.UNAVAILABLE,
+) -> None:
+    """Attempt both descriptor and exact-child cleanup before reporting uncertainty."""
+
+    descriptors_ok = _close_descriptors(descriptors)
+    processes_ok = _terminate_and_reap_processes(process_ids)
+    if (not descriptors_ok or not processes_ok) and sys.exception() is None:
+        raise HarnessFailure(code)
+
+
+def _wait_or_terminate_owned_process(
+    process_id: int,
+    *,
+    timeout_seconds: float = 10.0,
+) -> int | None:
+    """Boundedly wait for one child and guarantee a checked termination attempt."""
+
+    status = _wait_for_owned_process(
+        process_id,
+        timeout_seconds=timeout_seconds,
+    )
+    if status is not None:
+        return status
+    if not _terminate_and_reap_processes((process_id,)):
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+    return None
 
 
 def _read_process_packet(_stage: str, descriptor: int, size: int) -> bytes:
@@ -5390,7 +5815,8 @@ def create_stream(
     )
     _invoke_seam(seam_hook, "before_transaction")
     connection, _ = _connect(token, writer=True)
-    rows_materialized = 0
+    stream_rows = 0
+    history_rows = 0
     committed = False
     try:
         connection.execute("BEGIN IMMEDIATE").close()
@@ -5401,13 +5827,13 @@ def create_stream(
             stream_id=record.stream_id,
             natural_key=natural_key,
         )
-        rows_materialized += len(candidates)
+        stream_rows += len(candidates)
         if candidates:
             retained, retained_rows = _validate_identity_candidates(
                 connection,
                 candidates,
             )
-            rows_materialized += retained_rows
+            history_rows += retained_rows
             if len(candidates) == 1 and (
                 candidates[0]["stream_uuid"] == record.stream_id.bytes
                 and candidates[0]["natural_identity_key"] == natural_key
@@ -5426,7 +5852,8 @@ def create_stream(
             return MutationEvidence(
                 classification,
                 statements,
-                rows_materialized,
+                stream_rows,
+                history_rows,
                 committed,
             )
 
@@ -5495,7 +5922,8 @@ def create_stream(
         return MutationEvidence(
             StoreClassification.INSERTED,
             statements,
-            rows_materialized,
+            stream_rows,
+            history_rows,
             committed,
         )
     except sqlite3.Error as error:
@@ -5688,7 +6116,8 @@ def compare_and_swap_stream(
     )
     _invoke_seam(seam_hook, "before_transaction")
     connection, _ = _connect(token, writer=True)
-    rows_materialized = 0
+    stream_rows = 0
+    history_rows = 0
     committed = False
     try:
         connection.execute("BEGIN IMMEDIATE").close()
@@ -5716,7 +6145,7 @@ def compare_and_swap_stream(
                 stream_id=record.stream_id,
                 natural_key=_natural_key_from_expectation(exact_expectation),
             )
-        rows_materialized += len(streams)
+        stream_rows += len(streams)
         if len(streams) != 1 or (
             exact_expectation is not None
             and (
@@ -5732,14 +6161,15 @@ def compare_and_swap_stream(
                     connection,
                     streams,
                 )
-                rows_materialized += retained_rows
+                history_rows += retained_rows
             _verify_operation_authority(connection, token)
             connection.execute("COMMIT").close()
             committed = True
             return MutationEvidence(
                 StoreClassification.CONFLICT,
                 statements,
-                rows_materialized,
+                stream_rows,
+                history_rows,
                 committed,
             )
         stream = streams[0]
@@ -5749,7 +6179,7 @@ def compare_and_swap_stream(
             maximum=MAX_CONTRACT_INTEGER,
         )
         current_rows = _history_rows_for_current(connection, stream)
-        rows_materialized += len(current_rows)
+        history_rows += len(current_rows)
         creation, _, current = _validate_bounded_current(stream, current_rows)
         retained_policy = _policy_from_creation(creation)
         if exact_expectation is not None and not _expectation_matches_retained(
@@ -5763,7 +6193,8 @@ def compare_and_swap_stream(
             return MutationEvidence(
                 StoreClassification.CONFLICT,
                 statements,
-                rows_materialized,
+                stream_rows,
+                history_rows,
                 committed,
             )
         current_version = _require_exact_int(
@@ -5780,7 +6211,7 @@ def compare_and_swap_stream(
                 record.successor_version,
             ),
         )
-        rows_materialized += len(history)
+        history_rows += len(history)
         by_version = {cast(int, row["successor_version"]): row for row in history}
         successor_row = by_version.get(record.successor_version)
         predecessor_row = by_version.get(record.prior_version)
@@ -5792,7 +6223,8 @@ def compare_and_swap_stream(
                 return MutationEvidence(
                     StoreClassification.CORRUPT,
                     statements,
-                    rows_materialized,
+                    stream_rows,
+                    history_rows,
                     committed,
                 )
             retained = _entry_from_history_row(
@@ -5818,7 +6250,8 @@ def compare_and_swap_stream(
             return MutationEvidence(
                 classification,
                 statements,
-                rows_materialized,
+                stream_rows,
+                history_rows,
                 committed,
             )
         if current_version >= record.successor_version:
@@ -5828,7 +6261,8 @@ def compare_and_swap_stream(
             return MutationEvidence(
                 StoreClassification.CORRUPT,
                 statements,
-                rows_materialized,
+                stream_rows,
+                history_rows,
                 committed,
             )
         if predecessor_row is None:
@@ -5838,7 +6272,8 @@ def compare_and_swap_stream(
             return MutationEvidence(
                 StoreClassification.CORRUPT,
                 statements,
-                rows_materialized,
+                stream_rows,
+                history_rows,
                 committed,
             )
         if (
@@ -5854,7 +6289,8 @@ def compare_and_swap_stream(
             return MutationEvidence(
                 StoreClassification.CONFLICT,
                 statements,
-                rows_materialized,
+                stream_rows,
+                history_rows,
                 committed,
             )
 
@@ -5913,7 +6349,8 @@ def compare_and_swap_stream(
             return MutationEvidence(
                 StoreClassification.CONFLICT,
                 statements,
-                rows_materialized,
+                stream_rows,
+                history_rows,
                 False,
             )
         if rowcount != 1:
@@ -5929,7 +6366,8 @@ def compare_and_swap_stream(
         return MutationEvidence(
             StoreClassification.UPDATED,
             statements,
-            rows_materialized,
+            stream_rows,
+            history_rows,
             committed,
         )
     except sqlite3.Error as error:
@@ -6002,15 +6440,16 @@ def sqlite_result_code_fault_evidence(
     try:
         probe_process_id = os.fork()
     except OSError:
-        _close_descriptors(probe_descriptors)
+        _close_descriptors_checked(probe_descriptors)
         return _unproven_process_fault(seam, reason="fork_spawn_failed")
     if probe_process_id == 0:
-        os.close(probe_ready_read)
-        os.close(probe_control_write)
-        os.close(result_read)
         connection: sqlite3.Connection | None = None
         code = -1
+        exit_code = 70
         try:
+            os.close(probe_ready_read)
+            os.close(probe_control_write)
+            os.close(result_read)
             connection, _ = _connect(token, writer=True)
             _verify_operation_snapshot(connection, token, writer=True)
             os.write(probe_ready_write, b"R")
@@ -6035,108 +6474,41 @@ def sqlite_result_code_fault_evidence(
             if connection is not None:
                 _rollback_best_effort(connection)
                 _close_best_effort(connection)
-        with suppress(OSError):
-            os.write(result_write, struct.pack(">i", code))
-        os.close(result_write)
-        os._exit(0 if code >= 0 else 70)
+            try:
+                os.write(result_write, struct.pack(">i", code))
+                os.close(result_write)
+                exit_code = 0 if code >= 0 else 70
+            except BaseException:
+                exit_code = 70
+            os._exit(exit_code)
 
-    os.close(probe_ready_write)
-    os.close(probe_control_read)
-    os.close(result_write)
-    probe_selector = selectors.DefaultSelector()
-    probe_selector.register(probe_ready_read, selectors.EVENT_READ)
-    try:
-        probe_ready = os.read(probe_ready_read, 1) if probe_selector.select(timeout=10.0) else b""
-    finally:
-        probe_selector.close()
-        os.close(probe_ready_read)
-    if probe_ready != b"R":
-        with suppress(ProcessLookupError):
-            os.kill(probe_process_id, signal.SIGKILL)
-        with suppress(ChildProcessError):
-            os.waitpid(probe_process_id, 0)
-        os.close(probe_control_write)
-        os.close(result_read)
-        return FaultEvidence(
-            seam=seam,
-            disposition=EvidenceDisposition.UNPROVEN,
-            sqlite_errorcode=None,
-            observed_syscall=None,
-            acknowledgement_bytes=0,
-            reopened_state=ReopenedState.UNAVAILABLE,
-            reason="probe_open_failed",
-        )
+    owned_descriptors = set(probe_descriptors)
+    live_processes = {probe_process_id}
+
+    def close_owned(*descriptors: int) -> None:
+        for descriptor in descriptors:
+            if descriptor not in owned_descriptors:
+                continue
+            _close_descriptors_checked((descriptor,))
+            owned_descriptors.remove(descriptor)
 
     holder_process_id: int | None = None
     holder_release_write: int | None = None
     holder_ok = True
-    if seam == "busy":
+    payload = b""
+    probe_status: int | None = None
+    try:
+        close_owned(probe_ready_write, probe_control_read, result_write)
+        probe_selector = selectors.DefaultSelector()
         try:
-            holder_ready_pipe, holder_release_pipe = _open_pipes(2)
-        except OSError:
-            _close_descriptors((probe_control_write, result_read))
-            _terminate_and_reap_processes((probe_process_id,))
-            return _unproven_process_fault(seam, reason="ipc_setup_failed")
-        holder_ready_read, holder_ready_write = holder_ready_pipe
-        holder_release_read, holder_release_write = holder_release_pipe
-        holder_descriptors = (
-            holder_ready_read,
-            holder_ready_write,
-            holder_release_read,
-            holder_release_write,
-        )
-        try:
-            holder_process_id = os.fork()
-        except OSError:
-            _close_descriptors(
-                (
-                    *holder_descriptors,
-                    probe_control_write,
-                    result_read,
-                )
+            probe_selector.register(probe_ready_read, selectors.EVENT_READ)
+            probe_ready = (
+                os.read(probe_ready_read, 1) if probe_selector.select(timeout=10.0) else b""
             )
-            _terminate_and_reap_processes((probe_process_id,))
-            return _unproven_process_fault(seam, reason="fork_spawn_failed")
-        if holder_process_id == 0:
-            os.close(holder_ready_read)
-            os.close(holder_release_write)
-            os.close(probe_control_write)
-            os.close(result_read)
-            holder_connection: sqlite3.Connection | None = None
-            try:
-                holder_connection, _ = _connect(token, writer=True)
-                holder_connection.execute("BEGIN IMMEDIATE").close()
-                os.write(holder_ready_write, b"R")
-                if os.read(holder_release_read, 1) != b"C":
-                    os._exit(71)
-                _verify_operation_authority(holder_connection, token)
-                holder_connection.execute("ROLLBACK").close()
-                _close_checked(holder_connection)
-                os._exit(0)
-            except BaseException:
-                _close_best_effort(holder_connection)
-                os._exit(70)
-        os.close(holder_ready_write)
-        os.close(holder_release_read)
-        selector = selectors.DefaultSelector()
-        selector.register(holder_ready_read, selectors.EVENT_READ)
-        try:
-            ready = os.read(holder_ready_read, 1) if selector.select(timeout=10.0) else b""
         finally:
-            selector.close()
-            os.close(holder_ready_read)
-        if ready != b"R":
-            with suppress(ProcessLookupError):
-                os.kill(holder_process_id, signal.SIGKILL)
-            with suppress(ChildProcessError):
-                os.waitpid(holder_process_id, 0)
-            os.close(holder_release_write)
-            with suppress(ProcessLookupError):
-                os.kill(probe_process_id, signal.SIGKILL)
-            with suppress(ChildProcessError):
-                os.waitpid(probe_process_id, 0)
-            os.close(probe_control_write)
-            os.close(result_read)
+            probe_selector.close()
+        close_owned(probe_ready_read)
+        if probe_ready != b"R":
             return FaultEvidence(
                 seam=seam,
                 disposition=EvidenceDisposition.UNPROVEN,
@@ -6144,75 +6516,139 @@ def sqlite_result_code_fault_evidence(
                 observed_syscall=None,
                 acknowledgement_bytes=0,
                 reopened_state=ReopenedState.UNAVAILABLE,
-                reason="busy_holder_failed",
+                reason="probe_open_failed",
             )
-    with suppress(OSError):
-        os.write(probe_control_write, b"C")
-    os.close(probe_control_write)
-    selector = selectors.DefaultSelector()
-    selector.register(result_read, selectors.EVENT_READ)
-    payload = b""
-    try:
-        events = selector.select(timeout=10.0)
-        if events:
-            payload = os.read(result_read, 4)
-        if len(payload) != 4:
-            with suppress(ProcessLookupError):
-                os.kill(probe_process_id, signal.SIGKILL)
-        _, probe_status = os.waitpid(probe_process_id, 0)
-    finally:
-        selector.close()
-        os.close(result_read)
-        if holder_process_id is not None and holder_release_write is not None:
-            with suppress(OSError):
-                os.write(holder_release_write, b"C")
-            os.close(holder_release_write)
+
+        if seam == "busy":
             try:
-                _, holder_status = os.waitpid(holder_process_id, 0)
-            except ChildProcessError:
-                holder_ok = False
-            else:
-                holder_ok = os.WIFEXITED(holder_status) and os.WEXITSTATUS(holder_status) == 0
-    if len(payload) != 4:
+                holder_ready_pipe, holder_release_pipe = _open_pipes(2)
+            except OSError:
+                return _unproven_process_fault(seam, reason="ipc_setup_failed")
+            holder_ready_read, holder_ready_write = holder_ready_pipe
+            holder_release_read, holder_release_write = holder_release_pipe
+            holder_descriptors = (
+                holder_ready_read,
+                holder_ready_write,
+                holder_release_read,
+                holder_release_write,
+            )
+            owned_descriptors.update(holder_descriptors)
+            try:
+                holder_process_id = os.fork()
+            except OSError:
+                return _unproven_process_fault(seam, reason="fork_spawn_failed")
+            if holder_process_id == 0:
+                holder_connection: sqlite3.Connection | None = None
+                exit_code = 70
+                try:
+                    os.close(holder_ready_read)
+                    os.close(holder_release_write)
+                    os.close(probe_control_write)
+                    os.close(result_read)
+                    holder_connection, _ = _connect(token, writer=True)
+                    holder_connection.execute("BEGIN IMMEDIATE").close()
+                    os.write(holder_ready_write, b"R")
+                    if os.read(holder_release_read, 1) != b"C":
+                        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                    _verify_operation_authority(holder_connection, token)
+                    holder_connection.execute("ROLLBACK").close()
+                    _close_checked(holder_connection)
+                    holder_connection = None
+                    exit_code = 0
+                except BaseException:
+                    _close_best_effort(holder_connection)
+                os._exit(exit_code)
+            live_processes.add(holder_process_id)
+            close_owned(holder_ready_write, holder_release_read)
+            selector = selectors.DefaultSelector()
+            try:
+                selector.register(holder_ready_read, selectors.EVENT_READ)
+                ready = os.read(holder_ready_read, 1) if selector.select(timeout=10.0) else b""
+            finally:
+                selector.close()
+            close_owned(holder_ready_read)
+            if ready != b"R":
+                return FaultEvidence(
+                    seam=seam,
+                    disposition=EvidenceDisposition.UNPROVEN,
+                    sqlite_errorcode=None,
+                    observed_syscall=None,
+                    acknowledgement_bytes=0,
+                    reopened_state=ReopenedState.UNAVAILABLE,
+                    reason="busy_holder_failed",
+                )
+
+        _write_process_packet(probe_control_write, b"C")
+        close_owned(probe_control_write)
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(result_read, selectors.EVENT_READ)
+            events = selector.select(timeout=10.0)
+            if events:
+                payload = os.read(result_read, 4)
+        finally:
+            selector.close()
+        probe_status = _wait_or_terminate_owned_process(probe_process_id)
+        live_processes.discard(probe_process_id)
+        close_owned(result_read)
+        if holder_process_id is not None and holder_release_write is not None:
+            _write_process_packet(holder_release_write, b"C")
+            close_owned(holder_release_write)
+            holder_status = _wait_or_terminate_owned_process(holder_process_id)
+            live_processes.discard(holder_process_id)
+            holder_ok = (
+                holder_status is not None
+                and os.WIFEXITED(holder_status)
+                and os.WEXITSTATUS(holder_status) == 0
+            )
+        if len(payload) != 4:
+            return FaultEvidence(
+                seam=seam,
+                disposition=EvidenceDisposition.UNPROVEN,
+                sqlite_errorcode=None,
+                observed_syscall=None,
+                acknowledgement_bytes=len(payload),
+                reopened_state=ReopenedState.UNAVAILABLE,
+                reason="result_code_probe_failed",
+            )
+        (sqlite_errorcode,) = struct.unpack(">i", payload)
+        expected = sqlite3.SQLITE_READONLY if seam == "readonly" else sqlite3.SQLITE_BUSY
+        try:
+            after = verify_store(token)
+            unchanged = (
+                before.schema_fingerprint == after.schema_fingerprint
+                and before.stream_count == after.stream_count
+                and before.history_count == after.history_count
+            )
+        except HarnessFailure:
+            unchanged = False
+        passed = (
+            probe_status is not None
+            and os.WIFEXITED(probe_status)
+            and os.WEXITSTATUS(probe_status) == 0
+            and holder_ok
+            and sqlite_errorcode == expected
+            and sqlite_result_failure_code(sqlite_errorcode) is HarnessFailureCode.UNAVAILABLE
+            and unchanged
+        )
         return FaultEvidence(
             seam=seam,
-            disposition=EvidenceDisposition.UNPROVEN,
-            sqlite_errorcode=None,
-            observed_syscall=None,
+            disposition=(EvidenceDisposition.PASS if passed else EvidenceDisposition.FAIL),
+            sqlite_errorcode=sqlite_errorcode,
+            observed_syscall=(
+                "sqlite3-query-only" if seam == "readonly" else "forked-BEGIN-IMMEDIATE-contention"
+            ),
             acknowledgement_bytes=len(payload),
-            reopened_state=ReopenedState.UNAVAILABLE,
-            reason="result_code_probe_failed",
+            reopened_state=(ReopenedState.OLD if unchanged else ReopenedState.UNAVAILABLE),
+            reason=None if passed else "result_code_or_state_mismatch",
         )
-    (sqlite_errorcode,) = struct.unpack(">i", payload)
-    expected = sqlite3.SQLITE_READONLY if seam == "readonly" else sqlite3.SQLITE_BUSY
-    try:
-        after = verify_store(token)
-        unchanged = (
-            before.schema_fingerprint == after.schema_fingerprint
-            and before.stream_count == after.stream_count
-            and before.history_count == after.history_count
+    except (ChildProcessError, OSError):
+        return _unproven_process_fault(seam, reason="process_protocol_failed")
+    finally:
+        _finalize_process_resources(
+            tuple(owned_descriptors),
+            tuple(live_processes),
         )
-    except HarnessFailure:
-        unchanged = False
-    passed = (
-        os.WIFEXITED(probe_status)
-        and os.WEXITSTATUS(probe_status) == 0
-        and holder_ok
-        and sqlite_errorcode == expected
-        and sqlite_result_failure_code(sqlite_errorcode) is HarnessFailureCode.UNAVAILABLE
-        and unchanged
-    )
-    return FaultEvidence(
-        seam=seam,
-        disposition=(EvidenceDisposition.PASS if passed else EvidenceDisposition.FAIL),
-        sqlite_errorcode=sqlite_errorcode,
-        observed_syscall=(
-            "sqlite3-query-only" if seam == "readonly" else "forked-BEGIN-IMMEDIATE-contention"
-        ),
-        acknowledgement_bytes=len(payload),
-        reopened_state=(ReopenedState.OLD if unchanged else ReopenedState.UNAVAILABLE),
-        reason=None if passed else "result_code_or_state_mismatch",
-    )
 
 
 _WRITER_OUTCOME_PACKETS: Final = {
@@ -6337,8 +6773,10 @@ def fresh_process_writer_contention_evidence(
     def spawn_failed(
         process_ids: Sequence[int],
     ) -> WriterContentionEvidence:
-        _close_descriptors(all_descriptors)
-        _terminate_and_reap_processes(process_ids)
+        descriptors_ok = _close_descriptors(all_descriptors)
+        processes_ok = _terminate_and_reap_processes(process_ids)
+        if not descriptors_ok or not processes_ok:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
         return WriterContentionEvidence(
             operation=operation,
             winner_outcome=None,
@@ -6425,7 +6863,7 @@ def fresh_process_writer_contention_evidence(
             os.write(contender_result_write, packet)
         os._exit(0 if packet[:1] != b"E" else 70)
 
-    for descriptor in (
+    child_descriptors = (
         winner_ready_write,
         winner_start_read,
         winner_locked_write,
@@ -6434,8 +6872,7 @@ def fresh_process_writer_contention_evidence(
         contender_ready_write,
         contender_start_read,
         contender_result_write,
-    ):
-        os.close(descriptor)
+    )
 
     def read_packet(descriptor: int, size: int) -> bytes:
         selector = selectors.DefaultSelector()
@@ -6450,17 +6887,10 @@ def fresh_process_writer_contention_evidence(
     winner_outcome: StoreClassification | HarnessFailureCode | None = None
     contender_outcome: StoreClassification | HarnessFailureCode | None = None
     contender_code: int | None = None
-    parent_descriptors = (
-        winner_ready_read,
-        winner_start_write,
-        winner_locked_read,
-        winner_release_write,
-        winner_result_read,
-        contender_ready_read,
-        contender_start_write,
-        contender_result_read,
-    )
+    owned_descriptors = set(all_descriptors)
     try:
+        _close_descriptors_checked(child_descriptors)
+        owned_descriptors.difference_update(child_descriptors)
         winner_ready = read_packet(winner_ready_read, 1)
         contender_ready = read_packet(contender_ready_read, 1)
         if winner_ready != b"R" or contender_ready != b"R":
@@ -6482,10 +6912,11 @@ def fresh_process_writer_contention_evidence(
                 )
                 raw_code = struct.unpack(">i", contender_packet[1:])[0]
                 contender_code = raw_code if raw_code >= 0 else None
-            _, contender_status = os.waitpid(contender_process_id, 0)
+            contender_status = _wait_or_terminate_owned_process(contender_process_id)
             live_processes.remove(contender_process_id)
             protocol_ok = (
                 protocol_ok
+                and contender_status is not None
                 and os.WIFEXITED(contender_status)
                 and os.WEXITSTATUS(contender_status) == 0
             )
@@ -6496,25 +6927,18 @@ def fresh_process_writer_contention_evidence(
                 StoreClassification | HarnessFailureCode | None,
                 _WRITER_PACKET_OUTCOMES.get(winner_packet),
             )
-            _, winner_status = os.waitpid(winner_process_id, 0)
+            winner_status = _wait_or_terminate_owned_process(winner_process_id)
             live_processes.remove(winner_process_id)
             protocol_ok = (
-                os.WIFEXITED(winner_status)
+                winner_status is not None
+                and os.WIFEXITED(winner_status)
                 and os.WEXITSTATUS(winner_status) == 0
                 and winner_outcome is not None
             )
     except (OSError, ChildProcessError, struct.error):
         protocol_ok = False
     finally:
-        for descriptor in parent_descriptors:
-            with suppress(OSError):
-                os.close(descriptor)
-        for process_id in live_processes:
-            with suppress(ProcessLookupError):
-                os.kill(process_id, signal.SIGKILL)
-        for process_id in live_processes:
-            with suppress(ChildProcessError):
-                os.waitpid(process_id, 0)
+        _finalize_process_resources(tuple(owned_descriptors), tuple(live_processes))
 
     after = verify_store(token)
     current = load_current(
@@ -6623,10 +7047,12 @@ def fresh_process_two_writer_evidence(
         try:
             process_id = os.fork()
         except OSError:
-            _close_descriptors(all_descriptors)
-            _terminate_and_reap_processes(
+            descriptors_ok = _close_descriptors(all_descriptors)
+            processes_ok = _terminate_and_reap_processes(
                 tuple(child_process_id for child_process_id, _, _, _ in children)
             )
+            if not descriptors_ok or not processes_ok:
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
             return TwoWriterEvidence(
                 operation=operation,
                 outcomes=(),
@@ -6666,18 +7092,19 @@ def fresh_process_two_writer_evidence(
                 os.write(result_write, packet)
             os._exit(0 if packet != b"E" else 70)
         children.append((process_id, ready_read, control_write, result_read))
-    for _, (ready, control, result) in zip(exact_values, pipes, strict=True):
-        _, ready_write = ready
-        control_read, _ = control
-        _, result_write = result
-        os.close(ready_write)
-        os.close(control_read)
-        os.close(result_write)
 
     outcomes: list[StoreClassification | HarnessFailureCode] = []
     protocol_ok = True
     live_processes = {process_id for process_id, _, _, _ in children}
+    child_descriptors = tuple(
+        descriptor
+        for _, (ready, control, result) in zip(exact_values, pipes, strict=True)
+        for descriptor in (ready[1], control[0], result[1])
+    )
+    owned_descriptors = set(all_descriptors)
     try:
+        _close_descriptors_checked(child_descriptors)
+        owned_descriptors.difference_update(child_descriptors)
         for _, ready_read, _, _ in children:
             selector = selectors.DefaultSelector()
             selector.register(ready_read, selectors.EVENT_READ)
@@ -6685,41 +7112,33 @@ def fresh_process_two_writer_evidence(
                 readiness_packet = os.read(ready_read, 1) if selector.select(timeout=10.0) else b""
             finally:
                 selector.close()
-                os.close(ready_read)
             protocol_ok = protocol_ok and readiness_packet == b"R"
         for process_id, _, control_write, result_read in children:
             if protocol_ok:
                 os.write(control_write, b"C")
-            os.close(control_write)
             selector = selectors.DefaultSelector()
             selector.register(result_read, selectors.EVENT_READ)
             try:
                 packet = os.read(result_read, 1) if selector.select(timeout=10.0) else b""
             finally:
                 selector.close()
-                os.close(result_read)
-            _, status = os.waitpid(process_id, 0)
+            status = _wait_or_terminate_owned_process(process_id)
             live_processes.remove(process_id)
             decoded_outcome = cast(
                 StoreClassification | HarnessFailureCode | None,
                 _WRITER_PACKET_OUTCOMES.get(packet),
             )
-            if not os.WIFEXITED(status) or os.WEXITSTATUS(status) != 0 or decoded_outcome is None:
+            if (
+                status is None
+                or not os.WIFEXITED(status)
+                or os.WEXITSTATUS(status) != 0
+                or decoded_outcome is None
+            ):
                 protocol_ok = False
             else:
                 outcomes.append(decoded_outcome)
     finally:
-        for _, _, control_write, result_read in children:
-            with suppress(OSError):
-                os.close(control_write)
-            with suppress(OSError):
-                os.close(result_read)
-        for process_id in live_processes:
-            with suppress(ProcessLookupError):
-                os.kill(process_id, signal.SIGKILL)
-        for process_id in live_processes:
-            with suppress(ChildProcessError):
-                os.waitpid(process_id, 0)
+        _finalize_process_resources(tuple(owned_descriptors), tuple(live_processes))
 
     after = verify_store(token)
     expected_delta = 1
@@ -6800,18 +7219,19 @@ def fresh_process_kill_evidence(
     try:
         process_id = os.fork()
     except OSError:
-        _close_descriptors((read_descriptor, write_descriptor))
+        _close_descriptors_checked((read_descriptor, write_descriptor))
         return _unproven_process_fault(seam, reason="fork_spawn_failed")
     if process_id == 0:
-        os.close(read_descriptor)
-
-        def child_hook(observed_seam: str) -> None:
-            if observed_seam == seam:
-                os.write(write_descriptor, b"R")
-                while True:
-                    signal.pause()
-
+        exit_code = 70
         try:
+            os.close(read_descriptor)
+
+            def child_hook(observed_seam: str) -> None:
+                if observed_seam == seam:
+                    os.write(write_descriptor, b"R")
+                    while True:
+                        signal.pause()
+
             if is_create:
                 create_stream(
                     token,
@@ -6832,26 +7252,30 @@ def fresh_process_kill_evidence(
                     seam_hook=child_hook,
                 )
             os.write(write_descriptor, b"A")
-            os._exit(0)
+            exit_code = 0
         except BaseException:
             with suppress(OSError):
                 os.write(write_descriptor, b"E")
-            os._exit(70)
+        finally:
+            with suppress(OSError):
+                os.close(write_descriptor)
+            os._exit(exit_code)
 
-    os.close(write_descriptor)
-    selector = selectors.DefaultSelector()
-    selector.register(read_descriptor, selectors.EVENT_READ)
     observed = b""
+    owned_descriptors = {read_descriptor, write_descriptor}
     try:
-        events = selector.select(timeout=10.0)
-        if events:
-            observed = os.read(read_descriptor, 1)
-        with suppress(ProcessLookupError):
-            os.kill(process_id, signal.SIGKILL)
-        os.waitpid(process_id, 0)
+        _close_descriptors_checked((write_descriptor,))
+        owned_descriptors.remove(write_descriptor)
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(read_descriptor, selectors.EVENT_READ)
+            events = selector.select(timeout=10.0)
+            if events:
+                observed = os.read(read_descriptor, 1)
+        finally:
+            selector.close()
     finally:
-        selector.close()
-        os.close(read_descriptor)
+        _finalize_process_resources(tuple(owned_descriptors), (process_id,))
     if observed != b"R":
         return FaultEvidence(
             seam=seam,
@@ -6941,6 +7365,136 @@ def fresh_process_kill_evidence(
     )
 
 
+def _trace_commit_page_write(
+    process_id: int,
+    *,
+    ready_read: int,
+    ready_write: int,
+    control_read: int,
+    control_write: int,
+    wal_path: str,
+) -> tuple[bool, int, str | None]:
+    """Boundedly trace one exact child until the WAL frame page write is stopped."""
+
+    descriptors = (ready_read, ready_write, control_read, control_write)
+    handshake = b""
+    try:
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(ready_read, selectors.EVENT_READ)
+            events = selector.select(timeout=10.0)
+            if events:
+                handshake = os.read(ready_read, 1)
+        finally:
+            selector.close()
+        if handshake != b"R":
+            return False, 1 if handshake == b"A" else 0, "commit_gate_handshake_failed"
+
+        library = ctypes.CDLL(None, use_errno=True)
+        library.ptrace.restype = ctypes.c_long
+        seized = _ptrace_raw(
+            library,
+            _PTRACE_SEIZE,
+            process_id,
+            ctypes.c_void_p(),
+            ctypes.c_void_p(_PTRACE_O_TRACESYSGOOD),
+        )
+        interrupted = (
+            seized == 0
+            and _ptrace_raw(
+                library,
+                _PTRACE_INTERRUPT,
+                process_id,
+                ctypes.c_void_p(),
+                ctypes.c_void_p(),
+            )
+            == 0
+        )
+        if not interrupted:
+            return False, 0, "ptrace_seize_failed"
+        initial_status = _wait_for_owned_process_event(
+            process_id,
+            timeout_seconds=10.0,
+            include_stopped=True,
+        )
+        if initial_status is None or not os.WIFSTOPPED(initial_status):
+            return False, 0, "ptrace_initial_stop_failed"
+
+        os.write(control_write, b"C")
+        pending_header_offset: int | None = None
+        completed_header_offset: int | None = None
+        deadline = time.monotonic() + 10.0
+        for _ in range(20_000):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            if (
+                _ptrace_raw(
+                    library,
+                    _PTRACE_SYSCALL,
+                    process_id,
+                    ctypes.c_void_p(),
+                    ctypes.c_void_p(),
+                )
+                != 0
+            ):
+                break
+            status = _wait_for_owned_process_event(
+                process_id,
+                timeout_seconds=remaining,
+                include_stopped=True,
+            )
+            if status is None or os.WIFEXITED(status) or os.WIFSIGNALED(status):
+                break
+            if not os.WIFSTOPPED(status):
+                continue
+            if os.WSTOPSIG(status) != (signal.SIGTRAP | 0x80):
+                continue
+            information = _PtraceSyscallInfo()
+            received = _ptrace_raw(
+                library,
+                _PTRACE_GET_SYSCALL_INFO,
+                process_id,
+                ctypes.c_void_p(ctypes.sizeof(information)),
+                ctypes.byref(information),
+            )
+            if received <= 0 or information.architecture != _AUDIT_ARCH_X86_64:
+                continue
+            if information.operation == _PTRACE_SYSCALL_INFO_ENTRY:
+                entry = information.payload.entry
+                if entry.number != _X86_64_PWRITE64:
+                    continue
+                file_descriptor = int(entry.arguments[0])
+                byte_count = int(entry.arguments[2])
+                offset = int(entry.arguments[3])
+                try:
+                    target = os.readlink(f"/proc/{process_id}/fd/{file_descriptor}")
+                except OSError:
+                    continue
+                if target != wal_path:
+                    continue
+                if byte_count == 24:
+                    pending_header_offset = offset
+                elif (
+                    completed_header_offset is not None
+                    and byte_count == PAGE_SIZE
+                    and offset == completed_header_offset + 24
+                ):
+                    return True, 0, None
+            elif (
+                information.operation == _PTRACE_SYSCALL_INFO_EXIT
+                and pending_header_offset is not None
+            ):
+                if information.payload.exit.return_value == 24:
+                    completed_header_offset = pending_header_offset
+                pending_header_offset = None
+        return False, 0, "wal_commit_write_not_observed"
+    except (ChildProcessError, OSError):
+        return False, 0, "ptrace_protocol_failed"
+    finally:
+        _finalize_process_resources(descriptors, (process_id,))
+
+
 @_operation_evidence_executor
 def true_during_commit_evidence(
     token: StoreToken,
@@ -6952,7 +7506,7 @@ def true_during_commit_evidence(
 
     exact = _validated_transition(transition)
     decode_natural_identity_key(natural_key)
-    _require_token(token)
+    identity = _require_token(token)
     if not hasattr(os, "fork") or not hasattr(os, "uname") or os.uname().machine != "x86_64":
         return FaultEvidence(
             seam="true_during_commit",
@@ -6976,189 +7530,56 @@ def true_during_commit_evidence(
     try:
         process_id = os.fork()
     except OSError:
-        _close_descriptors((ready_read, ready_write, control_read, control_write))
+        _close_descriptors_checked((ready_read, ready_write, control_read, control_write))
         return _unproven_process_fault(
             "true_during_commit",
             reason="fork_spawn_failed",
         )
     if process_id == 0:
-        os.close(ready_read)
-        os.close(control_write)
-        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-
-        def commit_gate(observed_seam: str) -> None:
-            if observed_seam == "between_current_update_and_compare_and_swap_commit":
-                os.write(ready_write, b"R")
-                if os.read(control_read, 1) != b"C":
-                    os._exit(71)
-
+        exit_code = 70
         try:
+            os.close(ready_read)
+            os.close(control_write)
+            resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+            def commit_gate(observed_seam: str) -> None:
+                if observed_seam == "between_current_update_and_compare_and_swap_commit":
+                    os.write(ready_write, b"R")
+                    if os.read(control_read, 1) != b"C":
+                        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+
             compare_and_swap_stream(
                 token,
                 exact,
                 seam_hook=commit_gate,
             )
             os.write(ready_write, b"A")
-            os._exit(0)
+            exit_code = 0
         except BaseException:
             with suppress(OSError):
                 os.write(ready_write, b"E")
-            os._exit(70)
+        finally:
+            _close_descriptors((ready_write, control_read))
+            os._exit(exit_code)
 
-    os.close(ready_write)
-    os.close(control_read)
-    selector = selectors.DefaultSelector()
-    selector.register(ready_read, selectors.EVENT_READ)
-    handshake = b""
-    try:
-        events = selector.select(timeout=10.0)
-        if events:
-            handshake = os.read(ready_read, 1)
-    finally:
-        selector.close()
-        os.close(ready_read)
-    if handshake != b"R":
-        with suppress(ProcessLookupError):
-            os.kill(process_id, signal.SIGKILL)
-        os.waitpid(process_id, 0)
-        os.close(control_write)
-        return FaultEvidence(
-            seam="true_during_commit",
-            disposition=EvidenceDisposition.UNPROVEN,
-            sqlite_errorcode=None,
-            observed_syscall=None,
-            acknowledgement_bytes=1 if handshake == b"A" else 0,
-            reopened_state=ReopenedState.UNAVAILABLE,
-            reason="commit_gate_handshake_failed",
-        )
-
-    library = ctypes.CDLL(None, use_errno=True)
-    library.ptrace.restype = ctypes.c_long
-    seized = _ptrace_raw(
-        library,
-        _PTRACE_SEIZE,
+    wal_path = f"{identity.database_path}-wal"
+    page_write_stopped, acknowledgement_bytes, trace_reason = _trace_commit_page_write(
         process_id,
-        ctypes.c_void_p(),
-        ctypes.c_void_p(_PTRACE_O_TRACESYSGOOD),
+        ready_read=ready_read,
+        ready_write=ready_write,
+        control_read=control_read,
+        control_write=control_write,
+        wal_path=wal_path,
     )
-    interrupted = (
-        seized == 0
-        and _ptrace_raw(
-            library,
-            _PTRACE_INTERRUPT,
-            process_id,
-            ctypes.c_void_p(),
-            ctypes.c_void_p(),
-        )
-        == 0
-    )
-    if not interrupted:
-        with suppress(ProcessLookupError):
-            os.kill(process_id, signal.SIGKILL)
-        os.waitpid(process_id, 0)
-        os.close(control_write)
-        return FaultEvidence(
-            seam="true_during_commit",
-            disposition=EvidenceDisposition.UNPROVEN,
-            sqlite_errorcode=None,
-            observed_syscall=None,
-            acknowledgement_bytes=0,
-            reopened_state=ReopenedState.UNAVAILABLE,
-            reason="ptrace_seize_failed",
-        )
-    _, initial_status = os.waitpid(process_id, 0)
-    if not os.WIFSTOPPED(initial_status):
-        with suppress(ProcessLookupError):
-            os.kill(process_id, signal.SIGKILL)
-        os.waitpid(process_id, 0)
-        os.close(control_write)
-        return FaultEvidence(
-            seam="true_during_commit",
-            disposition=EvidenceDisposition.UNPROVEN,
-            sqlite_errorcode=None,
-            observed_syscall=None,
-            acknowledgement_bytes=0,
-            reopened_state=ReopenedState.UNAVAILABLE,
-            reason="ptrace_initial_stop_failed",
-        )
-
-    os.write(control_write, b"C")
-    os.close(control_write)
-    wal_path = f"{_require_token(token).database_path}-wal"
-    pending_header_offset: int | None = None
-    completed_header_offset: int | None = None
-    page_write_stopped = False
-    for _ in range(20_000):
-        if (
-            _ptrace_raw(
-                library,
-                _PTRACE_SYSCALL,
-                process_id,
-                ctypes.c_void_p(),
-                ctypes.c_void_p(),
-            )
-            != 0
-        ):
-            break
-        _, status = os.waitpid(process_id, 0)
-        if os.WIFEXITED(status) or os.WIFSIGNALED(status):
-            break
-        if not os.WIFSTOPPED(status):
-            continue
-        if os.WSTOPSIG(status) != (signal.SIGTRAP | 0x80):
-            continue
-        information = _PtraceSyscallInfo()
-        received = _ptrace_raw(
-            library,
-            _PTRACE_GET_SYSCALL_INFO,
-            process_id,
-            ctypes.c_void_p(ctypes.sizeof(information)),
-            ctypes.byref(information),
-        )
-        if received <= 0 or information.architecture != _AUDIT_ARCH_X86_64:
-            continue
-        if information.operation == _PTRACE_SYSCALL_INFO_ENTRY:
-            entry = information.payload.entry
-            if entry.number != _X86_64_PWRITE64:
-                continue
-            file_descriptor = int(entry.arguments[0])
-            byte_count = int(entry.arguments[2])
-            offset = int(entry.arguments[3])
-            try:
-                target = os.readlink(f"/proc/{process_id}/fd/{file_descriptor}")
-            except OSError:
-                continue
-            if target != wal_path:
-                continue
-            if byte_count == 24:
-                pending_header_offset = offset
-            elif (
-                completed_header_offset is not None
-                and byte_count == PAGE_SIZE
-                and offset == completed_header_offset + 24
-            ):
-                page_write_stopped = True
-                break
-        elif (
-            information.operation == _PTRACE_SYSCALL_INFO_EXIT and pending_header_offset is not None
-        ):
-            if information.payload.exit.return_value == 24:
-                completed_header_offset = pending_header_offset
-            pending_header_offset = None
-
-    with suppress(ProcessLookupError):
-        os.kill(process_id, signal.SIGKILL)
-    with suppress(ChildProcessError):
-        os.waitpid(process_id, 0)
     if not page_write_stopped:
         return FaultEvidence(
             seam="true_during_commit",
             disposition=EvidenceDisposition.UNPROVEN,
             sqlite_errorcode=None,
             observed_syscall=None,
-            acknowledgement_bytes=0,
+            acknowledgement_bytes=acknowledgement_bytes,
             reopened_state=ReopenedState.UNAVAILABLE,
-            reason="wal_commit_write_not_observed",
+            reason=trace_reason,
         )
 
     try:
@@ -7243,44 +7664,45 @@ def ioerr_write_evidence(
     try:
         process_id = os.fork()
     except OSError:
-        _close_descriptors((read_descriptor, write_descriptor))
+        _close_descriptors_checked((read_descriptor, write_descriptor))
         return _unproven_process_fault(
             "sqlite_ioerr_write",
             reason="fork_spawn_failed",
         )
     if process_id == 0:
-        os.close(read_descriptor)
-        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-        signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
         efbig_proven = False
-
-        def arm_file_limit(observed_seam: str) -> None:
-            nonlocal efbig_proven
-            if observed_seam != "between_current_update_and_compare_and_swap_commit":
-                return
-            wal_path = Path(f"{identity.database_path}-wal")
-            wal_size = wal_path.stat().st_size
-            resource.setrlimit(resource.RLIMIT_FSIZE, (wal_size, wal_size))
-            file_descriptor = os.open(
-                wal_path,
-                os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0),
-            )
-            try:
-                try:
-                    os.pwrite(file_descriptor, b"X", wal_size)
-                except OSError as error:
-                    efbig_proven = error.errno == errno.EFBIG
-            finally:
-                os.close(file_descriptor)
-
+        exit_code = 70
         try:
+            os.close(read_descriptor)
+            resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+            signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+
+            def arm_file_limit(observed_seam: str) -> None:
+                nonlocal efbig_proven
+                if observed_seam != "between_current_update_and_compare_and_swap_commit":
+                    return
+                wal_path = Path(f"{identity.database_path}-wal")
+                wal_size = wal_path.stat().st_size
+                resource.setrlimit(resource.RLIMIT_FSIZE, (wal_size, wal_size))
+                file_descriptor = os.open(
+                    wal_path,
+                    os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0),
+                )
+                try:
+                    try:
+                        os.pwrite(file_descriptor, b"X", wal_size)
+                    except OSError as error:
+                        efbig_proven = error.errno == errno.EFBIG
+                finally:
+                    os.close(file_descriptor)
+
             compare_and_swap_stream(
                 token,
                 exact,
                 seam_hook=arm_file_limit,
             )
             os.write(write_descriptor, b"A")
-            os._exit(0)
+            exit_code = 0
         except HarnessFailure as error:
             code = error.sqlite_errorcode
             packet = (
@@ -7288,30 +7710,45 @@ def ioerr_write_evidence(
                 + struct.pack(">i", code if type(code) is int else -1)
                 + (b"\x01" if efbig_proven else b"\x00")
             )
-            with suppress(OSError):
+            try:
                 os.write(write_descriptor, packet)
-            os._exit(0)
+                exit_code = 0
+            except OSError:
+                exit_code = 70
         except BaseException:
             with suppress(OSError):
                 os.write(write_descriptor, b"X")
-            os._exit(70)
+        finally:
+            with suppress(OSError):
+                os.close(write_descriptor)
+            os._exit(exit_code)
 
-    os.close(write_descriptor)
-    selector = selectors.DefaultSelector()
-    selector.register(read_descriptor, selectors.EVENT_READ)
     packet = b""
+    status: int | None = None
+    live_processes = {process_id}
+    owned_descriptors = {read_descriptor, write_descriptor}
     try:
-        events = selector.select(timeout=10.0)
-        if events:
-            packet = os.read(read_descriptor, 6)
+        _close_descriptors_checked((write_descriptor,))
+        owned_descriptors.remove(write_descriptor)
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(read_descriptor, selectors.EVENT_READ)
+            events = selector.select(timeout=10.0)
+            if events:
+                packet = os.read(read_descriptor, 6)
+        finally:
+            selector.close()
+        status = _wait_or_terminate_owned_process(process_id)
+        live_processes.remove(process_id)
     finally:
-        selector.close()
-        os.close(read_descriptor)
-    if len(packet) != 6 or packet[:1] != b"E":
-        with suppress(ProcessLookupError):
-            os.kill(process_id, signal.SIGKILL)
-        with suppress(ChildProcessError):
-            os.waitpid(process_id, 0)
+        _finalize_process_resources(tuple(owned_descriptors), tuple(live_processes))
+    if (
+        len(packet) != 6
+        or packet[:1] != b"E"
+        or status is None
+        or not os.WIFEXITED(status)
+        or os.WEXITSTATUS(status) != 0
+    ):
         return FaultEvidence(
             seam="sqlite_ioerr_write",
             disposition=EvidenceDisposition.UNPROVEN,
@@ -7321,7 +7758,6 @@ def ioerr_write_evidence(
             reopened_state=ReopenedState.UNAVAILABLE,
             reason="ioerr_child_protocol_failed",
         )
-    os.waitpid(process_id, 0)
     sqlite_errorcode = struct.unpack(">i", packet[1:5])[0]
     efbig_proven = packet[5:] == b"\x01"
     try:
@@ -7399,15 +7835,16 @@ def max_page_count_evidence(
     try:
         process_id = os.fork()
     except OSError:
-        _close_descriptors((read_descriptor, write_descriptor))
+        _close_descriptors_checked((read_descriptor, write_descriptor))
         return _unproven_process_fault(
             "max_page_count",
             reason="fork_spawn_failed",
         )
     if process_id == 0:
-        os.close(read_descriptor)
         code = -1
+        exit_code = 70
         try:
+            os.close(read_descriptor)
             compare_and_swap_stream(
                 token,
                 exact,
@@ -7417,26 +7854,39 @@ def max_page_count_evidence(
             code = error.sqlite_errorcode if type(error.sqlite_errorcode) is int else -1
         except BaseException:
             code = -1
-        with suppress(OSError):
-            os.write(write_descriptor, struct.pack(">i", code))
-        os.close(write_descriptor)
-        os._exit(0 if code >= 0 else 70)
+        finally:
+            try:
+                os.write(write_descriptor, struct.pack(">i", code))
+                os.close(write_descriptor)
+                exit_code = 0 if code >= 0 else 70
+            except BaseException:
+                exit_code = 70
+            os._exit(exit_code)
 
-    os.close(write_descriptor)
-    selector = selectors.DefaultSelector()
-    selector.register(read_descriptor, selectors.EVENT_READ)
     payload = b""
+    status: int | None = None
+    live_processes = {process_id}
+    owned_descriptors = {read_descriptor, write_descriptor}
     try:
-        if selector.select(timeout=10.0):
-            payload = os.read(read_descriptor, 4)
-        if len(payload) != 4:
-            with suppress(ProcessLookupError):
-                os.kill(process_id, signal.SIGKILL)
-        _, status = os.waitpid(process_id, 0)
+        _close_descriptors_checked((write_descriptor,))
+        owned_descriptors.remove(write_descriptor)
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(read_descriptor, selectors.EVENT_READ)
+            if selector.select(timeout=10.0):
+                payload = os.read(read_descriptor, 4)
+        finally:
+            selector.close()
+        status = _wait_or_terminate_owned_process(process_id)
+        live_processes.remove(process_id)
     finally:
-        selector.close()
-        os.close(read_descriptor)
-    child_ok = len(payload) == 4 and os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0
+        _finalize_process_resources(tuple(owned_descriptors), tuple(live_processes))
+    child_ok = (
+        len(payload) == 4
+        and status is not None
+        and os.WIFEXITED(status)
+        and os.WEXITSTATUS(status) == 0
+    )
     sqlite_errorcode = struct.unpack(">i", payload)[0] if len(payload) == 4 else None
     try:
         after = verify_store(token)
@@ -7552,8 +8002,9 @@ def wal_concurrency_evidence(
     live_processes: set[int] = set()
 
     def spawn_failed() -> WalConcurrencyEvidence:
-        _close_descriptors(all_descriptors)
-        if not _terminate_and_reap_processes(tuple(live_processes)):
+        descriptors_ok = _close_descriptors(all_descriptors)
+        processes_ok = _terminate_and_reap_processes(tuple(live_processes))
+        if not descriptors_ok or not processes_ok:
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
         live_processes.clear()
         return WalConcurrencyEvidence(
@@ -7712,16 +8163,6 @@ def wal_concurrency_evidence(
                 os.write(checkpoint_result_write, b"E")
             os._exit(70)
 
-    _close_descriptors(
-        (
-            reader_control_read,
-            reader_result_write,
-            writer_control_read,
-            writer_result_write,
-            checkpoint_control_read,
-            checkpoint_result_write,
-        )
-    )
     samples: list[tuple[int, int, int]] = []
     maximum_wal_bytes = 0
     initial_version = 0
@@ -7826,10 +8267,10 @@ def wal_concurrency_evidence(
     except (OSError, ChildProcessError, struct.error):
         protocol_ok = False
     finally:
-        _close_descriptors(all_descriptors)
-        cleanup_ok = _terminate_and_reap_processes(tuple(live_processes))
+        descriptors_ok = _close_descriptors(all_descriptors)
+        processes_ok = _terminate_and_reap_processes(tuple(live_processes))
         live_processes.clear()
-        if not cleanup_ok:
+        if (not descriptors_ok or not processes_ok) and sys.exception() is None:
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
 
     final = load_current(
@@ -9264,15 +9705,11 @@ def online_backup(
         raise
 
 
-@_operation_evidence_executor
-def concurrent_write_backup_evidence(
+def _validated_applicable_transition_chain(
     source: StoreToken,
-    pytest_root: Path,
-    *,
-    transitions: tuple[ContinuousPublicTradeStreamStoredTransitionV1, ...],
-    evidence_recorded_at_utc: str,
-) -> ConcurrentBackupEvidence:
-    """Run one online backup while a bounded writer commits exact transitions."""
+    transitions: object,
+) -> tuple[ContinuousPublicTradeStreamStoredTransitionV1, ...]:
+    """Read-only validate the complete concurrent-write batch before any fork."""
 
     if (
         type(transitions) is not tuple
@@ -9283,10 +9720,60 @@ def concurrent_write_backup_evidence(
         )
     ):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    exact = tuple(
+        _validated_transition(cast(ContinuousPublicTradeStreamStoredTransitionV1, transition))
+        for transition in transitions
+    )
+    identities = tuple(
+        (stream_id, natural_key)
+        for stream_id, natural_key in _stream_identities(source)
+        if stream_id == exact[0].record.stream_id
+    )
+    if len(identities) != 1:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    stream_id, natural_key = identities[0]
+    current = load_current(
+        source,
+        stream_id=stream_id,
+        natural_key=natural_key,
+    )
+    if (
+        current.classification is not StoreClassification.FOUND
+        or current.creation is None
+        or current.current is None
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    policy = _policy_from_creation(current.creation)
+    prior = current.current
+    for transition in exact:
+        if transition.record.stream_id != stream_id:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        _validate_transition_against_prior(
+            transition,
+            prior_envelope=prior.successor_envelope.envelope,
+            prior_history_root=prior.history_root,
+            prior_recorded_at=prior.record.recorded_at,
+            policy=policy,
+        )
+        prior = transition
+    return exact
+
+
+@_operation_evidence_executor
+def concurrent_write_backup_evidence(
+    source: StoreToken,
+    pytest_root: Path,
+    *,
+    transitions: tuple[ContinuousPublicTradeStreamStoredTransitionV1, ...],
+    evidence_recorded_at_utc: str,
+) -> ConcurrentBackupEvidence:
+    """Run one online backup while a bounded writer commits exact transitions."""
+
+    exact_transitions = _validated_applicable_transition_chain(source, transitions)
+    exact_evidence_time = _validated_evidence_timestamp(evidence_recorded_at_utc)
     source_before = verify_store(source)
     if not hasattr(os, "fork") or _CONNECTION_PATH_SNAPSHOTS:
         raise HarnessFailure(HarnessFailureCode.UNPROVEN)
-    exact_transitions = tuple(_validated_transition(item) for item in transitions)
     cas_statements = (
         "BEGIN IMMEDIATE",
         "stream UUID lookup LIMIT 2",
@@ -9296,7 +9783,7 @@ def concurrent_write_backup_evidence(
         "UPDATE current CAS",
         "COMMIT",
     )
-    record_size = 2 + hashlib.sha256().digest_size
+    record_size = 4 + hashlib.sha256().digest_size
     result_packet_size = 1 + (CONCURRENT_BACKUP_TRANSITIONS * record_size)
     try:
         control_pipe, result_pipe = _open_pipes(2)
@@ -9307,17 +9794,17 @@ def concurrent_write_backup_evidence(
     try:
         process_id = os.fork()
     except OSError:
-        _close_descriptors((control_read, control_write, result_read, result_write))
+        _close_descriptors_checked((control_read, control_write, result_read, result_write))
         raise HarnessFailure(HarnessFailureCode.UNPROVEN) from None
     if process_id == 0:
-        os.close(control_write)
-        os.close(result_read)
-        _ACTIVE_EVIDENCE_RUN.set(None)
-        _ACTIVE_GATE_OPERATIONS.set(None)
-        _ACTIVE_REJECTION_COLLECTOR.set(None)
-        _ACTIVE_OPERATION_EXECUTOR_DEPTH.set(0)
         exit_code = 70
         try:
+            os.close(control_write)
+            os.close(result_read)
+            _ACTIVE_EVIDENCE_RUN.set(None)
+            _ACTIVE_GATE_OPERATIONS.set(None)
+            _ACTIVE_REJECTION_COLLECTOR.set(None)
+            _ACTIVE_OPERATION_EXECUTOR_DEPTH.set(0)
             _write_process_packet(result_write, b"R")
             if os.read(control_read, 1) != b"S":
                 raise HarnessFailure(HarnessFailureCode.UNPROVEN)
@@ -9328,12 +9815,20 @@ def concurrent_write_backup_evidence(
                     type(mutation) is not MutationEvidence
                     or mutation.classification is not StoreClassification.UPDATED
                     or mutation.statements != cas_statements
-                    or type(mutation.rows_materialized) is not int
-                    or not 0 <= mutation.rows_materialized <= 5
+                    or type(mutation.stream_rows) is not int
+                    or not 0 <= mutation.stream_rows <= 2
+                    or type(mutation.history_rows) is not int
+                    or not 0 <= mutation.history_rows <= 6
                     or mutation.committed is not True
                 ):
                     raise HarnessFailure(HarnessFailureCode.CORRUPT)
-                packet.extend(struct.pack(">H", mutation.rows_materialized))
+                packet.extend(
+                    struct.pack(
+                        ">HH",
+                        mutation.stream_rows,
+                        mutation.history_rows,
+                    )
+                )
                 packet.extend(bytes.fromhex(_evidence_payload_digest(mutation)))
             if len(packet) != result_packet_size:
                 raise HarnessFailure(HarnessFailureCode.CORRUPT)
@@ -9343,8 +9838,9 @@ def concurrent_write_backup_evidence(
             with suppress(OSError):
                 _write_process_packet(result_write, b"F")
         finally:
-            _close_descriptors((control_read, result_write))
-        os._exit(exit_code)
+            if not _close_descriptors((control_read, result_write)):
+                exit_code = 70
+            os._exit(exit_code)
 
     try:
         os.close(control_read)
@@ -9355,7 +9851,7 @@ def concurrent_write_backup_evidence(
         if ready != b"R":
             raise HarnessFailure(HarnessFailureCode.UNPROVEN)
     except BaseException as error:
-        _close_descriptors(
+        _finalize_process_resources(
             tuple(
                 descriptor
                 for descriptor in (
@@ -9365,10 +9861,10 @@ def concurrent_write_backup_evidence(
                     result_write,
                 )
                 if descriptor >= 0
-            )
+            ),
+            (process_id,),
+            code=HarnessFailureCode.UNPROVEN,
         )
-        if not _terminate_and_reap_processes((process_id,)):
-            raise HarnessFailure(HarnessFailureCode.UNPROVEN) from error
         if isinstance(error, HarnessFailure):
             raise
         raise HarnessFailure(HarnessFailureCode.UNPROVEN) from error
@@ -9397,7 +9893,7 @@ def concurrent_write_backup_evidence(
         backup_token, backup_manifest = online_backup(
             source,
             pytest_root,
-            evidence_recorded_at_utc=evidence_recorded_at_utc,
+            evidence_recorded_at_utc=exact_evidence_time,
             progress_hook=observe_progress,
         )
         status = _wait_for_owned_process(process_id)
@@ -9412,21 +9908,24 @@ def concurrent_write_backup_evidence(
         writer_mutations: list[MutationEvidence] = []
         offset = 1
         for _ in range(CONCURRENT_BACKUP_TRANSITIONS):
-            rows_materialized = struct.unpack(
-                ">H",
-                writer_packet[offset : offset + 2],
-            )[0]
-            offset += 2
+            stream_rows, history_rows = struct.unpack(
+                ">HH",
+                writer_packet[offset : offset + 4],
+            )
+            offset += 4
             observed_digest = writer_packet[offset : offset + hashlib.sha256().digest_size]
             offset += hashlib.sha256().digest_size
             mutation = MutationEvidence(
                 classification=StoreClassification.UPDATED,
                 statements=cas_statements,
-                rows_materialized=rows_materialized,
+                stream_rows=stream_rows,
+                history_rows=history_rows,
                 committed=True,
             )
-            if not 0 <= rows_materialized <= 5 or observed_digest != bytes.fromhex(
-                _evidence_payload_digest(mutation)
+            if (
+                not 0 <= stream_rows <= 2
+                or not 0 <= history_rows <= 6
+                or observed_digest != bytes.fromhex(_evidence_payload_digest(mutation))
             ):
                 raise HarnessFailure(HarnessFailureCode.CORRUPT)
             writer_mutations.append(mutation)
@@ -9467,7 +9966,7 @@ def concurrent_write_backup_evidence(
             _remove_owned_files(backup_token)
         raise
     finally:
-        _close_descriptors(
+        descriptors_ok = _close_descriptors(
             tuple(
                 descriptor
                 for descriptor in (
@@ -9479,7 +9978,8 @@ def concurrent_write_backup_evidence(
                 if descriptor >= 0
             )
         )
-        if not _terminate_and_reap_processes((process_id,)):
+        processes_ok = _terminate_and_reap_processes((process_id,))
+        if (not descriptors_ok or not processes_ok) and sys.exception() is None:
             raise HarnessFailure(HarnessFailureCode.UNPROVEN)
 
 
@@ -9827,18 +10327,17 @@ def bounded_query_operation_scope(run: _EvidenceRun) -> Iterator[None]:
 
 
 def _report_token_role(
-    arguments: tuple[object, ...],
-    _keywords: Mapping[str, object],
+    arguments: Mapping[str, object],
     _result: object,
 ) -> tuple[tuple[str, StoreToken], ...]:
-    if not arguments or type(arguments[0]) is not StoreToken:
+    report_token = arguments.get("report_token")
+    if type(report_token) is not StoreToken:
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
-    return (("report", arguments[0]),)
+    return (("report", report_token),)
 
 
 def _backup_token_roles(
-    _arguments: tuple[object, ...],
-    _keywords: Mapping[str, object],
+    _arguments: Mapping[str, object],
     result: object,
 ) -> tuple[tuple[str, StoreToken], ...]:
     if type(result) is not BackupRestoreEvidence:
@@ -9851,8 +10350,7 @@ def _backup_token_roles(
 
 
 def _generation_copy_token_roles(
-    _arguments: tuple[object, ...],
-    _keywords: Mapping[str, object],
+    _arguments: Mapping[str, object],
     result: object,
 ) -> tuple[tuple[str, StoreToken], ...]:
     if type(result) is not GenerationCopyEvidence:
@@ -9860,6 +10358,95 @@ def _generation_copy_token_roles(
     return (
         ("source", result.source_token),
         ("destination", result.destination_token),
+    )
+
+
+def _preflight_backup_restore_collector(
+    run: _EvidenceRun,
+    arguments: Mapping[str, object],
+) -> None:
+    """Validate every result-independent backup input before source mutation."""
+
+    if (
+        set(arguments)
+        != {
+            "source_token",
+            "pytest_root",
+            "transitions",
+            "backup_recorded_at_utc",
+            "restore_recorded_at_utc",
+        }
+        or type(arguments["source_token"]) is not StoreToken
+        or not isinstance(arguments["pytest_root"], Path)
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    source = arguments["source_token"]
+    pytest_root = arguments["pytest_root"]
+    if (
+        _require_token(source).pytest_registration is not run._pytest_registration
+        or pytest_root is not run._pytest_registration.path_object
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    _validated_evidence_timestamp(cast(str, arguments["backup_recorded_at_utc"]))
+    _validated_evidence_timestamp(cast(str, arguments["restore_recorded_at_utc"]))
+    _validated_applicable_transition_chain(source, arguments["transitions"])
+
+
+def _remove_new_collector_token(
+    run: _EvidenceRun,
+    token: object,
+    *,
+    retained_nonces: frozenset[bytes],
+) -> None:
+    """Remove only one live output generation owned by this invocation."""
+
+    if type(token) is not StoreToken or token._nonce in retained_nonces:
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+    registered = _TOKEN_REGISTRY.get(token._nonce)
+    if registered is None or registered.pytest_registration is not run._pytest_registration:
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+    _remove_owned_files(token)
+
+
+def _rollback_backup_restore_outputs(
+    run: _EvidenceRun,
+    arguments: Mapping[str, object],
+    result: object,
+) -> None:
+    source_token = arguments.get("source_token")
+    if type(source_token) is not StoreToken:
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+    if type(result) is not BackupRestoreEvidence:
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+    retained = frozenset({source_token._nonce})
+    cleanup_ok = True
+    for token in (result.restore_token, result.backup_token):
+        try:
+            _remove_new_collector_token(
+                run,
+                token,
+                retained_nonces=retained,
+            )
+        except BaseException:
+            cleanup_ok = False
+    if not cleanup_ok:
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+
+
+def _rollback_generation_copy_outputs(
+    run: _EvidenceRun,
+    arguments: Mapping[str, object],
+    result: object,
+) -> None:
+    report_token = arguments.get("report_token")
+    if type(report_token) is not StoreToken:
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+    if type(result) is not GenerationCopyEvidence:
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+    _remove_new_collector_token(
+        run,
+        result.destination_token,
+        retained_nonces=frozenset({report_token._nonce}),
     )
 
 
@@ -10185,36 +10772,176 @@ def finalize_atomicity_evidence(
     mutation_operations = tuple(
         operation for operation in operations if operation.producer_name != "bootstrap_store"
     )
-    creates = tuple(
-        cast(MutationEvidence, observation.result)
-        for observation in mutation_operations
-        if observation.producer_name == "create_stream"
+    expected_mutations = (
+        ("create_stream", StoreClassification.INSERTED, 0, 0, None),
+        ("compare_and_swap_stream", StoreClassification.UPDATED, 1, 2, None),
+        ("compare_and_swap_stream", StoreClassification.UPDATED, 1, 3, None),
+        ("create_stream", StoreClassification.DUPLICATE, 1, 3, None),
+        (
+            "compare_and_swap_stream",
+            StoreClassification.DUPLICATE,
+            1,
+            5,
+            "historical_duplicate_mature",
+        ),
+        ("create_stream", StoreClassification.INSERTED, 0, 0, None),
+        ("compare_and_swap_stream", StoreClassification.UPDATED, 1, 2, None),
+        ("compare_and_swap_stream", StoreClassification.UPDATED, 1, 3, None),
+        (
+            "create_stream",
+            StoreClassification.CONFLICT,
+            2,
+            6,
+            "create_two_candidate_conflict_mature",
+        ),
+        (
+            "compare_and_swap_stream",
+            StoreClassification.CONFLICT,
+            2,
+            6,
+            "cas_expectation_two_candidate_conflict_mature",
+        ),
     )
-    swaps = tuple(
-        cast(MutationEvidence, observation.result)
-        for observation in mutation_operations
-        if observation.producer_name == "compare_and_swap_stream"
+    if len(mutation_operations) != len(expected_mutations):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    input_bindings: list[_MutationOperationBinding] = []
+    for observation, expected in zip(
+        mutation_operations,
+        expected_mutations,
+        strict=True,
+    ):
+        producer_name, classification, stream_rows, history_rows, semantic_case = expected
+        mutation = observation.result
+        input_binding = observation.input_binding
+        tag_prefix = (
+            classification.value
+            if semantic_case is None
+            else f"{semantic_case}:{classification.value}"
+        )
+        if (
+            observation.producer_name != producer_name
+            or observation.operation_tag
+            != (f"{tag_prefix}:stream_rows={stream_rows}:history_rows={history_rows}")
+            or type(mutation) is not MutationEvidence
+            or mutation.classification is not classification
+            or mutation.stream_rows != stream_rows
+            or mutation.history_rows != history_rows
+            or mutation.committed is not True
+            or type(input_binding) is not _MutationOperationBinding
+            or observation.input_digest != _evidence_payload_digest(input_binding)
+            or observation.payload_digest != _evidence_payload_digest(mutation)
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        input_bindings.append(input_binding)
+    (
+        create_a_binding,
+        transition_a_v2_binding,
+        transition_a_v3_binding,
+        replay_create_a_binding,
+        replay_transition_a_v3_binding,
+        create_b_binding,
+        transition_b_v2_binding,
+        transition_b_v3_binding,
+        mixed_create_binding,
+        transition_a_v4_conflict_binding,
+    ) = input_bindings
+    creation_bindings = (
+        create_a_binding,
+        replay_create_a_binding,
+        create_b_binding,
+        mixed_create_binding,
     )
-    if (
-        tuple(
-            (observation.producer_name, observation.operation_tag)
-            for observation in mutation_operations
-        )
-        != (
-            ("create_stream", "INSERTED"),
-            ("create_stream", "DUPLICATE"),
-            ("create_stream", "CONFLICT"),
-            ("compare_and_swap_stream", "UPDATED"),
-            ("compare_and_swap_stream", "DUPLICATE"),
-            ("compare_and_swap_stream", "CONFLICT"),
-        )
-        or len(creates) != 3
-        or len(swaps) != 3
+    transition_bindings = (
+        transition_a_v2_binding,
+        transition_a_v3_binding,
+        replay_transition_a_v3_binding,
+        transition_b_v2_binding,
+        transition_b_v3_binding,
+        transition_a_v4_conflict_binding,
+    )
+    if any(
+        type(binding.stored_record) is not ContinuousPublicTradeStreamStoredCreationV1
+        or binding.policy_digest is None
+        or binding.expectation_identity is not None
+        or binding.expectation_policy_digest is not None
+        or binding.expectation_child_policy_fingerprint is not None
+        for binding in creation_bindings
+    ) or any(
+        type(binding.stored_record) is not ContinuousPublicTradeStreamStoredTransitionV1
+        or binding.policy_digest is not None
+        for binding in transition_bindings
     ):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    creation_a = cast(
+        ContinuousPublicTradeStreamStoredCreationV1,
+        create_a_binding.stored_record,
+    )
+    transition_a_v2 = cast(
+        ContinuousPublicTradeStreamStoredTransitionV1,
+        transition_a_v2_binding.stored_record,
+    )
+    transition_a_v3 = cast(
+        ContinuousPublicTradeStreamStoredTransitionV1,
+        transition_a_v3_binding.stored_record,
+    )
+    creation_b = cast(
+        ContinuousPublicTradeStreamStoredCreationV1,
+        create_b_binding.stored_record,
+    )
+    transition_b_v2 = cast(
+        ContinuousPublicTradeStreamStoredTransitionV1,
+        transition_b_v2_binding.stored_record,
+    )
+    transition_b_v3 = cast(
+        ContinuousPublicTradeStreamStoredTransitionV1,
+        transition_b_v3_binding.stored_record,
+    )
+    mixed_creation = cast(
+        ContinuousPublicTradeStreamStoredCreationV1,
+        mixed_create_binding.stored_record,
+    )
+    transition_a_v4_conflict = cast(
+        ContinuousPublicTradeStreamStoredTransitionV1,
+        transition_a_v4_conflict_binding.stored_record,
+    )
+    if (
+        create_a_binding.policy_digest != _stored_creation_policy_digest(creation_a)
+        or create_b_binding.policy_digest != _stored_creation_policy_digest(creation_b)
+        or mixed_create_binding.policy_digest != _stored_creation_policy_digest(mixed_creation)
+        or replay_create_a_binding != create_a_binding
+        or replay_transition_a_v3_binding != transition_a_v3_binding
+        or not _transition_follows_binding(creation_a, transition_a_v2)
+        or not _transition_follows_binding(transition_a_v2, transition_a_v3)
+        or not _transition_follows_binding(creation_b, transition_b_v2)
+        or not _transition_follows_binding(transition_b_v2, transition_b_v3)
+        or not _transition_follows_binding(
+            transition_a_v3,
+            transition_a_v4_conflict,
+        )
+        or creation_a.record.stream_id == creation_b.record.stream_id
+        or _stored_creation_natural_key(creation_a) == _stored_creation_natural_key(creation_b)
+        or mixed_creation.record.stream_id != creation_a.record.stream_id
+        or _stored_creation_natural_key(mixed_creation) != _stored_creation_natural_key(creation_b)
+        or mixed_creation.record_digest in {creation_a.record_digest, creation_b.record_digest}
+        or any(
+            binding.expectation_identity is not None
+            or binding.expectation_policy_digest is not None
+            or binding.expectation_child_policy_fingerprint is not None
+            for binding in transition_bindings[:-1]
+        )
+        or transition_a_v4_conflict_binding.expectation_identity
+        != _stored_creation_identity_binding(creation_b)
+        or transition_a_v4_conflict_binding.expectation_policy_digest
+        != _stored_creation_policy_digest(creation_b)
+        or transition_a_v4_conflict_binding.expectation_child_policy_fingerprint is not None
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    public_mutations = tuple(
+        cast(MutationEvidence, operations[index].result) for index in (1, 4, 9, 2, 5, 10)
+    )
     fresh = fresh_observation.value
     return AtomicityClassificationEvidence(
-        mutations=(*creates, *swaps),
+        mutations=public_mutations,
         two_writers=fresh.two_writers,
         unknown_acknowledgements=(
             fresh.create_faults[-1],
@@ -10242,16 +10969,22 @@ def finalize_bounded_query_evidence(
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     report_nonce = report_token._nonce
     conflict_nonce = operations[7].token_nonces
-    maximum_nonce = operations[12].token_nonces
+    maximum_nonce = operations[16].token_nonces
     if (
         any(operation.sequence != index for index, operation in enumerate(operations))
+        or tuple(operation.producer_name for operation in operations)
+        != _BOUNDED_OPERATION_PRODUCER_SEQUENCE
+        or any(
+            operation.payload_digest != _evidence_payload_digest(operation.result)
+            for operation in operations
+        )
         or any(operation.token_nonces != (report_nonce,) for operation in operations[:7])
         or len(conflict_nonce) != 1
         or conflict_nonce[0] == report_nonce
-        or any(operation.token_nonces != conflict_nonce for operation in operations[7:12])
+        or any(operation.token_nonces != conflict_nonce for operation in operations[7:16])
         or len(maximum_nonce) != 1
         or maximum_nonce[0] in {report_nonce, conflict_nonce[0]}
-        or any(operation.token_nonces != maximum_nonce for operation in operations[12:])
+        or any(operation.token_nonces != maximum_nonce for operation in operations[16:])
     ):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     query_operations = tuple(
@@ -10369,7 +11102,12 @@ def collect_closed_error_mapping_evidence(
     return closed_error_mapping_evidence()
 
 
-@_whole_gate_collector("backup_restore", token_roles=_backup_token_roles)
+@_whole_gate_collector(
+    "backup_restore",
+    token_roles=_backup_token_roles,
+    preflight=_preflight_backup_restore_collector,
+    rollback_outputs=_rollback_backup_restore_outputs,
+)
 def collect_backup_restore_evidence(
     run: _EvidenceRun,
     source_token: StoreToken,
@@ -10380,19 +11118,25 @@ def collect_backup_restore_evidence(
     restore_recorded_at_utc: str,
 ) -> BackupRestoreEvidence:
     del run
+    exact_backup_time = _validated_evidence_timestamp(backup_recorded_at_utc)
+    exact_restore_time = _validated_evidence_timestamp(restore_recorded_at_utc)
+    exact_transitions = _validated_applicable_transition_chain(
+        source_token,
+        transitions,
+    )
     concurrent: ConcurrentBackupEvidence | None = None
     restore_token: StoreToken | None = None
     try:
         concurrent = concurrent_write_backup_evidence(
             source_token,
             pytest_root,
-            transitions=transitions,
-            evidence_recorded_at_utc=backup_recorded_at_utc,
+            transitions=exact_transitions,
+            evidence_recorded_at_utc=exact_backup_time,
         )
         restore_token, restore_manifest = online_backup(
             concurrent.backup_token,
             pytest_root,
-            evidence_recorded_at_utc=restore_recorded_at_utc,
+            evidence_recorded_at_utc=exact_restore_time,
         )
         restore_summary = verify_store(restore_token)
         if (
@@ -10416,32 +11160,54 @@ def collect_backup_restore_evidence(
             restore_summary=restore_summary,
             concurrent_write=concurrent,
         )
-    except BaseException:
-        if restore_token is not None:
-            _remove_owned_files(restore_token)
-        if concurrent is not None:
-            _remove_owned_files(concurrent.backup_token)
+    except BaseException as error:
+        cleanup_ok = True
+        for token in (
+            restore_token,
+            None if concurrent is None else concurrent.backup_token,
+        ):
+            if token is None:
+                continue
+            try:
+                _remove_owned_files(token)
+            except BaseException:
+                cleanup_ok = False
+        if not cleanup_ok:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from error
         raise
 
 
-@_whole_gate_collector("generation_copy", token_roles=_generation_copy_token_roles)
+@_whole_gate_collector(
+    "generation_copy",
+    token_roles=_generation_copy_token_roles,
+    rollback_outputs=_rollback_generation_copy_outputs,
+)
 def collect_generation_copy_evidence(
     run: _EvidenceRun,
     report_token: StoreToken,
     pytest_root: Path,
 ) -> GenerationCopyEvidence:
     del run
-    destination = same_format_generation_copy(report_token, pytest_root)
-    return GenerationCopyEvidence(
-        source_token=report_token,
-        destination_token=destination,
-        source_generation_id=_generation_evidence_id(report_token),
-        destination_generation_id=_generation_evidence_id(destination),
-        source_summary=verify_store(report_token),
-        destination_summary=verify_store(destination),
-        source_tails=_tail_manifest(report_token),
-        destination_tails=_tail_manifest(destination),
-    )
+    destination: StoreToken | None = None
+    try:
+        destination = same_format_generation_copy(report_token, pytest_root)
+        return GenerationCopyEvidence(
+            source_token=report_token,
+            destination_token=destination,
+            source_generation_id=_generation_evidence_id(report_token),
+            destination_generation_id=_generation_evidence_id(destination),
+            source_summary=verify_store(report_token),
+            destination_summary=verify_store(destination),
+            source_tails=_tail_manifest(report_token),
+            destination_tails=_tail_manifest(destination),
+        )
+    except BaseException as error:
+        if destination is not None:
+            try:
+                _remove_owned_files(destination)
+            except BaseException:
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from error
+        raise
 
 
 @_whole_gate_collector("workload_thresholds", token_roles=_report_token_role)
@@ -10720,15 +11486,15 @@ def _validate_bounded_query_report_evidence(
             "current_identity_conflict",
             StoreClassification.IDENTITY_CONFLICT,
             2,
-            2,
-            2,
+            6,
+            6,
         ),
         (
             "audit_identity_conflict",
             StoreClassification.IDENTITY_CONFLICT,
             2,
-            2,
-            2,
+            6,
+            6,
         ),
         ("audit_initial_1", StoreClassification.PAGE, 1, 1, 1),
         ("audit_continuation_1", StoreClassification.PAGE, 1, 2, 2),
@@ -10938,23 +11704,24 @@ def _derived_report_gates(
     if type(atomicity) is not AtomicityClassificationEvidence:
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     mutations = atomicity.mutations
-    expected_mutation_classifications = (
-        StoreClassification.INSERTED,
-        StoreClassification.DUPLICATE,
-        StoreClassification.CONFLICT,
-        StoreClassification.UPDATED,
-        StoreClassification.DUPLICATE,
-        StoreClassification.CONFLICT,
+    expected_mutations = (
+        (StoreClassification.INSERTED, 0, 0),
+        (StoreClassification.DUPLICATE, 1, 3),
+        (StoreClassification.CONFLICT, 2, 6),
+        (StoreClassification.UPDATED, 1, 2),
+        (StoreClassification.DUPLICATE, 1, 5),
+        (StoreClassification.CONFLICT, 2, 6),
     )
     if (
         type(mutations) is not tuple
-        or len(mutations) != len(expected_mutation_classifications)
-        or tuple(item.classification for item in mutations) != expected_mutation_classifications
+        or len(mutations) != len(expected_mutations)
+        or any(type(item) is not MutationEvidence for item in mutations)
+        or tuple((item.classification, item.stream_rows, item.history_rows) for item in mutations)
+        != expected_mutations
         or any(
-            type(item) is not MutationEvidence
-            or item.committed is not True
-            or type(item.rows_materialized) is not int
-            or not 0 <= item.rows_materialized <= 5
+            item.committed is not True
+            or type(item.stream_rows) is not int
+            or type(item.history_rows) is not int
             or type(item.statements) is not tuple
             or not item.statements
             or item.statements[0] != "BEGIN IMMEDIATE"
@@ -11118,8 +11885,10 @@ def _derived_report_gates(
                 "UPDATE current CAS",
                 "COMMIT",
             )
-            or type(mutation.rows_materialized) is not int
-            or not 0 <= mutation.rows_materialized <= 5
+            or type(mutation.stream_rows) is not int
+            or mutation.stream_rows != 1
+            or type(mutation.history_rows) is not int
+            or not 2 <= mutation.history_rows <= 4
             for mutation in concurrent.writer_mutations
         )
         or concurrent.source_before.stream_count != concurrent.source_after.stream_count
@@ -11376,6 +12145,8 @@ def write_evidence_report(
 ) -> Path:
     """Write canonical generated evidence beneath one validated pytest root only."""
 
+    if type(report) is not EvidenceReport:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
     root = _validate_bootstrap_root(pytest_root)
     receipt_ledger = _validate_evidence_receipt(
         pytest_root,
@@ -11658,6 +12429,14 @@ def write_evidence_report(
             or stat.S_IMODE(final_details.st_mode) != 0o600
         ):
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        try:
+            os.close(root_descriptor)
+        except OSError:
+            root_descriptor = -1
+            receipt_ledger.consumed = True
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        root_descriptor = -1
+        receipt_ledger.consumed = True
     except BaseException as error:
         cleanup_ok = True
         if stage_descriptor >= 0:
@@ -11666,21 +12445,24 @@ def write_evidence_report(
             except OSError:
                 cleanup_ok = False
             stage_descriptor = -1
-        if root_descriptor >= 0 and published and stage_details is not None:
+        if root_descriptor >= 0 and stage_details is not None:
             try:
                 final_details = os.stat(
                     report_name,
                     dir_fd=root_descriptor,
                     follow_symlinks=False,
                 )
-                if (
-                    final_details.st_dev != stage_details.st_dev
-                    or final_details.st_ino != stage_details.st_ino
-                ):
-                    cleanup_ok = False
-                else:
+                same_staged_inode = (
+                    final_details.st_dev == stage_details.st_dev
+                    and final_details.st_ino == stage_details.st_ino
+                )
+                if same_staged_inode:
                     os.unlink(report_name, dir_fd=root_descriptor)
                     published = False
+                elif published or not isinstance(error, FileExistsError):
+                    cleanup_ok = False
+            except FileNotFoundError:
+                pass
             except OSError:
                 cleanup_ok = False
         if root_descriptor >= 0 and stage_created and stage_details is not None:
@@ -11725,5 +12507,4 @@ def write_evidence_report(
         if root_descriptor >= 0:
             with suppress(OSError):
                 os.close(root_descriptor)
-    receipt_ledger.consumed = True
     return path
