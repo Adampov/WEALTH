@@ -255,11 +255,11 @@ TASK-062 selects no physical store and adds no adapter, transaction implementati
 schema, path, migration, I/O, clock, evidence-body access, attestation service, fence, budget,
 runtime, retry loop, automatic action, capacity value, durability, recovery, deployment, or
 readiness claim. TASK-062 is complete only as this unused logical contract increment. TASK-063 is
-the canonical next action and remains only a design-only physical stream-store architecture and
-evidence plan resolving exact ADR-0027 epoch representation, schema/index and transaction mapping,
-retention/compaction, migration, backup/restore, crash evidence, and capacity before any adapter.
-It remains separately governed and grants no physical implementation authority. TASK-037 remains
-blocked and authorization remains denied.
+complete only as its design-only physical stream-store architecture and evidence plan; it grants
+no physical implementation authority. TASK-064 is the canonical next action and may add only an
+isolated executable SQLite test schema and generated-data evidence harness for the frozen
+transaction, crash, bounded-query, backup/restore, same-format generation-copy, and finite
+synthetic-workload gates. TASK-037 remains blocked and authorization remains denied.
 
 ADR-0031 now records the TASK-063 design-only result: one dedicated local SQLite generation behind
 the unused ADR-0030 port, with Python's standard-library binding, exact signed-64-bit `INTEGER`
@@ -276,9 +276,11 @@ This selects only a non-executable physical mapping and fail-closed evidence pla
 database, adapter, path, I/O, runtime, durability, recovery, capacity, or readiness exists.
 Preserve-all retention, separate-generation migration and rollback, verified backup and independent
 restore, crash and lost-acknowledgement evidence, bounded-query proof, exact patched runtime and
-filesystem evidence, and finite capacity thresholds remain prerequisites. TASK-063 remains the
-canonical next action until its governed lifecycle completes and grants no implementation
-authority. TASK-037 remains blocked and authorization remains denied.
+filesystem evidence, and finite capacity thresholds remain prerequisites. TASK-063 is complete
+only as this non-executable design. TASK-064 is the canonical next action and remains test-only:
+generated databases under pytest temporary directories, with no production adapter, runtime,
+operator path/data access, durability, capacity, recovery, or readiness claim. TASK-037 remains
+blocked and authorization remains denied.
 
 `RISK-005` remains open: the accepted plan selects Python
 datetimes in the fixed `datetime.UTC` zone, fixed microsecond RFC 3339 `Z` text, and derived

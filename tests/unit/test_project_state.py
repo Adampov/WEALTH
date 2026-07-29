@@ -129,25 +129,25 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert "continuous_public_trade_stream_store_port_contracts" in state.active_components
     assert "continuous_public_trade_stream_physical_store_architecture" in (state.active_components)
     assert len(state.open_tasks) == 2
-    task_037, task_063 = state.open_tasks
+    task_037, task_064 = state.open_tasks
     assert task_037.task_id == "TASK-037"
     assert task_037.status == "blocked"
     assert task_037.risk_tier == 3
     assert task_037.requires_human_approval is True
-    assert task_063.task_id == "TASK-063"
-    assert task_063.action == "phase2.continuous_public_trade_stream_physical_store_architecture"
-    assert task_063.status == "ready"
-    assert task_063.risk_tier == 1
-    assert task_063.requires_human_approval is False
+    assert task_064.task_id == "TASK-064"
+    assert task_064.action == "phase2.continuous_public_trade_stream_sqlite_schema_evidence_harness"
+    assert task_064.status == "ready"
+    assert task_064.risk_tier == 1
+    assert task_064.requires_human_approval is False
     assert state.blockers == (
         "TASK-037 awaits owner-supplied exact restricted-package inputs in an approved governance "
         "location before independent Risk and Security review and the project-owner decision; "
         "authorization remains denied.",
     )
-    assert state.next_action.task_id == "TASK-063"
+    assert state.next_action.task_id == "TASK-064"
     assert (
         state.next_action.action
-        == "phase2.continuous_public_trade_stream_physical_store_architecture"
+        == "phase2.continuous_public_trade_stream_sqlite_schema_evidence_harness"
     )
     assert any(decision.decision_id == "ADR-0029" for decision in state.recent_decisions)
     assert any(decision.decision_id == "ADR-0030" for decision in state.recent_decisions)
@@ -280,11 +280,15 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     task_062_section = completed_section.split("### TASK-062 ", maxsplit=1)[1].split(
         "### TASK-", maxsplit=1
     )[0]
-    task_063_section = next_action_section
+    task_063_section = completed_section.split("### TASK-063 ", maxsplit=1)[1].split(
+        "### TASK-", maxsplit=1
+    )[0]
+    task_064_section = next_action_section
     next_action_prose = collapse_whitespace(next_action_section)
     task_060_prose = collapse_whitespace(task_060_section)
     task_061_prose = collapse_whitespace(task_061_section)
     task_062_prose = collapse_whitespace(task_062_section)
+    task_063_prose = collapse_whitespace(task_063_section)
     queued_prose = collapse_whitespace(queued_section)
     root_readme_prose = collapse_whitespace(root_readme)
     market_data_prose = collapse_whitespace(market_data_contract)
@@ -299,36 +303,146 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
+    assert "- **Contract generation:** 2" in next_action_section
+    assert "`FROZEN`" in next_action_section
+    assert (
+        "`2ba9d4d70bde04c5225649d1c3e4f70e86b5085c46a370ffcfbe716887bef836`" in next_action_section
+    )
+    assert "`SUPERSEDED` before any writable activation" in next_action_prose
+    assert "Generation-1 read-only research and review outputs are retained as evidence only" in (
+        next_action_prose
+    )
+    assert "revalidated and rebound to generation 2" in next_action_prose
+    assert "`phase2.continuous_public_trade_stream_sqlite_schema_evidence_harness`" in (
+        task_064_section
+    )
+    assert "TASK-063 is complete after owner-approved PR #66" in next_action_prose
+    assert "accepted head `8def515c29f6b778540e1ac2d6c55b0006c59b1b`" in next_action_prose
+    assert "merge commit `cf5f69c818185c54cb1e4c701bf6e390cdf96237`" in next_action_prose
+    assert "successful required target-branch CI run `30401016909`" in next_action_prose
+    assert (
+        "Exact owner approval naming the pull request and current head commit remains required "
+        "before merge" in next_action_prose
+    )
+    assert "exact executable version-one SQLite schema" in next_action_prose
+    assert "isolated, generated-data evidence harness" in next_action_prose
+    assert "schema_descriptor.json" in task_064_section
+    assert "schema_fingerprint.txt" in task_064_section
+    assert "tests/support/continuous_public_trade_stream_sqlite_harness.py" in task_064_section
+    assert "generated non-operator databases beneath pytest temporary directories" in (
+        next_action_prose
+    )
+    assert "No `src/` adapter" in next_action_prose
+    assert "operator path or data" in next_action_prose
+    assert "dependency or lockfile change" in next_action_prose
+    assert "SQL `INTEGER` columns are permitted only for" in next_action_prose
+    assert "schema-local singleton and internal row keys" in next_action_prose
+    assert "`stream_contract_version`, `stream_start_epoch_ms`" in next_action_prose
+    assert "`prior_version` (SQL `NULL` only for creation)" in next_action_prose
+    assert "integer `serialization_version`" in next_action_prose
+    for policy_field in (
+        "window_size_ms",
+        "settlement_lag_ms",
+        "max_catchup_span_ms",
+        "max_jobs_per_invocation",
+        "max_requests_per_job",
+        "max_records_per_job",
+    ):
+        assert f"`{policy_field}`" in task_064_section
+    assert "exact built-in `int`; `bool` and subclasses are rejected" in next_action_prose
+    assert "policy `schema_version` and fingerprint" in next_action_prose
+    assert "record `model_version`" in next_action_prose
+    assert "Natural-identity atoms have no separate columns" in next_action_prose
+    assert "`recorded_at`, and every other unlisted TASK-061 value have no scalar columns" in (
+        next_action_prose
+    )
+    assert "No logical `REAL` or `TEXT` projection is allowed" in next_action_prose
+    assert (
+        "Only `stream_start_epoch_ms` and causal versions may be SQL `INTEGER` projections"
+        not in task_064_section
+    )
+    assert "caller-controlled URI-option injection" in next_action_prose
+    assert "harness-internally constructed `file:` URI" in next_action_prose
+    assert "sole fixed option `mode=rw`" in next_action_prose
+    assert "callers may supply neither a URI nor URI/query options" in next_action_prose
+    assert "exact non-colliding `application_id`" in next_action_prose
+    assert "ordered descriptor canonicalization" in next_action_prose
+    assert "4,096-byte pages, WAL, `synchronous=FULL` writers" in next_action_prose
+    assert "exact patched SQLite source ID" in next_action_prose
+    assert "`trusted_schema` off, busy timeout zero" in next_action_prose
+    assert "one explicit `BEGIN IMMEDIATE` transaction" in next_action_prose
+    assert "between stream insert and creation insert" in next_action_prose
+    assert "true during commit" in next_action_prose
+    assert "`FAIL`, `UNPROVEN`, skipped, or xfailed evidence blocks TASK-064 completion" in (
+        next_action_prose
+    )
+    assert "at most three distinct history rows" in next_action_prose
+    assert "duplicate classification materializes at most five rows" in next_action_prose
+    assert "Initial audit returns exactly 1 through the requested limit new rows" in (
+        next_action_prose
+    )
+    assert "`AT_TAIL` returns exactly one overlap and zero new rows" in next_action_prose
+    assert "SQLite Online Backup" in next_action_prose
+    assert "same-format generation-copy" in next_action_prose
+    assert "Same-format generation-copy evidence" in next_action_prose
+    assert "explicitly deferred to a separately frozen later task" in next_action_prose
+    assert "Before measurement, ADR-0032 freezes the numeric pass thresholds" in (next_action_prose)
+    assert "minimum/typical/maximum record-size and workload/concurrency matrix" in (
+        next_action_prose
+    )
+    assert "draft PR plus exact CI check/run logs" in next_action_prose
+    assert "not target-filesystem, capacity, durability, RPO/RTO, or readiness evidence" in (
+        next_action_prose
+    )
+    assert "TASK-063 completion-governance pull request itself is merged" in next_action_prose
+    assert "governance transition creates no ADR-0032, schema, harness, database" in (
+        next_action_prose
+    )
+    assert "and governance tests only" not in task_064_section
+    assert "no `.db`, `.sqlite`, `.sqlite3`, `-wal`, `-shm`" in next_action_prose
+    assert "Production code must never import the harness" in next_action_prose
+    assert "No extension loading, `ATTACH`, `writable_schema`" in next_action_prose
+    assert "contemporaneous writable lease ID" in next_action_prose
+    assert "no retrospective packet is valid" in next_action_prose
+    assert "Rollback is a revert of the exact TASK-064 candidate" in next_action_prose
+    assert "A production adapter remains blocked" in next_action_prose
+    assert "TASK-037 denial" in next_action_prose
+    assert "- **Status:** COMPLETE" in task_063_section
     assert "`phase2.continuous_public_trade_stream_physical_store_architecture`" in (
         task_063_section
     )
-    assert "TASK-062 is complete after exact owner approval" in next_action_prose
-    assert "PR #63 merge commit `6b959670e1737bd10585b437786d06408a22e31d`" in (next_action_prose)
-    assert "successful required target-branch CI run `30373228787`" in next_action_prose
-    assert (
-        "architecture, evidence planning, documentation, and coordinated governance only"
-        in next_action_prose
+    assert "Owner-approved PR" in task_063_prose
+    assert "[#66](https://github.com/Adampov/WEALTH/pull/66)" in task_063_section
+    assert "accepted head `8def515c29f6b778540e1ac2d6c55b0006c59b1b`" in task_063_prose
+    assert "merge commit `cf5f69c818185c54cb1e4c701bf6e390cdf96237`" in task_063_prose
+    assert "[30401016909](https://github.com/Adampov/WEALTH/actions/runs/30401016909)" in (
+        task_063_section
     )
-    assert "physical stream-store architecture and evidence plan" in next_action_prose
-    assert "exact epoch representation" in next_action_prose
-    assert "transaction/schema/index mapping" in next_action_prose
-    assert "retention/compaction" in next_action_prose
-    assert "migration" in next_action_prose
-    assert "backup/restore" in next_action_prose
-    assert "crash evidence" in next_action_prose
-    assert "finite capacity/performance evidence" in next_action_prose
-    assert "No production source or adapter" in next_action_prose
-    assert "database or schema creation" in next_action_prose
-    assert "filesystem/network/provider I/O" in next_action_prose
-    assert "Do not alter TASK-059 behavior, TASK-061 bytes, or TASK-062 port semantics" in (
-        next_action_prose
+    assert "successful required target-branch CI run" in task_063_prose
+    assert "dedicated local SQLite generation behind the unused ADR-0030 port" in task_063_prose
+    assert "Among TASK-059 epoch coordinates, only `stream_start_epoch_ms`" in task_063_prose
+    assert "non-epoch integer policy, version, key, and format fields" in task_063_prose
+    assert "without becoming authority" in task_063_prose
+    assert "current cursor and optional attachment-window epochs deliberately have no scalar" in (
+        task_063_prose
     )
-    assert "TASK-037" in next_action_prose
-    assert "authorization remains denied" in next_action_prose
-    assert (
-        "The decision adds no physical capability, I/O, dependency, lockfile change, runtime import"
-        in next_action_prose
+    assert "1 through 100 new rows plus only the permitted overlap" in task_063_prose
+    assert "creates no executable schema, database, adapter" in task_063_prose
+    assert backlog.count("### TASK-063 ") == 1
+    assert backlog.count("### TASK-064 ") == 1
+    assert "### TASK-063 " not in next_action_section
+    assert "### TASK-064 " not in completed_section
+    assert "### TASK-064 " not in queued_section
+    assert "Promote a test-only TASK-064 SQLite schema" not in queued_section
+    assert queued_section.count("\n- ") == 2
+    assert "TASK-064 passes its exact generated/test-environment schema" in queued_prose
+    assert "target path/VFS/filesystem and power-loss evidence" in queued_prose
+    assert "operational capacity/checkpoint values" in queued_prose
+    assert "any incompatible migration" in queued_prose
+    assert "Implement a production physical continuous public-trade stream-store adapter" in (
+        queued_section
     )
+    assert "Implement continuous public-trade runtime collection" in queued_section
     assert "- **Status:** COMPLETE" in task_062_section
     assert "`phase2.continuous_public_trade_stream_store_port_contracts`" in task_062_section
     assert "Owner-approved PR" in task_062_prose
@@ -356,15 +470,6 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "100-new-record plus one-overlap bound" in task_062_prose
     assert "A conforming future adapter must separately prove" in task_062_prose
     assert "The port performs no I/O and is not imported by runtime composition" in task_062_prose
-    assert "TASK-063 may define" not in queued_section
-    assert "### TASK-063" not in queued_section
-    assert queued_section.count("\n- ") == 3
-    assert "Promote a test-only TASK-064 SQLite schema" in queued_section
-    assert "generated non-operator records" in queued_prose
-    assert "Implement a production physical continuous public-trade stream-store adapter" in (
-        queued_section
-    )
-    assert "Implement continuous public-trade runtime collection" in queued_section
     assert "- **Status:** COMPLETE" in task_061_section
     assert "`phase2.continuous_public_trade_stream_persistence_codec_contracts`" in task_061_section
     assert "side-effect-free domain module" in task_061_prose
@@ -1238,7 +1343,12 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "TASK-062 is complete only as this unused logical contract increment" in (
         root_readme_prose
     )
-    assert "canonical next action is TASK-063" in root_readme_prose
+    assert "design-only TASK-063 architecture is also complete" in root_readme_prose
+    assert "canonical next action is TASK-064" in root_readme_prose
+    assert "isolated test-only SQLite schema and generated-data evidence harness" in (
+        root_readme_prose
+    )
+    assert "grants no production adapter, operator path/data access" in root_readme_prose
     assert "## Continuous Public-Trade Physical Stream-Store Architecture (Design Only)" in (
         root_readme
     )
@@ -1247,7 +1357,13 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     )
     assert "constraint-bound exact predecessor-record witness" in root_readme_prose
     assert "non-executable design and evidence plan only" in root_readme_prose
+    assert "TASK-063 is complete only as this non-executable architecture" in root_readme_prose
+    assert "TASK-064 is the canonical next action" in root_readme_prose
     assert "TASK-063 remains queued until TASK-062 is `COMPLETE`" not in root_readme_prose
+    assert "canonical next action is TASK-063" not in root_readme_prose
+    assert "TASK-063 is the canonical next action" not in root_readme_prose
+    assert "TASK-063 remains the canonical next action" not in root_readme_prose
+    assert "TASK-063 remains the canonical design-only next action" not in root_readme_prose
     assert "## Continuous Public-Trade Persistence Records and Codecs (Unused)" in (
         market_data_prose
     )
@@ -1288,14 +1404,30 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "TASK-062 is complete only as this unused logical contract increment" in (
         market_data_prose
     )
-    assert "canonical next action is TASK-063" in market_data_prose
+    assert "TASK-063 is complete only as its design-only physical architecture" in (
+        market_data_prose
+    )
+    assert "canonical next action is TASK-064" in market_data_prose
+    assert "isolated executable SQLite test schema and generated-data evidence harness" in (
+        market_data_prose
+    )
     assert "## Continuous Public-Trade Physical Stream-Store Architecture (Design Only)" in (
         market_data_contract
     )
     assert "Full-range TASK-059 epoch milliseconds and causal versions map" in market_data_prose
     assert "hidden second history-row read" in market_data_prose
     assert "ADR-0031 contains no executable schema" in market_data_prose
+    assert "TASK-063 is complete only as this non-executable design" in market_data_prose
+    assert "TASK-064 is the canonical next action" in market_data_prose
+    assert "generated databases beneath pytest temporary directories" in market_data_prose
+    assert "target path/VFS/filesystem, power-loss, operational capacity/checkpoint" in (
+        market_data_prose
+    )
     assert "TASK-063 remains queued until TASK-062 is `COMPLETE`" not in market_data_prose
+    assert "canonical next action is TASK-063" not in market_data_prose
+    assert "TASK-063 is the canonical next action" not in market_data_prose
+    assert "TASK-063 remains the canonical next action" not in market_data_prose
+    assert "TASK-063 remains the canonical design-only next action" not in market_data_prose
     assert "# ADR 0029: Continuous Public-Trade Stream Persistence Contract" in adr_0029
     assert "- **Status:** Accepted" in adr_0029
     assert "### Exact durable TASK-059 stream state" in adr_0029
@@ -1475,14 +1607,26 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "six domain-separated digest/history contracts" in risk_register_prose
     assert "TASK-062 now freezes only an unused logical store port" in risk_register_prose
     assert "one-winner compare-and-swap ownership" in risk_register_prose
-    assert "TASK-063 is now the canonical next design-only" in risk_register_prose
     assert (
-        "it authorizes no adapter, database, implementation, capacity, durability, or readiness "
-        "claim"
+        risk_register_prose.count(
+            "TASK-064 is now the canonical next RISK-1 test-only SQLite schema and generated-data "
+            "evidence-harness task"
+        )
+        == 4
+    )
+    assert (
+        "its synthetic measurements grant no operational capacity, checkpoint, request-budget, "
+        "durability, or readiness claim"
     ) in risk_register_prose
     assert "TASK-063 remains queued until TASK-062 is `COMPLETE`" not in risk_register_prose
+    assert "TASK-063 is now the canonical next design-only" not in risk_register_prose
+    assert "TASK-063 remains the canonical next action" not in risk_register_prose
+    assert "TASK-063 remains the canonical design-only next action" not in risk_register_prose
     assert "## TASK-063 Physical Store Design Treatment" in risk_register
     assert "changes no risk state" in risk_register_prose
+    assert "TASK-063 is complete only as this non-executable design" in risk_register_prose
+    assert "TASK-064 is the canonical next action" in risk_register_prose
+    assert "Target filesystem, power-loss, operational capacity/checkpoint" in risk_register_prose
     assert "the stream store grants no request budget" in risk_register_prose
     assert "stores remain separate and non-atomic" in risk_register_prose
     assert "No schema, adapter, database, migration, or operator-data access is executed" in (
@@ -1566,14 +1710,26 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "Every output is a store-local classification" in roadmap_prose
     assert "`UNAVAILABLE` carries no coherent classification" in roadmap_prose
     assert "TASK-062 is complete only as this unused logical contract increment" in roadmap_prose
-    assert "TASK-063 is the canonical next action" in roadmap_prose
+    assert "TASK-063 is complete only as its design-only physical stream-store architecture" in (
+        roadmap_prose
+    )
+    assert "TASK-064 is the canonical next action" in roadmap_prose
+    assert "isolated executable SQLite test schema and generated-data evidence harness" in (
+        roadmap_prose
+    )
     assert "ADR-0031 now records the TASK-063 design-only result" in roadmap_prose
     assert (
         "Constraint-bound creation-record, current-record, and predecessor-record witnesses"
         in roadmap_prose
     )
     assert "No schema, database, adapter, path, I/O, runtime" in roadmap_prose
+    assert "TASK-063 is complete only as this non-executable design" in roadmap_prose
+    assert "generated databases under pytest temporary directories" in roadmap_prose
     assert "TASK-063 remains queued until TASK-062 is `COMPLETE`" not in roadmap_prose
+    assert "canonical next action is TASK-063" not in roadmap_prose
+    assert "TASK-063 is the canonical next action" not in roadmap_prose
+    assert "TASK-063 remains the canonical next action" not in roadmap_prose
+    assert "TASK-063 remains the canonical design-only next action" not in roadmap_prose
     assert "grants no physical implementation authority" in roadmap_prose
     assert "The canonical next action is TASK-037" not in roadmap
 

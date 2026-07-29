@@ -733,11 +733,13 @@ unavailable storage; it is not retry authority and defines no retry loop, delay,
 permission. TASK-062 adds no physical store, adapter, database, schema, migration, I/O, clock,
 evidence-body access, runtime composition, authority, automatic action, capacity, durability,
 recovery, multi-host guarantee, deployment, or readiness. TASK-062 is complete only as this unused
-logical contract increment. The canonical next action is TASK-063: a design-only physical
-stream-store architecture and evidence plan resolving exact epoch representation, schema/index and
-transaction mapping, retention/compaction, migration, backup/restore, crash evidence, and capacity
-before any adapter, while granting no physical implementation authority. TASK-037 remains blocked
-and authorization remains denied.
+logical contract increment. TASK-063 is complete only as its design-only physical architecture and
+evidence plan and grants no implementation authority. The canonical next action is TASK-064: an
+isolated executable SQLite test schema and generated-data evidence harness for the frozen
+transaction, crash, bounded-query, backup/restore, same-format generation-copy, and finite
+synthetic-workload gates. It grants no production adapter, runtime, operator path/data access,
+durability, capacity, recovery, or readiness claim. TASK-037 remains blocked and authorization
+remains denied.
 
 ## Continuous Public-Trade Physical Stream-Store Architecture (Design Only)
 
@@ -767,8 +769,11 @@ ADR-0031 contains no executable schema and creates no database, adapter, path, c
 runtime, clock, fence, budget, retry or recovery action, durability, capacity, or readiness.
 Preserve-all retention, separate-generation migration, verified backup and independent restore,
 crash/lost-acknowledgement testing, bounded-query proof, exact-runtime and target-filesystem
-evidence, and finite capacity thresholds remain mandatory preimplementation gates. TASK-063 remains
-the canonical next action until its governed lifecycle completes. TASK-037 remains blocked and
+evidence, and finite capacity thresholds remain mandatory preimplementation gates. TASK-063 is
+complete only as this non-executable design. TASK-064 is the canonical next action and may exercise
+only generated databases beneath pytest temporary directories; target path/VFS/filesystem,
+power-loss, operational capacity/checkpoint, backup-boundary, retention, and incompatible-migration
+evidence remain separately governed before any production adapter. TASK-037 remains blocked and
 authorization remains denied.
 
 ## Canonical Candle
