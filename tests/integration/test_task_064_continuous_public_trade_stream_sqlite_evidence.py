@@ -11,6 +11,7 @@ import os
 import selectors
 import signal
 import sqlite3
+import stat
 import time
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import replace
@@ -2286,6 +2287,70 @@ def test_compare_and_swap_rejects_a_self_consistent_time_regression(
     assert harness.verify_store(token).history_count == 1
 
 
+def test_expectation_conflicts_cannot_mask_transition_link_corruption(
+    tmp_path: Path,
+) -> None:
+    single = harness.bootstrap_store(tmp_path)
+    policy_a, creation_a = _creation(seed=342)
+    a_v2 = _retain(creation_a, policy_a, reason="expectation-corrupt-a-v2")
+    a_v3 = _retain(a_v2, policy_a, reason="expectation-corrupt-a-v3")
+    valid_a_v4 = _retain(a_v3, policy_a, reason="expectation-corrupt-a-v4")
+    regressed_a_v4 = _with_recorded_at(
+        a_v3,
+        valid_a_v4,
+        a_v3.record.recorded_at - timedelta(microseconds=1),
+    )
+    assert (
+        harness.create_stream(single, creation_a, policy_a).classification
+        is harness.StoreClassification.INSERTED
+    )
+    assert (
+        harness.compare_and_swap_stream(single, a_v2).classification
+        is harness.StoreClassification.UPDATED
+    )
+    assert (
+        harness.compare_and_swap_stream(single, a_v3).classification
+        is harness.StoreClassification.UPDATED
+    )
+    with pytest.raises(harness.HarnessFailure) as single_candidate:
+        harness.compare_and_swap_stream(
+            single,
+            regressed_a_v4,
+            expectation=_expectation(_policy(seed=3_420), creation_a),
+        )
+    assert single_candidate.value.code is harness.HarnessFailureCode.CORRUPT
+    assert harness.verify_store(single).history_count == 3
+
+    mature = harness.bootstrap_store(tmp_path)
+    policy_b, creation_b = _creation(seed=343)
+    b_v2 = _retain(creation_b, policy_b, reason="expectation-corrupt-b-v2")
+    b_v3 = _retain(b_v2, policy_b, reason="expectation-corrupt-b-v3")
+    for creation, policy, second, third in (
+        (creation_a, policy_a, a_v2, a_v3),
+        (creation_b, policy_b, b_v2, b_v3),
+    ):
+        assert (
+            harness.create_stream(mature, creation, policy).classification
+            is harness.StoreClassification.INSERTED
+        )
+        assert (
+            harness.compare_and_swap_stream(mature, second).classification
+            is harness.StoreClassification.UPDATED
+        )
+        assert (
+            harness.compare_and_swap_stream(mature, third).classification
+            is harness.StoreClassification.UPDATED
+        )
+    with pytest.raises(harness.HarnessFailure) as two_candidates:
+        harness.compare_and_swap_stream(
+            mature,
+            regressed_a_v4,
+            expectation=_expectation(policy_b, creation_b),
+        )
+    assert two_candidates.value.code is harness.HarnessFailureCode.CORRUPT
+    assert harness.verify_store(mature).history_count == 6
+
+
 def test_load_and_verify_reject_a_persisted_time_regression(
     tmp_path: Path,
 ) -> None:
@@ -2667,8 +2732,40 @@ def test_report_collectors_reject_cross_root_before_delegate_and_preserve_slots(
         backup_recorded_at_utc="2026-07-29T06:35:00.000000Z",
         restore_recorded_at_utc="2026-07-29T06:36:00.000000Z",
     )
-    assert (chain_calls, backup_calls) == (3, 1)
+    assert (chain_calls, backup_calls) == (4, 1)
     report_token = backup_restore.backup_token
+    with harness.bootstrap_path_operation_scope(run):
+        _report_bootstrap_path_evidence(tmp_path, report_token)
+    harness.finalize_bootstrap_path_evidence(run, report_token)
+
+    before_summary = harness.verify_store(report_token)
+    before_tails = harness._tail_manifest(report_token)
+    before_manifest = harness._closed_file_manifest(report_token)
+    before_inventory = exact_inventory(tmp_path)
+    before_generations = generation_set(tmp_path)
+    before_ledger = (
+        dict(ledger.observations),
+        dict(ledger.operation_runs),
+        dict(ledger.rejection_runs),
+    )
+    with pytest.raises(harness.HarnessFailure) as wrong_same_root_source:
+        harness.collect_generation_copy_evidence(
+            run,
+            backup_restore.source_token,
+            tmp_path,
+        )
+    assert wrong_same_root_source.value.code is harness.HarnessFailureCode.CORRUPT
+    assert copy_calls == 0
+    assert exact_inventory(tmp_path) == before_inventory
+    assert generation_set(tmp_path) == before_generations
+    assert harness._closed_file_manifest(report_token) == before_manifest
+    assert harness._tail_manifest(report_token) == before_tails
+    assert harness.verify_store(report_token) == before_summary
+    assert (
+        dict(ledger.observations),
+        dict(ledger.operation_runs),
+        dict(ledger.rejection_runs),
+    ) == before_ledger
 
     foreign_copy_root = tmp_path / "foreign-copy-root"
     foreign_copy_root.mkdir(mode=0o700)
@@ -2708,74 +2805,12 @@ def test_report_collectors_reject_cross_root_before_delegate_and_preserve_slots(
             dict(ledger.rejection_runs),
         ) == before_ledger
 
-    copy_ordinal = harness.GENERATED_EVIDENCE_GATES.index("generation_copy")
-    before_inventory = exact_inventory(tmp_path)
-    before_generations = generation_set(tmp_path)
-    before_ledger = (
-        dict(ledger.observations),
-        dict(ledger.operation_runs),
-        dict(ledger.rejection_runs),
-    )
-    real_generation_id = harness._generation_evidence_id
-
-    def fail_generation_id(_token: harness.StoreToken) -> str:
-        raise harness.HarnessFailure(harness.HarnessFailureCode.CORRUPT)
-
-    monkeypatch.setattr(harness, "_generation_evidence_id", fail_generation_id)
-    with pytest.raises(harness.HarnessFailure) as local_post_copy_failure:
-        harness.collect_generation_copy_evidence(
-            run,
-            report_token,
-            tmp_path,
-        )
-    assert local_post_copy_failure.value.code is harness.HarnessFailureCode.CORRUPT
-    assert copy_calls == 1
-    assert exact_inventory(tmp_path) == before_inventory
-    assert generation_set(tmp_path) == before_generations
-    assert copy_ordinal not in ledger.observations
-    assert (
-        dict(ledger.observations),
-        dict(ledger.operation_runs),
-        dict(ledger.rejection_runs),
-    ) == before_ledger
-    monkeypatch.setattr(harness, "_generation_evidence_id", real_generation_id)
-
-    real_evidence_digest = harness._evidence_payload_digest
-
-    def fail_generation_copy_digest(value: object) -> str:
-        if type(value) is harness.GenerationCopyEvidence:
-            raise harness.HarnessFailure(harness.HarnessFailureCode.CORRUPT)
-        return real_evidence_digest(value)
-
-    monkeypatch.setattr(
-        harness,
-        "_evidence_payload_digest",
-        fail_generation_copy_digest,
-    )
-    with pytest.raises(harness.HarnessFailure) as post_return_failure:
-        harness.collect_generation_copy_evidence(
-            run,
-            report_token,
-            tmp_path,
-        )
-    assert post_return_failure.value.code is harness.HarnessFailureCode.CORRUPT
-    assert copy_calls == 2
-    assert exact_inventory(tmp_path) == before_inventory
-    assert generation_set(tmp_path) == before_generations
-    assert copy_ordinal not in ledger.observations
-    assert (
-        dict(ledger.observations),
-        dict(ledger.operation_runs),
-        dict(ledger.rejection_runs),
-    ) == before_ledger
-    monkeypatch.setattr(harness, "_evidence_payload_digest", real_evidence_digest)
-
     copied = harness.collect_generation_copy_evidence(
         run,
         report_token,
         tmp_path,
     )
-    assert copy_calls == 3
+    assert copy_calls == 1
     assert copied.source_token is report_token
     assert copied.destination_tails == copied.source_tails
     assert (
@@ -2844,6 +2879,102 @@ def test_online_backup_rejects_malformed_evidence_time_before_destination(
     assert malformed.value.code is harness.HarnessFailureCode.CORRUPT
     assert frozenset(harness._TOKEN_REGISTRY) == token_nonces
     assert harness.verify_store(source).history_count == 0
+
+
+def test_direct_backup_and_copy_apis_reject_cross_scope_before_access(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = harness.bootstrap_store(tmp_path)
+    policy, creation = _creation(seed=5_850)
+    assert (
+        harness.create_stream(source, creation, policy).classification
+        is harness.StoreClassification.INSERTED
+    )
+    transitions: list[ContinuousPublicTradeStreamStoredTransitionV1] = []
+    prior: ContinuousPublicTradeStreamStoredHistoryEntryV1 = creation
+    for offset in range(harness.CONCURRENT_BACKUP_TRANSITIONS):
+        transition = _retain(
+            prior,
+            policy,
+            reason=f"direct-preflight-{offset:02d}",
+        )
+        transitions.append(transition)
+        prior = transition
+    exact_transitions = tuple(transitions)
+    node_id = os.environ["PYTEST_CURRENT_TEST"].rsplit(" (", maxsplit=1)[0]
+    foreign_root = tmp_path / "direct-foreign-root"
+    foreign_root.mkdir(mode=0o700)
+    foreign_token: harness.StoreToken | None = None
+    with harness._pytest_root_scope(foreign_root, node_id=node_id):
+        foreign_token = harness.bootstrap_store(foreign_root)
+        source_summary = harness.verify_store(source)
+        source_tails = harness._tail_manifest(source)
+        source_files = harness._closed_file_manifest(source)
+        source_inventory = tuple(sorted(path.name for path in tmp_path.iterdir()))
+        verify_calls = 0
+        bootstrap_calls = 0
+        pipe_calls = 0
+        real_verify = harness.verify_store
+        real_bootstrap = harness.bootstrap_store
+        real_open_pipes = harness._open_pipes
+
+        def counted_verify(token: harness.StoreToken) -> harness.VerificationSummary:
+            nonlocal verify_calls
+            verify_calls += 1
+            return real_verify(token)
+
+        def counted_bootstrap(root: Path) -> harness.StoreToken:
+            nonlocal bootstrap_calls
+            bootstrap_calls += 1
+            return real_bootstrap(root)
+
+        def counted_pipes(count: int) -> tuple[tuple[int, int], ...]:
+            nonlocal pipe_calls
+            pipe_calls += 1
+            return real_open_pipes(count)
+
+        monkeypatch.setattr(harness, "verify_store", counted_verify)
+        monkeypatch.setattr(harness, "bootstrap_store", counted_bootstrap)
+        monkeypatch.setattr(harness, "_open_pipes", counted_pipes)
+        for candidate_token, candidate_root in (
+            (foreign_token, tmp_path),
+            (source, foreign_root),
+        ):
+            with pytest.raises(harness.HarnessFailure) as online_rejected:
+                harness.online_backup(
+                    candidate_token,
+                    candidate_root,
+                    evidence_recorded_at_utc="2026-07-29T06:40:00.000000Z",
+                )
+            assert online_rejected.value.code is harness.HarnessFailureCode.CORRUPT
+            with pytest.raises(harness.HarnessFailure) as concurrent_rejected:
+                harness.concurrent_write_backup_evidence(
+                    candidate_token,
+                    candidate_root,
+                    transitions=exact_transitions,
+                    evidence_recorded_at_utc="2026-07-29T06:41:00.000000Z",
+                )
+            assert concurrent_rejected.value.code is harness.HarnessFailureCode.CORRUPT
+            with pytest.raises(harness.HarnessFailure) as copy_rejected:
+                harness.same_format_generation_copy(
+                    candidate_token,
+                    candidate_root,
+                )
+            assert copy_rejected.value.code is harness.HarnessFailureCode.CORRUPT
+        assert (verify_calls, bootstrap_calls, pipe_calls) == (0, 0, 0)
+        assert tuple(sorted(path.name for path in tmp_path.iterdir())) == source_inventory
+        monkeypatch.setattr(harness, "verify_store", real_verify)
+        monkeypatch.setattr(harness, "bootstrap_store", real_bootstrap)
+        monkeypatch.setattr(harness, "_open_pipes", real_open_pipes)
+        assert harness.verify_store(source) == source_summary
+        assert harness._tail_manifest(source) == source_tails
+        assert harness._closed_file_manifest(source) == source_files
+        valid_copy = harness.same_format_generation_copy(source, tmp_path)
+        assert harness.verify_store(valid_copy).history_count == source_summary.history_count
+        harness._remove_owned_files(valid_copy)
+    assert foreign_token is not None
+    harness._remove_owned_files(foreign_token)
 
 
 def test_online_backup_post_copy_failure_preserves_primary_and_cleans_destination(
@@ -3675,6 +3806,99 @@ def test_rejection_capture_does_not_accept_caller_callbacks(tmp_path: Path) -> N
     assert not (tmp_path / "task064-evidence.json").exists()
 
 
+def test_direct_run_constructor_cannot_mint_evidence_authority(tmp_path: Path) -> None:
+    for removed_issuer in (
+        "_operation_evidence_executor",
+        "_operation_evidence_executor_unsealed",
+        "_build_operation_evidence_authority",
+        "_OPERATION_PRODUCERS_FROZEN",
+        "_whole_gate_collector",
+        "_whole_gate_collector_unsealed",
+        "_build_whole_gate_authority",
+        "_GATE_COLLECTORS_FROZEN",
+        "_registered_rejection_scenario",
+        "_REGISTERED_REJECTION_SCENARIOS",
+        "_build_rejection_scenario_authority",
+        "_GATE_OPERATION_ALLOWLIST",
+        "_FRESH_OPERATION_PRODUCER_SEQUENCE",
+        "_ATOMICITY_OPERATION_PRODUCER_SEQUENCE",
+        "_BOUNDED_OPERATION_PRODUCER_SEQUENCE",
+        "_GATE_OPERATION_PRODUCER_SEQUENCES",
+        "_canonical_operation_sequence",
+        "_canonical_rejection_scenario",
+        "_validate_canonical_rejection_scenario",
+        "_canonical_rejection_scenario_snapshot",
+        "_private_gate_receipt_digest",
+        "_validate_issued_operation_observation",
+        "_validate_issued_rejection_observation",
+        "_seal_generated_evidence_run_unsealed",
+        "_validate_evidence_receipt",
+        "_validate_evidence_receipt_unbound",
+        "_validate_issued_evidence_receipt",
+        "_consume_issued_evidence_receipt",
+        "_write_evidence_report_unbound",
+        "_build_evidence_report_writer",
+        "_build_private_gate_receipt_authority",
+        "_build_rejection_evidence_authority",
+        "_build_evidence_receipt_authority",
+    ):
+        assert not hasattr(harness, removed_issuer)
+    run = harness.begin_generated_evidence_run(tmp_path)
+    ledger = run._pytest_registration.evidence_ledger
+    forged = replace(run)
+    ledger.run = forged
+    context_token = harness._ACTIVE_EVIDENCE_RUN.set(forged)
+    try:
+        with pytest.raises(harness.HarnessFailure) as rejected:
+            harness._validated_evidence_run(forged)
+        assert rejected.value.code is harness.HarnessFailureCode.CORRUPT
+    finally:
+        harness._ACTIVE_EVIDENCE_RUN.reset(context_token)
+        ledger.run = run
+    assert harness._validated_evidence_run(run) is ledger
+
+
+def test_rejection_scenario_mutation_cannot_rebind_outcome(tmp_path: Path) -> None:
+    run = harness.begin_generated_evidence_run(tmp_path)
+    ledger = harness._validated_evidence_run(run)
+    bootstrap_calls = 0
+    real_bootstrap_store = harness.bootstrap_store
+
+    def counted_bootstrap_store(pytest_root: Path) -> harness.StoreToken:
+        nonlocal bootstrap_calls
+        bootstrap_calls += 1
+        return real_bootstrap_store(pytest_root)
+
+    with (
+        pytest.MonkeyPatch.context() as patch,
+        pytest.raises(harness.HarnessFailure) as mutated_scenario,
+        harness.bootstrap_path_operation_scope(run),
+    ):
+        patch.setattr(harness, "bootstrap_store", counted_bootstrap_store)
+        state = harness._ACTIVE_REJECTION_COLLECTOR.get()
+        assert state is not None
+        scenario = state.scenarios[0]
+        original_code = scenario.code
+        object.__setattr__(
+            scenario,
+            "code",
+            harness.HarnessFailureCode.INVALID_TOKEN,
+        )
+        try:
+            harness.capture_harness_rejection(
+                "relative_root",
+                pytest_root=Path("relative"),
+            )
+        finally:
+            object.__setattr__(scenario, "code", original_code)
+    assert mutated_scenario.value.code is harness.HarnessFailureCode.CORRUPT
+    assert bootstrap_calls == 0
+    assert scenario.code is original_code
+    assert harness._ACTIVE_REJECTION_COLLECTOR.get() is None
+    assert ledger.operation_runs == {}
+    assert ledger.rejection_runs == {}
+
+
 def test_live_connection_path_revalidation_is_lock_neutral(tmp_path: Path) -> None:
     token = harness.bootstrap_store(tmp_path)
     connection, _ = harness._connect(token, writer=True)
@@ -4030,17 +4254,95 @@ def test_cleanup_never_follows_a_replaced_generation_alias(tmp_path: Path) -> No
     original_generation.rename(retained_generation)
     original_generation.symlink_to(sentinel_root, target_is_directory=True)
     try:
-        harness._remove_owned_files(token)
+        with pytest.raises(harness.HarnessFailure) as replaced_alias:
+            harness._remove_owned_files(token)
+        assert replaced_alias.value.code is harness.HarnessFailureCode.UNAVAILABLE
         assert sentinel.read_bytes() == b"sentinel-must-survive"
+        assert token._nonce in harness._TOKEN_REGISTRY
     finally:
         original_generation.unlink()
         retained_generation.rename(original_generation)
-        harness._remove_unregistered_generation(
-            original_generation,
-            original_generation / "store.sqlite3",
-        )
+        harness._remove_owned_files(token)
         sentinel.unlink()
         sentinel_root.rmdir()
+    assert token._nonce not in harness._TOKEN_REGISTRY
+    assert not original_generation.exists()
+
+
+@pytest.mark.parametrize(
+    "fault",
+    ("unlink", "rmdir", "generation_close", "root_close"),
+)
+def test_owned_cleanup_failures_retain_retry_authority(
+    tmp_path: Path,
+    fault: str,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    registered = harness._TOKEN_REGISTRY[token._nonce]
+    real_unlink = os.unlink
+    real_rmdir = os.rmdir
+    real_close = os.close
+    injected = False
+
+    def fail_unlink(
+        path: str | bytes,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        nonlocal injected
+        if not injected and path == "store.sqlite3":
+            injected = True
+            raise OSError(errno.EIO, "injected owned unlink failure")
+        real_unlink(path, *args, **kwargs)
+
+    def fail_rmdir(
+        path: str | bytes,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        nonlocal injected
+        if not injected and path == token._generation_root.name:
+            injected = True
+            raise OSError(errno.EIO, "injected owned rmdir failure")
+        real_rmdir(path, *args, **kwargs)
+
+    target_inode = (
+        registered.generation_inode if fault == "generation_close" else registered.pytest_root_inode
+    )
+
+    def fail_close(descriptor: int) -> None:
+        nonlocal injected
+        details = os.fstat(descriptor)
+        if (
+            not injected
+            and details.st_dev
+            == (
+                registered.generation_device
+                if fault == "generation_close"
+                else registered.pytest_root_device
+            )
+            and details.st_ino == target_inode
+        ):
+            injected = True
+            real_close(descriptor)
+            raise OSError(errno.EIO, "injected owned close uncertainty")
+        real_close(descriptor)
+
+    with pytest.MonkeyPatch.context() as patch:
+        if fault == "unlink":
+            patch.setattr(os, "unlink", fail_unlink)
+        elif fault == "rmdir":
+            patch.setattr(os, "rmdir", fail_rmdir)
+        else:
+            patch.setattr(os, "close", fail_close)
+        with pytest.raises(harness.HarnessFailure) as cleanup:
+            harness._remove_owned_files(token)
+    assert injected
+    assert cleanup.value.code is harness.HarnessFailureCode.UNAVAILABLE
+    assert harness._TOKEN_REGISTRY.get(token._nonce) is registered
+    harness._remove_owned_files(token)
+    assert token._nonce not in harness._TOKEN_REGISTRY
+    assert not token._generation_root.exists()
 
 
 def test_cleanup_failures_preserve_primary_and_otherwise_are_sanitized() -> None:
@@ -4416,6 +4718,47 @@ def test_process_lifecycle_helpers_are_bounded_exact_and_fail_closed(
             is None
         )
 
+    attempted_signals: list[int] = []
+
+    def record_signal(process_id: int, _signal_number: int) -> None:
+        attempted_signals.append(process_id)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            os,
+            "waitpid",
+            lambda _process_id, _options: (_ for _ in ()).throw(
+                OSError(errno.EIO, "unproven ownership")
+            ),
+        )
+        patch.setattr(os, "kill", record_signal)
+        assert not harness._terminate_and_reap_processes((123_459,))
+    assert attempted_signals == []
+
+    ownership_ticks = -11.0
+
+    def expiring_ownership_clock() -> float:
+        nonlocal ownership_ticks
+        ownership_ticks += 11.0
+        return ownership_ticks
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(os, "waitpid", always_interrupted)
+        patch.setattr(time, "monotonic", expiring_ownership_clock)
+        patch.setattr(os, "kill", record_signal)
+        assert not harness._terminate_and_reap_processes((123_460,))
+    assert attempted_signals == []
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            os,
+            "waitpid",
+            lambda process_id, _options: (process_id + 1, 0),
+        )
+        patch.setattr(os, "kill", record_signal)
+        assert not harness._terminate_and_reap_processes((123_461,))
+    assert attempted_signals == []
+
     stopped_status = (signal.SIGSTOP << 8) | 0x7F
     assert os.WIFSTOPPED(stopped_status)
     observed_options: list[int] = []
@@ -4470,6 +4813,34 @@ def test_process_lifecycle_helpers_are_bounded_exact_and_fail_closed(
     assert harness._terminate_and_reap_processes((stopped_child,))
     with pytest.raises(ChildProcessError):
         os.waitpid(stopped_child, os.WNOHANG)
+
+    partial_read, partial_write = os.pipe()
+    partial_child = os.fork()
+    if partial_child == 0:
+        os.close(partial_read)
+        os.write(partial_write, b"ab")
+        os.write(partial_write, b"cd")
+        os.close(partial_write)
+        os._exit(0)
+    os.close(partial_write)
+    real_read = os.read
+    read_interrupted = False
+
+    def interrupt_partial_read(descriptor: int, size: int) -> bytes:
+        nonlocal read_interrupted
+        if not read_interrupted:
+            read_interrupted = True
+            raise InterruptedError
+        return real_read(descriptor, min(size, 2))
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(os, "read", interrupt_partial_read)
+        assert harness._read_process_packet("partial_packet", partial_read, 4) == b"abcd"
+    os.close(partial_read)
+    partial_status = harness._wait_for_owned_process(partial_child, timeout_seconds=1.0)
+    assert partial_status is not None
+    assert os.WIFEXITED(partial_status)
+    assert os.WEXITSTATUS(partial_status) == 0
 
     descriptor_count_before = len(os.listdir("/proc/self/fd"))
     read_descriptor, write_descriptor = os.pipe()
@@ -4538,6 +4909,87 @@ def test_process_lifecycle_helpers_are_bounded_exact_and_fail_closed(
         os.waitpid(cleanup_process_id, os.WNOHANG)
     assert len(os.listdir("/proc/self/fd")) == descriptor_count_before
     assert tmp_path.is_dir()
+
+
+def test_every_forked_evidence_api_rejects_live_connection_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    policy, creation = _creation(seed=7_450)
+    transition = _retain(creation, policy, reason="live-connection-fork-guard")
+    assert (
+        harness.create_stream(token, creation, policy).classification
+        is harness.StoreClassification.INSERTED
+    )
+    before = harness.verify_store(token)
+    connection, _ = harness._connect(token, writer=True)
+    fork_calls = 0
+
+    def forbidden_fork() -> int:
+        nonlocal fork_calls
+        fork_calls += 1
+        raise AssertionError("fork must not run with a live SQLite connection")
+
+    monkeypatch.setattr(os, "fork", forbidden_fork)
+    calls: tuple[Callable[[], object], ...] = (
+        lambda: harness.sqlite_result_code_fault_evidence(token, seam="readonly"),
+        lambda: harness.fresh_process_writer_contention_evidence(
+            token,
+            operation="create",
+            natural_key=_natural_key(creation),
+            creation=creation,
+            policy=policy,
+        ),
+        lambda: harness.fresh_process_two_writer_evidence(
+            token,
+            operation="create",
+            creations=(creation, creation),
+            policy=policy,
+        ),
+        lambda: harness.fresh_process_kill_evidence(
+            token,
+            seam="before_transaction",
+            creation=creation,
+            policy=policy,
+            natural_key=_natural_key(creation),
+        ),
+        lambda: harness.true_during_commit_evidence(
+            token,
+            transition=transition,
+            natural_key=_natural_key(creation),
+        ),
+        lambda: harness.ioerr_write_evidence(
+            token,
+            transition=transition,
+            natural_key=_natural_key(creation),
+        ),
+        lambda: harness.max_page_count_evidence(
+            token,
+            transition=transition,
+            natural_key=_natural_key(creation),
+        ),
+        lambda: harness.wal_concurrency_evidence(
+            token,
+            transitions=(transition,),
+            natural_key=_natural_key(creation),
+        ),
+        lambda: harness.concurrent_write_backup_evidence(
+            token,
+            tmp_path,
+            transitions=(transition,) * harness.CONCURRENT_BACKUP_TRANSITIONS,
+            evidence_recorded_at_utc="2026-07-29T06:42:00.000000Z",
+        ),
+    )
+    try:
+        for invoke in calls:
+            with pytest.raises(harness.HarnessFailure) as guarded:
+                invoke()
+            assert guarded.value.code is harness.HarnessFailureCode.UNPROVEN
+    finally:
+        connection.close()
+    assert fork_calls == 0
+    assert harness.verify_store(token) == before
 
 
 def test_partial_multichild_fork_failures_are_bounded_and_unproven(
@@ -5311,33 +5763,16 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
     )
     evidence_ledger = harness._validated_evidence_run(evidence_run)
     atomicity_ordinal = harness.GENERATED_EVIDENCE_GATES.index("atomicity_classification")
-    with harness.atomicity_operation_scope(evidence_run):
-        _report_atomicity_evidence(
-            tmp_path,
-            fresh_process,
-            substitute_semantics=True,
-        )
-    substituted_semantics = evidence_ledger.operation_runs["atomicity_classification"]
-    assert tuple(
-        (
-            cast(harness.MutationEvidence, substituted_semantics[index].result).classification,
-            cast(harness.MutationEvidence, substituted_semantics[index].result).stream_rows,
-            cast(harness.MutationEvidence, substituted_semantics[index].result).history_rows,
-        )
-        for index in (9, 10)
-    ) == (
-        (harness.StoreClassification.CONFLICT, 2, 6),
-        (harness.StoreClassification.CONFLICT, 2, 6),
-    )
-    with pytest.raises(harness.HarnessFailure) as semantic_substitution:
-        harness.finalize_atomicity_evidence(evidence_run, report_token)
-    assert semantic_substitution.value.code is harness.HarnessFailureCode.CORRUPT
-    assert atomicity_ordinal not in evidence_ledger.observations
-    evidence_ledger.operation_runs.pop("atomicity_classification")
-    evidence_ledger.rejection_runs.pop("atomicity_classification")
-
-    with harness.atomicity_operation_scope(evidence_run):
-        _report_atomicity_evidence(tmp_path, fresh_process)
+    harness.__dict__["_ATOMICITY_OPERATION_PRODUCER_SEQUENCE"] = ("bootstrap_store",)
+    harness.__dict__["_GATE_OPERATION_PRODUCER_SEQUENCES"] = {
+        "atomicity_classification": ("bootstrap_store",)
+    }
+    try:
+        with harness.atomicity_operation_scope(evidence_run):
+            _report_atomicity_evidence(tmp_path, fresh_process)
+    finally:
+        harness.__dict__.pop("_ATOMICITY_OPERATION_PRODUCER_SEQUENCE")
+        harness.__dict__.pop("_GATE_OPERATION_PRODUCER_SEQUENCES")
     atomicity_operations = evidence_ledger.operation_runs["atomicity_classification"]
     historical_binding_substitution = list(atomicity_operations)
     historical_binding_substitution[5] = replace(
@@ -5389,6 +5824,71 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
             retained[0][0],
             tmp_path,
         )
+    bounded_operations = evidence_ledger.operation_runs["bounded_queries"]
+    missing_binding = bounded_operations[1].input_binding
+    assert isinstance(missing_binding, harness._QueryOperationBinding)
+    hostile_missing_expectation = _expectation(
+        first_policy,
+        retained[0][0],
+    )
+    hostile_missing_binding = harness._operation_input_binding(
+        "load_current",
+        {
+            "stream_id": missing_binding.stream_id,
+            "natural_key": missing_binding.natural_key,
+            "expectation": hostile_missing_expectation,
+        },
+    )
+    assert isinstance(hostile_missing_binding, harness._QueryOperationBinding)
+    missing_expectation_operations = list(bounded_operations)
+    missing_expectation_operations[1] = replace(
+        missing_expectation_operations[1],
+        input_binding=hostile_missing_binding,
+        input_digest=harness._evidence_payload_digest(hostile_missing_binding),
+    )
+    evidence_ledger.operation_runs["bounded_queries"] = tuple(missing_expectation_operations)
+    with pytest.raises(harness.HarnessFailure) as missing_expectation_substitution:
+        harness.finalize_bounded_query_evidence(
+            evidence_run,
+            report_token,
+        )
+    assert missing_expectation_substitution.value.code is harness.HarnessFailureCode.CORRUPT
+    same_shape_binding = bounded_operations[2].input_binding
+    assert isinstance(same_shape_binding, harness._QueryOperationBinding)
+    wrong_stream_same_shape_binding = replace(
+        same_shape_binding,
+        stream_id=retained[1][0].record.stream_id,
+        natural_key=retained[1][1],
+    )
+    same_shape_operations = list(bounded_operations)
+    same_shape_operations[2] = replace(
+        same_shape_operations[2],
+        input_binding=wrong_stream_same_shape_binding,
+        input_digest=harness._evidence_payload_digest(
+            wrong_stream_same_shape_binding,
+        ),
+    )
+    evidence_ledger.operation_runs["bounded_queries"] = tuple(same_shape_operations)
+    with pytest.raises(harness.HarnessFailure) as same_shape_query_splice:
+        harness.finalize_bounded_query_evidence(
+            evidence_run,
+            report_token,
+        )
+    assert same_shape_query_splice.value.code is harness.HarnessFailureCode.CORRUPT
+    spliced_operations = list(bounded_operations)
+    spliced_operations[2] = replace(
+        spliced_operations[2],
+        input_binding=bounded_operations[3].input_binding,
+        input_digest=bounded_operations[3].input_digest,
+    )
+    evidence_ledger.operation_runs["bounded_queries"] = tuple(spliced_operations)
+    with pytest.raises(harness.HarnessFailure) as coherent_query_splice:
+        harness.finalize_bounded_query_evidence(
+            evidence_run,
+            report_token,
+        )
+    assert coherent_query_splice.value.code is harness.HarnessFailureCode.CORRUPT
+    evidence_ledger.operation_runs["bounded_queries"] = bounded_operations
     bounded_queries = harness.finalize_bounded_query_evidence(
         evidence_run,
         report_token,
@@ -5459,6 +5959,47 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
         evidence=evidence,
     )
     report_path = tmp_path / "task064-evidence.json"
+    forged_receipt = replace(evidence_receipt)
+    evidence_ledger.receipt = forged_receipt
+    fake_validator_calls = 0
+    fake_issued_validator_calls = 0
+
+    def fake_receipt_validator(*_args: Any, **_kwargs: Any) -> Any:
+        nonlocal fake_validator_calls
+        fake_validator_calls += 1
+        return evidence_ledger
+
+    def fake_issued_receipt_validator(*_args: Any, **_kwargs: Any) -> bool:
+        nonlocal fake_issued_validator_calls
+        fake_issued_validator_calls += 1
+        return True
+
+    with (
+        pytest.MonkeyPatch.context() as patch,
+        pytest.raises(harness.HarnessFailure) as direct_receipt_mint,
+    ):
+        patch.setattr(
+            harness,
+            "_validate_evidence_receipt",
+            fake_receipt_validator,
+            raising=False,
+        )
+        patch.setattr(
+            harness,
+            "_validate_issued_evidence_receipt",
+            fake_issued_receipt_validator,
+            raising=False,
+        )
+        harness.write_evidence_report(
+            tmp_path,
+            receipt=forged_receipt,
+            report=complete_report,
+        )
+    assert direct_receipt_mint.value.code is harness.HarnessFailureCode.CORRUPT
+    assert fake_validator_calls == 0
+    assert fake_issued_validator_calls == 0
+    assert not report_path.exists()
+    evidence_ledger.receipt = evidence_receipt
     with pytest.raises(harness.HarnessFailure) as wrong_report_type:
         harness.write_evidence_report(
             tmp_path,
@@ -5469,6 +6010,126 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
     assert not report_path.exists()
     assert not tuple(tmp_path.glob(".task064-evidence-*.tmp"))
     assert not evidence_ledger.consumed
+    wrong_nested_reports = (
+        replace(complete_report, evidence=cast(Any, object())),
+        replace(
+            complete_report,
+            evidence=replace(
+                evidence,
+                schema_identity=cast(Any, object()),
+            ),
+        ),
+        replace(
+            complete_report,
+            evidence=replace(
+                evidence,
+                projection_roundtrip=replace(
+                    projection,
+                    creation=cast(Any, object()),
+                ),
+            ),
+        ),
+        replace(
+            complete_report,
+            evidence=replace(
+                evidence,
+                bounded_queries=replace(
+                    bounded_queries,
+                    plans=(
+                        cast(Any, object()),
+                        *bounded_queries.plans[1:],
+                    ),
+                ),
+            ),
+        ),
+        replace(
+            complete_report,
+            evidence=replace(
+                evidence,
+                fresh_process_faults=replace(
+                    fresh_process,
+                    create_faults=(
+                        cast(Any, object()),
+                        *fresh_process.create_faults[1:],
+                    ),
+                ),
+            ),
+        ),
+        replace(
+            complete_report,
+            evidence=replace(
+                evidence,
+                fresh_process_faults=replace(
+                    fresh_process,
+                    wal_concurrency=replace(
+                        fresh_process.wal_concurrency,
+                        checkpoint_samples=cast(Any, object()),
+                    ),
+                ),
+            ),
+        ),
+        replace(
+            complete_report,
+            evidence=replace(
+                evidence,
+                backup_restore=replace(
+                    backup_restore,
+                    concurrent_write=replace(
+                        backup_restore.concurrent_write,
+                        source_before=replace(
+                            backup_restore.concurrent_write.source_before,
+                            profile=cast(Any, object()),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        replace(
+            complete_report,
+            evidence=replace(
+                evidence,
+                backup_restore=replace(
+                    backup_restore,
+                    concurrent_write=replace(
+                        backup_restore.concurrent_write,
+                        source_before=replace(
+                            backup_restore.concurrent_write.source_before,
+                            page_count=cast(Any, object()),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        replace(
+            complete_report,
+            backup_manifest=replace(
+                report_manifest,
+                files=(
+                    (
+                        cast(Any, object()),
+                        report_manifest.files[0][1],
+                        report_manifest.files[0][2],
+                    ),
+                    *report_manifest.files[1:],
+                ),
+            ),
+        ),
+        replace(
+            complete_report,
+            latency_samples_ns=cast(Any, object()),
+        ),
+    )
+    for wrong_nested_report in wrong_nested_reports:
+        with pytest.raises(harness.HarnessFailure) as wrong_nested:
+            harness.write_evidence_report(
+                tmp_path,
+                receipt=evidence_receipt,
+                report=wrong_nested_report,
+            )
+        assert wrong_nested.value.code is harness.HarnessFailureCode.CORRUPT
+        assert not report_path.exists()
+        assert not tuple(tmp_path.glob(".task064-evidence-*.tmp"))
+        assert not evidence_ledger.consumed
     backup_file_name, backup_file_size, backup_file_digest = report_manifest.files[0]
     forged_backup_digest = _digest("forged-report-backup-file")
     assert forged_backup_digest != backup_file_digest
@@ -5757,28 +6418,38 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
     assert not report_path.exists()
     assert_no_report_staging_file()
 
-    real_validate_receipt = harness._validate_evidence_receipt
-    receipt_validation_calls = 0
+    real_stage_close = os.close
+    staged_receipt_mutated = False
 
-    def fail_final_receipt_validation(*args: Any, **kwargs: Any) -> Any:
-        nonlocal receipt_validation_calls
-        receipt_validation_calls += 1
-        if receipt_validation_calls == 3:
-            raise harness.HarnessFailure(harness.HarnessFailureCode.CORRUPT)
-        return real_validate_receipt(*args, **kwargs)
+    def close_after_staged_receipt_mutation(descriptor: int) -> None:
+        nonlocal staged_receipt_mutated
+        details = os.fstat(descriptor)
+        try:
+            descriptor_target = Path(os.readlink(f"/proc/self/fd/{descriptor}")).name
+        except OSError:
+            descriptor_target = ""
+        if (
+            stat.S_ISREG(details.st_mode)
+            and descriptor_target.startswith(".task064-evidence-")
+            and descriptor_target.endswith(".tmp")
+            and not staged_receipt_mutated
+        ):
+            evidence_ledger.receipt = forged_receipt
+            staged_receipt_mutated = True
+        real_stage_close(descriptor)
 
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(
-            harness,
-            "_validate_evidence_receipt",
-            fail_final_receipt_validation,
-        )
-        with pytest.raises(harness.HarnessFailure) as final_receipt_recheck:
-            harness.write_evidence_report(
-                tmp_path,
-                receipt=evidence_receipt,
-                report=complete_report,
-            )
+        patch.setattr(os, "close", close_after_staged_receipt_mutation)
+        try:
+            with pytest.raises(harness.HarnessFailure) as final_receipt_recheck:
+                harness.write_evidence_report(
+                    tmp_path,
+                    receipt=evidence_receipt,
+                    report=complete_report,
+                )
+        finally:
+            evidence_ledger.receipt = evidence_receipt
+    assert staged_receipt_mutated
     assert final_receipt_recheck.value.code is harness.HarnessFailureCode.CORRUPT
     assert not report_path.exists()
     assert_no_report_staging_file()
@@ -5835,11 +6506,46 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
     finally:
         report_path.unlink()
 
-    report = harness.write_evidence_report(
-        tmp_path,
-        receipt=evidence_receipt,
-        report=complete_report,
-    )
+    real_report_close = os.close
+    root_identity = tmp_path.lstat()
+    ledger_mutated_during_root_close = False
+
+    def close_after_ledger_mutation(descriptor: int) -> None:
+        nonlocal ledger_mutated_during_root_close
+        details = os.fstat(descriptor)
+        if (
+            stat.S_ISDIR(details.st_mode)
+            and details.st_dev == root_identity.st_dev
+            and details.st_ino == root_identity.st_ino
+            and report_path.exists()
+        ):
+            evidence_ledger.receipt = forged_receipt
+            evidence_ledger.consumed = False
+            ledger_mutated_during_root_close = True
+        real_report_close(descriptor)
+
+    fake_consume_calls = 0
+
+    def fake_receipt_consumer(*_args: Any, **_kwargs: Any) -> None:
+        nonlocal fake_consume_calls
+        fake_consume_calls += 1
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(os, "close", close_after_ledger_mutation)
+        patch.setattr(
+            harness,
+            "_consume_issued_evidence_receipt",
+            fake_receipt_consumer,
+            raising=False,
+        )
+        report = harness.write_evidence_report(
+            tmp_path,
+            receipt=evidence_receipt,
+            report=complete_report,
+        )
+    assert ledger_mutated_during_root_close
+    assert fake_consume_calls == 0
+    assert not evidence_ledger.consumed
     assert report == report_path
     assert stat_mode(report) == 0o600
     assert report.stat().st_nlink == 1
@@ -5895,4 +6601,15 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
             report=complete_report,
         )
     assert consumed_receipt.value.code is harness.HarnessFailureCode.CORRUPT
+    evidence_ledger.consumed = False
+    evidence_ledger.recording = False
+    evidence_ledger.receipt = evidence_receipt
+    with pytest.raises(harness.HarnessFailure) as reopened_receipt:
+        harness.write_evidence_report(
+            tmp_path,
+            receipt=evidence_receipt,
+            report=complete_report,
+        )
+    assert reopened_receipt.value.code is harness.HarnessFailureCode.CORRUPT
+    evidence_ledger.consumed = True
     assert report.read_text(encoding="utf-8") == report_text
