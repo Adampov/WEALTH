@@ -56,6 +56,34 @@ device, inode, UID, mode, and random nonce; registration is revoked when the fix
 plain or reconstructed `Path` grants no authority. The harness owns every database it opens and
 accepts neither a database path nor SQL nor URI options at an operation boundary.
 
+The two fixture and binder call sites are sealed with an external-reference-independent,
+domain-versioned TLV fingerprint over every Python `CodeType` field, with filename and first line
+normalized to the named source suffix and line one. The domain binds CPython, its cache tag, exact
+Python `3.13.14`, and optimization level. Constants have exact type tags, recursive code/tuple
+encoding, sorted frozenset members, strict depth/node/cumulative-byte limits, and fail closed on
+unsupported or canonically ambiguous types.
+
+A separate occurrence-ordinal partition authenticates identity sharing within the selected
+executable constant graph rooted at each snapshotted `co_consts` tuple, including nested code,
+tuples, frozensets, and supported scalar constants. It preserves behavior-observable internal
+aliases without incorporating external reference counts or raw object IDs. Root-code identity and
+aliases between constants and nonconstant metadata are outside this identity partition; every
+metadata value remains authenticated by the value TLV. Whole-object `marshal` bytes are not an
+identity because their unused reference flags can differ after a valid pytest assertion-rewrite
+cache round trip while every selected value and internal constant-graph alias agrees.
+
+Fingerprint memoization is an optimization only. Its bounded table keys the retained exact
+`CodeType` identity together with the normalized source suffix and fingerprint domain, retains the
+code object itself so an object-ID collision cannot alias a result, and fails closed when its
+fixed capacity is exhausted. Request and computation counters prove repeated authentication of
+one exact code object reuses one computation. External-reference invariance is proved separately
+with genuinely distinct, equivalent, previously uncached code objects; a cache hit is not accepted
+as that proof. The serializer, capacity, and exhaustion stress runs only in a fresh authenticated
+exec-isolated pytest child with a fresh harness authority. The parent snapshots and proves the
+identity and ordered entries of its cache plus its request/computation counters are unchanged; no
+capacity proof may fill or directly mutate the shared parent cache, and rejected oversized or
+unsupported inputs must leave the child cache entries unchanged.
+
 The SQLite documentation identifies the application ID as an application-format marker and points
 to the source-tree `magic.txt` list. A contemporaneous 2026-07-29 review found no listed collision
 for `0x57505431`; this local selection is not a claim of external registration. The exact accepted
@@ -203,6 +231,54 @@ owned-file cleanup remains available after revocation. Every transaction repeats
 pinned root/generation/file identity check at its last pre-commit boundary; revocation raises the
 closed token failure and the mutation rolls back rather than committing after fixture exit.
 
+Each of the two pytest root fixtures is built by a private factory and executes only through
+closure-sealed exact dependencies. Before provenance handling, permit registration, or auxiliary
+root I/O, it revalidates the original module globals, pytest request and temporary-path types,
+temporary-root callable, `Path` and function types, environment and context modules, unwrap and
+fixture decorators, exact exported fixture and raw callable, harness authority functions, and
+failure types. Rebinding the authenticated globals dictionary, replacing an underlying module
+attribute, or substituting the exported fixture therefore fails before `BEGIN` or filesystem
+effects. This is an enforcement of the existing module-global-substitution boundary, not an
+expansion of the same-interpreter exclusion.
+
+All five internal nested-pytest protocols—execution isolation, post-return fixture replay, root
+latch probes, shared cleanup, and report-close probes—use one common inherited-descriptor
+provenance packet. The canonical packet binds the validated `0700` root and `0600` marker
+identities, parent PID, exact independently supplied issuer node, exact target child node,
+protocol, mode, random nonce, and packet digest. Issuance proves the active node is the issuer;
+consumption proves the packet issuer against the independently expected issuer and the packet
+target against the current child node. Same-node protocols require issuer and target equality;
+post-return replay alone binds its exact orchestrator issuer to a distinct exact target. Successful
+consumption unlinks the marker, closes the inherited descriptor, records the nonce, and scrubs
+every provenance and legacy mode variable. Bare legacy environment values are scrubbed but cannot
+select or shorten a parent matrix, malformed Unicode envelopes become closed harness failures,
+replay fails, and every nested pytest invocation disables its cache provider.
+
+Packet consumption precedes `BEGIN`, auxiliary-root creation, root-scope construction, and fixture
+I/O, and is distinct from later ticket claim. Successful authentication registers one opaque
+closure-owned ticket; the fixture binds it to the exact target node, PID, original temporary-root
+object and identity, and originating `ContextVar` token before `BEGIN`. Post-return replay claims
+that ticket locally in the fixture. Every other protocol leaves it only in the private context and
+registry until the test body supplies the exact closed protocol/mode matrix while the exact root
+session is active. Claim first validates issuer, target, mode, provenance root, fixture root,
+session, PID, reserved-environment absence, and state, then resets the activation token as the
+exact-context gate and installs a distinct finalize token. A copied/new context, thread, fork,
+wrong protocol/node/mode, replay, or late envelope cannot mutate claim state.
+Hostile code that runs before fixture authentication and deliberately rewrites the inherited marker
+descriptor, canonical packet, envelope, and digest is likewise outside this controlled/cooperating-
+process boundary. Within the accepted boundary, the exact parent-issued mode inventory and result
+attribution are preserved; an out-of-policy mode or caller-supplied mode mismatch fails before
+ticket state changes.
+
+Every authenticated ticket reaches exactly one bounded terminal record: `RETURNED` after a claimed
+successful lifecycle, `CANCELLED` after any setup/body/exit failure, or `UNCLAIMED` when a body
+returns without consuming its ticket. Unclaimed teardown is a test failure. Fixture failure paths
+independently attempt permit cancellation and ticket cancellation; token-reset, descriptor-close,
+or other cleanup ambiguity latches root-authority uncertainty and fails closed. Causal nested-pytest
+evidence covers all five protocols, wrong packets before `BEGIN`, every auxiliary-root creation,
+scope construction/entry, body and teardown failure, one-shot claim/replay, context/thread/PID
+separation, and zero live ticket-registry/context residue after failure.
+
 Every later open pins the registered root and generation descriptors; rejects unexpected entries
 and every observed main/WAL/SHM alias, non-regular file, ownership/mode/link mismatch, or identity
 change before and after SQLite open; and retains the generation descriptor for the connection
@@ -220,6 +296,14 @@ cannot descriptor-pin SQLite's own main/WAL/SHM opens or eliminate a hostile sam
 racing pathname replacement. That hostile race and target/VFS isolation are target/deployment
 `NOT_APPLICABLE` evidence here, never `PASS`, and independently block production use until
 separately governed target/VFS isolation evidence exists.
+
+The controlled-process model also excludes hostile code already executing in the same Python
+interpreter that deliberately traverses or mutates private closure cells, closure-owned authority
+registries, debugger state, `ctypes`, or raw process memory. This narrow same-interpreter exclusion
+does not relax any rejection of forged or mutated caller-held capabilities, direct exported
+wrapper bypasses, module-global substitution, fixture/node/path/PID/UID/mode/nonce mismatches,
+revocation or cleanup failure, filesystem identity and ownership failure, or any independent
+production blocker.
 
 ### Exact accepted runtime
 
@@ -491,6 +575,20 @@ be `NOT_APPLICABLE` with the fixed reason `outside_task_target_deployment_eviden
 duplicate, reordered, extra, negative, or differently reasoned gates are rejected. Reports reject
 arbitrary PRAGMA names and user/host/device/path identifiers. No committed report claims to bind
 its own future commit; the durable exact-head evidence is the draft pull request and CI logs.
+
+The parent sequentially pre-issues four distinct one-shot provenance packets, inherited
+descriptors, environments, and fresh bytecode-cache prefixes in its original fixture context,
+then launches the four destructive report-close ambiguity modes concurrently as independently
+authenticated pytest children. Their output drains have fixed per-stream and aggregate byte
+ceilings, all siblings share one deadline, any failure terminates and boundedly reaps the entire
+set, and every provenance marker and process is checked before the parent begins its own evidence
+run. Every close child still collects all twelve positive gates, constructs the exact report, and
+seals a valid receipt before entering its one destructive close branch. Each branch retains the
+exact staging/report inventory, descriptor-close count, cleanup-uncertainty or root-revocation
+state, terminal-receipt, and nine protected fork-guard assertions, then returns. Tamper, splice,
+shallow-query, seal-transition, second-digest, and generic negative report regressions remain in
+the normal parent together with the successful publication path; isolated close children do not
+repeat those unrelated negative checks.
 
 ## Security and Authority Boundary
 

@@ -16,6 +16,7 @@ import mmap
 import os
 import resource
 import secrets
+import select
 import selectors
 import signal
 import sqlite3
@@ -25,19 +26,22 @@ import sys
 import time
 import tracemalloc
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager, suppress
-from contextvars import ContextVar
+from contextlib import AbstractContextManager, contextmanager, suppress
+from contextvars import Context, ContextVar, Token
 from dataclasses import dataclass, fields, is_dataclass
 from datetime import UTC, datetime
 from enum import Enum, StrEnum
 from functools import partial, wraps
 from pathlib import Path
-from typing import Any, Final, ParamSpec, TypeVar, cast
+from types import CodeType, MappingProxyType
+from typing import Any, Final, Never, ParamSpec, TypeVar, cast
 from uuid import UUID
+from weakref import WeakSet
 
 from wealth.domain.continuous_public_trade import (
     MAX_CONTRACT_INTEGER,
     ContinuousPublicTradePolicy,
+    ContinuousPublicTradeTransitionKind,
 )
 from wealth.domain.continuous_public_trade_persistence import (
     ContinuousPublicTradeStreamCreationRecordV1,
@@ -158,10 +162,6 @@ TARGET_NOT_APPLICABLE_GATES: Final = (
     "incompatible_generation_migration",
 )
 TARGET_NOT_APPLICABLE_REASON: Final = "outside_task_target_deployment_evidence"
-_ALLOWED_TASK064_TEST_MODULES: Final = (
-    "tests/unit/test_task_064_continuous_public_trade_stream_sqlite_schema.py",
-    "tests/integration/test_task_064_continuous_public_trade_stream_sqlite_evidence.py",
-)
 ACCEPTED_SQLITE_SOURCE_ID: Final = (
     "2026-05-05 10:34:17 c88b22011a54b4f6fbd149e9f8e4de77658ce58143a1af0e3785e4e6475127e9"
 )
@@ -494,6 +494,286 @@ class _ValidatedIdentityCandidate:
 
 
 @dataclass(frozen=True, slots=True)
+class _SchemaFixtureSnapshot:
+    """One fresh, operation-local view of the two committed schema fixtures."""
+
+    descriptor: dict[str, object]
+    fingerprint: str
+    fingerprint_bytes: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class _DecodedCanonicalHistoryRecord:
+    """Canonical record evidence that carries no physical-row authority."""
+
+    record: (
+        ContinuousPublicTradeStreamCreationRecordV1 | ContinuousPublicTradeStreamTransitionRecordV1
+    )
+    canonical_bytes: bytes
+    record_digest: str
+    successor_envelope: ContinuousPublicTradeStreamEnvelopeV1
+    successor_envelope_bytes: bytes
+    successor_envelope_digest: str
+    history_root: str
+
+
+@dataclass(frozen=True, slots=True)
+class _HistoryPredecessorLinkSeal:
+    """Compact predecessor link evidence without retaining its decoded model."""
+
+    stream_uuid: bytes
+    successor_version: int
+    entry_kind: bytes
+    canonical_bytes: bytes
+    record_digest: str
+    successor_envelope_bytes: bytes
+    successor_envelope_digest: str
+    history_root: str
+    recorded_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class _ValidatedHistoryRowSnapshot:
+    """One fully validated physical row plus its canonical decoded evidence."""
+
+    row: sqlite3.Row
+    decoded: _DecodedCanonicalHistoryRecord
+    predecessor_link: _HistoryPredecessorLinkSeal | None
+    entry: ContinuousPublicTradeStreamStoredHistoryEntryV1
+
+
+_MAX_LOCAL_HISTORY_SNAPSHOTS: Final = 101
+_HISTORY_ROW_COLUMNS: Final = (
+    "history_row_id",
+    "stream_row_id",
+    "successor_version",
+    "entry_kind",
+    "record_model_version",
+    "serialization_version",
+    "record_canonical_bytes",
+    "record_digest",
+    "successor_envelope_canonical_bytes",
+    "successor_envelope_digest",
+    "prior_version",
+    "prior_envelope_digest",
+    "prior_history_root",
+    "predecessor_record_canonical_bytes",
+    "predecessor_record_digest",
+    "successor_history_root",
+)
+
+
+@dataclass(slots=True)
+class _HistorySnapshotCache:
+    """Bounded operation-local issuer for decoded records and physical snapshots."""
+
+    process_id: int
+    decoded_records: dict[bytes, _DecodedCanonicalHistoryRecord]
+    decoded_issued: dict[int, tuple[_DecodedCanonicalHistoryRecord, bytes]]
+    validated_rows: dict[tuple[int, int], _ValidatedHistoryRowSnapshot]
+    snapshot_issued: dict[int, tuple[object, ...]]
+    valid: bool
+
+    def _require_live(self) -> None:
+        if type(self) is not _HistorySnapshotCache or self.valid is not True:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        if (
+            type(self.decoded_records) is not dict
+            or type(self.decoded_issued) is not dict
+            or type(self.validated_rows) is not dict
+            or type(self.snapshot_issued) is not dict
+        ):
+            _invalidate_history_snapshot_cache_preserving_primary(self)
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        if self.process_id != os.getpid():
+            self.invalidate()
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+
+    def decoded(self, canonical_bytes: bytes) -> _DecodedCanonicalHistoryRecord | None:
+        self._require_live()
+        decoded = self.decoded_records.get(canonical_bytes)
+        if decoded is None:
+            return None
+        issued = self.decoded_issued.get(id(decoded))
+        if (
+            issued is None
+            or issued[0] is not decoded
+            or issued[1] != canonical_bytes
+            or decoded.canonical_bytes != canonical_bytes
+        ):
+            self.invalidate()
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        return decoded
+
+    def issue_decoded(self, decoded: _DecodedCanonicalHistoryRecord) -> None:
+        try:
+            self._require_live()
+            if type(decoded) is not _DecodedCanonicalHistoryRecord:
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            canonical_bytes = decoded.canonical_bytes
+            if canonical_bytes in self.decoded_records or id(decoded) in self.decoded_issued:
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            if len(self.decoded_records) >= _MAX_LOCAL_HISTORY_SNAPSHOTS:
+                raise HarnessFailure(HarnessFailureCode.BOUNDS_EXCEEDED)
+            self.decoded_records[canonical_bytes] = decoded
+            self.decoded_issued[id(decoded)] = (decoded, canonical_bytes)
+        except BaseException:
+            _invalidate_history_snapshot_cache_preserving_primary(self)
+            raise
+
+    def cached_row(self, key: tuple[int, int]) -> _ValidatedHistoryRowSnapshot | None:
+        self._require_live()
+        snapshot = self.validated_rows.get(key)
+        if snapshot is not None:
+            self.require_snapshot(snapshot)
+        return snapshot
+
+    def issue_snapshot(self, snapshot: _ValidatedHistoryRowSnapshot) -> None:
+        try:
+            self._require_live()
+            _validate_history_snapshot_coherence(snapshot)
+            key = (
+                cast(int, snapshot.row["stream_row_id"]),
+                cast(int, snapshot.row["successor_version"]),
+            )
+            row_keys, row_values = _history_row_binding(snapshot.row)
+            if (
+                key in self.validated_rows
+                or id(snapshot) in self.snapshot_issued
+                or self.decoded(snapshot.decoded.canonical_bytes) is not snapshot.decoded
+            ):
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            if len(self.validated_rows) >= _MAX_LOCAL_HISTORY_SNAPSHOTS:
+                raise HarnessFailure(HarnessFailureCode.BOUNDS_EXCEEDED)
+            self.validated_rows[key] = snapshot
+            self.snapshot_issued[id(snapshot)] = (
+                snapshot,
+                snapshot.row,
+                snapshot.decoded,
+                snapshot.predecessor_link,
+                snapshot.entry,
+                row_keys,
+                row_values,
+            )
+        except BaseException:
+            _invalidate_history_snapshot_cache_preserving_primary(self)
+            raise
+
+    def require_snapshot(self, snapshot: _ValidatedHistoryRowSnapshot) -> None:
+        try:
+            self._require_live()
+            if type(snapshot) is not _ValidatedHistoryRowSnapshot:
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            issued = self.snapshot_issued.get(id(snapshot))
+            row_keys, row_values = _history_row_binding(snapshot.row)
+            if (
+                issued is None
+                or issued[0] is not snapshot
+                or issued[1] is not snapshot.row
+                or issued[2] is not snapshot.decoded
+                or issued[3] is not snapshot.predecessor_link
+                or issued[4] is not snapshot.entry
+                or issued[5] != row_keys
+                or issued[6] != row_values
+                or self.decoded(snapshot.decoded.canonical_bytes) is not snapshot.decoded
+            ):
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            _validate_history_snapshot_coherence(snapshot)
+        except BaseException:
+            _invalidate_history_snapshot_cache_preserving_primary(self)
+            raise
+
+    def retain_boundary(self, snapshot: _ValidatedHistoryRowSnapshot) -> None:
+        try:
+            self.require_snapshot(snapshot)
+            decoded_record = self.decoded_issued[id(snapshot.decoded)]
+            issued_snapshot = self.snapshot_issued[id(snapshot)]
+            key = (
+                cast(int, snapshot.row["stream_row_id"]),
+                cast(int, snapshot.row["successor_version"]),
+            )
+            new_decoded = {snapshot.decoded.canonical_bytes: snapshot.decoded}
+            new_decoded_issued = {id(snapshot.decoded): decoded_record}
+            new_rows = {key: snapshot}
+            new_snapshot_issued = {id(snapshot): issued_snapshot}
+            self.decoded_records = new_decoded
+            self.decoded_issued = new_decoded_issued
+            self.validated_rows = new_rows
+            self.snapshot_issued = new_snapshot_issued
+            if (
+                self.cardinalities() != (1, 1, 1, 1)
+                or self.decoded_records.get(snapshot.decoded.canonical_bytes)
+                is not snapshot.decoded
+                or self.decoded_issued.get(id(snapshot.decoded)) is not decoded_record
+                or self.validated_rows.get(key) is not snapshot
+                or self.snapshot_issued.get(id(snapshot)) is not issued_snapshot
+            ):
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        except BaseException:
+            _invalidate_history_snapshot_cache_preserving_primary(self)
+            raise
+
+    def cardinalities(self) -> tuple[int, int, int, int]:
+        self._require_live()
+        return (
+            len(self.decoded_records),
+            len(self.decoded_issued),
+            len(self.validated_rows),
+            len(self.snapshot_issued),
+        )
+
+    def invalidate(self) -> None:
+        self.valid = False
+        first_failure: BaseException | None = None
+        decoded_records = self.decoded_records
+        if type(decoded_records) is not dict:
+            self.decoded_records = {}
+        try:
+            decoded_records.clear()
+        except BaseException as error:
+            first_failure = error
+        decoded_issued = self.decoded_issued
+        if type(decoded_issued) is not dict:
+            self.decoded_issued = {}
+        try:
+            decoded_issued.clear()
+        except BaseException as error:
+            if first_failure is None:
+                first_failure = error
+        validated_rows = self.validated_rows
+        if type(validated_rows) is not dict:
+            self.validated_rows = {}
+        try:
+            validated_rows.clear()
+        except BaseException as error:
+            if first_failure is None:
+                first_failure = error
+        snapshot_issued = self.snapshot_issued
+        if type(snapshot_issued) is not dict:
+            self.snapshot_issued = {}
+        try:
+            snapshot_issued.clear()
+        except BaseException as error:
+            if first_failure is None:
+                first_failure = error
+        if first_failure is not None:
+            raise first_failure
+
+
+def _invalidate_history_snapshot_cache_preserving_primary(
+    cache: _HistorySnapshotCache,
+) -> None:
+    try:
+        cache.invalidate()
+    except BaseException:
+        return
+
+
+def _new_history_snapshot_cache() -> _HistorySnapshotCache:
+    return _HistorySnapshotCache(os.getpid(), {}, {}, {}, {}, True)
+
+
+@dataclass(frozen=True, slots=True)
 class _OperationObservation:
     """One closure-issued low-level executor result in a fixed gate scope."""
 
@@ -544,8 +824,22 @@ class _ActivePytestRoot:
     process_id: int
     node_id: str
     nonce: bytes
-    revocation_flag: mmap.mmap
     evidence_ledger: _EvidenceLedger
+
+
+@dataclass(frozen=True, slots=True)
+class _PytestRootCapability:
+    """Opaque fixture result naming the exact roots pre-issued for one test."""
+
+    roots: tuple[Path, ...]
+    _nonce: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class _PytestRootRegistrationPermit:
+    """Opaque one-shot permit issued before a fixture creates its auxiliary roots."""
+
+    _nonce: bytes
 
 
 @dataclass(frozen=True, slots=True)
@@ -598,6 +892,17 @@ class RuntimeProfile:
     defensive_enabled: bool
     pragmas: tuple[tuple[str, str | int], ...]
     limits: tuple[tuple[str, int], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _ConnectionImmutableRuntimeEvidence:
+    """Connection-local immutable runtime observations, independent of public reports."""
+
+    python_version: str
+    sqlite_version: str
+    threadsafety: int
+    sqlite_source_id: str
+    compile_options: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -961,16 +1266,45 @@ class _PinnedFile:
 
 @dataclass(frozen=True, slots=True)
 class _OperationPathSnapshot:
-    root_descriptor: int
-    generation_descriptor: int
-    files: tuple[_PinnedFile, ...]
+    nonce: bytes
 
 
-_TOKEN_REGISTRY: dict[bytes, _RegisteredIdentity] = {}
-_ACTIVE_PYTEST_ROOTS: dict[int, _ActivePytestRoot] = {}
-_REVOKED_PYTEST_ROOTS: dict[int, _ActivePytestRoot] = {}
-_CONNECTION_PATH_SNAPSHOTS: dict[int, _OperationPathSnapshot] = {}
-_CONNECTION_EVIDENCE_BINDINGS: dict[int, tuple[bytes, bool]] = {}
+@dataclass(frozen=True, slots=True)
+class _OperationPathAcquisition:
+    nonce: bytes
+
+
+_RegisteredIdentityFields = tuple[
+    Path,
+    _ActivePytestRoot,
+    Path,
+    Path,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+]
+_TokenAuthorityView = tuple[
+    str,
+    str,
+    str,
+    int,
+    int,
+    int,
+    int,
+    int,
+]
+
+
 _ACTIVE_CURSOR_MEASUREMENT: ContextVar[CursorMeasurement | None] = ContextVar(
     "task064_cursor_measurement",
     default=None,
@@ -993,88 +1327,339 @@ _ACTIVE_OPERATION_EXECUTOR_DEPTH: ContextVar[int] = ContextVar(
 )
 _GENERATION_COUNTER = 0
 
+
+def _build_authority_nonce_issuer() -> Callable[[str], bytes]:
+    """Capture one process-lifetime entropy source and reject every reused nonce."""
+
+    entropy = secrets.token_bytes
+    seen: set[bytes] = set()
+
+    def issue(kind: str) -> bytes:
+        if type(kind) is not str or not kind:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        try:
+            nonce = entropy(32)
+        except BaseException:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        if type(nonce) is not bytes or len(nonce) != 32 or nonce in seen:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        seen.add(nonce)
+        return nonce
+
+    return issue
+
+
+_issue_authority_nonce = _build_authority_nonce_issuer()
+del _build_authority_nonce_issuer
+
+
+def _registered_identity_fields(identity: _RegisteredIdentity) -> _RegisteredIdentityFields:
+    """Return the exact immutable authority-bearing fields of an identity view."""
+
+    return (
+        identity.pytest_root,
+        identity.pytest_registration,
+        identity.generation_root,
+        identity.database_path,
+        identity.pytest_root_device,
+        identity.pytest_root_inode,
+        identity.pytest_root_uid,
+        identity.pytest_root_mode,
+        identity.generation_device,
+        identity.generation_inode,
+        identity.generation_uid,
+        identity.generation_mode,
+        identity.device,
+        identity.inode,
+        identity.uid,
+        identity.mode,
+        identity.link_count,
+    )
+
+
+def _identity_from_fields(fields: _RegisteredIdentityFields) -> _RegisteredIdentity:
+    """Return a fresh non-authoritative identity view from closure-owned fields."""
+
+    return _RegisteredIdentity(*fields)
+
+
+def _store_token_fields(token: StoreToken) -> tuple[object, ...]:
+    """Include object identities so equal replacement fields cannot rebind a token."""
+
+    return (
+        id(token._nonce),
+        token._nonce,
+        id(token._pytest_root),
+        str(token._pytest_root),
+        id(token._generation_root),
+        str(token._generation_root),
+        id(token._database_path),
+        str(token._database_path),
+        token._device,
+        token._inode,
+        token._uid,
+        token._mode,
+        token._link_count,
+    )
+
+
+def _build_store_token_authority() -> tuple[
+    Callable[
+        [Callable[[Path, Callable[[_RegisteredIdentity], StoreToken]], StoreToken]],
+        Callable[[Path], StoreToken],
+    ],
+    Callable[[StoreToken], _RegisteredIdentity | None],
+    Callable[[bytes], _RegisteredIdentity | None],
+    Callable[[StoreToken, _RegisteredIdentity], bool],
+    Callable[[StoreToken], bool],
+    Callable[[], Mapping[bytes, _TokenAuthorityView]],
+]:
+    """Keep token issuance and exact object identity outside mutable module mirrors."""
+
+    nonce_issuer = _issue_authority_nonce
+    issued: dict[int, tuple[StoreToken, tuple[object, ...], _RegisteredIdentityFields]] = {}
+    by_nonce: dict[
+        bytes,
+        tuple[StoreToken, tuple[object, ...], _RegisteredIdentityFields],
+    ] = {}
+    retired: dict[int, tuple[StoreToken, tuple[object, ...]]] = {}
+
+    def valid_record(
+        token: StoreToken,
+    ) -> tuple[StoreToken, tuple[object, ...], _RegisteredIdentityFields] | None:
+        if type(token) is not StoreToken:
+            return None
+        record = issued.get(id(token))
+        if (
+            record is None
+            or record[0] is not token
+            or _store_token_fields(token) != record[1]
+            or type(token._nonce) is not bytes
+            or len(token._nonce) != 32
+            or by_nonce.get(token._nonce) is not record
+        ):
+            return None
+        return record
+
+    def issuing_bootstrap(
+        function: Callable[[Path, Callable[[_RegisteredIdentity], StoreToken]], StoreToken],
+    ) -> Callable[[Path], StoreToken]:
+        def wrapped(pytest_root: Path) -> StoreToken:
+            def issue(registered: _RegisteredIdentity) -> StoreToken:
+                registered_fields = _registered_identity_fields(registered)
+                nonce = nonce_issuer("store-token")
+                token = StoreToken(
+                    _nonce=nonce,
+                    _pytest_root=registered_fields[0],
+                    _generation_root=registered_fields[2],
+                    _database_path=registered_fields[3],
+                    _device=registered_fields[12],
+                    _inode=registered_fields[13],
+                    _uid=registered_fields[14],
+                    _mode=registered_fields[15],
+                    _link_count=registered_fields[16],
+                )
+                token_fields = _store_token_fields(token)
+                authority_record = (token, token_fields, registered_fields)
+                if id(token) in issued or id(token) in retired or nonce in by_nonce:
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                issued[id(token)] = authority_record
+                by_nonce[nonce] = authority_record
+                return token
+
+            return function(pytest_root, issue)
+
+        wrapped.__name__ = function.__name__
+        wrapped.__qualname__ = function.__qualname__
+        wrapped.__doc__ = function.__doc__
+        wrapped.__annotations__ = {"pytest_root": Path, "return": StoreToken}
+        return wrapped
+
+    def lookup(token: StoreToken) -> _RegisteredIdentity | None:
+        record = valid_record(token)
+        return None if record is None else _identity_from_fields(record[2])
+
+    def lookup_nonce(nonce: bytes) -> _RegisteredIdentity | None:
+        if type(nonce) is not bytes or len(nonce) != 32:
+            return None
+        record = by_nonce.get(nonce)
+        if record is None or valid_record(record[0]) is not record:
+            return None
+        return _identity_from_fields(record[2])
+
+    def revoke(token: StoreToken, registered: _RegisteredIdentity) -> bool:
+        record = valid_record(token)
+        if record is None or _registered_identity_fields(registered) != record[2]:
+            return False
+        by_nonce.pop(token._nonce, None)
+        issued.pop(id(token), None)
+        retired[id(token)] = (token, record[1])
+        return True
+
+    def is_retired(token: StoreToken) -> bool:
+        return bool(
+            type(token) is StoreToken
+            and type(token._nonce) is bytes
+            and len(token._nonce) == 32
+            and (record := retired.get(id(token))) is not None
+            and record[0] is token
+            and _store_token_fields(token) == record[1]
+        )
+
+    def snapshot() -> Mapping[bytes, _TokenAuthorityView]:
+        return MappingProxyType(
+            {
+                nonce: (
+                    "ACTIVE",
+                    str(record[2][0]),
+                    str(record[2][2]),
+                    record[2][12],
+                    record[2][13],
+                    record[2][14],
+                    record[2][15],
+                    record[2][16],
+                )
+                for nonce, record in by_nonce.items()
+                if valid_record(record[0]) is record
+            }
+        )
+
+    return issuing_bootstrap, lookup, lookup_nonce, revoke, is_retired, snapshot
+
+
+(
+    _store_token_issuing_bootstrap,
+    _lookup_store_token_authority,
+    _lookup_store_identity_by_nonce,
+    _revoke_store_token_authority,
+    _is_retired_store_token,
+    _token_authority_snapshot,
+) = _build_store_token_authority()
+del _build_store_token_authority
+
 _Parameters = ParamSpec("_Parameters")
 _Result = TypeVar("_Result")
+_MAX_EVIDENCE_TRAVERSAL_DEPTH: Final = 64
+
+
+@contextmanager
+def _evidence_traversal_guard(
+    value: object,
+    *,
+    depth: int,
+    active_ids: set[int],
+) -> Iterator[None]:
+    """Reject cyclic or unbounded evidence shapes with one sanitized outcome."""
+
+    identity = id(value)
+    if depth > _MAX_EVIDENCE_TRAVERSAL_DEPTH or identity in active_ids:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    active_ids.add(identity)
+    try:
+        yield
+    finally:
+        active_ids.remove(identity)
 
 
 def _normalized_evidence_payload(value: object) -> object:
     """Return a strict type-tagged value suitable for a private payload digest."""
 
-    if value is None:
-        return ["none"]
-    if isinstance(value, Enum):
-        return [
-            "enum",
-            f"{type(value).__module__}.{type(value).__qualname__}",
-            value.value,
-        ]
-    if type(value) is bool:
-        return ["bool", value]
-    if type(value) is int:
-        return ["int", value]
-    if type(value) is float:
-        if not math.isfinite(value):
+    active_ids: set[int] = set()
+
+    def normalize(item: object, depth: int) -> object:
+        with _evidence_traversal_guard(
+            item,
+            depth=depth,
+            active_ids=active_ids,
+        ):
+            if item is None:
+                return ["none"]
+            if isinstance(item, Enum):
+                return [
+                    "enum",
+                    f"{type(item).__module__}.{type(item).__qualname__}",
+                    item.value,
+                ]
+            if type(item) is bool:
+                return ["bool", item]
+            if type(item) is int:
+                return ["int", item]
+            if type(item) is float:
+                if not math.isfinite(item):
+                    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+                return ["float", item.hex()]
+            if type(item) is str:
+                return ["str", item]
+            if type(item) is bytes:
+                return ["bytes", item.hex()]
+            if isinstance(item, UUID):
+                return ["uuid", str(item)]
+            if isinstance(item, Path):
+                return ["path", str(item)]
+            if isinstance(item, datetime):
+                return ["datetime", item.isoformat()]
+            if type(item) in (
+                ContinuousPublicTradeStreamStoredCreationV1,
+                ContinuousPublicTradeStreamStoredTransitionV1,
+            ):
+                try:
+                    stored_value = cast(
+                        ContinuousPublicTradeStreamStoredCreationV1
+                        | ContinuousPublicTradeStreamStoredTransitionV1,
+                        item,
+                    )
+                    dumped = stored_value.model_dump(mode="json")
+                except (AttributeError, TypeError, ValueError):
+                    raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+                return [
+                    "pydantic",
+                    f"{type(item).__module__}.{type(item).__qualname__}",
+                    normalize(dumped, depth + 1),
+                ]
+            if type(item) is tuple:
+                return [
+                    "tuple",
+                    [normalize(nested, depth + 1) for nested in item],
+                ]
+            if type(item) is list:
+                return [
+                    "list",
+                    [normalize(nested, depth + 1) for nested in item],
+                ]
+            if type(item) is dict:
+                normalized_items = [
+                    (
+                        normalize(key, depth + 1),
+                        normalize(nested, depth + 1),
+                    )
+                    for key, nested in dict.items(item)
+                ]
+                normalized_items.sort(
+                    key=lambda pair: json.dumps(
+                        pair[0],
+                        ensure_ascii=True,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                )
+                return ["mapping", normalized_items]
+            if isinstance(item, Mapping):
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            if is_dataclass(item) and not isinstance(item, type):
+                return [
+                    "dataclass",
+                    f"{type(item).__module__}.{type(item).__qualname__}",
+                    [
+                        [
+                            field.name,
+                            normalize(getattr(item, field.name), depth + 1),
+                        ]
+                        for field in fields(item)
+                    ],
+                ]
             raise HarnessFailure(HarnessFailureCode.CORRUPT)
-        return ["float", value.hex()]
-    if type(value) is str:
-        return ["str", value]
-    if type(value) is bytes:
-        return ["bytes", value.hex()]
-    if isinstance(value, UUID):
-        return ["uuid", str(value)]
-    if isinstance(value, Path):
-        return ["path", str(value)]
-    if isinstance(value, datetime):
-        return ["datetime", value.isoformat()]
-    if type(value) in (
-        ContinuousPublicTradeStreamStoredCreationV1,
-        ContinuousPublicTradeStreamStoredTransitionV1,
-    ):
-        try:
-            stored_value = cast(
-                ContinuousPublicTradeStreamStoredCreationV1
-                | ContinuousPublicTradeStreamStoredTransitionV1,
-                value,
-            )
-            dumped = stored_value.model_dump(mode="json")
-        except (AttributeError, TypeError, ValueError):
-            raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
-        return [
-            "pydantic",
-            f"{type(value).__module__}.{type(value).__qualname__}",
-            _normalized_evidence_payload(dumped),
-        ]
-    if type(value) is tuple:
-        return ["tuple", [_normalized_evidence_payload(item) for item in value]]
-    if type(value) is list:
-        return ["list", [_normalized_evidence_payload(item) for item in value]]
-    if isinstance(value, Mapping):
-        normalized_items = [
-            (
-                _normalized_evidence_payload(key),
-                _normalized_evidence_payload(item),
-            )
-            for key, item in value.items()
-        ]
-        normalized_items.sort(
-            key=lambda item: json.dumps(
-                item[0],
-                ensure_ascii=True,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-        )
-        return ["mapping", normalized_items]
-    if is_dataclass(value) and not isinstance(value, type):
-        return [
-            "dataclass",
-            f"{type(value).__module__}.{type(value).__qualname__}",
-            [
-                [field.name, _normalized_evidence_payload(getattr(value, field.name))]
-                for field in fields(value)
-            ],
-        ]
-    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+
+    return normalize(value, 0)
 
 
 def _evidence_payload_digest(value: object) -> str:
@@ -1085,7 +1670,7 @@ def _evidence_payload_digest(value: object) -> str:
             sort_keys=True,
             separators=(",", ":"),
         ).encode("ascii")
-    except (AttributeError, TypeError, ValueError):
+    except (AttributeError, RecursionError, TypeError, ValueError):
         raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
     return hashlib.sha256(raw).hexdigest()
 
@@ -1095,36 +1680,44 @@ def _collect_evidence_registrations(
     registrations: list[_ActivePytestRoot],
     token_nonces: list[bytes],
 ) -> None:
-    if type(value) is StoreToken:
-        registered = _TOKEN_REGISTRY.get(value._nonce)
-        if registered is None:
-            raise HarnessFailure(HarnessFailureCode.CORRUPT)
-        if registered.pytest_registration not in registrations:
-            registrations.append(registered.pytest_registration)
-        if value._nonce not in token_nonces:
-            token_nonces.append(value._nonce)
-        return
-    if isinstance(value, Path):
-        registration = _ACTIVE_PYTEST_ROOTS.get(id(value))
-        if registration is not None and registration not in registrations:
-            registrations.append(registration)
-        return
-    if is_dataclass(value) and not isinstance(value, type):
-        for field in fields(value):
-            _collect_evidence_registrations(
-                getattr(value, field.name),
-                registrations,
-                token_nonces,
-            )
-        return
-    if type(value) in (tuple, list):
-        for item in cast(tuple[object, ...] | list[object], value):
-            _collect_evidence_registrations(item, registrations, token_nonces)
-        return
-    if isinstance(value, Mapping):
-        for key, item in value.items():
-            _collect_evidence_registrations(key, registrations, token_nonces)
-            _collect_evidence_registrations(item, registrations, token_nonces)
+    active_ids: set[int] = set()
+
+    def collect(item: object, depth: int) -> None:
+        with _evidence_traversal_guard(
+            item,
+            depth=depth,
+            active_ids=active_ids,
+        ):
+            if type(item) is StoreToken:
+                registered = _lookup_store_token_authority(item)
+                if registered is None:
+                    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+                if registered.pytest_registration not in registrations:
+                    registrations.append(registered.pytest_registration)
+                if item._nonce not in token_nonces:
+                    token_nonces.append(item._nonce)
+                return
+            if isinstance(item, Path):
+                registration = _lookup_active_pytest_root(item)
+                if registration is not None and registration not in registrations:
+                    registrations.append(registration)
+                return
+            if type(item) is tuple or type(item) is list:
+                for nested in item:
+                    collect(nested, depth + 1)
+                return
+            if type(item) is dict:
+                for key, nested in dict.items(item):
+                    collect(key, depth + 1)
+                    collect(nested, depth + 1)
+                return
+            if isinstance(item, Mapping):
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            if is_dataclass(item) and not isinstance(item, type):
+                for field in fields(item):
+                    collect(getattr(item, field.name), depth + 1)
+
+    collect(value, 0)
 
 
 def _validate_collector_value_registration(
@@ -1133,38 +1726,47 @@ def _validate_collector_value_registration(
 ) -> None:
     """Fail before authority-bearing work when a value crosses pytest scopes."""
 
-    if type(value) is StoreToken:
-        registered = _TOKEN_REGISTRY.get(value._nonce)
-        if (
-            registered is None
-            or registered.pytest_registration is not registration
-            or _require_token(value) is not registered
+    active_ids: set[int] = set()
+
+    def validate(item: object, depth: int) -> None:
+        with _evidence_traversal_guard(
+            item,
+            depth=depth,
+            active_ids=active_ids,
         ):
-            raise HarnessFailure(HarnessFailureCode.CORRUPT)
-        return
-    if isinstance(value, Path):
-        if (
-            value is not registration.path_object
-            or _ACTIVE_PYTEST_ROOTS.get(id(value)) is not registration
-        ):
-            raise HarnessFailure(HarnessFailureCode.CORRUPT)
-        _validate_bootstrap_root(value)
-        return
-    if is_dataclass(value) and not isinstance(value, type):
-        for field in fields(value):
-            _validate_collector_value_registration(
-                getattr(value, field.name),
-                registration,
-            )
-        return
-    if type(value) in (tuple, list):
-        for item in cast(tuple[object, ...] | list[object], value):
-            _validate_collector_value_registration(item, registration)
-        return
-    if isinstance(value, Mapping):
-        for key, item in value.items():
-            _validate_collector_value_registration(key, registration)
-            _validate_collector_value_registration(item, registration)
+            if type(item) is StoreToken:
+                registered = _lookup_store_token_authority(item)
+                if (
+                    registered is None
+                    or registered.pytest_registration is not registration
+                    or _require_token(item) != registered
+                ):
+                    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+                return
+            if isinstance(item, Path):
+                if (
+                    item is not registration.path_object
+                    or _lookup_active_pytest_root(item) is not registration
+                ):
+                    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+                _validate_bootstrap_root(item)
+                return
+            if type(item) is tuple or type(item) is list:
+                for nested in item:
+                    validate(nested, depth + 1)
+                return
+            if type(item) is dict:
+                for key, nested in dict.items(item):
+                    validate(key, depth + 1)
+                    validate(nested, depth + 1)
+                return
+            if isinstance(item, Mapping):
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            if is_dataclass(item) and not isinstance(item, type):
+                for field in fields(item):
+                    validate(getattr(item, field.name), depth + 1)
+
+    validate(value, 0)
 
 
 def _validate_collector_value_authority(
@@ -1173,33 +1775,42 @@ def _validate_collector_value_authority(
 ) -> None:
     """Reject foreign registrations before any token or filesystem validation."""
 
-    if type(value) is StoreToken:
-        registered = _TOKEN_REGISTRY.get(value._nonce)
-        if registered is None or registered.pytest_registration is not registration:
-            raise HarnessFailure(HarnessFailureCode.CORRUPT)
-        return
-    if isinstance(value, Path):
-        if (
-            value is not registration.path_object
-            or _ACTIVE_PYTEST_ROOTS.get(id(value)) is not registration
+    active_ids: set[int] = set()
+
+    def validate(item: object, depth: int) -> None:
+        with _evidence_traversal_guard(
+            item,
+            depth=depth,
+            active_ids=active_ids,
         ):
-            raise HarnessFailure(HarnessFailureCode.CORRUPT)
-        return
-    if is_dataclass(value) and not isinstance(value, type):
-        for field in fields(value):
-            _validate_collector_value_authority(
-                getattr(value, field.name),
-                registration,
-            )
-        return
-    if type(value) in (tuple, list):
-        for item in cast(tuple[object, ...] | list[object], value):
-            _validate_collector_value_authority(item, registration)
-        return
-    if isinstance(value, Mapping):
-        for key, item in value.items():
-            _validate_collector_value_authority(key, registration)
-            _validate_collector_value_authority(item, registration)
+            if type(item) is StoreToken:
+                registered = _lookup_store_token_authority(item)
+                if registered is None or registered.pytest_registration is not registration:
+                    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+                return
+            if isinstance(item, Path):
+                if (
+                    item is not registration.path_object
+                    or _lookup_active_pytest_root(item) is not registration
+                ):
+                    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+                return
+            if type(item) is tuple or type(item) is list:
+                for nested in item:
+                    validate(nested, depth + 1)
+                return
+            if type(item) is dict:
+                for key, nested in dict.items(item):
+                    validate(key, depth + 1)
+                    validate(nested, depth + 1)
+                return
+            if isinstance(item, Mapping):
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            if is_dataclass(item) and not isinstance(item, type):
+                for field in fields(item):
+                    validate(getattr(item, field.name), depth + 1)
+
+    validate(value, 0)
 
 
 _GATE_PRODUCERS: dict[int, tuple[str, str, int]] = {}
@@ -2070,7 +2681,7 @@ def _whole_gate_collector_unsealed(
                 if (
                     any(observed is not registration for observed in registrations)
                     or registration.process_id != os.getpid()
-                    or _ACTIVE_PYTEST_ROOTS.get(id(registration.path_object)) is not registration
+                    or _lookup_active_pytest_root(registration.path_object) is not registration
                     or type(named_tokens) is not tuple
                     or not named_tokens
                     or len(named_tokens) != len({name for name, _ in named_tokens})
@@ -2338,6 +2949,7 @@ def _close_descriptors_checked(
     """Close exact parent-owned descriptors or fail closed."""
 
     if not _close_descriptors(descriptors):
+        _mark_process_cleanup_uncertain()
         raise HarnessFailure(code)
 
 
@@ -2348,6 +2960,7 @@ def _open_pipes(count: int) -> tuple[tuple[int, int], ...]:
             pipes.append(os.pipe())
     except OSError:
         if not _close_descriptors(tuple(descriptor for pipe in pipes for descriptor in pipe)):
+            _mark_process_cleanup_uncertain()
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
         raise
     return tuple(pipes)
@@ -2459,49 +3072,178 @@ def _terminate_and_reap_processes(process_ids: Sequence[int]) -> bool:
     return cleanup_ok and not remaining
 
 
-def _finalize_process_resources(
-    descriptors: Sequence[int],
-    process_ids: Sequence[int],
-    *,
-    code: HarnessFailureCode = HarnessFailureCode.UNAVAILABLE,
-) -> None:
-    """Attempt both descriptor and exact-child cleanup before reporting uncertainty."""
+def _build_process_cleanup_uncertainty() -> tuple[
+    Callable[[], None],
+    Callable[[], bool],
+    Callable[[Callable[[], None]], None],
+]:
+    """Retain a redundant, fork-shared cleanup-uncertainty latch."""
 
-    descriptors_ok = _close_descriptors(descriptors)
-    processes_ok = _terminate_and_reap_processes(process_ids)
-    if (not descriptors_ok or not processes_ok) and sys.exception() is None:
-        raise HarnessFailure(code)
-
-
-def _wait_or_terminate_owned_process(
-    process_id: int,
-    *,
-    timeout_seconds: float = 10.0,
-) -> int | None:
-    """Boundedly wait for one child and guarantee a checked termination attempt."""
-
-    status = _wait_for_owned_process(
-        process_id,
-        timeout_seconds=timeout_seconds,
+    mmap_constructor = mmap.mmap
+    mmap_flush = mmap.mmap.flush
+    mmap_shared = mmap.MAP_SHARED
+    mmap_protection = mmap.PROT_READ | mmap.PROT_WRITE
+    pipe_constructor = os.pipe
+    pipe_write = os.write
+    pipe_close = os.close
+    set_blocking = os.set_blocking
+    set_inheritable = os.set_inheritable
+    select_wait = select.select
+    suppress_errors = suppress
+    uncertain = False
+    root_poison_marker: Callable[[], None] | None = None
+    shared_poison = mmap_constructor(
+        -1,
+        1,
+        flags=mmap_shared,
+        prot=mmap_protection,
     )
-    if status is not None:
-        return status
-    if not _terminate_and_reap_processes((process_id,)):
-        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-    return None
+    shared_poison[0] = 0
+    mmap_flush(shared_poison)
+    poison_read_descriptor, poison_write_descriptor = pipe_constructor()
+    try:
+        set_blocking(poison_read_descriptor, False)
+        set_blocking(poison_write_descriptor, False)
+        set_inheritable(poison_read_descriptor, False)
+        set_inheritable(poison_write_descriptor, False)
+    except BaseException:
+        with suppress(OSError):
+            pipe_close(poison_read_descriptor)
+        with suppress(OSError):
+            pipe_close(poison_write_descriptor)
+        raise
+
+    def mark() -> None:
+        nonlocal uncertain
+        uncertain = True
+        try:
+            shared_poison[0] = 1
+            mmap_flush(shared_poison)
+        except (IndexError, OSError, ValueError):
+            pass
+        with suppress_errors(BlockingIOError, OSError):
+            pipe_write(poison_write_descriptor, b"\x01")
+        marker = root_poison_marker
+        if marker is not None:
+            marker()
+
+    def observed() -> bool:
+        nonlocal uncertain
+        if uncertain:
+            return True
+        try:
+            mmap_poisoned = shared_poison[0] != 0
+        except (IndexError, OSError, ValueError):
+            mmap_poisoned = True
+        try:
+            readable, _, _ = select_wait(
+                (poison_read_descriptor,),
+                (),
+                (),
+                0.0,
+            )
+            pipe_poisoned = poison_read_descriptor in readable
+        except (OSError, ValueError):
+            pipe_poisoned = True
+        if mmap_poisoned or pipe_poisoned:
+            mark()
+            return True
+        return False
+
+    def bind_root_poison(marker: Callable[[], None]) -> None:
+        nonlocal root_poison_marker
+        if root_poison_marker is not None or not callable(marker):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        root_poison_marker = marker
+
+    return mark, observed, bind_root_poison
+
+
+(
+    _mark_process_cleanup_uncertain,
+    _has_process_cleanup_uncertainty,
+    _bind_process_cleanup_root_poison,
+) = _build_process_cleanup_uncertainty()
+del _build_process_cleanup_uncertainty
+
+
+def _build_process_resource_finalizers(
+    mark_cleanup_uncertain: Callable[[], None],
+) -> tuple[
+    Callable[..., None],
+    Callable[..., int | None],
+]:
+    """Capture the irreversible cleanup marker behind both process finalizers."""
+
+    def finalize(
+        descriptors: Sequence[int],
+        process_ids: Sequence[int],
+        *,
+        code: HarnessFailureCode = HarnessFailureCode.UNAVAILABLE,
+    ) -> None:
+        """Attempt descriptor and exact-child cleanup before reporting uncertainty."""
+
+        try:
+            descriptors_ok = _close_descriptors(descriptors)
+        except BaseException:
+            descriptors_ok = False
+        try:
+            processes_ok = _terminate_and_reap_processes(process_ids)
+        except BaseException:
+            processes_ok = False
+        if not descriptors_ok or not processes_ok:
+            mark_cleanup_uncertain()
+            raise HarnessFailure(code)
+
+    def wait_or_terminate(
+        process_id: int,
+        *,
+        timeout_seconds: float = 10.0,
+    ) -> int | None:
+        """Boundedly wait for one child and guarantee a checked termination attempt."""
+
+        status = _wait_for_owned_process(
+            process_id,
+            timeout_seconds=timeout_seconds,
+        )
+        if status is not None:
+            return status
+        if not _terminate_and_reap_processes((process_id,)):
+            mark_cleanup_uncertain()
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        return None
+
+    return finalize, wait_or_terminate
+
+
+(
+    _finalize_process_resources,
+    _wait_or_terminate_owned_process,
+) = _build_process_resource_finalizers(_mark_process_cleanup_uncertain)
+del _build_process_resource_finalizers
 
 
 def _read_process_packet(stage: str, descriptor: int, size: int) -> bytes:
     """Read one exact finite child packet with a shared deadline."""
 
+    if type(stage) is not str or not stage or type(descriptor) is not int or descriptor < 0:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    _require_exact_int(size, minimum=1, maximum=1_048_576)
     timeout_seconds = (
         60.0 if stage in {"concurrent_backup_ready", "concurrent_backup_result"} else 10.0
     )
+    try:
+        os.set_blocking(descriptor, False)
+    except OSError:
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
     selector = selectors.DefaultSelector()
     deadline = time.monotonic() + timeout_seconds
     payload = bytearray()
     try:
-        selector.register(descriptor, selectors.EVENT_READ)
+        try:
+            selector.register(descriptor, selectors.EVENT_READ)
+        except (OSError, ValueError):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
         while len(payload) < size:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -2510,11 +3252,13 @@ def _read_process_packet(stage: str, descriptor: int, size: int) -> bytes:
                 ready = selector.select(timeout=remaining)
             except InterruptedError:
                 continue
+            except OSError:
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
             if not ready:
                 continue
             try:
                 chunk = os.read(descriptor, size - len(payload))
-            except InterruptedError:
+            except (InterruptedError, BlockingIOError):
                 continue
             if not chunk:
                 break
@@ -2524,22 +3268,70 @@ def _read_process_packet(stage: str, descriptor: int, size: int) -> bytes:
         selector.close()
 
 
-def _write_process_packet(descriptor: int, payload: bytes) -> None:
-    """Write one finite child packet without accepting a partial acknowledgement."""
+def _write_process_packet(stage: str, descriptor: int, payload: bytes) -> None:
+    """Write one finite child packet with one deadline and complete-write semantics."""
 
+    if (
+        type(stage) is not str
+        or not stage
+        or type(descriptor) is not int
+        or descriptor < 0
+        or type(payload) is not bytes
+        or not 1 <= len(payload) <= 1_048_576
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    timeout_seconds = (
+        60.0 if stage in {"concurrent_backup_ready", "concurrent_backup_result"} else 10.0
+    )
+    try:
+        os.set_blocking(descriptor, False)
+    except OSError:
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+    selector = selectors.DefaultSelector()
+    deadline = time.monotonic() + timeout_seconds
     view = memoryview(payload)
-    while view:
-        written = os.write(descriptor, view)
-        if written <= 0:
-            raise OSError(errno.EIO, "short process packet write")
-        view = view[written:]
+    try:
+        try:
+            selector.register(descriptor, selectors.EVENT_WRITE)
+        except (OSError, ValueError):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        while view:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            try:
+                ready = selector.select(timeout=remaining)
+            except InterruptedError:
+                continue
+            except OSError:
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+            if not ready:
+                continue
+            try:
+                written = os.write(descriptor, view)
+            except (InterruptedError, BlockingIOError):
+                continue
+            except OSError:
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+            if written <= 0 or written > len(view):
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            view = view[written:]
+    finally:
+        selector.close()
 
 
-def _require_fork_safe_connection_state() -> None:
-    """Reject fork-based evidence while any SQLite path authority remains live."""
+def _build_fork_safe_connection_requirement(
+    root_uncertain: Callable[[], bool],
+    connection_unsafe: Callable[[], bool],
+    cleanup_uncertain: Callable[[], bool],
+) -> Callable[[], None]:
+    """Capture the three irreversible fork-safety observers exactly once."""
 
-    if _CONNECTION_PATH_SNAPSHOTS or _CONNECTION_EVIDENCE_BINDINGS:
-        raise HarnessFailure(HarnessFailureCode.UNPROVEN)
+    def require() -> None:
+        if root_uncertain() or connection_unsafe() or cleanup_uncertain():
+            raise HarnessFailure(HarnessFailureCode.UNPROVEN)
+
+    return require
 
 
 def _unproven_process_fault(seam: str, *, reason: str) -> FaultEvidence:
@@ -2727,9 +3519,15 @@ def canonical_descriptor_bytes(descriptor: Mapping[str, object]) -> bytes:
 def schema_fingerprint(descriptor: Mapping[str, object]) -> str:
     """Return the domain-separated schema descriptor fingerprint."""
 
-    digest = hashlib.sha256(
-        SCHEMA_DESCRIPTOR_DOMAIN + canonical_descriptor_bytes(descriptor)
-    ).hexdigest()
+    return _schema_fingerprint_from_canonical_bytes(canonical_descriptor_bytes(descriptor))
+
+
+def _schema_fingerprint_from_canonical_bytes(canonical_bytes: bytes) -> str:
+    """Hash one already-canonical descriptor byte string exactly once."""
+
+    if type(canonical_bytes) is not bytes:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    digest = hashlib.sha256(SCHEMA_DESCRIPTOR_DOMAIN + canonical_bytes).hexdigest()
     return f"sha256:{digest}"
 
 
@@ -2846,9 +3644,7 @@ def installed_schema_descriptor(connection: sqlite3.Connection) -> dict[str, obj
     }
 
 
-def load_schema_descriptor() -> dict[str, object]:
-    """Load only exact canonical descriptor fixture bytes."""
-
+def _load_canonical_schema_descriptor_fixture() -> tuple[dict[str, object], bytes]:
     try:
         raw = SCHEMA_DESCRIPTOR_PATH.read_bytes()
     except OSError:
@@ -2856,21 +3652,24 @@ def load_schema_descriptor() -> dict[str, object]:
     if not raw.endswith(b"\n") or raw.endswith(b"\n\n"):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     document = raw[:-1]
+    descriptor = _parse_schema_descriptor_document(document)
+    canonical_bytes = canonical_descriptor_bytes(descriptor)
+    if canonical_bytes != document:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    return descriptor, canonical_bytes
+
+
+def _parse_schema_descriptor_document(document: bytes) -> dict[str, object]:
     try:
         value = json.loads(document)
     except (UnicodeDecodeError, json.JSONDecodeError):
         raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
     if type(value) is not dict:
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
-    descriptor = cast(dict[str, object], value)
-    if canonical_descriptor_bytes(descriptor) != document:
-        raise HarnessFailure(HarnessFailureCode.CORRUPT)
-    return descriptor
+    return cast(dict[str, object], value)
 
 
-def load_schema_fingerprint() -> str:
-    """Load and independently recompute the golden descriptor fingerprint."""
-
+def _load_schema_fingerprint_fixture() -> tuple[str, bytes]:
     try:
         raw = SCHEMA_FINGERPRINT_PATH.read_bytes()
     except OSError:
@@ -2881,10 +3680,38 @@ def load_schema_fingerprint() -> str:
         value = raw[:-1].decode("ascii")
     except UnicodeDecodeError:
         raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
-    _digest_bytes(value)
-    if value != schema_fingerprint(load_schema_descriptor()):
+    return value, _digest_bytes(value)
+
+
+def _load_schema_fixture_snapshot(
+    *,
+    expected_descriptor: Mapping[str, object] | None = None,
+    fingerprint_first: bool = False,
+) -> _SchemaFixtureSnapshot:
+    if fingerprint_first:
+        fingerprint, fingerprint_bytes = _load_schema_fingerprint_fixture()
+    descriptor, canonical_bytes = _load_canonical_schema_descriptor_fixture()
+    if expected_descriptor is not None and descriptor != expected_descriptor:
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
-    return value
+    if not fingerprint_first:
+        fingerprint, fingerprint_bytes = _load_schema_fingerprint_fixture()
+    computed_fingerprint = _schema_fingerprint_from_canonical_bytes(canonical_bytes)
+    if fingerprint != computed_fingerprint:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    return _SchemaFixtureSnapshot(descriptor, fingerprint, fingerprint_bytes)
+
+
+def load_schema_descriptor() -> dict[str, object]:
+    """Load only one fresh exact canonical descriptor fixture."""
+
+    descriptor, _ = _load_canonical_schema_descriptor_fixture()
+    return descriptor
+
+
+def load_schema_fingerprint() -> str:
+    """Load one fresh, self-consistent view of both golden schema fixtures."""
+
+    return _load_schema_fixture_snapshot(fingerprint_first=True).fingerprint
 
 
 def _walk_without_aliases(path: Path, *, include_leaf: bool) -> None:
@@ -2914,111 +3741,1581 @@ def _resolve_existing(path: Path, *, code: HarnessFailureCode) -> Path:
         raise HarnessFailure(code) from None
 
 
-@contextmanager
-def _pytest_root_scope(
-    pytest_root: Path,
-    *,
-    node_id: str,
-) -> Iterator[None]:
-    """Bind one real pytest fixture object to one exact allowed TASK064 test node."""
+def _build_pytest_root_authority() -> tuple[
+    Callable[[], None],
+    Callable[[str, Path], _PytestRootRegistrationPermit],
+    Callable[[_PytestRootRegistrationPermit], None],
+    Callable[
+        [_PytestRootRegistrationPermit, tuple[Path, ...]],
+        AbstractContextManager[_PytestRootCapability],
+    ],
+    Callable[[Path], _ActivePytestRoot | None],
+    Callable[[_ActivePytestRoot], bool],
+    Callable[[Path], _ActivePytestRoot | None],
+    Callable[[_PytestRootCapability, Path], None],
+    Callable[[_ActivePytestRoot, bool], bool],
+    Callable[[str], None],
+    Callable[[str], bool],
+    Callable[[], tuple[bool, bool]],
+    Callable[[], bool],
+    Callable[
+        [
+            Callable[[_EvidenceRun], bool],
+            Callable[[_EvidenceRun], bool],
+        ],
+        None,
+    ],
+    Callable[[], None],
+]:
+    """Pre-issue exact fixture roots from two sealed stdlib-only fixture call sites."""
 
-    if (
-        not isinstance(pytest_root, Path)
-        or not pytest_root.is_absolute()
-        or type(node_id) is not str
-        or not any(
-            node_id == module or node_id.startswith(f"{module}::")
-            for module in _ALLOWED_TASK064_TEST_MODULES
-        )
-        or os.environ.get("PYTEST_CURRENT_TEST", "").rsplit(" (", maxsplit=1)[0] != node_id
-    ):
-        raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
-    _walk_without_aliases(pytest_root, include_leaf=False)
-    try:
-        details = pytest_root.lstat()
-    except OSError:
-        raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT) from None
-    if (
-        stat.S_ISLNK(details.st_mode)
-        or not stat.S_ISDIR(details.st_mode)
-        or details.st_uid != os.getuid()
-    ):
-        raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
-    resolved = _resolve_existing(
-        pytest_root,
-        code=HarnessFailureCode.INVALID_BOOTSTRAP_ROOT,
-    )
-    revocation_flag: mmap.mmap | None = None
-    try:
-        revocation_flag = mmap.mmap(
-            -1,
-            1,
-            flags=mmap.MAP_SHARED,
-            prot=mmap.PROT_READ | mmap.PROT_WRITE,
-        )
-        revocation_flag[0] = 0
-    except (OSError, ValueError):
-        if revocation_flag is not None:
-            with suppress(OSError, ValueError):
-                revocation_flag.close()
-        raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT) from None
-    identity = _ActivePytestRoot(
-        path_object=pytest_root,
-        resolved_path=resolved,
-        device=details.st_dev,
-        inode=details.st_ino,
-        uid=details.st_uid,
-        mode=stat.S_IMODE(details.st_mode),
-        process_id=os.getpid(),
-        node_id=node_id,
-        nonce=secrets.token_bytes(32),
-        revocation_flag=revocation_flag,
-        evidence_ledger=_EvidenceLedger(
-            nonce=secrets.token_bytes(32),
-            observations={},
-            operation_runs={},
-            rejection_runs={},
+    fixture_policy = (
+        (
+            "tests/unit/test_task_064_continuous_public_trade_stream_sqlite_schema.py",
+            "tests.unit.test_task_064_continuous_public_trade_stream_sqlite_schema",
+            "_active_task064_pytest_root",
+            "tests/unit/test_task_064_continuous_public_trade_stream_sqlite_schema.py",
+            "7136d6ff216b9b1d3bdf32030918302d8fa5a87dfd8555df68c81939bde2dd34",
+            410,
+            494,
+            "_bind_task064_harness_module",
+            "41d05f3670974dedbcdb1b12e85b39bb2f1b306eb13686ba016caa07c2eeeb06",
+            34,
+            "8b511581be81cc760077fbf27e5c359eb012bc0a91e57eeb567a1e323b1d892f",
+        ),
+        (
+            "tests/integration/test_task_064_continuous_public_trade_stream_sqlite_evidence.py",
+            "tests.integration.test_task_064_continuous_public_trade_stream_sqlite_evidence",
+            "_active_task064_pytest_root",
+            "tests/integration/test_task_064_continuous_public_trade_stream_sqlite_evidence.py",
+            "f80cf4107910768e202a7f9b02df75d70c9c2c279129a4f99b9cb7f32895c47a",
+            410,
+            494,
+            "_bind_task064_harness_module",
+            "e4bba9b8f370dc1c66fcf977d36438dc870ade6792cd281e1f4ff5ed0fbfc330",
+            34,
+            "99a6ee84c608499eeb00f11fb3164128e2ff0ce5ee0c5f2f44fd35f389613ff4",
         ),
     )
-    key = id(pytest_root)
-    if key in _ACTIVE_PYTEST_ROOTS:
-        revocation_flag.close()
-        raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
-    _REVOKED_PYTEST_ROOTS.pop(key, None)
-    _ACTIVE_PYTEST_ROOTS[key] = identity
+    real_getpid = os.getpid
+    real_getppid = os.getppid
+    real_getuid = os.getuid
+    frame_getter = sys._getframe
+    code_type = CodeType
+    suppress_errors = suppress
+    path_type = Path
+    path_lstat = Path.lstat
+    path_read_bytes = Path.read_bytes
+    path_resolve = Path.resolve
+    path_is_file = Path.is_file
+    stat_is_link = stat.S_ISLNK
+    stat_is_directory = stat.S_ISDIR
+    stat_is_regular = stat.S_ISREG
+    stat_mode = stat.S_IMODE
+    digest_constructor = hashlib.sha256
+    compile_code = compile
+    type_of = type
+    object_identity = id
+    iter_values = iter
+    length_of = len
+    bytes_type = bytes
+    bool_type = bool
+    complex_type = complex
+    dict_type = dict
+    float_type = float
+    frozenset_type = frozenset
+    int_type = int
+    list_type = list
+    set_type = set
+    str_type = str
+    tuple_type = tuple
+    bytes_join = bytes.join
+    int_bit_length = int.bit_length
+    int_to_bytes = int.to_bytes
+    str_encode = str.encode
+    binary_float_pack = struct.pack
+    binary_float_pack_error = struct.error
+    sort_values = sorted
+    cast_value = cast
+    recursion_error = RecursionError
+    type_error = TypeError
+    value_error = ValueError
+    overflow_error = OverflowError
+    implementation_name = sys.implementation.name
+    implementation_cache_tag = sys.implementation.cache_tag
+    accepted_python_version = ACCEPTED_PYTHON_VERSION
+    runtime_python_version = (
+        f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    )
+    optimization_level = sys.flags.optimize
+    mmap_constructor = mmap.mmap
+    mmap_flush = mmap.mmap.flush
+    mmap_close = mmap.mmap.close
+    mmap_shared = mmap.MAP_SHARED
+    mmap_protection = mmap.PROT_READ | mmap.PROT_WRITE
+    pipe_constructor = os.pipe
+    set_blocking = os.set_blocking
+    set_inheritable = os.set_inheritable
+    pipe_write = os.write
+    pipe_close = os.close
+    select_wait = select.select
+    nonce_issuer = _issue_authority_nonce
+    active_evidence_run = _ACTIVE_EVIDENCE_RUN
+    process_cleanup_uncertain = _has_process_cleanup_uncertainty
+    active: dict[int, dict[str, object]] = {}
+    revoked: dict[int, dict[str, object]] = {}
+    all_roots: dict[int, dict[str, object]] = {}
+    inode_records: dict[tuple[int, int], dict[str, object]] = {}
+    sessions: dict[int, dict[str, object]] = {}
+    capabilities: dict[int, dict[str, object]] = {}
+    permits: dict[int, dict[str, object]] = {}
+    revocation_uncertain = False
+    fingerprint_cache: dict[tuple[int, str], tuple[CodeType, str]] = {}
+    fingerprint_requests = 0
+    fingerprint_computations = 0
+    maximum_cached_fingerprints = 256
+    root_fault_policy = frozenset(
+        {
+            "revocation_flag_write",
+            "revocation_flag_flush",
+            "revocation_after_flush",
+            "revocation_close",
+            "evidence_run_close",
+            "permit_scope_construction",
+            "permit_scope_entry",
+            "permit_partial_activation",
+            "permit_cancel",
+        }
+    )
+    poison_delivery_fault_policy = frozenset(
+        {
+            "poison_mmap_write",
+            "poison_mmap_flush",
+            "poison_pipe_write",
+        }
+    )
+    poison_probe_fault_policy = frozenset(
+        {
+            "poison_mmap_probe",
+            "poison_pipe_probe",
+        }
+    )
+    paired_fixture_cancel_faults = frozenset({"permit_scope_construction", "permit_cancel"})
+    armed_faults: frozenset[str] = frozenset()
+    fault_hits: frozenset[str] = frozenset()
+    run_closer: Callable[[_EvidenceRun], bool] | None = None
+    run_closed: Callable[[_EvidenceRun], bool] | None = None
+    unit_module_globals_identity: int | None = None
+    integration_module_globals_identity: int | None = None
+    active_node_lifecycle: tuple[int, str] | None = None
+    returned_node_tombstones: tuple[tuple[int, str], ...] = ()
+
+    def code_fingerprint(code: CodeType, suffix: str) -> str:
+        nonlocal fingerprint_requests
+        nonlocal fingerprint_computations
+        if (
+            type_of(code) is not code_type
+            or type_of(suffix) is not str_type
+            or type_of(implementation_name) is not str_type
+            or type_of(implementation_cache_tag) is not str_type
+            or type_of(accepted_python_version) is not str_type
+            or type_of(runtime_python_version) is not str_type
+            or runtime_python_version != accepted_python_version
+            or type_of(optimization_level) is not int_type
+            or optimization_level not in {0, 1, 2}
+            or fingerprint_requests >= 1_000_000
+        ):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        fingerprint_requests += 1
+        cache_key = (object_identity(code), suffix)
+        cached_fingerprint = fingerprint_cache.get(cache_key)
+        if cached_fingerprint is not None:
+            if cached_fingerprint[0] is not code:
+                raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+            return cached_fingerprint[1]
+        fingerprint_computations += 1
+        serializer_domain = b"TASK064-CODE-FINGERPRINT-TLV-V3"
+        alias_domain = b"CONST-GRAPH-ALIAS-PARTITION-V3"
+        maximum_depth = 64
+        maximum_nodes = 65_536
+        maximum_payload_bytes = 16 * 1024 * 1024
+        active_ancestors = set_type()
+        constant_snapshots: dict[int, tuple[CodeType, tuple[object, ...]]] = dict_type()
+        frozenset_orders: dict[
+            int,
+            tuple[frozenset[object], tuple[object, ...]],
+        ] = dict_type()
+        nodes = 0
+        materialized_bytes = 0
+
+        def invalid_fingerprint() -> Never:
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+
+        def consume_node(depth: int) -> None:
+            nonlocal nodes
+            if type_of(depth) is not int_type or depth > maximum_depth:
+                invalid_fingerprint()
+            nodes += 1
+            if nodes > maximum_nodes:
+                invalid_fingerprint()
+
+        def charge_bytes(size: int) -> None:
+            nonlocal materialized_bytes
+            if (
+                type_of(size) is not int_type
+                or size < 0
+                or size > maximum_payload_bytes - materialized_bytes
+            ):
+                invalid_fingerprint()
+            materialized_bytes += size
+
+        def bounded_join(parts: Iterator[bytes]) -> bytes:
+            fragments = list_type()
+            payload_length = 0
+            for fragment in parts:
+                if type_of(fragment) is not bytes_type:
+                    invalid_fingerprint()
+                payload_length += length_of(fragment)
+                if payload_length > maximum_payload_bytes:
+                    invalid_fingerprint()
+                fragments.append(fragment)
+            charge_bytes(payload_length)
+            return bytes_join(b"", fragments)
+
+        def frame(tag: bytes, payload: bytes) -> bytes:
+            if (
+                type_of(tag) is not bytes_type
+                or length_of(tag) != 2
+                or type_of(payload) is not bytes_type
+                or length_of(payload) > maximum_payload_bytes - 10
+            ):
+                invalid_fingerprint()
+            charge_bytes(8)
+            encoded_length = int_to_bytes(length_of(payload), 8, "big")
+            charge_bytes(10 + length_of(payload))
+            return bytes_join(b"", (tag, encoded_length, payload))
+
+        def encode_text(value: str) -> bytes:
+            if length_of(value) > maximum_payload_bytes // 4:
+                invalid_fingerprint()
+            encoded = str_encode(value, "utf-8", "surrogatepass")
+            charge_bytes(length_of(encoded))
+            return encoded
+
+        def encode_integer(value: int) -> bytes:
+            negative = value < 0
+            magnitude = -value if negative else value
+            width = (int_bit_length(magnitude) + 7) // 8 or 1
+            if width > maximum_payload_bytes:
+                invalid_fingerprint()
+            charge_bytes(width)
+            encoded_magnitude = int_to_bytes(magnitude, width, "big")
+            charge_bytes(width + 1)
+            return bytes_join(
+                b"",
+                (b"-" if negative else b"+", encoded_magnitude),
+            )
+
+        def encode_uint64(value: int) -> bytes:
+            if type_of(value) is not int_type or value < 0 or value >= 1 << 64:
+                invalid_fingerprint()
+            charge_bytes(8)
+            return int_to_bytes(value, 8, "big")
+
+        def snapshot_constants(candidate: CodeType) -> tuple[object, ...]:
+            identity = object_identity(candidate)
+            existing = constant_snapshots.get(identity)
+            if existing is not None:
+                if existing[0] is not candidate:
+                    invalid_fingerprint()
+                return existing[1]
+            constants = candidate.co_consts
+            if type_of(constants) is not tuple_type:
+                invalid_fingerprint()
+            constant_snapshots[identity] = (candidate, constants)
+            return constants
+
+        def serialize_sequence(
+            tag: bytes,
+            values: tuple[object, ...] | frozenset[object],
+            depth: int,
+            *,
+            ordered: bool,
+        ) -> bytes:
+            identity = object_identity(values)
+            if identity in active_ancestors:
+                invalid_fingerprint()
+            active_ancestors.add(identity)
+            try:
+                if ordered:
+                    serialized = list_type(serialize_constant(value, depth + 1) for value in values)
+                else:
+                    frozen_values = cast_value(frozenset[object], values)
+                    cached_order = frozenset_orders.get(identity)
+                    if cached_order is not None:
+                        if cached_order[0] is not frozen_values:
+                            invalid_fingerprint()
+                        ordered_values = cached_order[1]
+                        serialized = list_type(
+                            serialize_constant(value, depth + 1) for value in ordered_values
+                        )
+                    else:
+                        serialized_pairs = list_type(
+                            (
+                                serialize_constant(value, depth + 1),
+                                value,
+                            )
+                            for value in frozen_values
+                        )
+                        serialized_pairs = list_type(
+                            sort_values(
+                                serialized_pairs,
+                                key=lambda pair: pair[0],
+                            )
+                        )
+                        previous: bytes | None = None
+                        for serialized_value, _ in serialized_pairs:
+                            if previous is not None and serialized_value == previous:
+                                invalid_fingerprint()
+                            previous = serialized_value
+                        ordered_values = tuple_type(value for _, value in serialized_pairs)
+                        frozenset_orders[identity] = (
+                            frozen_values,
+                            ordered_values,
+                        )
+                        serialized = list_type(value for value, _ in serialized_pairs)
+                charge_bytes(8)
+                encoded_length = int_to_bytes(length_of(serialized), 8, "big")
+                body = bounded_join(
+                    iter_values(
+                        (
+                            encoded_length,
+                            *serialized,
+                        )
+                    )
+                )
+                return frame(tag, body)
+            finally:
+                active_ancestors.remove(identity)
+
+        def serialize_code(candidate: CodeType, depth: int) -> bytes:
+            consume_node(depth)
+            identity = object_identity(candidate)
+            if identity in active_ancestors:
+                invalid_fingerprint()
+            active_ancestors.add(identity)
+            try:
+                constants = snapshot_constants(candidate)
+                fields = (
+                    frame(b"sv", serializer_domain),
+                    frame(b"im", encode_text(implementation_name)),
+                    frame(b"ct", encode_text(implementation_cache_tag)),
+                    frame(b"pv", encode_text(accepted_python_version)),
+                    frame(
+                        b"op",
+                        serialize_constant(optimization_level, depth + 1),
+                    ),
+                    frame(b"fn", encode_text(suffix)),
+                    frame(b"ln", encode_integer(1)),
+                    frame(b"ac", serialize_constant(candidate.co_argcount, depth + 1)),
+                    frame(
+                        b"pa",
+                        serialize_constant(candidate.co_posonlyargcount, depth + 1),
+                    ),
+                    frame(
+                        b"ka",
+                        serialize_constant(candidate.co_kwonlyargcount, depth + 1),
+                    ),
+                    frame(b"nl", serialize_constant(candidate.co_nlocals, depth + 1)),
+                    frame(b"ss", serialize_constant(candidate.co_stacksize, depth + 1)),
+                    frame(b"fg", serialize_constant(candidate.co_flags, depth + 1)),
+                    frame(b"bc", serialize_constant(candidate.co_code, depth + 1)),
+                    frame(b"cs", serialize_constant(constants, depth + 1)),
+                    frame(b"ns", serialize_constant(candidate.co_names, depth + 1)),
+                    frame(b"vn", serialize_constant(candidate.co_varnames, depth + 1)),
+                    frame(b"nm", serialize_constant(candidate.co_name, depth + 1)),
+                    frame(b"qn", serialize_constant(candidate.co_qualname, depth + 1)),
+                    frame(b"lt", serialize_constant(candidate.co_linetable, depth + 1)),
+                    frame(
+                        b"et",
+                        serialize_constant(candidate.co_exceptiontable, depth + 1),
+                    ),
+                    frame(b"fv", serialize_constant(candidate.co_freevars, depth + 1)),
+                    frame(b"cv", serialize_constant(candidate.co_cellvars, depth + 1)),
+                )
+                return frame(b"co", bounded_join(iter_values(fields)))
+            finally:
+                active_ancestors.remove(identity)
+
+        def serialize_constant(value: object, depth: int) -> bytes:
+            value_type = type_of(value)
+            if value_type is code_type:
+                return serialize_code(cast_value(CodeType, value), depth)
+            consume_node(depth)
+            if value is None:
+                return frame(b"no", b"")
+            if value is Ellipsis:
+                return frame(b"el", b"")
+            if value_type is bool_type:
+                return frame(b"bo", b"\x01" if value else b"\x00")
+            if value_type is int_type:
+                return frame(b"in", encode_integer(cast_value(int, value)))
+            if value_type is float_type:
+                charge_bytes(8)
+                return frame(b"fl", binary_float_pack(">d", cast_value(float, value)))
+            if value_type is complex_type:
+                complex_value = cast_value(complex, value)
+                charge_bytes(16)
+                return frame(
+                    b"cx",
+                    binary_float_pack(">dd", complex_value.real, complex_value.imag),
+                )
+            if value_type is str_type:
+                return frame(b"st", encode_text(cast_value(str, value)))
+            if value_type is bytes_type:
+                return frame(b"by", cast_value(bytes, value))
+            if value_type is tuple_type:
+                return serialize_sequence(
+                    b"tu",
+                    cast_value(tuple[object, ...], value),
+                    depth,
+                    ordered=True,
+                )
+            if value_type is frozenset_type:
+                return serialize_sequence(
+                    b"fs",
+                    cast_value(frozenset[object], value),
+                    depth,
+                    ordered=False,
+                )
+            invalid_fingerprint()
+
+        def serialize_alias_partition(root: CodeType) -> bytes:
+            alias_active_ancestors = set_type()
+            expanded_alias_containers = set_type()
+            alias_objects: dict[int, object] = dict_type()
+            alias_occurrences: dict[int, list[int]] = dict_type()
+            occurrence_count = 0
+            unique_count = 0
+
+            def visit(value: object, depth: int) -> None:
+                nonlocal occurrence_count
+                nonlocal unique_count
+                if type_of(depth) is not int_type or depth > maximum_depth:
+                    invalid_fingerprint()
+                value_type = type_of(value)
+                if value is None or value is Ellipsis or value_type is bool_type:
+                    return
+                if value_type not in {
+                    code_type,
+                    tuple_type,
+                    frozenset_type,
+                    int_type,
+                    float_type,
+                    complex_type,
+                    str_type,
+                    bytes_type,
+                }:
+                    invalid_fingerprint()
+                occurrence_count += 1
+                if occurrence_count > maximum_nodes:
+                    invalid_fingerprint()
+                ordinal = occurrence_count - 1
+                identity = object_identity(value)
+                retained = alias_objects.get(identity)
+                if retained is None:
+                    alias_objects[identity] = value
+                    alias_occurrences[identity] = list_type((ordinal,))
+                    unique_count += 1
+                    if unique_count > maximum_nodes:
+                        invalid_fingerprint()
+                else:
+                    if retained is not value:
+                        invalid_fingerprint()
+                    alias_occurrences[identity].append(ordinal)
+
+                if value_type not in {code_type, tuple_type, frozenset_type}:
+                    return
+                if identity in alias_active_ancestors:
+                    invalid_fingerprint()
+                if identity in expanded_alias_containers:
+                    return
+                expanded_alias_containers.add(identity)
+                alias_active_ancestors.add(identity)
+                try:
+                    if value_type is code_type:
+                        visit(
+                            snapshot_constants(cast_value(CodeType, value)),
+                            depth + 1,
+                        )
+                    elif value_type is tuple_type:
+                        for item in cast_value(tuple[object, ...], value):
+                            visit(item, depth + 1)
+                    else:
+                        frozen_value = cast_value(frozenset[object], value)
+                        cached_order = frozenset_orders.get(identity)
+                        if cached_order is None or cached_order[0] is not frozen_value:
+                            invalid_fingerprint()
+                        for item in cached_order[1]:
+                            visit(item, depth + 1)
+                finally:
+                    alias_active_ancestors.remove(identity)
+
+            visit(snapshot_constants(root), 0)
+            if alias_active_ancestors or occurrence_count < unique_count:
+                invalid_fingerprint()
+            groups = list_type(
+                occurrences
+                for occurrences in alias_occurrences.values()
+                if length_of(occurrences) > 1
+            )
+            groups = list_type(sort_values(groups, key=lambda group: group[0]))
+            group_frames = list_type()
+            for group in groups:
+                encoded_ordinals = tuple_type(encode_uint64(ordinal) for ordinal in group)
+                group_fields = (
+                    frame(b"gc", encode_uint64(length_of(group))),
+                    frame(
+                        b"go",
+                        bounded_join(iter_values(encoded_ordinals)),
+                    ),
+                )
+                group_frames.append(
+                    frame(
+                        b"gp",
+                        bounded_join(iter_values(group_fields)),
+                    )
+                )
+            alias_fields = (
+                frame(b"ad", alias_domain),
+                frame(b"oc", encode_uint64(occurrence_count)),
+                frame(b"uc", encode_uint64(unique_count)),
+                frame(b"ag", encode_uint64(length_of(groups))),
+                *group_frames,
+            )
+            return frame(b"al", bounded_join(iter_values(alias_fields)))
+
+        try:
+            value_payload = serialize_code(code, 0)
+            if active_ancestors:
+                invalid_fingerprint()
+            alias_payload = serialize_alias_partition(code)
+            payload_fields = (
+                frame(b"vl", value_payload),
+                alias_payload,
+            )
+            payload = frame(b"fp", bounded_join(iter_values(payload_fields)))
+        except HarnessFailure:
+            raise
+        except (
+            binary_float_pack_error,
+            overflow_error,
+            recursion_error,
+            type_error,
+            value_error,
+        ):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT) from None
+        fingerprint_digest = digest_constructor(payload).hexdigest()
+        if len(fingerprint_cache) >= maximum_cached_fingerprints:
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        fingerprint_cache[cache_key] = (code, fingerprint_digest)
+        return fingerprint_digest
+
     try:
-        yield
-    finally:
-        issued_run = identity.evidence_ledger.run
+        harness_file = path_resolve(path_type(__file__), strict=True)
+        checkout_root = harness_file.parents[2]
+        allowed_fixture_paths = tuple(
+            (
+                policy[0],
+                path_resolve(
+                    checkout_root.joinpath(*suffix.split("/")),
+                    strict=True,
+                ),
+            )
+            for policy in fixture_policy
+            for suffix in (policy[0],)
+        )
+    except (IndexError, OSError, RuntimeError, TypeError):
+        raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT) from None
+    if (
+        harness_file.name != "continuous_public_trade_stream_sqlite_harness.py"
+        or harness_file.parent.name != "support"
+        or harness_file.parent.parent.name != "tests"
+        or any(
+            resolved != checkout_root.joinpath(*suffix.split("/"))
+            or not path_is_file(resolved)
+            or stat_is_link(path_lstat(resolved).st_mode)
+            or not stat_is_regular(path_lstat(resolved).st_mode)
+            or path_lstat(resolved).st_uid != real_getuid()
+            for suffix, resolved in allowed_fixture_paths
+        )
+    ):
+        raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+    for policy, (_, resolved) in zip(
+        fixture_policy,
+        allowed_fixture_paths,
+        strict=True,
+    ):
+        try:
+            source_bytes = path_read_bytes(resolved)
+            module_code = compile_code(
+                source_bytes,
+                str(resolved),
+                "exec",
+                flags=0,
+                dont_inherit=True,
+                optimize=0,
+            )
+            module_digest = digest_constructor(source_bytes).hexdigest()
+        except (OSError, SyntaxError, ValueError):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT) from None
+        finally:
+            with suppress_errors(UnboundLocalError):
+                del module_code
+        if module_digest != policy[10]:
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+    authority_poison = mmap_constructor(
+        -1,
+        1,
+        flags=mmap_shared,
+        prot=mmap_protection,
+    )
+    authority_poison[0] = 0
+    mmap_flush(authority_poison)
+    poison_read_descriptor, poison_write_descriptor = pipe_constructor()
+    try:
+        set_blocking(poison_read_descriptor, False)
+        set_blocking(poison_write_descriptor, False)
+        set_inheritable(poison_read_descriptor, False)
+        set_inheritable(poison_write_descriptor, False)
+    except BaseException:
+        with suppress_errors(OSError):
+            pipe_close(poison_read_descriptor)
+        with suppress_errors(OSError):
+            pipe_close(poison_write_descriptor)
+        raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT) from None
+    current_session: ContextVar[_PytestRootCapability | None] = ContextVar(
+        "task064_pytest_root_session",
+        default=None,
+    )
+
+    def consume_fault(name: str) -> bool:
+        nonlocal armed_faults
+        nonlocal fault_hits
+        if name not in armed_faults:
+            return False
+        armed_faults = armed_faults - frozenset((name,))
+        fault_hits = fault_hits | frozenset((name,))
+        return True
+
+    def arm_fault(name: str) -> None:
+        nonlocal armed_faults
+        if (
+            type(name) is not str
+            or name
+            not in (root_fault_policy | poison_delivery_fault_policy | poison_probe_fault_policy)
+            or name in armed_faults
+            or uncertainty_latched()
+            or len(armed_faults) >= 2
+            or (
+                name in root_fault_policy
+                and any(
+                    fault in root_fault_policy | poison_probe_fault_policy for fault in armed_faults
+                )
+                and (armed_faults | frozenset((name,))) != paired_fixture_cancel_faults
+            )
+            or (
+                name in poison_delivery_fault_policy
+                and any(
+                    fault in poison_delivery_fault_policy | poison_probe_fault_policy
+                    for fault in armed_faults
+                )
+            )
+            or (name in poison_probe_fault_policy and armed_faults)
+        ):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        armed_faults = armed_faults | frozenset((name,))
+
+    def fault_hit(name: str) -> bool:
+        if type(name) is not str or name not in (
+            root_fault_policy | poison_delivery_fault_policy | poison_probe_fault_policy
+        ):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        return name in fault_hits
+
+    def poison_channels() -> tuple[bool, bool]:
+        try:
+            mmap_poisoned = authority_poison[0] != 0
+        except (IndexError, OSError, ValueError):
+            mmap_poisoned = True
+        try:
+            readable, _, _ = select_wait(
+                (poison_read_descriptor,),
+                (),
+                (),
+                0.0,
+            )
+            pipe_poisoned = poison_read_descriptor in readable
+        except (OSError, ValueError):
+            pipe_poisoned = True
+        return mmap_poisoned, pipe_poisoned
+
+    def uncertainty_latched() -> bool:
+        nonlocal revocation_uncertain
+        if revocation_uncertain:
+            return True
+        mmap_poisoned = consume_fault("poison_mmap_probe")
+        if not mmap_poisoned:
+            try:
+                mmap_poisoned = authority_poison[0] != 0
+            except (IndexError, OSError, ValueError):
+                mmap_poisoned = True
+        pipe_poisoned = consume_fault("poison_pipe_probe")
+        if not pipe_poisoned:
+            try:
+                readable, _, _ = select_wait(
+                    (poison_read_descriptor,),
+                    (),
+                    (),
+                    0.0,
+                )
+                pipe_poisoned = poison_read_descriptor in readable
+            except (OSError, ValueError):
+                pipe_poisoned = True
+        if mmap_poisoned or pipe_poisoned:
+            latch_uncertainty()
+            return True
+        return False
+
+    def latch_uncertainty() -> None:
+        nonlocal revocation_uncertain
+        revocation_uncertain = True
+        if not consume_fault("poison_mmap_write"):
+            try:
+                authority_poison[0] = 1
+            except (IndexError, OSError, ValueError):
+                pass
+            else:
+                if not consume_fault("poison_mmap_flush"):
+                    with suppress_errors(OSError, ValueError):
+                        mmap_flush(authority_poison)
+        for record in tuple(active.values()):
+            try:
+                active_flag = cast(mmap.mmap, record["revocation_flag"])
+                active_flag[0] = 1
+                mmap_flush(active_flag)
+            except (IndexError, OSError, ValueError):
+                pass
+        if not consume_fault("poison_pipe_write"):
+            try:
+                pipe_write(poison_write_descriptor, b"\x01")
+            except BlockingIOError:
+                pass
+            except OSError:
+                pass
+
+    def bind_test_module() -> None:
+        nonlocal unit_module_globals_identity
+        nonlocal integration_module_globals_identity
+        try:
+            caller = frame_getter(1)
+            code = caller.f_code
+            call_offset = caller.f_lasti
+            module_name = caller.f_globals.get("__name__")
+            module_globals_identity = id(caller.f_globals)
+        except (ValueError, AttributeError):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT) from None
+        finally:
+            with suppress_errors(UnboundLocalError):
+                del caller
+        if (
+            type(code) is not code_type
+            or type(module_name) is not str
+            or type(call_offset) is not int
+        ):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        for policy, (_, expected_path) in zip(
+            fixture_policy,
+            allowed_fixture_paths,
+            strict=True,
+        ):
+            (
+                suffix,
+                expected_module,
+                _,
+                _,
+                _,
+                _,
+                _,
+                expected_binder,
+                expected_binder_digest,
+                expected_binder_offset,
+                _,
+            ) = policy
+            if (
+                code.co_filename == str(expected_path)
+                and code.co_name == expected_binder
+                and module_name == expected_module
+                and call_offset == expected_binder_offset
+                and code_fingerprint(code, suffix) == expected_binder_digest
+            ):
+                if suffix.startswith("tests/unit/"):
+                    if unit_module_globals_identity is not None:
+                        break
+                    unit_module_globals_identity = module_globals_identity
+                    return
+                if integration_module_globals_identity is not None:
+                    break
+                integration_module_globals_identity = module_globals_identity
+                return
+        raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+
+    def authenticate_fixture_call(
+        *,
+        phase: str,
+    ) -> tuple[str, str, str]:
+        try:
+            caller = frame_getter(2)
+            code = caller.f_code
+            call_offset = caller.f_lasti
+            module_name = caller.f_globals.get("__name__")
+            module_globals_identity = id(caller.f_globals)
+        except (ValueError, AttributeError):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT) from None
+        finally:
+            with suppress_errors(UnboundLocalError):
+                del caller
+        if (
+            type(code) is not code_type
+            or type(module_name) is not str
+            or type(call_offset) is not int
+            or phase not in {"BEGIN", "ACTIVATE"}
+        ):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        for policy, (_, expected_path) in zip(
+            fixture_policy,
+            allowed_fixture_paths,
+            strict=True,
+        ):
+            (
+                suffix,
+                expected_module,
+                expected_fixture,
+                node_prefix,
+                expected_digest,
+                begin_offset,
+                activate_offset,
+                _,
+                _,
+                _,
+                _,
+            ) = policy
+            expected_offset = begin_offset if phase == "BEGIN" else activate_offset
+            expected_globals_identity = (
+                unit_module_globals_identity
+                if suffix.startswith("tests/unit/")
+                else integration_module_globals_identity
+            )
+            if (
+                code.co_filename == str(expected_path)
+                and code.co_name == expected_fixture
+                and module_name == expected_module
+                and expected_globals_identity is not None
+                and module_globals_identity == expected_globals_identity
+                and call_offset == expected_offset
+                and code_fingerprint(code, suffix) == expected_digest
+            ):
+                return suffix, node_prefix, expected_digest
+        raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+
+    def observe_root(pytest_root: Path) -> tuple[object, ...]:
+        if not isinstance(pytest_root, path_type) or not pytest_root.is_absolute():
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        target = pytest_root.parent
+        current = path_type(target.anchor)
+        try:
+            for part in target.parts[1:]:
+                current = current / part
+                ancestor = path_lstat(current)
+                if stat_is_link(ancestor.st_mode) or not stat_is_directory(ancestor.st_mode):
+                    raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+            details = path_lstat(pytest_root)
+            resolved = path_resolve(pytest_root, strict=True)
+        except HarnessFailure:
+            raise
+        except (OSError, RuntimeError):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT) from None
+        if (
+            stat_is_link(details.st_mode)
+            or not stat_is_directory(details.st_mode)
+            or details.st_uid != real_getuid()
+            or stat_mode(details.st_mode) != 0o700
+        ):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        return (
+            id(pytest_root),
+            str(pytest_root),
+            str(resolved),
+            details.st_dev,
+            details.st_ino,
+            details.st_uid,
+            stat_mode(details.st_mode),
+        )
+
+    def identity_fields(identity: _ActivePytestRoot) -> tuple[object, ...]:
+        ledger = identity.evidence_ledger
+        return (
+            id(identity.path_object),
+            str(identity.path_object),
+            id(identity.resolved_path),
+            str(identity.resolved_path),
+            identity.device,
+            identity.inode,
+            identity.uid,
+            identity.mode,
+            identity.process_id,
+            identity.node_id,
+            id(identity.nonce),
+            identity.nonce,
+            id(ledger),
+            id(ledger.nonce),
+            ledger.nonce,
+        )
+
+    def capability_fields(capability: _PytestRootCapability) -> tuple[object, ...]:
+        return (
+            tuple((id(root), str(root)) for root in capability.roots),
+            id(capability._nonce),
+            capability._nonce,
+        )
+
+    def cleanup_record_for_identity(identity: object) -> dict[str, object] | None:
+        uncertainty_latched()
+        if type(identity) is not _ActivePytestRoot:
+            return None
+        record = active.get(id(identity.path_object))
+        inode_identity = (identity.device, identity.inode)
+        if (
+            record is None
+            or record["identity"] is not identity
+            or record["path"] is not identity.path_object
+            or all_roots.get(id(identity.path_object)) is not record
+            or inode_records.get(inode_identity) is not record
+            or record["state"] != "ACTIVE"
+            or identity_fields(identity) != record["identity_fields"]
+            or real_getuid() != identity.uid
+        ):
+            return None
+        try:
+            if cast(mmap.mmap, record["revocation_flag"])[0] != 0 and not revocation_uncertain:
+                return None
+        except (IndexError, OSError, ValueError):
+            return None
+        return record
+
+    def record_for_identity(identity: object) -> dict[str, object] | None:
+        if uncertainty_latched():
+            return None
+        return cleanup_record_for_identity(identity)
+
+    def validate_identity(identity: _ActivePytestRoot) -> bool:
+        record = record_for_identity(identity)
+        if record is None:
+            return False
+        try:
+            return observe_root(identity.path_object) == record["root_observation"]
+        except HarnessFailure:
+            return False
+
+    def lookup(pytest_root: object) -> _ActivePytestRoot | None:
+        if uncertainty_latched() or not isinstance(pytest_root, path_type):
+            return None
+        record = active.get(id(pytest_root))
+        if (
+            record is None
+            or record["path"] is not pytest_root
+            or record_for_identity(record["identity"]) is not record
+        ):
+            return None
+        return cast(_ActivePytestRoot, record["identity"])
+
+    def lookup_revoked(pytest_root: object) -> _ActivePytestRoot | None:
+        if not isinstance(pytest_root, path_type):
+            return None
+        record = revoked.get(id(pytest_root))
+        if (
+            record is None
+            or record["path"] is not pytest_root
+            or all_roots.get(id(pytest_root)) is not record
+            or inode_records.get(cast(tuple[int, int], record["inode_identity"])) is not record
+            or record["state"] not in {"REVOKED", "REVOCATION_UNCERTAIN"}
+            or identity_fields(cast(_ActivePytestRoot, record["identity"]))
+            != record["identity_fields"]
+        ):
+            return None
+        return cast(_ActivePytestRoot, record["identity"])
+
+    def revoke_identity(pytest_root: Path, identity: _ActivePytestRoot) -> None:
+        record = cleanup_record_for_identity(identity)
+        if record is None or record["path"] is not pytest_root:
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        record["state"] = "REVOKING"
+        errors: list[BaseException] = []
+        try:
+            flag = cast(mmap.mmap, record["revocation_flag"])
+            if consume_fault("revocation_flag_write"):
+                raise OSError(errno.EIO, "injected revocation-flag write failure")
+            flag[0] = 1
+            if consume_fault("revocation_flag_flush"):
+                raise OSError(errno.EIO, "injected revocation-flag flush failure")
+            mmap_flush(flag)
+            if consume_fault("revocation_after_flush"):
+                raise OSError(errno.EIO, "injected post-flush revocation uncertainty")
+        except BaseException as error:
+            errors.append(error)
+            latch_uncertainty()
+            record["state"] = "REVOCATION_UNCERTAIN"
+        else:
+            record["state"] = "REVOKED"
+        key = id(pytest_root)
+        if active.get(key) is record:
+            active.pop(key)
+        revoked[key] = record
+
+        ledger = cast(_EvidenceLedger, record["ledger"])
+        issued_run = ledger.run
         if issued_run is not None:
-            _close_issued_evidence_run(issued_run)
-        identity.evidence_ledger.closed = True
-        identity.evidence_ledger.recording = False
-        identity.evidence_ledger.observations.clear()
-        identity.evidence_ledger.operation_runs.clear()
-        identity.evidence_ledger.rejection_runs.clear()
-        active_run = _ACTIVE_EVIDENCE_RUN.get()
-        if active_run is not None and active_run._pytest_registration is identity:
-            _ACTIVE_EVIDENCE_RUN.set(None)
-        with suppress(IndexError, OSError, ValueError):
-            identity.revocation_flag[0] = 1
-            identity.revocation_flag.flush()
-        if _ACTIVE_PYTEST_ROOTS.get(key) is identity:
-            del _ACTIVE_PYTEST_ROOTS[key]
-        _REVOKED_PYTEST_ROOTS[key] = identity
-        with suppress(OSError, ValueError):
-            identity.revocation_flag.close()
+            try:
+                if run_closer is None or run_closed is None:
+                    raise RuntimeError("checked evidence-run close uncertainty")
+                close_result = (
+                    False if consume_fault("evidence_run_close") else run_closer(issued_run)
+                )
+                if not close_result or not run_closed(issued_run):
+                    raise RuntimeError("evidence-run authority did not reach CLOSED")
+            except BaseException as error:
+                errors.append(error)
+        try:
+            ledger.closed = True
+            ledger.recording = False
+            ledger.observations.clear()
+            ledger.operation_runs.clear()
+            ledger.rejection_runs.clear()
+        except BaseException as error:
+            errors.append(error)
+        try:
+            issued_active_run = active_evidence_run.get()
+            if issued_active_run is not None and issued_active_run._pytest_registration is identity:
+                active_evidence_run.set(None)
+        except BaseException as error:
+            errors.append(error)
+        try:
+            if consume_fault("revocation_close"):
+                raise OSError(errno.EIO, "injected checked revocation close uncertainty")
+            mmap_close(cast(mmap.mmap, record["revocation_flag"]))
+        except BaseException as error:
+            errors.append(error)
+        if errors:
+            latch_uncertainty()
+            record["state"] = "REVOCATION_UNCERTAIN"
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT) from None
+
+    def bind_run_closer(
+        closer: Callable[[_EvidenceRun], bool],
+        closed_observer: Callable[[_EvidenceRun], bool],
+    ) -> None:
+        nonlocal run_closer
+        nonlocal run_closed
+        if (
+            run_closer is not None
+            or run_closed is not None
+            or not callable(closer)
+            or not callable(closed_observer)
+            or closer is closed_observer
+        ):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        run_closer = closer
+        run_closed = closed_observer
+
+    def issue_identity(
+        pytest_root: Path,
+        *,
+        node_id: str,
+        owner_process_id: int,
+    ) -> tuple[_ActivePytestRoot, dict[str, object]]:
+        if uncertainty_latched():
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        observed = observe_root(pytest_root)
+        if uncertainty_latched():
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        object_key = id(pytest_root)
+        inode_identity = (cast(int, observed[3]), cast(int, observed[4]))
+        if object_key in all_roots or inode_identity in inode_records:
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        resolved = path_type(cast(str, observed[2]))
+        revocation_flag: mmap.mmap | None = None
+        try:
+            revocation_flag = mmap_constructor(
+                -1,
+                1,
+                flags=mmap_shared,
+                prot=mmap_protection,
+            )
+            if uncertainty_latched():
+                mmap_close(revocation_flag)
+                revocation_flag = None
+                raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+            revocation_flag[0] = 0
+            if uncertainty_latched():
+                mmap_close(revocation_flag)
+                revocation_flag = None
+                raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+            root_nonce = nonce_issuer("pytest-root")
+            ledger_nonce = nonce_issuer("evidence-ledger")
+            ledger = _EvidenceLedger(
+                nonce=ledger_nonce,
+                observations={},
+                operation_runs={},
+                rejection_runs={},
+            )
+            identity = _ActivePytestRoot(
+                path_object=pytest_root,
+                resolved_path=resolved,
+                device=cast(int, observed[3]),
+                inode=cast(int, observed[4]),
+                uid=cast(int, observed[5]),
+                mode=cast(int, observed[6]),
+                process_id=owner_process_id,
+                node_id=node_id,
+                nonce=root_nonce,
+                evidence_ledger=ledger,
+            )
+            record: dict[str, object] = {
+                "path": pytest_root,
+                "identity": identity,
+                "identity_fields": identity_fields(identity),
+                "root_observation": observed,
+                "ledger": ledger,
+                "revocation_flag": revocation_flag,
+                "owner_process_id": owner_process_id,
+                "owner_uid": real_getuid(),
+                "inode_identity": inode_identity,
+                "state": "ACTIVE",
+            }
+            all_roots[object_key] = record
+            inode_records[inode_identity] = record
+            return identity, record
+        except BaseException:
+            if revocation_flag is not None:
+                try:
+                    mmap_close(revocation_flag)
+                except (OSError, ValueError):
+                    latch_uncertainty()
+            raise
+
+    def terminalize_node_lifecycle(node_key: tuple[int, str]) -> bool:
+        nonlocal active_node_lifecycle
+        nonlocal returned_node_tombstones
+        if active_node_lifecycle != node_key:
+            return False
+        if node_key not in returned_node_tombstones:
+            returned_node_tombstones = (*returned_node_tombstones, node_key)
+        active_node_lifecycle = None
+        return True
+
+    def begin_registration(
+        node_id: str,
+        pytest_root: Path,
+    ) -> _PytestRootRegistrationPermit:
+        """Authorize one exact fixture call before it creates auxiliary roots."""
+
+        nonlocal active_node_lifecycle
+        nonlocal returned_node_tombstones
+        if uncertainty_latched():
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        suffix, node_prefix, fixture_digest = authenticate_fixture_call(phase="BEGIN")
+        owner_process_id = real_getpid()
+        node_key = (owner_process_id, node_id)
+        if node_key in returned_node_tombstones:
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT) from None
+        if (
+            type(node_id) is not str
+            or not node_id
+            or not (node_id == node_prefix or node_id.startswith(f"{node_prefix}::"))
+            or not isinstance(pytest_root, path_type)
+            or not pytest_root.is_absolute()
+            or id(pytest_root) in all_roots
+            or active_node_lifecycle is not None
+        ):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT) from None
+        active_node_lifecycle = node_key
+        try:
+            root_observation = observe_root(pytest_root)
+            if uncertainty_latched():
+                raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+            permit = _PytestRootRegistrationPermit(
+                _nonce=nonce_issuer("pytest-root-registration-permit"),
+            )
+            permits[id(permit)] = {
+                "permit": permit,
+                "permit_fields": (id(permit._nonce), permit._nonce),
+                "module_suffix": suffix,
+                "fixture_digest": fixture_digest,
+                "node_id": node_id,
+                "pytest_root": pytest_root,
+                "path_type": type(pytest_root),
+                "root_observation": root_observation,
+                "owner_process_id": owner_process_id,
+                "owner_uid": real_getuid(),
+                "state": "PERMIT_ISSUED",
+            }
+            return permit
+        except BaseException:
+            if not terminalize_node_lifecycle(node_key):
+                latch_uncertainty()
+            raise
+
+    def cancel_registration(permit: _PytestRootRegistrationPermit) -> None:
+        """Permanently cancel one exact unactivated or partially activated permit."""
+
+        permit_record = permits.get(id(permit))
+        node_key = (
+            (
+                cast(int, permit_record["owner_process_id"]),
+                cast(str, permit_record["node_id"]),
+            )
+            if permit_record is not None
+            else None
+        )
+        if (
+            type(permit) is not _PytestRootRegistrationPermit
+            or permit_record is None
+            or permit_record["permit"] is not permit
+            or permit_record["permit_fields"] != (id(permit._nonce), permit._nonce)
+            or node_key is None
+            or real_getpid() != permit_record["owner_process_id"]
+            or real_getuid() != permit_record["owner_uid"]
+        ):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        if (
+            permit_record["state"] in {"CANCELLED", "RETURNED"}
+            and active_node_lifecycle is None
+            and node_key in returned_node_tombstones
+        ):
+            return
+        if (
+            permit_record["state"] not in {"PERMIT_ISSUED", "READY", "ACTIVATING"}
+            or active_node_lifecycle != node_key
+        ):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        permit_record["state"] = "CANCELLING"
+        cancellation_errors: list[BaseException] = []
+        try:
+            if consume_fault("permit_cancel"):
+                raise OSError(errno.EIO, "injected permit-cancellation uncertainty")
+            for root, identity in reversed(
+                cast(
+                    list[tuple[Path, _ActivePytestRoot]],
+                    permit_record.get("issued", []),
+                )
+            ):
+                if active.get(id(root)) is not None:
+                    try:
+                        revoke_identity(root, identity)
+                    except BaseException as error:
+                        cancellation_errors.append(error)
+        except BaseException as error:
+            cancellation_errors.append(error)
+        if not terminalize_node_lifecycle(node_key):
+            cancellation_errors.append(HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT))
+        permit_record["state"] = "CANCEL_UNCERTAIN" if cancellation_errors else "CANCELLED"
+        if cancellation_errors:
+            latch_uncertainty()
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT) from None
+
+    def scope(
+        permit: _PytestRootRegistrationPermit,
+        fixture_roots: tuple[Path, ...],
+    ) -> AbstractContextManager[_PytestRootCapability]:
+        """Validate all fixture-created roots and pre-issue them before test code."""
+
+        if uncertainty_latched():
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT) from None
+        permit_record = permits.get(id(permit))
+        expected_node_lifecycle = (
+            (
+                cast(int, permit_record["owner_process_id"]),
+                cast(str, permit_record["node_id"]),
+            )
+            if permit_record is not None
+            else None
+        )
+        if (
+            type(permit) is not _PytestRootRegistrationPermit
+            or permit_record is None
+            or permit_record["permit"] is not permit
+            or permit_record["permit_fields"] != (id(permit._nonce), permit._nonce)
+            or permit_record["state"] != "PERMIT_ISSUED"
+            or real_getpid() != permit_record["owner_process_id"]
+            or real_getuid() != permit_record["owner_uid"]
+            or type(fixture_roots) is not tuple
+            or len(fixture_roots) != 4
+            or active_node_lifecycle != expected_node_lifecycle
+        ):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        suffix, node_prefix, fixture_digest = authenticate_fixture_call(phase="ACTIVATE")
+        pytest_root = cast(Path, permit_record["pytest_root"])
+        roots = (pytest_root, *fixture_roots)
+        if (
+            suffix != permit_record["module_suffix"]
+            or node_prefix != cast(str, permit_record["node_id"]).split("::", 1)[0]
+            or fixture_digest != permit_record["fixture_digest"]
+            or any(
+                not isinstance(root, path_type)
+                or type(root) is not permit_record["path_type"]
+                or not root.is_absolute()
+                for root in roots
+            )
+            or len({id(root) for root in roots}) != len(roots)
+            or any(root.parent != pytest_root.parent for root in fixture_roots)
+        ):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        if consume_fault("permit_scope_construction"):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        observations = tuple(observe_root(root) for root in roots)
+        if (
+            observations[0] != permit_record["root_observation"]
+            or len({(item[3], item[4]) for item in observations}) != len(roots)
+            or uncertainty_latched()
+        ):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        permit_record["roots"] = roots
+        permit_record["root_observations"] = observations
+        permit_record["state"] = "READY"
+
+        @contextmanager
+        def activate() -> Iterator[_PytestRootCapability]:
+            if uncertainty_latched():
+                raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+            owner_process_id = real_getpid()
+            session_key = id(permit)
+            existing_session = sessions.get(session_key)
+            if (
+                current_session.get() is not None
+                or existing_session is not None
+                or permit_record["state"] != "READY"
+                or owner_process_id != permit_record["owner_process_id"]
+                or real_getuid() != permit_record["owner_uid"]
+            ):
+                raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+            permit_record["state"] = "ACTIVATING"
+            issued: list[tuple[Path, _ActivePytestRoot]] = []
+            permit_record["issued"] = issued
+            capability: _PytestRootCapability | None = None
+            capability_record: dict[str, object] | None = None
+            session_token: Token[_PytestRootCapability | None] | None = None
+            cleanup_errors: list[BaseException] = []
+            activation_reached = False
+            try:
+                if consume_fault("permit_scope_entry"):
+                    raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+                identities: set[tuple[int, int]] = set()
+                for root in roots:
+                    if uncertainty_latched():
+                        raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+                    identity, root_record = issue_identity(
+                        root,
+                        node_id=cast(str, permit_record["node_id"]),
+                        owner_process_id=owner_process_id,
+                    )
+                    key = id(root)
+                    inode_identity = (identity.device, identity.inode)
+                    if (
+                        key in active
+                        or key in revoked
+                        or all_roots.get(key) is not root_record
+                        or inode_records.get(inode_identity) is not root_record
+                        or inode_identity in identities
+                    ):
+                        try:
+                            cast(mmap.mmap, root_record["revocation_flag"]).close()
+                        except (OSError, ValueError):
+                            cleanup_errors.append(
+                                HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+                            )
+                        raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+                    identities.add(inode_identity)
+                    active[key] = root_record
+                    issued.append((root, identity))
+                    if len(issued) == 1 and consume_fault("permit_partial_activation"):
+                        raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+                capability_nonce = nonce_issuer("pytest-root-capability")
+                capability = _PytestRootCapability(
+                    roots=roots,
+                    _nonce=capability_nonce,
+                )
+                capability_record = {
+                    "capability": capability,
+                    "capability_fields": capability_fields(capability),
+                    "roots": roots,
+                    "permit": permit,
+                    "module_suffix": permit_record["module_suffix"],
+                    "fixture_digest": permit_record["fixture_digest"],
+                    "node_id": permit_record["node_id"],
+                    "owner_process_id": owner_process_id,
+                    "owner_uid": permit_record["owner_uid"],
+                    "state": "ACTIVE",
+                }
+                sessions[session_key] = capability_record
+                capabilities[id(capability)] = capability_record
+                permit_record["state"] = "ACTIVE"
+                session_token = current_session.set(capability)
+                activation_reached = True
+                yield capability
+            finally:
+                if session_token is not None:
+                    try:
+                        current_session.reset(session_token)
+                    except BaseException as error:
+                        cleanup_errors.append(error)
+                if capability is not None:
+                    capability_record = capabilities.get(id(capability))
+                    if (
+                        capability_record is not None
+                        and capability_record["capability"] is capability
+                    ):
+                        capability_record["state"] = (
+                            "RETURNED" if activation_reached else "CANCELLED"
+                        )
+                permit_record["state"] = "RETURNED" if activation_reached else "CANCELLED"
+                for root, identity in reversed(issued):
+                    if active.get(id(root)) is not None:
+                        try:
+                            revoke_identity(root, identity)
+                        except BaseException as error:
+                            cleanup_errors.append(error)
+                if expected_node_lifecycle is None or not terminalize_node_lifecycle(
+                    expected_node_lifecycle
+                ):
+                    cleanup_errors.append(HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT))
+                if cleanup_errors:
+                    latch_uncertainty()
+                    raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT) from None
+
+        return activate()
+
+    def revoke_fixture_root(
+        capability: _PytestRootCapability,
+        pytest_root: Path,
+    ) -> None:
+        capability_record = capabilities.get(id(capability))
+        if (
+            type(capability) is not _PytestRootCapability
+            or capability_record is None
+            or capability_record["capability"] is not capability
+            or capability_record["state"] != "ACTIVE"
+            or capability_fields(capability) != capability_record["capability_fields"]
+            or current_session.get() is not capability
+            or not isinstance(pytest_root, path_type)
+            or not any(
+                root is pytest_root
+                for root in cast(tuple[Path, ...], capability_record["roots"])[1:]
+            )
+            or real_getpid() != capability_record["owner_process_id"]
+            or real_getuid() != capability_record["owner_uid"]
+        ):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        record = active.get(id(pytest_root))
+        identity = None if record is None else record.get("identity")
+        if (
+            type(identity) is not _ActivePytestRoot
+            or cleanup_record_for_identity(identity) is not record
+            or identity.path_object is not pytest_root
+        ):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        revoke_identity(pytest_root, identity)
+
+    def session_owns(identity: _ActivePytestRoot, allow_direct_child: bool) -> bool:
+        capability = current_session.get()
+        capability_record = (
+            None
+            if type(capability) is not _PytestRootCapability
+            else capabilities.get(id(capability))
+        )
+        current_process_id = real_getpid()
+        return bool(
+            not uncertainty_latched()
+            and not process_cleanup_uncertain()
+            and type(identity) is _ActivePytestRoot
+            and type(allow_direct_child) is bool
+            and type(capability) is _PytestRootCapability
+            and capability_record is not None
+            and capability_record["capability"] is capability
+            and capability_record["state"] == "ACTIVE"
+            and capability_fields(capability) == capability_record["capability_fields"]
+            and real_getuid() == capability_record["owner_uid"]
+            and identity.uid == capability_record["owner_uid"]
+            and any(
+                root is identity.path_object
+                for root in cast(tuple[Path, ...], capability_record["roots"])
+            )
+            and lookup(identity.path_object) is identity
+            and (
+                current_process_id == capability_record["owner_process_id"]
+                or (allow_direct_child and real_getppid() == capability_record["owner_process_id"])
+            )
+        )
+
+    return (
+        bind_test_module,
+        begin_registration,
+        cancel_registration,
+        scope,
+        lookup,
+        validate_identity,
+        lookup_revoked,
+        revoke_fixture_root,
+        session_owns,
+        arm_fault,
+        fault_hit,
+        poison_channels,
+        uncertainty_latched,
+        bind_run_closer,
+        latch_uncertainty,
+    )
+
+
+(
+    _bind_task064_test_module,
+    _begin_pytest_root_registration,
+    _cancel_pytest_root_registration,
+    _pytest_root_scope,
+    _lookup_active_pytest_root,
+    _validate_pytest_root_identity,
+    _lookup_revoked_pytest_root,
+    _revoke_fixture_root,
+    _pytest_root_session_owns,
+    _arm_pytest_root_authority_fault,
+    _pytest_root_authority_fault_hit,
+    _pytest_root_poison_channels,
+    _pytest_root_authority_uncertain,
+    _bind_pytest_root_run_closer,
+    _latch_pytest_root_authority_uncertainty,
+) = _build_pytest_root_authority()
+del _build_pytest_root_authority
+_bind_process_cleanup_root_poison(_latch_pytest_root_authority_uncertainty)
+del _bind_process_cleanup_root_poison
 
 
 def _validate_bootstrap_root(pytest_root: Path) -> Path:
     if not isinstance(pytest_root, Path) or not pytest_root.is_absolute():
         raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
-    active = _ACTIVE_PYTEST_ROOTS.get(id(pytest_root))
+    active = _lookup_active_pytest_root(pytest_root)
     if (
         active is None
         or active.path_object is not pytest_root
-        or active.process_id != os.getpid()
-        or os.environ.get("PYTEST_CURRENT_TEST", "").rsplit(" (", maxsplit=1)[0] != active.node_id
+        or not _validate_pytest_root_identity(active)
+        or not _pytest_root_session_owns(active, False)
         or type(active.nonce) is not bytes
         or len(active.nonce) != 32
     ):
@@ -3031,7 +5328,6 @@ def _validate_bootstrap_root(pytest_root: Path) -> Path:
     if (
         stat.S_ISLNK(details.st_mode)
         or not stat.S_ISDIR(details.st_mode)
-        or details.st_uid != os.getuid()
         or details.st_dev != active.device
         or details.st_ino != active.inode
         or details.st_uid != active.uid
@@ -3047,35 +5343,1135 @@ def _validate_bootstrap_root(pytest_root: Path) -> Path:
     return resolved
 
 
+_TASK064_CHILD_PROVENANCE_ENVIRONMENT = "WEALTH_TASK064_CHILD_PROVENANCE"
+_TASK064_LEGACY_CHILD_MODE_ENVIRONMENTS = (
+    "WEALTH_TASK064_EXEC_ISOLATION",
+    "WEALTH_TASK064_POST_RETURN_FIXTURE_REPLAY",
+    "WEALTH_TASK064_ROOT_LATCH_PROBE",
+    "WEALTH_TASK064_SHARED_CLEANUP_PROBE",
+    "WEALTH_TASK064_REPORT_ROOT_CLOSE_PROBE",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _Task064ChildProvenance:
+    envelope: str
+    descriptor: int
+    marker_path: Path
+    marker_device: int
+    marker_inode: int
+    root_path: Path
+    root_device: int
+    root_inode: int
+    nonce: str
+
+
+@dataclass(frozen=True, slots=True)
+class _Task064ChildProvenanceTicket:
+    """Opaque, authority-registered proof that fixture-order authentication completed."""
+
+    _authority_nonce: bytes
+
+
+def _build_task064_child_provenance_authority() -> tuple[
+    Callable[[Path, str, str, str, str], _Task064ChildProvenance],
+    Callable[[str], _Task064ChildProvenanceTicket | None],
+    Callable[[_Task064ChildProvenanceTicket | None, str, Path], None],
+    Callable[[_Task064ChildProvenanceTicket | None, str], bool],
+    Callable[[str, str, tuple[str, ...]], str | None],
+    Callable[[_Task064ChildProvenanceTicket | None, str], None],
+    Callable[[_Task064ChildProvenanceTicket | None, str], None],
+    Callable[[_Task064ChildProvenance], bool],
+]:
+    """Issue one-shot, inherited-FD provenance for internal pytest children."""
+
+    envelope_environment = _TASK064_CHILD_PROVENANCE_ENVIRONMENT
+    legacy_environments = _TASK064_LEGACY_CHILD_MODE_ENVIRONMENTS
+    provenance_type = _Task064ChildProvenance
+    ticket_type = _Task064ChildProvenanceTicket
+    failure_type = HarnessFailure
+    invalid_code = HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+    validate_root = _validate_bootstrap_root
+    lookup_root = _lookup_active_pytest_root
+    session_owns_root = _pytest_root_session_owns
+    validate_root_identity = _validate_pytest_root_identity
+    mark_authority_uncertain = _latch_pytest_root_authority_uncertainty
+    path_type = Path
+    type_of = type
+    int_type = int
+    str_type = str
+    dict_type = dict
+    set_type = set
+    tuple_type = tuple
+    bytes_type = bytes
+    bool_type = bool
+    isinstance_value = isinstance
+    base_exception_type = BaseException
+    length_of = len
+    all_values = all
+    any_values = any
+    minimum_value = min
+    suppress_errors = suppress
+    os_error = OSError
+    type_error = TypeError
+    value_error = ValueError
+    unicode_error = UnicodeError
+    file_not_found_error = FileNotFoundError
+    environment = os.environ
+    current_pid = os.getpid
+    parent_pid = os.getppid
+    current_uid = os.getuid
+    open_file = os.open
+    close_file = os.close
+    read_file = os.read
+    write_file = os.write
+    seek_file = os.lseek
+    sync_file = os.fsync
+    chmod_file = os.fchmod
+    stat_file = os.fstat
+    unlink_file = os.unlink
+    no_follow = getattr(os, "O_NOFOLLOW", 0)
+    close_on_exec = getattr(os, "O_CLOEXEC", 0)
+    directory_only = getattr(os, "O_DIRECTORY", 0)
+    read_only = os.O_RDONLY
+    read_write = os.O_RDWR
+    create_exclusive = os.O_CREAT | os.O_EXCL
+    seek_start = os.SEEK_SET
+    stat_is_regular = stat.S_ISREG
+    stat_is_directory = stat.S_ISDIR
+    stat_is_link = stat.S_ISLNK
+    stat_mode = stat.S_IMODE
+    canonical_dump = json.dumps
+    canonical_load = json.loads
+    digest_constructor = hashlib.sha256
+    issue_nonce = secrets.token_hex
+    issue_ticket_nonce = secrets.token_bytes
+    object_identity = id
+    context_var_type = ContextVar
+    context_token_type = Token
+    protocol_policy = (
+        (
+            "exec_isolation",
+            "WEALTH_TASK064_EXEC_ISOLATION",
+            (),
+            True,
+        ),
+        (
+            "post_return_fixture_replay",
+            "WEALTH_TASK064_POST_RETURN_FIXTURE_REPLAY",
+            (),
+            True,
+        ),
+        (
+            "root_latch",
+            "WEALTH_TASK064_ROOT_LATCH_PROBE",
+            (
+                "revocation_flag_write",
+                "revocation_flag_flush",
+                "revocation_after_flush",
+                "revocation_close",
+                "evidence_run_close",
+                "poison_mmap_write",
+                "poison_mmap_flush",
+                "poison_pipe_write",
+                "poison_mmap_probe",
+                "poison_pipe_probe",
+            ),
+            False,
+        ),
+        (
+            "shared_cleanup",
+            "WEALTH_TASK064_SHARED_CLEANUP_PROBE",
+            ("run",),
+            False,
+        ),
+        (
+            "report_close",
+            "WEALTH_TASK064_REPORT_ROOT_CLOSE_PROBE",
+            (
+                "readback_verified_root_close_ambiguity",
+                "staging_close_ambiguity",
+                "readback_close_ambiguity",
+                "reentrant_root_revocation",
+            ),
+            False,
+        ),
+    )
+    consumed_nonces: set[str] = set()
+    ticket_records: dict[int, dict[str, object]] = {}
+    terminal_ticket_records: dict[
+        int,
+        tuple[_Task064ChildProvenanceTicket, int, str, str],
+    ] = {}
+    active_body_ticket: ContextVar[_Task064ChildProvenanceTicket | None] = context_var_type(
+        "task064_child_provenance_ticket",
+        default=None,
+    )
+    maximum_packet_bytes = 8_192
+    maximum_envelope_bytes = 2_048
+    maximum_consumed_nonces = 1_024
+    maximum_active_tickets = 64
+    maximum_terminal_tickets = 64
+    domain = "TASK064-CHILD-PROVENANCE-V1"
+    post_return_issuer_node_id = (
+        "tests/integration/"
+        "test_task_064_continuous_public_trade_stream_sqlite_evidence.py::"
+        "test_exact_fixture_callable_replay_is_rejected_after_real_lifecycle_return"
+    )
+
+    def invalid() -> Never:
+        raise failure_type(invalid_code)
+
+    def policy_for(protocol: str) -> tuple[str, tuple[str, ...], bool]:
+        for candidate, legacy_environment, fixed_modes, mode_is_node in protocol_policy:
+            if protocol == candidate:
+                return legacy_environment, fixed_modes, mode_is_node
+        invalid()
+
+    def canonical_json(value: object) -> str:
+        try:
+            encoded = canonical_dump(
+                value,
+                ensure_ascii=True,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        except (type_error, value_error):
+            invalid()
+        if type_of(encoded) is not str_type:
+            invalid()
+        return encoded
+
+    def valid_hex(value: object, size: int) -> bool:
+        if type_of(value) is not str_type:
+            return False
+        exact_value = str_type(value)
+        return bool_type(
+            length_of(exact_value) == size
+            and all_values(character in "0123456789abcdef" for character in exact_value)
+        )
+
+    def validate_protocol_values(
+        protocol: str,
+        target_node_id: str,
+        mode: str,
+    ) -> tuple[str, tuple[str, ...], bool]:
+        if (
+            type_of(protocol) is not str_type
+            or type_of(target_node_id) is not str_type
+            or type_of(mode) is not str_type
+            or not target_node_id.startswith("tests/")
+            or "::" not in target_node_id
+            or "\x00" in target_node_id
+            or "\x00" in mode
+            or length_of(target_node_id) > 2_048
+            or length_of(mode) > 2_048
+        ):
+            invalid()
+        exact_protocol = str_type(protocol)
+        exact_target_node_id = str_type(target_node_id)
+        exact_mode = str_type(mode)
+        legacy_environment, fixed_modes, mode_is_node = policy_for(exact_protocol)
+        if (mode_is_node and exact_mode != exact_target_node_id) or (
+            not mode_is_node and exact_mode not in fixed_modes
+        ):
+            invalid()
+        return legacy_environment, fixed_modes, mode_is_node
+
+    def scrub_child_environment() -> None:
+        environment.pop(envelope_environment, None)
+        for ambient_environment in legacy_environments:
+            environment.pop(ambient_environment, None)
+
+    def issue(
+        pytest_root: Path,
+        protocol: str,
+        issuer_node_id: str,
+        target_node_id: str,
+        mode: str,
+    ) -> _Task064ChildProvenance:
+        legacy_environment, _, _ = validate_protocol_values(
+            protocol,
+            target_node_id,
+            mode,
+        )
+        if environment.get(envelope_environment) is not None or any_values(
+            environment.get(name) is not None for name in legacy_environments
+        ):
+            invalid()
+        resolved_root = validate_root(pytest_root)
+        active = lookup_root(pytest_root)
+        if (
+            active is None
+            or active.path_object is not pytest_root
+            or not session_owns_root(active, False)
+            or type_of(active.node_id) is not str_type
+            or type_of(issuer_node_id) is not str_type
+            or active.node_id != issuer_node_id
+            or (
+                protocol == "post_return_fixture_replay"
+                and issuer_node_id != post_return_issuer_node_id
+            )
+            or (protocol != "post_return_fixture_replay" and issuer_node_id != target_node_id)
+        ):
+            invalid()
+        try:
+            root_details = pytest_root.lstat()
+        except os_error:
+            invalid()
+        if (
+            stat_is_link(root_details.st_mode)
+            or not stat_is_directory(root_details.st_mode)
+            or root_details.st_uid != current_uid()
+            or stat_mode(root_details.st_mode) != 0o700
+        ):
+            invalid()
+        nonce = issue_nonce(32)
+        if not valid_hex(nonce, 64):
+            invalid()
+        marker_name = f".task064-child-provenance-{nonce}.json"
+        marker_path = pytest_root / marker_name
+        root_descriptor = -1
+        marker_descriptor = -1
+        issued = False
+        try:
+            root_descriptor = open_file(
+                str_type(resolved_root),
+                read_only | directory_only | no_follow | close_on_exec,
+            )
+            opened_root = stat_file(root_descriptor)
+            if (
+                not stat_is_directory(opened_root.st_mode)
+                or opened_root.st_dev != root_details.st_dev
+                or opened_root.st_ino != root_details.st_ino
+                or opened_root.st_uid != root_details.st_uid
+                or stat_mode(opened_root.st_mode) != 0o700
+            ):
+                invalid()
+            marker_descriptor = open_file(
+                marker_name,
+                read_write | create_exclusive | no_follow | close_on_exec,
+                0o600,
+                dir_fd=root_descriptor,
+            )
+            chmod_file(marker_descriptor, 0o600)
+            marker_details = stat_file(marker_descriptor)
+            if (
+                not stat_is_regular(marker_details.st_mode)
+                or marker_details.st_uid != current_uid()
+                or marker_details.st_nlink != 1
+                or stat_mode(marker_details.st_mode) != 0o600
+            ):
+                invalid()
+            packet = {
+                "domain": domain,
+                "protocol": protocol,
+                "legacy_environment": legacy_environment,
+                "parent_pid": current_pid(),
+                "issuer_node_id": active.node_id,
+                "target_node_id": target_node_id,
+                "mode": mode,
+                "nonce": nonce,
+                "root_path": str_type(pytest_root),
+                "root_device": root_details.st_dev,
+                "root_inode": root_details.st_ino,
+                "root_uid": root_details.st_uid,
+                "root_mode": stat_mode(root_details.st_mode),
+                "marker_name": marker_name,
+                "marker_device": marker_details.st_dev,
+                "marker_inode": marker_details.st_ino,
+                "marker_uid": marker_details.st_uid,
+                "marker_mode": stat_mode(marker_details.st_mode),
+            }
+            packet_text = canonical_json(packet)
+            packet_bytes = packet_text.encode("ascii")
+            if not 0 < length_of(packet_bytes) <= maximum_packet_bytes:
+                invalid()
+            offset = 0
+            while offset < length_of(packet_bytes):
+                written = write_file(marker_descriptor, packet_bytes[offset:])
+                if type_of(written) is not int_type or written <= 0:
+                    invalid()
+                offset += written
+            sync_file(marker_descriptor)
+            seek_file(marker_descriptor, 0, seek_start)
+            packet_digest = digest_constructor(packet_bytes).hexdigest()
+            envelope = canonical_json(
+                {
+                    "domain": domain,
+                    "descriptor": marker_descriptor,
+                    "marker_path": str_type(marker_path),
+                    "packet_sha256": packet_digest,
+                }
+            )
+            if length_of(envelope.encode("ascii")) > maximum_envelope_bytes:
+                invalid()
+            provenance = provenance_type(
+                envelope=envelope,
+                descriptor=marker_descriptor,
+                marker_path=marker_path,
+                marker_device=marker_details.st_dev,
+                marker_inode=marker_details.st_ino,
+                root_path=pytest_root,
+                root_device=root_details.st_dev,
+                root_inode=root_details.st_ino,
+                nonce=nonce,
+            )
+            issued = True
+            return provenance
+        except failure_type:
+            raise
+        except (os_error, unicode_error, value_error):
+            invalid()
+        finally:
+            if not issued and marker_descriptor >= 0:
+                with suppress_errors(os_error):
+                    close_file(marker_descriptor)
+                with suppress_errors(os_error):
+                    marker_path.unlink()
+            if root_descriptor >= 0:
+                try:
+                    close_file(root_descriptor)
+                except os_error:
+                    if marker_descriptor >= 0:
+                        with suppress_errors(os_error):
+                            close_file(marker_descriptor)
+                    with suppress_errors(os_error):
+                        marker_path.unlink()
+                    invalid()
+
+    def authenticate_before_fixture(
+        target_node_id: str,
+    ) -> _Task064ChildProvenanceTicket | None:
+        """Authenticate and consume any closed-policy packet before fixture authority starts."""
+
+        if (
+            type_of(target_node_id) is not str_type
+            or not target_node_id.startswith("tests/")
+            or "::" not in target_node_id
+            or "\x00" in target_node_id
+            or length_of(target_node_id) > 2_048
+        ):
+            invalid()
+        raw_envelope = environment.get(envelope_environment)
+        if raw_envelope is None:
+            scrub_child_environment()
+            return None
+        if (
+            type_of(raw_envelope) is not str_type
+            or any_values(environment.get(name) is not None for name in legacy_environments)
+            or active_body_ticket.get() is not None
+            or length_of(ticket_records) >= maximum_active_tickets
+        ):
+            invalid()
+        try:
+            encoded_envelope = raw_envelope.encode("ascii")
+            envelope = canonical_load(raw_envelope)
+        except (type_error, unicode_error, value_error):
+            invalid()
+        if not 0 < length_of(encoded_envelope) <= maximum_envelope_bytes:
+            invalid()
+        if (
+            type_of(envelope) is not dict_type
+            or set_type(envelope) != {"domain", "descriptor", "marker_path", "packet_sha256"}
+            or canonical_json(envelope) != raw_envelope
+            or envelope["domain"] != domain
+            or type_of(envelope["descriptor"]) is not int_type
+            or envelope["descriptor"] <= 2
+            or type_of(envelope["marker_path"]) is not str_type
+            or not valid_hex(envelope["packet_sha256"], 64)
+        ):
+            invalid()
+        descriptor = envelope["descriptor"]
+        try:
+            marker_details = stat_file(descriptor)
+            seek_file(descriptor, 0, seek_start)
+            fragments: list[bytes] = []
+            packet_size = 0
+            while True:
+                fragment = read_file(
+                    descriptor,
+                    minimum_value(4_096, maximum_packet_bytes + 1 - packet_size),
+                )
+                if type_of(fragment) is not bytes_type:
+                    invalid()
+                if fragment == b"":
+                    break
+                fragments.append(fragment)
+                packet_size += length_of(fragment)
+                if packet_size > maximum_packet_bytes:
+                    invalid()
+            packet_bytes = b"".join(fragments)
+            if (
+                not packet_bytes
+                or digest_constructor(packet_bytes).hexdigest() != envelope["packet_sha256"]
+            ):
+                invalid()
+            packet_text = packet_bytes.decode("ascii")
+            packet = canonical_load(packet_text)
+        except failure_type:
+            raise
+        except (os_error, unicode_error, type_error, value_error):
+            invalid()
+        expected_packet_keys = {
+            "domain",
+            "protocol",
+            "legacy_environment",
+            "parent_pid",
+            "issuer_node_id",
+            "target_node_id",
+            "mode",
+            "nonce",
+            "root_path",
+            "root_device",
+            "root_inode",
+            "root_uid",
+            "root_mode",
+            "marker_name",
+            "marker_device",
+            "marker_inode",
+            "marker_uid",
+            "marker_mode",
+        }
+        if (
+            type_of(packet) is not dict_type
+            or set_type(packet) != expected_packet_keys
+            or canonical_json(packet) != packet_text
+            or packet["domain"] != domain
+        ):
+            invalid()
+        legacy_environment, _, _ = validate_protocol_values(
+            packet["protocol"],
+            packet["target_node_id"],
+            packet["mode"],
+        )
+        protocol = str_type(packet["protocol"])
+        expected_issuer_node_id = (
+            post_return_issuer_node_id
+            if protocol == "post_return_fixture_replay"
+            else target_node_id
+        )
+        if (
+            packet["target_node_id"] != target_node_id
+            or packet["legacy_environment"] != legacy_environment
+            or type_of(packet["parent_pid"]) is not int_type
+            or packet["parent_pid"] <= 1
+            or parent_pid() != packet["parent_pid"]
+            or type_of(packet["issuer_node_id"]) is not str_type
+            or packet["issuer_node_id"] != expected_issuer_node_id
+            or (
+                packet["protocol"] == "post_return_fixture_replay"
+                and expected_issuer_node_id != post_return_issuer_node_id
+            )
+            or (
+                packet["protocol"] != "post_return_fixture_replay"
+                and expected_issuer_node_id != target_node_id
+            )
+            or not valid_hex(packet["nonce"], 64)
+            or packet["nonce"] in consumed_nonces
+            or type_of(packet["root_path"]) is not str_type
+            or type_of(packet["marker_name"]) is not str_type
+            or packet["marker_name"] != f".task064-child-provenance-{packet['nonce']}.json"
+            or envelope["marker_path"]
+            != str_type(path_type(packet["root_path"]) / packet["marker_name"])
+            or any_values(
+                type_of(packet[name]) is not int_type
+                for name in (
+                    "root_device",
+                    "root_inode",
+                    "root_uid",
+                    "root_mode",
+                    "marker_device",
+                    "marker_inode",
+                    "marker_uid",
+                    "marker_mode",
+                )
+            )
+        ):
+            invalid()
+        root_path = path_type(packet["root_path"])
+        marker_path = path_type(envelope["marker_path"])
+        try:
+            root_details = root_path.lstat()
+            path_marker_details = marker_path.lstat()
+        except os_error:
+            invalid()
+        if (
+            stat_is_link(root_details.st_mode)
+            or not stat_is_directory(root_details.st_mode)
+            or root_details.st_dev != packet["root_device"]
+            or root_details.st_ino != packet["root_inode"]
+            or root_details.st_uid != packet["root_uid"]
+            or packet["root_uid"] != current_uid()
+            or stat_mode(root_details.st_mode) != packet["root_mode"]
+            or packet["root_mode"] != 0o700
+            or stat_is_link(path_marker_details.st_mode)
+            or not stat_is_regular(path_marker_details.st_mode)
+            or marker_details.st_dev != packet["marker_device"]
+            or marker_details.st_ino != packet["marker_inode"]
+            or marker_details.st_uid != packet["marker_uid"]
+            or packet["marker_uid"] != current_uid()
+            or stat_mode(marker_details.st_mode) != packet["marker_mode"]
+            or packet["marker_mode"] != 0o600
+            or marker_details.st_nlink != 1
+            or path_marker_details.st_dev != marker_details.st_dev
+            or path_marker_details.st_ino != marker_details.st_ino
+        ):
+            invalid()
+        if length_of(consumed_nonces) >= maximum_consumed_nonces:
+            invalid()
+        root_descriptor = -1
+        consumption_irreversible = False
+        consumption_failed = False
+        root_close_failed = False
+        try:
+            root_descriptor = open_file(
+                str_type(root_path),
+                read_only | directory_only | no_follow | close_on_exec,
+            )
+            opened_root = stat_file(root_descriptor)
+            if (
+                opened_root.st_dev != root_details.st_dev
+                or opened_root.st_ino != root_details.st_ino
+                or opened_root.st_uid != root_details.st_uid
+                or stat_mode(opened_root.st_mode) != 0o700
+            ):
+                invalid()
+            unlink_file(packet["marker_name"], dir_fd=root_descriptor)
+            consumption_irreversible = True
+            close_file(descriptor)
+        except failure_type:
+            consumption_failed = True
+        except os_error:
+            consumption_failed = True
+        finally:
+            if root_descriptor >= 0:
+                try:
+                    close_file(root_descriptor)
+                except os_error:
+                    root_close_failed = True
+        if consumption_irreversible:
+            consumed_nonces.add(packet["nonce"])
+            scrub_child_environment()
+        if consumption_failed or root_close_failed:
+            if consumption_irreversible or root_close_failed:
+                mark_authority_uncertain()
+            invalid()
+        if not consumption_irreversible:
+            invalid()
+        ticket: _Task064ChildProvenanceTicket | None = None
+        ticket_key = -1
+        try:
+            ticket = ticket_type(_authority_nonce=issue_ticket_nonce(32))
+            if (
+                type_of(ticket._authority_nonce) is not bytes_type
+                or length_of(ticket._authority_nonce) != 32
+            ):
+                invalid()
+            ticket_key = object_identity(ticket)
+            ticket_records[ticket_key] = {
+                "ticket": ticket,
+                "ticket_fields": (
+                    object_identity(ticket._authority_nonce),
+                    ticket._authority_nonce,
+                ),
+                "owner_process_id": current_pid(),
+                "node_id": target_node_id,
+                "protocol": protocol,
+                "issuer_node_id": expected_issuer_node_id,
+                "mode": str_type(packet["mode"]),
+                "provenance_root": root_path,
+                "provenance_root_fields": (
+                    root_details.st_dev,
+                    root_details.st_ino,
+                    root_details.st_uid,
+                    stat_mode(root_details.st_mode),
+                ),
+                "state": "AUTHENTICATED",
+            }
+        except base_exception_type:
+            if ticket_key >= 0:
+                ticket_records.pop(ticket_key, None)
+            mark_authority_uncertain()
+            invalid()
+        return ticket
+
+    def reserved_environment_is_absent() -> bool:
+        return bool_type(
+            environment.get(envelope_environment) is None
+            and not any_values(environment.get(name) is not None for name in legacy_environments)
+        )
+
+    def exact_ticket_record(
+        ticket: _Task064ChildProvenanceTicket,
+        target_node_id: str,
+    ) -> dict[str, object] | None:
+        record = ticket_records.get(object_identity(ticket))
+        if (
+            type_of(ticket) is not ticket_type
+            or type_of(target_node_id) is not str_type
+            or record is None
+            or record["ticket"] is not ticket
+            or record["ticket_fields"]
+            != (object_identity(ticket._authority_nonce), ticket._authority_nonce)
+            or record["owner_process_id"] != current_pid()
+            or record["node_id"] != target_node_id
+        ):
+            return None
+        return record
+
+    def roots_are_exact(record: dict[str, object], *, require_active: bool) -> bool:
+        provenance_root = record.get("provenance_root")
+        fixture_root = record.get("fixture_root")
+        if not isinstance(provenance_root, path_type) or not isinstance(
+            fixture_root,
+            path_type,
+        ):
+            return False
+        try:
+            provenance_details = provenance_root.lstat()
+            fixture_details = fixture_root.lstat()
+        except os_error:
+            return False
+        if (
+            stat_is_link(provenance_details.st_mode)
+            or not stat_is_directory(provenance_details.st_mode)
+            or (
+                provenance_details.st_dev,
+                provenance_details.st_ino,
+                provenance_details.st_uid,
+                stat_mode(provenance_details.st_mode),
+            )
+            != record.get("provenance_root_fields")
+            or stat_is_link(fixture_details.st_mode)
+            or not stat_is_directory(fixture_details.st_mode)
+            or (
+                object_identity(fixture_root),
+                fixture_details.st_dev,
+                fixture_details.st_ino,
+                fixture_details.st_uid,
+                stat_mode(fixture_details.st_mode),
+            )
+            != record.get("fixture_root_fields")
+            or fixture_details.st_uid != current_uid()
+        ):
+            return False
+        if not require_active:
+            return True
+        active_root = lookup_root(fixture_root)
+        return bool_type(
+            active_root is not None
+            and active_root.path_object is fixture_root
+            and active_root.node_id == record["node_id"]
+            and validate_root_identity(active_root)
+            and session_owns_root(active_root, False)
+        )
+
+    def activate_fixture_ticket(
+        ticket: _Task064ChildProvenanceTicket | None,
+        target_node_id: str,
+        fixture_root: Path,
+    ) -> None:
+        """Bind an authenticated ticket to the exact originating fixture context."""
+
+        if ticket is None:
+            return
+        record = exact_ticket_record(ticket, target_node_id)
+        if (
+            record is None
+            or record["state"] != "AUTHENTICATED"
+            or not isinstance_value(fixture_root, path_type)
+            or not fixture_root.is_absolute()
+            or active_body_ticket.get() is not None
+            or not reserved_environment_is_absent()
+        ):
+            invalid()
+        try:
+            fixture_details = fixture_root.lstat()
+        except os_error:
+            invalid()
+        if (
+            stat_is_link(fixture_details.st_mode)
+            or not stat_is_directory(fixture_details.st_mode)
+            or fixture_details.st_uid != current_uid()
+        ):
+            invalid()
+        context_token = active_body_ticket.set(ticket)
+        if type_of(context_token) is not context_token_type:
+            mark_authority_uncertain()
+            invalid()
+        record["fixture_root"] = fixture_root
+        record["fixture_root_fields"] = (
+            object_identity(fixture_root),
+            fixture_details.st_dev,
+            fixture_details.st_ino,
+            fixture_details.st_uid,
+            stat_mode(fixture_details.st_mode),
+        )
+        record["context_token"] = context_token
+        record["state"] = "ACTIVATED"
+
+    def transition_to_claimed(
+        record: dict[str, object],
+        ticket: _Task064ChildProvenanceTicket,
+    ) -> None:
+        context_token = record.get("context_token")
+        if (
+            type_of(context_token) is not context_token_type
+            or active_body_ticket.get() is not ticket
+        ):
+            invalid()
+        try:
+            active_body_ticket.reset(context_token)  # type: ignore[arg-type]
+        except base_exception_type:
+            invalid()
+        try:
+            finalize_token = active_body_ticket.set(ticket)
+        except base_exception_type:
+            mark_authority_uncertain()
+            invalid()
+        if type_of(finalize_token) is not context_token_type:
+            mark_authority_uncertain()
+            invalid()
+        record["context_token"] = finalize_token
+        record["state"] = "CLAIMED"
+
+    def claim_post_return(
+        ticket: _Task064ChildProvenanceTicket | None,
+        target_node_id: str,
+    ) -> bool:
+        """Claim a post-return packet locally without exposing its mode to test code."""
+
+        if ticket is None:
+            return False
+        record = exact_ticket_record(ticket, target_node_id)
+        if (
+            record is None
+            or record["state"] != "ACTIVATED"
+            or not reserved_environment_is_absent()
+            or not roots_are_exact(record, require_active=False)
+        ):
+            invalid()
+        if record["protocol"] != "post_return_fixture_replay":
+            if active_body_ticket.get() is not ticket:
+                invalid()
+            return False
+        if (
+            record["issuer_node_id"] != post_return_issuer_node_id
+            or record["mode"] != target_node_id
+        ):
+            invalid()
+        transition_to_claimed(record, ticket)
+        return True
+
+    def claim_body_dispatch(
+        protocol: str,
+        target_node_id: str,
+        allowed_modes: tuple[str, ...],
+    ) -> str | None:
+        """Claim one authenticated body ticket without consulting process environment."""
+
+        if (
+            type_of(protocol) is not str_type
+            or type_of(target_node_id) is not str_type
+            or type_of(allowed_modes) is not tuple_type
+            or any_values(type_of(item) is not str_type for item in allowed_modes)
+        ):
+            invalid()
+        _, fixed_modes, mode_is_node = policy_for(protocol)
+        exact_modes = (target_node_id,) if mode_is_node else fixed_modes
+        if allowed_modes != exact_modes:
+            invalid()
+        ticket = active_body_ticket.get()
+        if ticket is None:
+            if environment.get(envelope_environment) is not None:
+                invalid()
+            if any_values(environment.get(name) is not None for name in legacy_environments):
+                scrub_child_environment()
+            if any_values(
+                record["owner_process_id"] == current_pid() and record["node_id"] == target_node_id
+                for record in ticket_records.values()
+            ):
+                invalid()
+            return None
+        if not reserved_environment_is_absent():
+            scrub_child_environment()
+            invalid()
+        record = ticket_records.get(object_identity(ticket))
+        if (
+            type_of(ticket) is not ticket_type
+            or record is None
+            or record["ticket"] is not ticket
+            or record["ticket_fields"]
+            != (object_identity(ticket._authority_nonce), ticket._authority_nonce)
+            or record["owner_process_id"] != current_pid()
+            or record["node_id"] != target_node_id
+            or record["protocol"] != protocol
+            or record["mode"] not in exact_modes
+            or record["issuer_node_id"] != target_node_id
+            or record["state"] != "ACTIVATED"
+            or not roots_are_exact(record, require_active=True)
+        ):
+            invalid()
+        transition_to_claimed(record, ticket)
+        return str_type(record["mode"])
+
+    def terminalize_fixture_ticket(
+        ticket: _Task064ChildProvenanceTicket,
+        target_node_id: str,
+        *,
+        require_claimed: bool,
+        terminal_state: str,
+    ) -> None:
+        ticket_key = object_identity(ticket)
+        record = exact_ticket_record(ticket, target_node_id)
+        if (
+            record is None
+            or (require_claimed and record["state"] != "CLAIMED")
+            or record["state"] not in {"AUTHENTICATED", "ACTIVATED", "CLAIMED"}
+            or terminal_state not in {"RETURNED", "CANCELLED", "UNCLAIMED"}
+            or length_of(terminal_ticket_records) >= maximum_terminal_tickets
+        ):
+            invalid()
+        if record["state"] in {"ACTIVATED", "CLAIMED"}:
+            context_token = record.get("context_token")
+            if (
+                type_of(context_token) is not context_token_type
+                or active_body_ticket.get() is not ticket
+            ):
+                mark_authority_uncertain()
+                invalid()
+            try:
+                active_body_ticket.reset(context_token)  # type: ignore[arg-type]
+            except base_exception_type:
+                mark_authority_uncertain()
+                invalid()
+        terminal_ticket_records[ticket_key] = (
+            ticket,
+            current_pid(),
+            target_node_id,
+            terminal_state,
+        )
+        del ticket_records[ticket_key]
+
+    def finish_fixture_ticket(
+        ticket: _Task064ChildProvenanceTicket | None,
+        target_node_id: str,
+    ) -> None:
+        """Require one exact claim and erase every fixture-local ticket reference."""
+
+        if ticket is None:
+            return
+        record = exact_ticket_record(ticket, target_node_id)
+        if record is None:
+            invalid()
+        if record["state"] != "CLAIMED":
+            terminalize_fixture_ticket(
+                ticket,
+                target_node_id,
+                require_claimed=False,
+                terminal_state="UNCLAIMED",
+            )
+            invalid()
+        terminalize_fixture_ticket(
+            ticket,
+            target_node_id,
+            require_claimed=True,
+            terminal_state="RETURNED",
+        )
+
+    def cancel_fixture_ticket(
+        ticket: _Task064ChildProvenanceTicket | None,
+        target_node_id: str,
+    ) -> None:
+        """Idempotently erase an exact ticket after any fixture failure."""
+
+        if ticket is None:
+            return
+        ticket_key = object_identity(ticket)
+        terminal_record = terminal_ticket_records.get(ticket_key)
+        if terminal_record is not None:
+            if terminal_record[:3] != (ticket, current_pid(), target_node_id):
+                invalid()
+            return
+        terminalize_fixture_ticket(
+            ticket,
+            target_node_id,
+            require_claimed=False,
+            terminal_state="CANCELLED",
+        )
+
+    def close(provenance: _Task064ChildProvenance) -> bool:
+        if type_of(provenance) is not provenance_type:
+            invalid()
+        close_ok = True
+        try:
+            close_file(provenance.descriptor)
+        except os_error:
+            close_ok = False
+        consumed = False
+        try:
+            marker_details = provenance.marker_path.lstat()
+        except file_not_found_error:
+            consumed = True
+        except os_error:
+            close_ok = False
+        else:
+            if (
+                stat_is_link(marker_details.st_mode)
+                or not stat_is_regular(marker_details.st_mode)
+                or marker_details.st_dev != provenance.marker_device
+                or marker_details.st_ino != provenance.marker_inode
+                or marker_details.st_uid != current_uid()
+                or stat_mode(marker_details.st_mode) != 0o600
+            ):
+                close_ok = False
+            else:
+                try:
+                    unlink_file(provenance.marker_path)
+                except os_error:
+                    close_ok = False
+        if not close_ok:
+            invalid()
+        return consumed
+
+    return (
+        issue,
+        authenticate_before_fixture,
+        activate_fixture_ticket,
+        claim_post_return,
+        claim_body_dispatch,
+        finish_fixture_ticket,
+        cancel_fixture_ticket,
+        close,
+    )
+
+
+(
+    _issue_task064_child_provenance,
+    _authenticate_task064_child_provenance,
+    _activate_task064_child_provenance,
+    _claim_task064_post_return_child_provenance,
+    _claim_task064_child_dispatch_provenance,
+    _finish_task064_child_provenance,
+    _cancel_task064_child_provenance,
+    _close_task064_child_provenance,
+) = _build_task064_child_provenance_authority()
+del _build_task064_child_provenance_authority
+
+
 def _build_evidence_run_authority() -> tuple[
     Callable[[Path], _EvidenceRun],
     Callable[[_EvidenceRun, tuple[str, ...]], bool],
-    Callable[[_EvidenceRun], None],
-    Callable[[_EvidenceRun], None],
-    Callable[[_EvidenceRun], None],
+    Callable[[_EvidenceRun], Callable[[], bool]],
+    Callable[[_EvidenceRun], Callable[[], bool]],
+    Callable[[_EvidenceRun], bool],
+    Callable[[_EvidenceRun], bool],
+    Callable[[str], None],
 ]:
     """Own irreversible run issuance and lifecycle outside mutable ledger mirrors."""
 
+    nonce_issuer = _issue_authority_nonce
+    root_lookup = _lookup_active_pytest_root
+    root_session_owns = _pytest_root_session_owns
+    mark_authority_uncertain = _latch_pytest_root_authority_uncertainty
+    active_run_context = _ACTIVE_EVIDENCE_RUN
     records: dict[int, dict[str, object]] = {}
+    begin_stage_faults = frozenset(
+        {
+            "after_record_reservation",
+            "after_ledger_run",
+            "after_ledger_recording",
+            "after_context_set",
+        }
+    )
+    begin_rollback_faults = frozenset(
+        {
+            "rollback_context_reset",
+            "rollback_ledger_restore",
+        }
+    )
+    armed_begin_faults: frozenset[str] = frozenset()
 
-    def validate(run: _EvidenceRun, phases: tuple[str, ...]) -> bool:
+    def arm_begin_fault(name: str) -> None:
+        nonlocal armed_begin_faults
+        if (
+            type(name) is not str
+            or name not in begin_stage_faults | begin_rollback_faults
+            or name in armed_begin_faults
+            or len(armed_begin_faults) >= 2
+            or (
+                name in begin_stage_faults
+                and any(fault in begin_stage_faults for fault in armed_begin_faults)
+            )
+            or (
+                name in begin_rollback_faults
+                and any(fault in begin_rollback_faults for fault in armed_begin_faults)
+            )
+            or (name == "rollback_context_reset" and "after_context_set" not in armed_begin_faults)
+            or (
+                name == "rollback_ledger_restore"
+                and not (
+                    armed_begin_faults
+                    & frozenset(
+                        {
+                            "after_ledger_run",
+                            "after_ledger_recording",
+                            "after_context_set",
+                        }
+                    )
+                )
+            )
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        armed_begin_faults = armed_begin_faults | frozenset((name,))
+
+    def consume_begin_fault(name: str) -> bool:
+        nonlocal armed_begin_faults
+        if name not in armed_begin_faults:
+            return False
+        armed_begin_faults = armed_begin_faults - frozenset((name,))
+        return True
+
+    def run_fields(run: _EvidenceRun) -> tuple[object, ...]:
+        registration = run._pytest_registration
+        ledger = registration.evidence_ledger
+        return (
+            id(registration),
+            id(run._nonce),
+            run._nonce,
+            id(ledger),
+            id(ledger.nonce),
+            ledger.nonce,
+        )
+
+    def record_matches(run: _EvidenceRun, phases: tuple[str, ...]) -> bool:
         if type(run) is not _EvidenceRun or type(phases) is not tuple:
             return False
         record = records.get(id(run))
         return not (
             record is None
             or record["run"] is not run
-            or record["registration"] is not run._pytest_registration
-            or record["ledger"] is not run._pytest_registration.evidence_ledger
-            or record["nonce"] != run._nonce
+            or record["run_fields"] != run_fields(run)
             or type(run._nonce) is not bytes
             or len(run._nonce) != 32
             or record["phase"] not in phases
+            or type(record["version"]) is not int
+        )
+
+    def validate(run: _EvidenceRun, phases: tuple[str, ...]) -> bool:
+        return bool(
+            record_matches(run, phases)
+            and root_lookup(run._pytest_registration.path_object) is run._pytest_registration
+            and root_session_owns(run._pytest_registration, False)
         )
 
     def begin(pytest_root: Path) -> _EvidenceRun:
         _validate_bootstrap_root(pytest_root)
-        registration = _ACTIVE_PYTEST_ROOTS[id(pytest_root)]
+        registration = _lookup_active_pytest_root(pytest_root)
+        if registration is None:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
         ledger = registration.evidence_ledger
         if (
             ledger.closed
@@ -3086,52 +6482,189 @@ def _build_evidence_run_authority() -> tuple[
             or ledger.observations
             or ledger.operation_runs
             or ledger.rejection_runs
+            or active_run_context.get() is not None
         ):
             raise HarnessFailure(HarnessFailureCode.CORRUPT)
         run = _EvidenceRun(
             _pytest_registration=registration,
-            _nonce=secrets.token_bytes(32),
+            _nonce=nonce_issuer("evidence-run"),
         )
         if id(run) in records:
             raise HarnessFailure(HarnessFailureCode.CORRUPT)
-        records[id(run)] = {
+        record: dict[str, object] = {
             "run": run,
             "registration": registration,
             "ledger": ledger,
-            "nonce": run._nonce,
-            "phase": "RECORDING",
+            "run_fields": run_fields(run),
+            "phase": "BEGINNING",
+            "version": 0,
         }
-        ledger.run = run
-        ledger.recording = True
-        _ACTIVE_EVIDENCE_RUN.set(run)
-        return run
+        context_token: Token[_EvidenceRun | None] | None = None
+        try:
+            records[id(run)] = record
+            if consume_begin_fault("after_record_reservation"):
+                raise RuntimeError("injected evidence-run reservation failure")
+            ledger.run = run
+            if consume_begin_fault("after_ledger_run"):
+                raise RuntimeError("injected evidence-run ledger binding failure")
+            ledger.recording = True
+            if consume_begin_fault("after_ledger_recording"):
+                raise RuntimeError("injected evidence-run recording failure")
+            context_token = active_run_context.set(run)
+            if consume_begin_fault("after_context_set"):
+                raise RuntimeError("injected evidence-run context failure")
+            if (
+                records.get(id(run)) is not record
+                or record["phase"] != "BEGINNING"
+                or record["version"] != 0
+                or record["run_fields"] != run_fields(run)
+                or ledger.run is not run
+                or not ledger.recording
+                or ledger.receipt is not None
+                or ledger.closed
+                or ledger.consumed
+                or ledger.observations
+                or ledger.operation_runs
+                or ledger.rejection_runs
+                or active_run_context.get() is not run
+            ):
+                raise RuntimeError("evidence-run begin postcondition failed")
+            record["phase"] = "RECORDING"
+            record["version"] = 1
+            if not validate(run, ("RECORDING",)):
+                raise RuntimeError("evidence-run begin transition failed")
+            return run
+        except BaseException:
+            rollback_ok = True
+            if context_token is not None:
+                if consume_begin_fault("rollback_context_reset"):
+                    rollback_ok = False
+                else:
+                    try:
+                        active_run_context.reset(context_token)
+                    except BaseException:
+                        rollback_ok = False
+            if consume_begin_fault("rollback_ledger_restore"):
+                rollback_ok = False
+            else:
+                try:
+                    ledger.run = None
+                    ledger.recording = False
+                    ledger.receipt = None
+                except BaseException:
+                    rollback_ok = False
+            try:
+                record["phase"] = "ABORTED"
+                record["version"] = cast(int, record["version"]) + 1
+            except BaseException:
+                rollback_ok = False
+            if not (
+                records.get(id(run)) is record
+                and record.get("phase") == "ABORTED"
+                and active_run_context.get() is None
+                and ledger.run is None
+                and not ledger.recording
+                and ledger.receipt is None
+                and not ledger.closed
+                and not ledger.consumed
+                and not ledger.observations
+                and not ledger.operation_runs
+                and not ledger.rejection_runs
+            ):
+                rollback_ok = False
+            if not rollback_ok:
+                mark_authority_uncertain()
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+            raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
 
-    def seal(run: _EvidenceRun) -> None:
+    def prepare_seal(run: _EvidenceRun) -> Callable[[], bool]:
         if not validate(run, ("RECORDING",)):
             raise HarnessFailure(HarnessFailureCode.CORRUPT)
-        records[id(run)]["phase"] = "SEALED"
+        record = records[id(run)]
+        expected_version = cast(int, record["version"])
+        prepared_state = "READY"
 
-    def consume(run: _EvidenceRun) -> None:
+        def transition() -> bool:
+            nonlocal prepared_state
+            if (
+                prepared_state != "READY"
+                or records.get(id(run)) is not record
+                or not validate(run, ("RECORDING",))
+                or record["version"] != expected_version
+            ):
+                return False
+            prepared_state = "COMMITTING"
+            record["phase"] = "SEALED"
+            record["version"] = expected_version + 1
+            prepared_state = "DONE"
+            return record_matches(run, ("SEALED",))
+
+        return transition
+
+    def prepare_consumption(run: _EvidenceRun) -> Callable[[], bool]:
         if not validate(run, ("SEALED",)):
             raise HarnessFailure(HarnessFailureCode.CORRUPT)
-        records[id(run)]["phase"] = "CONSUMED"
+        record = records[id(run)]
+        expected_version = cast(int, record["version"])
+        prepared_state = "READY"
 
-    def close(run: _EvidenceRun) -> None:
-        record = records.get(id(run))
-        if record is not None and record["run"] is run:
-            record["phase"] = "CLOSED"
+        def transition() -> bool:
+            nonlocal prepared_state
+            if (
+                prepared_state != "READY"
+                or records.get(id(run)) is not record
+                or not record_matches(run, ("SEALED",))
+                or record["version"] != expected_version
+            ):
+                return False
+            prepared_state = "COMMITTING"
+            record["phase"] = "CONSUMED"
+            record["version"] = expected_version + 1
+            prepared_state = "DONE"
+            return record_matches(run, ("CONSUMED",))
 
-    return begin, validate, seal, consume, close
+        return transition
+
+    def close(run: _EvidenceRun) -> bool:
+        if not record_matches(run, ("RECORDING", "SEALED", "CONSUMED", "ABORTED")):
+            return False
+        record = records[id(run)]
+        version = cast(int, record["version"])
+        record["phase"] = "CLOSED"
+        record["version"] = version + 1
+        return record_matches(run, ("CLOSED",))
+
+    def is_closed(run: _EvidenceRun) -> bool:
+        return record_matches(run, ("CLOSED",))
+
+    return (
+        begin,
+        validate,
+        prepare_seal,
+        prepare_consumption,
+        close,
+        is_closed,
+        arm_begin_fault,
+    )
 
 
 (
     begin_generated_evidence_run,
     _validate_issued_evidence_run,
-    _mark_issued_evidence_run_sealed,
-    _consume_issued_evidence_run,
+    _prepare_issued_evidence_run_seal,
+    _prepare_issued_evidence_run_consumption,
     _close_issued_evidence_run,
+    _is_issued_evidence_run_closed,
+    _arm_evidence_run_begin_fault,
 ) = _build_evidence_run_authority()
 del _build_evidence_run_authority
+_bind_pytest_root_run_closer(
+    _close_issued_evidence_run,
+    _is_issued_evidence_run_closed,
+)
+del _bind_pytest_root_run_closer
+del _close_issued_evidence_run
+del _is_issued_evidence_run_closed
 
 
 def _validated_evidence_run(run: _EvidenceRun) -> _EvidenceLedger:
@@ -3194,9 +6727,8 @@ def _active_rejection_recording_ledger(
         or ledger.closed
         or ledger.consumed
         or registration.process_id != os.getpid()
-        or _ACTIVE_PYTEST_ROOTS.get(id(registration.path_object)) is not registration
-        or os.environ.get("PYTEST_CURRENT_TEST", "").rsplit(" (", maxsplit=1)[0]
-        != registration.node_id
+        or _lookup_active_pytest_root(registration.path_object) is not registration
+        or not _pytest_root_session_owns(registration, False)
     ):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     if not allow_intentional_root_fault:
@@ -3279,8 +6811,8 @@ def _capture_harness_rejection_unsealed(
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
 
     outer_registration = state.run._pytest_registration
-    target_registration = None if pytest_root is None else _ACTIVE_PYTEST_ROOTS.get(id(pytest_root))
-    token_registration = None if token is None else _TOKEN_REGISTRY.get(token._nonce)
+    target_registration = None if pytest_root is None else _lookup_active_pytest_root(pytest_root)
+    token_registration = None if token is None else _lookup_store_token_authority(token)
     if label == "relative_root" and pytest_root != Path("relative"):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     if label == "unregistered_root" and (
@@ -3327,7 +6859,7 @@ def _capture_harness_rejection_unsealed(
         token_registration is None or token_registration.pytest_registration is outer_registration
     ):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
-    revoked_target = None if pytest_root is None else _REVOKED_PYTEST_ROOTS.get(id(pytest_root))
+    revoked_target = None if pytest_root is None else _lookup_revoked_pytest_root(pytest_root)
     if label == "expired_root" and (
         target_registration is not None
         or revoked_target is None
@@ -3336,9 +6868,9 @@ def _capture_harness_rejection_unsealed(
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     if label == "expired_token" and (
         token_registration is None
-        or _ACTIVE_PYTEST_ROOTS.get(id(token_registration.pytest_registration.path_object))
+        or _lookup_active_pytest_root(token_registration.pytest_registration.path_object)
         is token_registration.pytest_registration
-        or _REVOKED_PYTEST_ROOTS.get(id(token_registration.pytest_registration.path_object))
+        or _lookup_revoked_pytest_root(token_registration.pytest_registration.path_object)
         is not token_registration.pytest_registration
     ):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
@@ -3506,24 +7038,13 @@ def _capture_harness_rejection_unsealed(
         finally:
             _close_preserving_primary(predicate_connection)
 
-    original_getpid = os.getpid
-    original_node = os.environ.get("PYTEST_CURRENT_TEST")
     original_resolve = Path.resolve
 
     def fail_resolve(_path: Path, *, strict: bool = False) -> Path:
         del strict
         raise FileNotFoundError("sanitized-report-path-probe")
 
-    try:
-        if label in {"wrong_process_root", "wrong_process_token"}:
-            os.getpid = lambda: -1
-        elif label in {"wrong_node_root", "wrong_node_token"}:
-            os.environ["PYTEST_CURRENT_TEST"] = (
-                f"{state.run._pytest_registration.node_id}::wrong (call)"
-            )
-        elif label in {"path_resolution_bootstrap", "path_resolution_operation"}:
-            Path.resolve = fail_resolve  # type: ignore[method-assign,assignment]
-
+    def execute_scenario() -> None:
         if executor_name == "bootstrap_store":
             bootstrap_store(cast(Path, pytest_root))
         elif executor_name == "verify_store":
@@ -3536,6 +7057,35 @@ def _capture_harness_rejection_unsealed(
                 limit=cast(int, limit),
                 expectation=expectation,
             )
+
+    try:
+        if label in {"wrong_process_root", "wrong_process_token"}:
+            wrong_process_registration = (
+                cast(_ActivePytestRoot, target_registration)
+                if label == "wrong_process_root"
+                else cast(_RegisteredIdentity, token_registration).pytest_registration
+            )
+            original_process_id = wrong_process_registration.process_id
+            object.__setattr__(
+                wrong_process_registration,
+                "process_id",
+                -1,
+            )
+            try:
+                execute_scenario()
+            finally:
+                object.__setattr__(
+                    wrong_process_registration,
+                    "process_id",
+                    original_process_id,
+                )
+        elif label in {"path_resolution_bootstrap", "path_resolution_operation"}:
+            Path.resolve = fail_resolve  # type: ignore[method-assign,assignment]
+            execute_scenario()
+        elif label in {"wrong_node_root", "wrong_node_token"}:
+            Context().run(execute_scenario)
+        else:
+            execute_scenario()
     except HarnessFailure as error:
         if error.code is not scenario_code or not _traceback_contains_harness_executor(
             error,
@@ -3566,11 +7116,6 @@ def _capture_harness_rejection_unsealed(
         )
         return label, error.code
     finally:
-        os.getpid = original_getpid
-        if original_node is None:
-            os.environ.pop("PYTEST_CURRENT_TEST", None)
-        else:
-            os.environ["PYTEST_CURRENT_TEST"] = original_node
         Path.resolve = original_resolve  # type: ignore[method-assign]
     raise HarnessFailure(HarnessFailureCode.CORRUPT)
 
@@ -3605,13 +7150,14 @@ def _capture_sqlite_rejection_unsealed(
     ) = scenario_snapshot(scenario)
     if scenario_kind != "sqlite" or scenario_label != label or scenario_executors:
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
-    binding = _CONNECTION_EVIDENCE_BINDINGS.get(id(connection))
+    binding = _connection_authority_binding(connection)
+    token_registration = None if binding is None else _lookup_store_identity_by_nonce(binding[0])
     if (
         binding is None
         or not binding[1]
-        or id(connection) not in _CONNECTION_PATH_SNAPSHOTS
-        or _TOKEN_REGISTRY.get(binding[0]) is None
-        or _TOKEN_REGISTRY[binding[0]].pytest_registration is not state.run._pytest_registration
+        or not _connection_has_path_snapshot(connection)
+        or token_registration is None
+        or token_registration.pytest_registration is not state.run._pytest_registration
     ):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     parameter_tuple = tuple(parameters)
@@ -4107,9 +7653,6 @@ def _seal_generated_evidence_run_unsealed(
         evidence_digest=_evidence_payload_digest(evidence),
         gates=gate_receipts,
     )
-    ledger.receipt = receipt
-    ledger.recording = False
-    _ACTIVE_EVIDENCE_RUN.set(None)
     return receipt
 
 
@@ -4119,21 +7662,45 @@ def _build_evidence_receipt_authority(
 ) -> tuple[
     Callable[..., _EvidenceReceipt],
     Callable[[_EvidenceReceipt, GeneratedEvidenceAggregate, bool], bool],
-    Callable[[_EvidenceReceipt], None],
+    Callable[
+        [_EvidenceReceipt],
+        tuple[
+            Callable[[], bool],
+            Callable[[], bool],
+            Callable[[], bool],
+        ],
+    ],
+    Callable[[], None],
 ]:
     """Issue and consume exact receipts under an irreversible closure-held lifecycle."""
 
     issued: dict[int, dict[str, object]] = {}
     seal_implementation = _seal_generated_evidence_run_unsealed
+    prepare_run_consumption = _prepare_issued_evidence_run_consumption
+    prepare_run_seal = _prepare_issued_evidence_run_seal
+    validate_run = _validate_issued_evidence_run
+    active_run_context = _ACTIVE_EVIDENCE_RUN
+    root_lookup = _lookup_active_pytest_root
+    root_session_owns = _pytest_root_session_owns
+    process_cleanup_uncertain = _has_process_cleanup_uncertainty
+    mark_cleanup_uncertain = _mark_process_cleanup_uncertain
+    seal_transition_fault = False
+
+    def arm_seal_transition_fault() -> None:
+        nonlocal seal_transition_fault
+        if seal_transition_fault:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        seal_transition_fault = True
 
     def seal(
         run: _EvidenceRun,
         *,
         evidence: GeneratedEvidenceAggregate,
     ) -> _EvidenceReceipt:
+        nonlocal seal_transition_fault
         if (
             type(evidence) is not GeneratedEvidenceAggregate
-            or not _validate_issued_evidence_run(run, ("RECORDING",))
+            or not validate_run(run, ("RECORDING",))
             or id(run) in issued
         ):
             raise HarnessFailure(HarnessFailureCode.CORRUPT)
@@ -4164,19 +7731,62 @@ def _build_evidence_receipt_authority(
             )
             for gate in gates
         )
-        issued[id(run)] = {
+        second_evidence_digest = _evidence_payload_digest(evidence)
+        if (
+            any(
+                snapshot[3] != gate.payload_digest
+                for gate, snapshot in zip(gates, gate_snapshots, strict=True)
+            )
+            or second_evidence_digest != receipt.evidence_digest
+            or ledger.receipt is not None
+            or not ledger.recording
+            or active_run_context.get() is not run
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        run_seal_transition = prepare_run_seal(run)
+        prepared_record: dict[str, object] = {
             "phase": "SEALED",
+            "version": 0,
             "run": run,
             "registration": run._pytest_registration,
             "ledger": ledger,
             "receipt": receipt,
             "evidence": evidence,
-            "evidence_digest": _evidence_payload_digest(evidence),
+            "evidence_digest": second_evidence_digest,
             "gates": gates,
             "gate_snapshots": gate_snapshots,
             "observations": observations,
         }
-        _mark_issued_evidence_run_sealed(run)
+        issued[id(run)] = prepared_record
+        context_token: Token[_EvidenceRun | None] | None = None
+        try:
+            if seal_transition_fault:
+                seal_transition_fault = False
+                raise RuntimeError("injected active evidence-run transition failure")
+            context_token = active_run_context.set(None)
+            ledger.receipt = receipt
+            ledger.recording = False
+            if not run_seal_transition():
+                raise RuntimeError("evidence-run seal transition lost authority")
+        except BaseException:
+            if issued.get(id(run)) is prepared_record:
+                issued.pop(id(run))
+            retryable = bool(
+                context_token is None
+                or (validate_run(run, ("RECORDING",)) and not ledger.closed and not ledger.consumed)
+            )
+            if retryable:
+                ledger.receipt = None
+                ledger.recording = True
+                if context_token is not None:
+                    try:
+                        active_run_context.reset(context_token)
+                    except BaseException:
+                        retryable = False
+            if not retryable:
+                mark_cleanup_uncertain()
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+            raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
         return receipt
 
     def validate(
@@ -4200,7 +7810,7 @@ def _build_evidence_receipt_authority(
             or record["receipt"] is not receipt
             or record["gates"] is not receipt.gates
             or record["evidence"] is not receipt.evidence
-            or not _validate_issued_evidence_run(receipt.run, ("SEALED",))
+            or not validate_run(receipt.run, ("SEALED",))
             or receipt.run._pytest_registration.evidence_ledger.receipt is not receipt
             or receipt.run._pytest_registration.evidence_ledger.recording
             or receipt.run._pytest_registration.evidence_ledger.closed
@@ -4249,7 +7859,13 @@ def _build_evidence_receipt_authority(
             and receipt.evidence_digest == _evidence_payload_digest(evidence)
         )
 
-    def consume(receipt: _EvidenceReceipt) -> None:
+    def prepare_consumption(
+        receipt: _EvidenceReceipt,
+    ) -> tuple[
+        Callable[[], bool],
+        Callable[[], bool],
+        Callable[[], bool],
+    ]:
         if type(receipt) is not _EvidenceReceipt:
             raise HarnessFailure(HarnessFailureCode.CORRUPT)
         record = issued.get(id(receipt.run))
@@ -4259,13 +7875,78 @@ def _build_evidence_receipt_authority(
             or record["run"] is not receipt.run
             or record["registration"] is not receipt.run._pytest_registration
             or record["receipt"] is not receipt
-            or not _validate_issued_evidence_run(receipt.run, ("SEALED",))
+            or record["version"] != 0
+            or not validate_run(receipt.run, ("SEALED",))
         ):
             raise HarnessFailure(HarnessFailureCode.CORRUPT)
-        _consume_issued_evidence_run(receipt.run)
-        record["phase"] = "CONSUMED"
+        ledger = cast(_EvidenceLedger, record["ledger"])
+        if (
+            ledger is not receipt.run._pytest_registration.evidence_ledger
+            or ledger.receipt is not receipt
+            or ledger.recording
+            or ledger.closed
+            or ledger.consumed
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        expected_version = record["version"]
+        run_transition = prepare_run_consumption(receipt.run)
+        prepared_state = "READY"
 
-    return seal, validate, consume
+        def terminal_state() -> bool:
+            return bool(
+                issued.get(id(receipt.run)) is record
+                and record["phase"] == "CONSUMED"
+                and record["version"] == expected_version + 1
+                and record["receipt"] is receipt
+                and ledger.receipt is receipt
+                and not ledger.recording
+                and not ledger.closed
+                and ledger.consumed
+            )
+
+        def transition(require_active_root: bool) -> bool:
+            nonlocal prepared_state
+            if (
+                prepared_state != "READY"
+                or issued.get(id(receipt.run)) is not record
+                or record["phase"] != "SEALED"
+                or record["version"] != expected_version
+                or record["receipt"] is not receipt
+                or ledger.recording
+                or ledger.closed
+                or ledger.consumed
+                or (
+                    require_active_root
+                    and (
+                        process_cleanup_uncertain()
+                        or root_lookup(receipt.run._pytest_registration.path_object)
+                        is not receipt.run._pytest_registration
+                        or not root_session_owns(receipt.run._pytest_registration, False)
+                    )
+                )
+            ):
+                return False
+            prepared_state = "COMMITTING"
+            if not run_transition():
+                prepared_state = "FAILED"
+                return False
+            record["phase"] = "CONSUMED"
+            record["version"] = expected_version + 1
+            ledger.receipt = receipt
+            ledger.recording = False
+            ledger.consumed = True
+            prepared_state = "DONE"
+            return terminal_state()
+
+        def commit() -> bool:
+            return transition(True)
+
+        def terminalize() -> bool:
+            return transition(False)
+
+        return commit, terminalize, terminal_state
+
+    return seal, validate, prepare_consumption, arm_seal_transition_fault
 
 
 def _validate_evidence_receipt_unbound(
@@ -4379,19 +8060,20 @@ def _identity_for(
     )
 
 
-def _open_owned_generation(identity: _RegisteredIdentity) -> tuple[int, int]:
+def _open_owned_generation(
+    identity: _RegisteredIdentity,
+    *,
+    acquisition: _OperationPathAcquisition,
+) -> tuple[int, int]:
     """Open the registered root and generation without following a replacement alias."""
 
-    flags = (
-        os.O_RDONLY
-        | getattr(os, "O_DIRECTORY", 0)
-        | getattr(os, "O_NOFOLLOW", 0)
-        | getattr(os, "O_CLOEXEC", 0)
-    )
-    root_descriptor = -1
-    generation_descriptor = -1
     try:
-        root_descriptor = os.open(identity.pytest_root, flags)
+        root_descriptor = _open_and_adopt_operation_path_descriptor(
+            acquisition,
+            "root",
+            None,
+            False,
+        )
         root_details = os.fstat(root_descriptor)
         if (
             root_details.st_dev != identity.pytest_root_device
@@ -4401,10 +8083,11 @@ def _open_owned_generation(identity: _RegisteredIdentity) -> tuple[int, int]:
             or not stat.S_ISDIR(root_details.st_mode)
         ):
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-        generation_descriptor = os.open(
-            identity.generation_root.name,
-            flags,
-            dir_fd=root_descriptor,
+        generation_descriptor = _open_and_adopt_operation_path_descriptor(
+            acquisition,
+            "generation",
+            None,
+            False,
         )
         generation_details = os.fstat(generation_descriptor)
         generation_entry = os.stat(
@@ -4437,34 +8120,980 @@ def _open_owned_generation(identity: _RegisteredIdentity) -> tuple[int, int]:
         ):
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
         return root_descriptor, generation_descriptor
-    except HarnessFailure:
-        if generation_descriptor >= 0:
-            with suppress(OSError):
-                os.close(generation_descriptor)
-        if root_descriptor >= 0:
-            with suppress(OSError):
-                os.close(root_descriptor)
-        raise
-    except (OSError, RuntimeError):
-        if generation_descriptor >= 0:
-            with suppress(OSError):
-                os.close(generation_descriptor)
-        if root_descriptor >= 0:
-            with suppress(OSError):
-                os.close(root_descriptor)
+    except BaseException as error:
+        if isinstance(error, HarnessFailure):
+            raise
         raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
 
 
-def _close_operation_path_snapshot(snapshot: _OperationPathSnapshot | None) -> None:
-    if snapshot is None:
-        return
-    for item in snapshot.files:
-        with suppress(OSError):
-            os.close(item.descriptor)
-    with suppress(OSError):
-        os.close(snapshot.generation_descriptor)
-    with suppress(OSError):
-        os.close(snapshot.root_descriptor)
+def _build_connection_authority() -> tuple[
+    Callable[[_RegisteredIdentity], _OperationPathAcquisition],
+    Callable[[_OperationPathAcquisition, str, str | None, bool], int],
+    Callable[
+        [_OperationPathAcquisition, Sequence[_PinnedFile]],
+        _OperationPathSnapshot,
+    ],
+    Callable[[_OperationPathAcquisition], None],
+    Callable[[_OperationPathSnapshot], None],
+    Callable[[sqlite3.Connection, _OperationPathSnapshot, bytes, bool], None],
+    Callable[[sqlite3.Connection, _OperationPathSnapshot, bytes, bool], None],
+    Callable[[sqlite3.Connection], None],
+    Callable[[sqlite3.Connection], _ConnectionImmutableRuntimeEvidence],
+    Callable[[sqlite3.Connection, bytes, bool], _ConnectionImmutableRuntimeEvidence],
+    Callable[[sqlite3.Connection], None],
+    Callable[[_OperationPathSnapshot], Path],
+    Callable[[_RegisteredIdentity, _OperationPathSnapshot], None],
+    Callable[[_RegisteredIdentity, sqlite3.Connection], None],
+    Callable[[_RegisteredIdentity, sqlite3.Connection, str, bool, int], int],
+    Callable[[sqlite3.Connection], bool],
+    Callable[[sqlite3.Connection], tuple[bytes, bool] | None],
+    Callable[[], bool],
+    Callable[[sqlite3.Connection], str | None],
+    Callable[[str], None],
+]:
+    """Track exact live/close-uncertain SQLite and descriptor authority in a closure."""
+
+    nonce_issuer = _issue_authority_nonce
+    real_open = os.open
+    real_close = os.close
+    real_fstat = os.fstat
+    real_stat = os.stat
+    real_listdir = os.listdir
+    real_getpid = os.getpid
+    sqlite_close = sqlite3.Connection.close
+    sqlite_connection_type = sqlite3.Connection
+    runtime_evidence_type = _ConnectionImmutableRuntimeEvidence
+    runtime_sys = sys
+    runtime_sqlite = sqlite3
+    runtime_fetch_one = _fetch_one
+    runtime_fetch_all = _fetch_all
+    accepted_runtime_fields = (
+        ACCEPTED_PYTHON_VERSION,
+        ACCEPTED_SQLITE_VERSION,
+        ACCEPTED_THREADSAFETY,
+        ACCEPTED_SQLITE_SOURCE_ID,
+        ACCEPTED_COMPILE_OPTIONS,
+    )
+    mark_cleanup_uncertain = _mark_process_cleanup_uncertain
+    directory_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    file_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NONBLOCK", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    pthread_sigmask = getattr(signal, "pthread_sigmask", None)
+    sig_block = getattr(signal, "SIG_BLOCK", None)
+    sig_setmask = getattr(signal, "SIG_SETMASK", None)
+    blockable_signals = frozenset(
+        observed
+        for observed in signal.valid_signals()
+        if observed not in {signal.SIGKILL, signal.SIGSTOP}
+    )
+    owned_names = frozenset(_OWNED_DATABASE_FILENAMES)
+    acquisition_records: dict[int, dict[str, object]] = {}
+    snapshot_records: dict[int, dict[str, object]] = {}
+    connection_records: dict[int, dict[str, object]] = {}
+    closed_connections: WeakSet[sqlite3.Connection] = WeakSet()
+    fork_unsafe_latched = False
+    armed_fault: str | None = None
+    allowed_faults = frozenset(
+        {
+            "after_root_open",
+            "after_generation_open",
+            "after_file_open",
+            "file_close",
+            "generation_close",
+            "root_close",
+            "sqlite_close",
+        }
+    )
+
+    def consume_fault(name: str) -> bool:
+        nonlocal armed_fault
+        if armed_fault != name:
+            return False
+        armed_fault = None
+        return True
+
+    def arm_fault(name: str) -> None:
+        nonlocal armed_fault
+        if type(name) is not str or name not in allowed_faults or armed_fault is not None:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        armed_fault = name
+
+    def acquisition_fields(acquisition: _OperationPathAcquisition) -> tuple[object, ...]:
+        return (id(acquisition.nonce), acquisition.nonce)
+
+    def snapshot_fields(snapshot: _OperationPathSnapshot) -> tuple[object, ...]:
+        return (id(snapshot.nonce), snapshot.nonce)
+
+    def valid_acquisition(
+        acquisition: object,
+        states: tuple[str, ...],
+    ) -> dict[str, object] | None:
+        if type(acquisition) is not _OperationPathAcquisition:
+            return None
+        record = acquisition_records.get(id(acquisition))
+        if (
+            record is None
+            or record["acquisition"] is not acquisition
+            or record["acquisition_fields"] != acquisition_fields(acquisition)
+            or record["state"] not in states
+        ):
+            return None
+        return record
+
+    def valid_snapshot(
+        snapshot: object,
+        states: tuple[str, ...],
+    ) -> dict[str, object] | None:
+        if type(snapshot) is not _OperationPathSnapshot:
+            return None
+        record = snapshot_records.get(id(snapshot))
+        if (
+            record is None
+            or record["snapshot"] is not snapshot
+            or record["snapshot_fields"] != snapshot_fields(snapshot)
+            or record["state"] not in states
+        ):
+            return None
+        return record
+
+    def latch_uncertain() -> None:
+        nonlocal fork_unsafe_latched
+        fork_unsafe_latched = True
+        mark_cleanup_uncertain()
+
+    def begin_snapshot_acquisition(
+        identity: _RegisteredIdentity,
+    ) -> _OperationPathAcquisition:
+        nonce = nonce_issuer("operation-path-acquisition")
+        acquisition = _OperationPathAcquisition(nonce=nonce)
+        acquisition_records[id(acquisition)] = {
+            "acquisition": acquisition,
+            "acquisition_fields": acquisition_fields(acquisition),
+            "identity_fields": _registered_identity_fields(identity),
+            "state": "ACQUIRING",
+            "descriptors": [],
+            "roles": [],
+            "close_attempted": set(),
+        }
+        return acquisition
+
+    def open_and_adopt_snapshot_descriptor(
+        acquisition: _OperationPathAcquisition,
+        role: str,
+        name: str | None = None,
+        missing_ok: bool = False,
+    ) -> int:
+        nonlocal fork_unsafe_latched
+        record = valid_acquisition(acquisition, ("ACQUIRING",))
+        descriptors = [] if record is None else cast(list[int], record["descriptors"])
+        roles = [] if record is None else cast(list[tuple[str, str | None]], record["roles"])
+        if (
+            record is None
+            or type(role) is not str
+            or type(missing_ok) is not bool
+            or role not in {"root", "generation", "file"}
+            or (role != "file" and (name is not None or missing_ok))
+            or (
+                role == "file"
+                and (
+                    type(name) is not str
+                    or name not in owned_names
+                    or any(observed_name == name for _, observed_name in roles)
+                )
+            )
+            or (role == "root" and descriptors)
+            or (role == "generation" and len(descriptors) != 1)
+            or (role == "file" and len(descriptors) < 2)
+        ):
+            fork_unsafe_latched = True
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        identity_fields = cast(_RegisteredIdentityFields, record["identity_fields"])
+        if role == "root":
+            path: str | Path = identity_fields[0]
+            flags = directory_flags
+            directory_descriptor = None
+        elif role == "generation":
+            path = identity_fields[2].name
+            flags = directory_flags
+            directory_descriptor = descriptors[0]
+        else:
+            path = cast(str, name)
+            flags = file_flags
+            directory_descriptor = descriptors[1]
+        old_signal_mask: object | None = None
+        descriptor = -1
+        record["state"] = "OPENING"
+        try:
+            if pthread_sigmask is not None and sig_block is not None and sig_setmask is not None:
+                old_signal_mask = pthread_sigmask(sig_block, blockable_signals)
+            if directory_descriptor is None:
+                descriptor = real_open(path, flags)
+            else:
+                descriptor = real_open(path, flags, dir_fd=directory_descriptor)
+            if type(descriptor) is not int or descriptor < 0 or descriptor in descriptors:
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            descriptors.append(descriptor)
+            roles.append((role, name))
+            if consume_fault(f"after_{role}_open"):
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            record["state"] = "ACQUIRING"
+        except FileNotFoundError:
+            if descriptor < 0:
+                record["state"] = "ACQUIRING"
+                if missing_ok:
+                    return -1
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+            record["state"] = "OPEN_UNCERTAIN"
+            latch_uncertain()
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        except OSError:
+            if descriptor < 0:
+                record["state"] = "ACQUIRING"
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+            record["state"] = "OPEN_UNCERTAIN"
+            latch_uncertain()
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        except BaseException as error:
+            if descriptor >= 0 and descriptor not in descriptors:
+                descriptors.append(descriptor)
+                roles.append((role, name))
+            record["state"] = "OPEN_UNCERTAIN"
+            latch_uncertain()
+            if isinstance(error, HarnessFailure):
+                raise
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        finally:
+            if old_signal_mask is not None:
+                try:
+                    cast(Callable[[object, object], object], pthread_sigmask)(
+                        cast(object, sig_setmask),
+                        old_signal_mask,
+                    )
+                except BaseException:
+                    record["state"] = "CLOSE_UNCERTAIN"
+                    latch_uncertain()
+        if record["state"] != "ACQUIRING":
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        return descriptor
+
+    def complete_snapshot_acquisition(
+        acquisition: _OperationPathAcquisition,
+        files: Sequence[_PinnedFile],
+    ) -> _OperationPathSnapshot:
+        nonlocal fork_unsafe_latched
+        acquisition_record = valid_acquisition(acquisition, ("ACQUIRING",))
+        descriptors = (
+            ()
+            if acquisition_record is None
+            else tuple(cast(list[int], acquisition_record["descriptors"]))
+        )
+        exact_files = tuple(files)
+        if (
+            acquisition_record is None
+            or type(files) not in {tuple, list}
+            or len(descriptors) < 2
+            or descriptors[2:] != tuple(item.descriptor for item in exact_files)
+            or any(type(item) is not _PinnedFile for item in exact_files)
+            or len(set(descriptors)) != len(descriptors)
+        ):
+            fork_unsafe_latched = True
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        pinned_fields = tuple(
+            (
+                item.name,
+                item.descriptor,
+                item.device,
+                item.inode,
+                item.uid,
+                item.mode,
+                item.link_count,
+            )
+            for item in exact_files
+        )
+        snapshot = _OperationPathSnapshot(
+            nonce=nonce_issuer("operation-path-snapshot"),
+        )
+        snapshot_records[id(snapshot)] = {
+            "snapshot": snapshot,
+            "snapshot_fields": snapshot_fields(snapshot),
+            "identity_fields": acquisition_record["identity_fields"],
+            "descriptors": descriptors,
+            "roles": tuple(cast(list[tuple[str, str | None]], acquisition_record["roles"])),
+            "pinned_fields": pinned_fields,
+            "close_attempted": set(),
+            "acquisition_record": acquisition_record,
+            "state": "LIVE",
+        }
+        acquisition_record["state"] = "TRANSFERRED"
+        return snapshot
+
+    def fail_snapshot_acquisition(
+        acquisition: _OperationPathAcquisition,
+    ) -> None:
+        record = valid_acquisition(
+            acquisition,
+            ("ACQUIRING", "OPENING", "OPEN_UNCERTAIN", "CLOSE_UNCERTAIN"),
+        )
+        if record is None:
+            latch_uncertain()
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        already_uncertain = record["state"] in {"OPEN_UNCERTAIN", "CLOSE_UNCERTAIN"}
+        record["state"] = "CLOSING"
+        close_attempted = cast(set[int], record["close_attempted"])
+        close_failed = False
+        descriptors = cast(list[int], record["descriptors"])
+        roles = cast(list[tuple[str, str | None]], record["roles"])
+        for descriptor, (role, _) in reversed(tuple(zip(descriptors, roles, strict=True))):
+            if descriptor in close_attempted:
+                continue
+            close_attempted.add(descriptor)
+            try:
+                real_close(descriptor)
+                if consume_fault(f"{role}_close"):
+                    raise OSError(errno.EIO, "injected checked close uncertainty")
+            except BaseException:
+                close_failed = True
+        if close_failed or already_uncertain:
+            record["state"] = "CLOSE_UNCERTAIN"
+            latch_uncertain()
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        record["state"] = "CLOSED"
+
+    def close_snapshot(snapshot: _OperationPathSnapshot) -> None:
+        record = valid_snapshot(snapshot, ("LIVE", "CLOSED", "CLOSE_UNCERTAIN"))
+        if record is None:
+            latch_uncertain()
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        state = record["state"]
+        if state == "CLOSED":
+            return
+        if state != "LIVE":
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        record["state"] = "CLOSING"
+        close_attempted = cast(set[int], record["close_attempted"])
+        close_failed = False
+        descriptors = cast(tuple[int, ...], record["descriptors"])
+        roles = cast(tuple[tuple[str, str | None], ...], record["roles"])
+        for descriptor, (role, _) in reversed(tuple(zip(descriptors, roles, strict=True))):
+            if descriptor in close_attempted:
+                continue
+            close_attempted.add(descriptor)
+            try:
+                real_close(descriptor)
+                if consume_fault(f"{role}_close"):
+                    raise OSError(errno.EIO, "injected checked close uncertainty")
+            except BaseException:
+                close_failed = True
+        if close_failed:
+            record["state"] = "CLOSE_UNCERTAIN"
+            cast(dict[str, object], record["acquisition_record"])["state"] = "CLOSE_UNCERTAIN"
+            latch_uncertain()
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        record["state"] = "CLOSED"
+        cast(dict[str, object], record["acquisition_record"])["state"] = "CLOSED"
+
+    def register_connection(
+        connection: sqlite3.Connection,
+        snapshot: _OperationPathSnapshot,
+        nonce: bytes,
+        writer: bool,
+    ) -> None:
+        nonlocal fork_unsafe_latched
+        snapshot_record = valid_snapshot(snapshot, ("LIVE",))
+        creator_pid = real_getpid()
+        if (
+            not isinstance(connection, sqlite_connection_type)
+            or snapshot_record is None
+            or type(nonce) is not bytes
+            or len(nonce) != 32
+            or type(writer) is not bool
+            or type(creator_pid) is not int
+            or creator_pid <= 0
+            or id(connection) in connection_records
+            or connection in closed_connections
+        ):
+            fork_unsafe_latched = True
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        connection_records[id(connection)] = {
+            "connection": connection,
+            "snapshot": snapshot,
+            "snapshot_record": snapshot_record,
+            "nonce": nonce,
+            "nonce_identity": id(nonce),
+            "writer": writer,
+            "creator_pid": creator_pid,
+            "runtime_state": "UNBOUND",
+            "runtime_evidence": None,
+            "runtime_evidence_fields": None,
+            "runtime_evidence_binding": None,
+            "runtime_seal": None,
+            "state": "LIVE",
+        }
+
+    def discard_failed_connection_open(
+        connection: sqlite3.Connection,
+        snapshot: _OperationPathSnapshot,
+        nonce: bytes,
+        writer: bool,
+    ) -> None:
+        nonlocal fork_unsafe_latched
+        record = connection_records.get(id(connection))
+        if record is not None:
+            if (
+                record.get("connection") is not connection
+                or record.get("snapshot") is not snapshot
+                or valid_snapshot(snapshot, ("LIVE",)) is not record.get("snapshot_record")
+                or record.get("nonce") is not nonce
+                or record.get("nonce_identity") != id(nonce)
+                or record.get("writer") is not writer
+                or record.get("creator_pid") != real_getpid()
+                or record.get("state") != "LIVE"
+            ):
+                fork_unsafe_latched = True
+                latch_uncertain()
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            close_connection(connection)
+            return
+        snapshot_record = valid_snapshot(snapshot, ("LIVE",))
+        creator_pid = real_getpid()
+        if (
+            not isinstance(connection, sqlite_connection_type)
+            or snapshot_record is None
+            or type(nonce) is not bytes
+            or len(nonce) != 32
+            or type(writer) is not bool
+            or type(creator_pid) is not int
+            or creator_pid <= 0
+            or connection in closed_connections
+        ):
+            fork_unsafe_latched = True
+            latch_uncertain()
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        record = {
+            "connection": connection,
+            "snapshot": snapshot,
+            "snapshot_record": snapshot_record,
+            "nonce": nonce,
+            "nonce_identity": id(nonce),
+            "writer": writer,
+            "creator_pid": creator_pid,
+            "runtime_state": "UNBOUND",
+            "runtime_evidence": None,
+            "runtime_evidence_fields": None,
+            "runtime_evidence_binding": None,
+            "runtime_seal": None,
+            "state": "DISCARDING",
+        }
+        connection_records[id(connection)] = record
+        sqlite_closed = True
+        try:
+            sqlite_close(connection)
+            if consume_fault("sqlite_close"):
+                raise sqlite3.OperationalError("injected checked sqlite close uncertainty")
+        except BaseException:
+            sqlite_closed = False
+        snapshot_closed = True
+        try:
+            close_snapshot(snapshot)
+        except HarnessFailure:
+            snapshot_closed = False
+        if sqlite_closed and snapshot_closed:
+            record["state"] = "CLOSED"
+            closed_connections.add(connection)
+            del connection_records[id(connection)]
+            return
+        record["state"] = "CLOSE_UNCERTAIN"
+        latch_uncertain()
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+
+    def exact_runtime_record(
+        connection: sqlite3.Connection,
+        runtime_states: tuple[str, ...],
+    ) -> dict[str, object]:
+        record = connection_records.get(id(connection))
+        snapshot = None if record is None else record.get("snapshot")
+        if (
+            record is None
+            or record.get("connection") is not connection
+            or record.get("state") != "LIVE"
+            or type(record.get("creator_pid")) is not int
+            or record["creator_pid"] != real_getpid()
+            or type(record.get("nonce")) is not bytes
+            or len(cast(bytes, record["nonce"])) != 32
+            or record.get("nonce_identity") != id(record["nonce"])
+            or type(record.get("writer")) is not bool
+            or record.get("runtime_state") not in runtime_states
+            or valid_snapshot(snapshot, ("LIVE",)) is not record.get("snapshot_record")
+        ):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        return record
+
+    def runtime_evidence_fields(
+        evidence: _ConnectionImmutableRuntimeEvidence,
+    ) -> tuple[str, str, int, str, tuple[str, ...]]:
+        return (
+            evidence.python_version,
+            evidence.sqlite_version,
+            evidence.threadsafety,
+            evidence.sqlite_source_id,
+            evidence.compile_options,
+        )
+
+    def capture_connection_runtime(connection: sqlite3.Connection) -> None:
+        record = exact_runtime_record(connection, ("UNBOUND",))
+        if any(
+            record[name] is not None
+            for name in (
+                "runtime_evidence",
+                "runtime_evidence_fields",
+                "runtime_evidence_binding",
+                "runtime_seal",
+            )
+        ):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        record["runtime_state"] = "CAPTURED"
+        source_id = cast(
+            str,
+            runtime_fetch_one(connection, "SELECT sqlite_source_id()")[0],
+        )
+        python_version = ".".join(str(part) for part in runtime_sys.version_info[:3])
+        compile_options = tuple(
+            sorted(
+                cast(str, row[0]) for row in runtime_fetch_all(connection, "PRAGMA compile_options")
+            )
+        )
+        evidence = runtime_evidence_type(
+            python_version=python_version,
+            sqlite_version=runtime_sqlite.sqlite_version,
+            threadsafety=runtime_sqlite.threadsafety,
+            sqlite_source_id=source_id,
+            compile_options=compile_options,
+        )
+        evidence_fields = runtime_evidence_fields(evidence)
+        binding = (
+            id(connection),
+            connection,
+            id(record["snapshot"]),
+            record["snapshot"],
+            record["nonce_identity"],
+            record["nonce"],
+            record["writer"],
+            record["creator_pid"],
+            id(evidence),
+            evidence,
+            evidence_fields,
+        )
+        record["runtime_evidence"] = evidence
+        record["runtime_evidence_fields"] = evidence_fields
+        record["runtime_evidence_binding"] = binding
+        if (
+            evidence_fields != accepted_runtime_fields
+            or "THREADSAFE=0" in compile_options
+            or any(
+                option in compile_options
+                for option in ("OMIT_FOREIGN_KEY", "OMIT_TRIGGER", "OMIT_AUTHORIZATION")
+            )
+        ):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+
+    def exact_captured_runtime(
+        connection: sqlite3.Connection,
+        record: dict[str, object],
+    ) -> _ConnectionImmutableRuntimeEvidence:
+        evidence = record.get("runtime_evidence")
+        fields = record.get("runtime_evidence_fields")
+        binding = record.get("runtime_evidence_binding")
+        expected_binding = (
+            id(connection),
+            connection,
+            id(record["snapshot"]),
+            record["snapshot"],
+            record["nonce_identity"],
+            record["nonce"],
+            record["writer"],
+            record["creator_pid"],
+            id(evidence),
+            evidence,
+            fields,
+        )
+        if (
+            type(evidence) is not runtime_evidence_type
+            or type(fields) is not tuple
+            or len(fields) != 5
+            or runtime_evidence_fields(evidence) != fields
+            or fields != accepted_runtime_fields
+            or type(binding) is not tuple
+            or binding != expected_binding
+            or binding[1] is not connection
+            or binding[3] is not record["snapshot"]
+            or binding[5] is not record["nonce"]
+            or binding[9] is not evidence
+            or binding[10] is not fields
+        ):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        return evidence
+
+    def seal_connection_runtime(
+        connection: sqlite3.Connection,
+    ) -> _ConnectionImmutableRuntimeEvidence:
+        record = exact_runtime_record(connection, ("CAPTURED",))
+        evidence = exact_captured_runtime(connection, record)
+        if record["runtime_seal"] is not None:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        seal = (
+            id(connection),
+            connection,
+            id(evidence),
+            evidence,
+            record["runtime_evidence_binding"],
+        )
+        record["runtime_seal"] = seal
+        record["runtime_state"] = "SEALED"
+        return runtime_evidence_type(*runtime_evidence_fields(evidence))
+
+    def consume_connection_runtime(
+        connection: sqlite3.Connection,
+        nonce: bytes,
+        writer: bool,
+    ) -> _ConnectionImmutableRuntimeEvidence:
+        record = exact_runtime_record(connection, ("SEALED",))
+        evidence = exact_captured_runtime(connection, record)
+        seal = record.get("runtime_seal")
+        expected_seal = (
+            id(connection),
+            connection,
+            id(evidence),
+            evidence,
+            record["runtime_evidence_binding"],
+        )
+        if (
+            type(nonce) is not bytes
+            or len(nonce) != 32
+            or nonce is not record["nonce"]
+            or type(writer) is not bool
+            or writer is not record["writer"]
+            or type(seal) is not tuple
+            or seal != expected_seal
+            or seal[1] is not connection
+            or seal[3] is not evidence
+            or seal[4] is not record["runtime_evidence_binding"]
+        ):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        return runtime_evidence_type(*runtime_evidence_fields(evidence))
+
+    def close_connection(
+        connection: sqlite3.Connection,
+    ) -> None:
+        nonlocal fork_unsafe_latched
+        record = connection_records.get(id(connection))
+        if record is None:
+            if connection in closed_connections:
+                return
+            fork_unsafe_latched = True
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        if record["connection"] is not connection:
+            fork_unsafe_latched = True
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        state = record["state"]
+        if state == "CLOSED":
+            return
+        if state != "LIVE":
+            fork_unsafe_latched = True
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        sqlite_closed = True
+        try:
+            sqlite_close(connection)
+            if consume_fault("sqlite_close"):
+                raise sqlite3.OperationalError("injected checked sqlite close uncertainty")
+        except BaseException:
+            sqlite_closed = False
+        snapshot_closed = True
+        try:
+            close_snapshot(cast(_OperationPathSnapshot, record["snapshot"]))
+        except HarnessFailure:
+            snapshot_closed = False
+        if sqlite_closed and snapshot_closed:
+            record["state"] = "CLOSED"
+            closed_connections.add(connection)
+            del connection_records[id(connection)]
+            return
+        record["state"] = "CLOSE_UNCERTAIN"
+        latch_uncertain()
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+
+    def snapshot_database_path(snapshot: _OperationPathSnapshot) -> Path:
+        record = valid_snapshot(snapshot, ("LIVE",))
+        if record is None:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        descriptors = cast(tuple[int, ...], record["descriptors"])
+        if len(descriptors) < 2 or not Path("/proc/self/fd").is_dir():
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        return Path(f"/proc/self/fd/{descriptors[1]}/{_DATABASE_BASENAME}")
+
+    def revalidate_snapshot(
+        identity: _RegisteredIdentity,
+        snapshot: _OperationPathSnapshot,
+    ) -> None:
+        record = valid_snapshot(snapshot, ("LIVE",))
+        identity_fields = _registered_identity_fields(identity)
+        if record is None or identity_fields != record["identity_fields"]:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        descriptors = cast(tuple[int, ...], record["descriptors"])
+        pinned_fields = cast(
+            tuple[tuple[str, int, int, int, int, int, int], ...],
+            record["pinned_fields"],
+        )
+        try:
+            generation = real_fstat(descriptors[1])
+            if (
+                generation.st_dev != identity_fields[8]
+                or generation.st_ino != identity_fields[9]
+                or generation.st_uid != identity_fields[10]
+                or stat.S_IMODE(generation.st_mode) != identity_fields[11]
+                or not stat.S_ISDIR(generation.st_mode)
+            ):
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            names = tuple(sorted(real_listdir(descriptors[1])))
+            if (
+                _DATABASE_BASENAME not in names
+                or set(names) - owned_names
+                or len(names) != len(set(names))
+            ):
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            prior = {item[0]: item for item in pinned_fields}
+            for name in names:
+                details = real_stat(
+                    name,
+                    dir_fd=descriptors[1],
+                    follow_symlinks=False,
+                )
+                expected = prior.get(name)
+                if expected is not None:
+                    pinned_details = real_fstat(expected[1])
+                    if (
+                        not stat.S_ISREG(pinned_details.st_mode)
+                        or pinned_details.st_dev != expected[2]
+                        or pinned_details.st_ino != expected[3]
+                        or pinned_details.st_uid != expected[4]
+                        or stat.S_IMODE(pinned_details.st_mode) != expected[5]
+                        or pinned_details.st_nlink != expected[6]
+                        or details.st_dev != pinned_details.st_dev
+                        or details.st_ino != pinned_details.st_ino
+                    ):
+                        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                if (
+                    not stat.S_ISREG(details.st_mode)
+                    or details.st_dev != identity_fields[12]
+                    or details.st_uid != identity_fields[14]
+                    or details.st_nlink != 1
+                    or stat.S_IMODE(details.st_mode) != 0o600
+                    or (
+                        name == _DATABASE_BASENAME
+                        and (
+                            details.st_ino != identity_fields[13]
+                            or details.st_dev != identity_fields[12]
+                        )
+                    )
+                    or (
+                        expected is not None
+                        and (
+                            details.st_dev != expected[2]
+                            or details.st_ino != expected[3]
+                            or details.st_uid != expected[4]
+                            or stat.S_IMODE(details.st_mode) != expected[5]
+                            or details.st_nlink != expected[6]
+                        )
+                    )
+                ):
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        except HarnessFailure:
+            raise
+        except (OSError, RuntimeError, IndexError):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+
+    def revalidate_connection(
+        identity: _RegisteredIdentity,
+        connection: sqlite3.Connection,
+    ) -> None:
+        record = connection_records.get(id(connection))
+        if record is None or record["connection"] is not connection or record["state"] != "LIVE":
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        revalidate_snapshot(identity, cast(_OperationPathSnapshot, record["snapshot"]))
+
+    def connection_file_size(
+        identity: _RegisteredIdentity,
+        connection: sqlite3.Connection,
+        name: str,
+        required: bool,
+        maximum: int,
+    ) -> int:
+        record = connection_records.get(id(connection))
+        if (
+            record is None
+            or record["connection"] is not connection
+            or record["state"] != "LIVE"
+            or name not in owned_names
+            or type(required) is not bool
+            or type(maximum) is not int
+            or maximum < 0
+        ):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        snapshot = cast(_OperationPathSnapshot, record["snapshot"])
+        revalidate_snapshot(identity, snapshot)
+        snapshot_record = valid_snapshot(snapshot, ("LIVE",))
+        if snapshot_record is None:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        generation_descriptor = cast(tuple[int, ...], snapshot_record["descriptors"])[1]
+        try:
+            details = real_stat(
+                name,
+                dir_fd=generation_descriptor,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            if not required:
+                revalidate_snapshot(identity, snapshot)
+                return 0
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        except OSError:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        if (
+            not stat.S_ISREG(details.st_mode)
+            or details.st_dev != identity.device
+            or details.st_uid != identity.uid
+            or details.st_nlink != 1
+            or stat.S_IMODE(details.st_mode) != 0o600
+            or not 0 <= details.st_size <= maximum
+            or (
+                name == _DATABASE_BASENAME
+                and (details.st_ino != identity.inode or details.st_dev != identity.device)
+            )
+        ):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        revalidate_snapshot(identity, snapshot)
+        return details.st_size
+
+    def connection_has_snapshot(connection: sqlite3.Connection) -> bool:
+        record = connection_records.get(id(connection))
+        return bool(
+            record is not None
+            and record["connection"] is connection
+            and record["state"] == "LIVE"
+            and valid_snapshot(record["snapshot"], ("LIVE",)) is record["snapshot_record"]
+        )
+
+    def connection_binding(connection: sqlite3.Connection) -> tuple[bytes, bool] | None:
+        record = connection_records.get(id(connection))
+        if record is None or record["connection"] is not connection or record["state"] != "LIVE":
+            return None
+        return cast(bytes, record["nonce"]), cast(bool, record["writer"])
+
+    def fork_unsafe() -> bool:
+        return bool(
+            fork_unsafe_latched
+            or any(
+                record["state"] not in {"CLOSED", "TRANSFERRED"}
+                for record in acquisition_records.values()
+            )
+            or any(record["state"] != "CLOSED" for record in snapshot_records.values())
+            or any(record["state"] != "CLOSED" for record in connection_records.values())
+        )
+
+    def connection_state(connection: sqlite3.Connection) -> str | None:
+        record = connection_records.get(id(connection))
+        if record is None:
+            return "CLOSED" if connection in closed_connections else None
+        if record["connection"] is not connection:
+            return None
+        return cast(str, record["state"])
+
+    return (
+        begin_snapshot_acquisition,
+        open_and_adopt_snapshot_descriptor,
+        complete_snapshot_acquisition,
+        fail_snapshot_acquisition,
+        close_snapshot,
+        register_connection,
+        discard_failed_connection_open,
+        capture_connection_runtime,
+        seal_connection_runtime,
+        consume_connection_runtime,
+        close_connection,
+        snapshot_database_path,
+        revalidate_snapshot,
+        revalidate_connection,
+        connection_file_size,
+        connection_has_snapshot,
+        connection_binding,
+        fork_unsafe,
+        connection_state,
+        arm_fault,
+    )
+
+
+(
+    _begin_operation_path_acquisition,
+    _open_and_adopt_operation_path_descriptor,
+    _complete_operation_path_acquisition,
+    _fail_operation_path_acquisition,
+    _close_operation_path_snapshot,
+    _register_live_connection,
+    _discard_failed_connection_open,
+    _capture_connection_immutable_runtime,
+    _seal_connection_immutable_runtime,
+    _consume_connection_immutable_runtime,
+    _close_live_connection,
+    _snapshot_database_path,
+    _revalidate_operation_path_snapshot,
+    _revalidate_connection_path,
+    _connection_operation_file_size,
+    _connection_has_path_snapshot,
+    _connection_authority_binding,
+    _has_fork_unsafe_connection_authority,
+    _connection_authority_state,
+    _arm_connection_authority_fault,
+) = _build_connection_authority()
+del _build_connection_authority
+
+
+_require_fork_safe_connection_state = _build_fork_safe_connection_requirement(
+    _pytest_root_authority_uncertain,
+    _has_fork_unsafe_connection_authority,
+    _has_process_cleanup_uncertainty,
+)
+del _build_fork_safe_connection_requirement
+
+
+def _capture_fork_guard(  # noqa: UP047
+    function: Callable[_Parameters, _Result],
+) -> Callable[_Parameters, _Result]:
+    """Put an immutable fork guard outside evidence-executor fast paths."""
+
+    require_fork_safe = _require_fork_safe_connection_state
+
+    def guarded(
+        *args: _Parameters.args,
+        **kwargs: _Parameters.kwargs,
+    ) -> _Result:
+        require_fork_safe()
+        return function(*args, **kwargs)
+
+    guarded.__name__ = function.__name__
+    guarded.__qualname__ = function.__qualname__
+    guarded.__doc__ = function.__doc__
+    guarded.__module__ = function.__module__
+    guarded.__annotations__ = dict(function.__annotations__)
+    guarded.__signature__ = inspect.signature(function)  # type: ignore[attr-defined]
+    return guarded
 
 
 def _open_operation_path_snapshot(
@@ -4472,11 +9101,13 @@ def _open_operation_path_snapshot(
 ) -> _OperationPathSnapshot:
     """Pin the owned generation and reject every observed alias before SQLite opens it."""
 
-    root_descriptor = -1
-    generation_descriptor = -1
+    acquisition = _begin_operation_path_acquisition(identity)
     pinned: list[_PinnedFile] = []
     try:
-        root_descriptor, generation_descriptor = _open_owned_generation(identity)
+        _, generation_descriptor = _open_owned_generation(
+            identity,
+            acquisition=acquisition,
+        )
         names = tuple(sorted(os.listdir(generation_descriptor)))
         if (
             _DATABASE_BASENAME not in names
@@ -4484,14 +9115,13 @@ def _open_operation_path_snapshot(
             or len(names) != len(set(names))
         ):
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-        flags = (
-            os.O_RDONLY
-            | getattr(os, "O_NONBLOCK", 0)
-            | getattr(os, "O_NOFOLLOW", 0)
-            | getattr(os, "O_CLOEXEC", 0)
-        )
         for name in names:
-            descriptor = os.open(name, flags, dir_fd=generation_descriptor)
+            descriptor = _open_and_adopt_operation_path_descriptor(
+                acquisition,
+                "file",
+                name,
+                False,
+            )
             details = os.fstat(descriptor)
             if (
                 not stat.S_ISREG(details.st_mode)
@@ -4504,7 +9134,6 @@ def _open_operation_path_snapshot(
                     and (details.st_ino != identity.inode or details.st_dev != identity.device)
                 )
             ):
-                os.close(descriptor)
                 raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
             pinned.append(
                 _PinnedFile(
@@ -4517,104 +9146,17 @@ def _open_operation_path_snapshot(
                     link_count=details.st_nlink,
                 )
             )
-        return _OperationPathSnapshot(
-            root_descriptor=root_descriptor,
-            generation_descriptor=generation_descriptor,
-            files=tuple(pinned),
+        return _complete_operation_path_acquisition(
+            acquisition,
+            tuple(pinned),
         )
-    except HarnessFailure:
-        for item in pinned:
-            with suppress(OSError):
-                os.close(item.descriptor)
-        if generation_descriptor >= 0:
-            with suppress(OSError):
-                os.close(generation_descriptor)
-        if root_descriptor >= 0:
-            with suppress(OSError):
-                os.close(root_descriptor)
-        raise
-    except (OSError, RuntimeError):
-        for item in pinned:
-            with suppress(OSError):
-                os.close(item.descriptor)
-        if generation_descriptor >= 0:
-            with suppress(OSError):
-                os.close(generation_descriptor)
-        if root_descriptor >= 0:
-            with suppress(OSError):
-                os.close(root_descriptor)
-        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
-
-
-def _revalidate_operation_path_snapshot(
-    identity: _RegisteredIdentity,
-    snapshot: _OperationPathSnapshot,
-) -> None:
-    """Require stable pre-existing files and safe newly created SQLite sidecars."""
-
-    try:
-        generation = os.fstat(snapshot.generation_descriptor)
-        if (
-            generation.st_dev != identity.generation_device
-            or generation.st_ino != identity.generation_inode
-            or generation.st_uid != identity.generation_uid
-            or stat.S_IMODE(generation.st_mode) != identity.generation_mode
-            or not stat.S_ISDIR(generation.st_mode)
-        ):
-            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-        names = tuple(sorted(os.listdir(snapshot.generation_descriptor)))
-        if (
-            _DATABASE_BASENAME not in names
-            or set(names) - _OWNED_DATABASE_FILENAMES
-            or len(names) != len(set(names))
-        ):
-            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-        prior = {item.name: item for item in snapshot.files}
-        for name in names:
-            details = os.stat(
-                name,
-                dir_fd=snapshot.generation_descriptor,
-                follow_symlinks=False,
-            )
-            expected = prior.get(name)
-            if expected is not None:
-                pinned_details = os.fstat(expected.descriptor)
-                if (
-                    not stat.S_ISREG(pinned_details.st_mode)
-                    or pinned_details.st_dev != expected.device
-                    or pinned_details.st_ino != expected.inode
-                    or pinned_details.st_uid != expected.uid
-                    or stat.S_IMODE(pinned_details.st_mode) != expected.mode
-                    or pinned_details.st_nlink != expected.link_count
-                    or details.st_dev != pinned_details.st_dev
-                    or details.st_ino != pinned_details.st_ino
-                ):
-                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-            if (
-                not stat.S_ISREG(details.st_mode)
-                or details.st_dev != identity.device
-                or details.st_uid != identity.uid
-                or details.st_nlink != 1
-                or stat.S_IMODE(details.st_mode) != 0o600
-                or (
-                    name == _DATABASE_BASENAME
-                    and (details.st_ino != identity.inode or details.st_dev != identity.device)
-                )
-                or (
-                    expected is not None
-                    and (
-                        details.st_dev != expected.device
-                        or details.st_ino != expected.inode
-                        or details.st_uid != expected.uid
-                        or stat.S_IMODE(details.st_mode) != expected.mode
-                        or details.st_nlink != expected.link_count
-                    )
-                )
-            ):
-                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-    except HarnessFailure:
-        raise
-    except (OSError, RuntimeError):
+    except BaseException as error:
+        try:
+            _fail_operation_path_acquisition(acquisition)
+        except HarnessFailure:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        if isinstance(error, HarnessFailure):
+            raise
         raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
 
 
@@ -4625,76 +9167,82 @@ def _owned_file_size(
     required: bool,
     maximum: int,
 ) -> int:
-    root_descriptor = -1
-    generation_descriptor = -1
-    file_descriptor = -1
+    acquisition = _begin_operation_path_acquisition(identity)
+    snapshot: _OperationPathSnapshot | None = None
+    result: int | None = None
     try:
-        root_descriptor, generation_descriptor = _open_owned_generation(identity)
-        flags = (
-            os.O_RDONLY
-            | getattr(os, "O_NONBLOCK", 0)
-            | getattr(os, "O_NOFOLLOW", 0)
-            | getattr(os, "O_CLOEXEC", 0)
+        _, _ = _open_owned_generation(
+            identity,
+            acquisition=acquisition,
         )
-        try:
-            file_descriptor = os.open(name, flags, dir_fd=generation_descriptor)
-        except FileNotFoundError:
-            if not required:
-                return 0
-            raise
-        details = os.fstat(file_descriptor)
-        if (
-            not stat.S_ISREG(details.st_mode)
-            or details.st_uid != identity.uid
-            or details.st_nlink != 1
-            or stat.S_IMODE(details.st_mode) != 0o600
-            or not 0 <= details.st_size <= maximum
-            or (
-                name == _DATABASE_BASENAME
-                and (details.st_dev != identity.device or details.st_ino != identity.inode)
+        file_descriptor = _open_and_adopt_operation_path_descriptor(
+            acquisition,
+            "file",
+            name,
+            not required,
+        )
+        pinned: tuple[_PinnedFile, ...] = ()
+        if file_descriptor < 0:
+            result = 0
+        else:
+            details = os.fstat(file_descriptor)
+            if (
+                not stat.S_ISREG(details.st_mode)
+                or details.st_uid != identity.uid
+                or details.st_nlink != 1
+                or stat.S_IMODE(details.st_mode) != 0o600
+                or not 0 <= details.st_size <= maximum
+                or (
+                    name == _DATABASE_BASENAME
+                    and (details.st_dev != identity.device or details.st_ino != identity.inode)
+                )
+            ):
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            result = details.st_size
+            pinned = (
+                _PinnedFile(
+                    name=name,
+                    descriptor=file_descriptor,
+                    device=details.st_dev,
+                    inode=details.st_ino,
+                    uid=details.st_uid,
+                    mode=stat.S_IMODE(details.st_mode),
+                    link_count=details.st_nlink,
+                ),
             )
-        ):
-            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-        return details.st_size
-    except HarnessFailure:
-        raise
-    except (OSError, RuntimeError):
+        snapshot = _complete_operation_path_acquisition(acquisition, pinned)
+    except BaseException as error:
+        try:
+            _fail_operation_path_acquisition(acquisition)
+        except HarnessFailure:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        if isinstance(error, HarnessFailure):
+            raise
         raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
-    finally:
-        if file_descriptor >= 0:
-            with suppress(OSError):
-                os.close(file_descriptor)
-        if generation_descriptor >= 0:
-            with suppress(OSError):
-                os.close(generation_descriptor)
-        if root_descriptor >= 0:
-            with suppress(OSError):
-                os.close(root_descriptor)
+    try:
+        _close_operation_path_snapshot(snapshot)
+    except HarnessFailure:
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+    if result is None:
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+    return result
 
 
 def _require_token(token: StoreToken) -> _RegisteredIdentity:
-    if type(token) is not StoreToken or type(token._nonce) is not bytes:
+    if type(token) is not StoreToken or type(token._nonce) is not bytes or len(token._nonce) != 32:
         raise HarnessFailure(HarnessFailureCode.INVALID_TOKEN)
-    registered = _TOKEN_REGISTRY.get(token._nonce)
+    registered = _lookup_store_token_authority(token)
     if registered is None:
         raise HarnessFailure(HarnessFailureCode.INVALID_TOKEN)
     active_root = registered.pytest_registration
-    current_process_id = os.getpid()
-    try:
-        registration_revoked = active_root.revocation_flag[0] != 0
-    except (IndexError, OSError, ValueError):
-        registration_revoked = True
     if (
-        registration_revoked
-        or _ACTIVE_PYTEST_ROOTS.get(id(active_root.path_object)) is not active_root
+        _lookup_active_pytest_root(active_root.path_object) is not active_root
         or active_root.resolved_path != registered.pytest_root
         or active_root.device != registered.pytest_root_device
         or active_root.inode != registered.pytest_root_inode
         or active_root.uid != registered.pytest_root_uid
         or active_root.mode != registered.pytest_root_mode
-        or os.environ.get("PYTEST_CURRENT_TEST", "").rsplit(" (", maxsplit=1)[0]
-        != active_root.node_id
-        or (current_process_id != active_root.process_id and os.getppid() != active_root.process_id)
+        or not _pytest_root_session_owns(active_root, True)
         or token._pytest_root != registered.pytest_root
         or token._generation_root != registered.generation_root
         or token._database_path != registered.database_path
@@ -4717,6 +9265,27 @@ def _require_token(token: StoreToken) -> _RegisteredIdentity:
     return registered
 
 
+def _build_protected_token_requirement(
+    implementation: Callable[[StoreToken], _RegisteredIdentity],
+    cleanup_uncertain: Callable[[], bool],
+) -> Callable[[StoreToken], _RegisteredIdentity]:
+    """Reject shared cleanup poison before any token-backed path observation."""
+
+    def require(token: StoreToken) -> _RegisteredIdentity:
+        if cleanup_uncertain():
+            raise HarnessFailure(HarnessFailureCode.INVALID_TOKEN)
+        return implementation(token)
+
+    return require
+
+
+_require_token = _build_protected_token_requirement(  # type: ignore[assignment]
+    _require_token,
+    _has_process_cleanup_uncertainty,
+)
+del _build_protected_token_requirement
+
+
 def _require_direct_token_root_pair(
     token: StoreToken,
     pytest_root: Path,
@@ -4726,27 +9295,22 @@ def _require_direct_token_root_pair(
     if (
         type(token) is not StoreToken
         or type(token._nonce) is not bytes
+        or len(token._nonce) != 32
         or not isinstance(pytest_root, Path)
     ):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
-    registered = _TOKEN_REGISTRY.get(token._nonce)
+    registered = _lookup_store_token_authority(token)
     if registered is None or not _cleanup_token_matches_identity(token, registered):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     active = registered.pytest_registration
-    try:
-        revoked = active.revocation_flag[0] != 0
-    except (IndexError, OSError, ValueError):
-        revoked = True
     if (
-        revoked
-        or pytest_root is not active.path_object
-        or _ACTIVE_PYTEST_ROOTS.get(id(pytest_root)) is not active
-        or active.process_id != os.getpid()
-        or os.environ.get("PYTEST_CURRENT_TEST", "").rsplit(" (", maxsplit=1)[0] != active.node_id
+        pytest_root is not active.path_object
+        or _lookup_active_pytest_root(pytest_root) is not active
+        or not _pytest_root_session_owns(active, False)
     ):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     _validate_bootstrap_root(pytest_root)
-    if _require_token(token) is not registered:
+    if _require_token(token) != registered:
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     return registered
 
@@ -4756,12 +9320,6 @@ def _database_uri(path: Path) -> str:
     if "?" in uri:
         raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
     return f"{uri}?mode=rw"
-
-
-def _snapshot_database_path(snapshot: _OperationPathSnapshot) -> Path:
-    if os.name != "posix" or not Path("/proc/self/fd").is_dir():
-        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-    return Path(f"/proc/self/fd/{snapshot.generation_descriptor}/{_DATABASE_BASENAME}")
 
 
 class _MeteredCursor(sqlite3.Cursor):
@@ -4809,16 +9367,11 @@ class _MeteredConnection(sqlite3.Connection):
             registry.discard(cursor)
 
     def close(self) -> None:
-        _CONNECTION_EVIDENCE_BINDINGS.pop(id(self), None)
-        snapshot = _CONNECTION_PATH_SNAPSHOTS.pop(id(self), None)
-        try:
-            registry = tuple(getattr(self, "_task064_open_cursors", ()))
-            for cursor in registry:
-                with suppress(BaseException):
-                    cursor.close()
-            super().close()
-        finally:
-            _close_operation_path_snapshot(snapshot)
+        registry = tuple(getattr(self, "_task064_open_cursors", ()))
+        for cursor in registry:
+            with suppress(BaseException):
+                cursor.close()
+        _close_live_connection(self)
 
     def execute(self, sql: str, parameters: Any = (), /) -> sqlite3.Cursor:
         cursor = _MeteredCursor(self)
@@ -4888,6 +9441,7 @@ ACCEPTED_COMMON_PRAGMAS: Final = (
     ("cell_size_check", 1),
     ("mmap_size", 0),
     ("temp_store", 2),
+    ("cache_size", -8192),
     ("locking_mode", "normal"),
     ("max_page_count", MAX_PAGE_COUNT),
     ("wal_autocheckpoint", WAL_AUTOCHECKPOINT_PAGES),
@@ -5064,9 +9618,18 @@ def _connect(
     except BaseException:
         _close_operation_path_snapshot(snapshot)
         raise
-    _CONNECTION_PATH_SNAPSHOTS[id(connection)] = snapshot
-    connection.row_factory = sqlite3.Row
     try:
+        _register_live_connection(connection, snapshot, token._nonce, writer)
+    except BaseException as error:
+        try:
+            _discard_failed_connection_open(connection, snapshot, token._nonce, writer)
+        except HarnessFailure:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        if isinstance(error, MemoryError):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        raise
+    try:
+        connection.row_factory = sqlite3.Row
         observed_dbconfig, defensive_available, defensive_enabled = _apply_connection_controls(
             connection
         )
@@ -5086,24 +9649,7 @@ def _connect(
         connection.execute(
             "PRAGMA synchronous = FULL" if writer else "PRAGMA query_only = ON"
         ).close()
-        source_id = cast(str, _fetch_one(connection, "SELECT sqlite_source_id()")[0])
-        python_version = ".".join(str(part) for part in sys.version_info[:3])
-        compile_options = tuple(
-            sorted(cast(str, row[0]) for row in _fetch_all(connection, "PRAGMA compile_options"))
-        )
-        if (
-            python_version != ACCEPTED_PYTHON_VERSION
-            or sqlite3.sqlite_version != ACCEPTED_SQLITE_VERSION
-            or sqlite3.threadsafety != ACCEPTED_THREADSAFETY
-            or source_id != ACCEPTED_SQLITE_SOURCE_ID
-            or compile_options != ACCEPTED_COMPILE_OPTIONS
-            or "THREADSAFE=0" in compile_options
-            or any(
-                option in compile_options
-                for option in ("OMIT_FOREIGN_KEY", "OMIT_TRIGGER", "OMIT_AUTHORIZATION")
-            )
-        ):
-            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        _capture_connection_immutable_runtime(connection)
         database_list = _fetch_all(connection, "PRAGMA database_list")
         if len(database_list) != 1 or database_list[0]["name"] != "main":
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
@@ -5131,6 +9677,7 @@ def _connect(
             ("cell_size_check", cast(int, _pragma_scalar(connection, "cell_size_check"))),
             ("mmap_size", cast(int, _pragma_scalar(connection, "mmap_size"))),
             ("temp_store", cast(int, _pragma_scalar(connection, "temp_store"))),
+            ("cache_size", cast(int, _pragma_scalar(connection, "cache_size"))),
             ("locking_mode", cast(str, _pragma_scalar(connection, "locking_mode"))),
             ("max_page_count", cast(int, _pragma_scalar(connection, "max_page_count"))),
             (
@@ -5162,13 +9709,14 @@ def _connect(
                 raise HarnessFailure(HarnessFailureCode.CORRUPT)
         connection.set_authorizer(_operation_authorizer)
         _revalidate_operation_path_snapshot(registered, snapshot)
+        runtime_evidence = _seal_connection_immutable_runtime(connection)
         profile = RuntimeProfile(
             role="writer" if writer else "reader",
-            python_version=python_version,
-            sqlite_version=sqlite3.sqlite_version,
-            sqlite_source_id=source_id,
-            threadsafety=sqlite3.threadsafety,
-            compile_options=compile_options,
+            python_version=runtime_evidence.python_version,
+            sqlite_version=runtime_evidence.sqlite_version,
+            sqlite_source_id=runtime_evidence.sqlite_source_id,
+            threadsafety=runtime_evidence.threadsafety,
+            compile_options=runtime_evidence.compile_options,
             dbconfig=observed_dbconfig,
             defensive_available=defensive_available,
             defensive_enabled=defensive_enabled,
@@ -5178,7 +9726,6 @@ def _connect(
                 for name, _ in _LIMITS
             ),
         )
-        _CONNECTION_EVIDENCE_BINDINGS[id(connection)] = (token._nonce, writer)
         return connection, profile
     except sqlite3.Error as error:
         failure = _sqlite_failure(error)
@@ -5229,7 +9776,7 @@ def _remove_unregistered_generation(
     generation_root: Path,
     database_path: Path,
 ) -> None:
-    """Best-effort rollback for an internally named generation before token registration."""
+    """Remove an internally named generation with positively proven descriptor closure."""
 
     if (
         database_path.parent != generation_root
@@ -5250,6 +9797,9 @@ def _remove_unregistered_generation(
     )
     root_descriptor = -1
     generation_descriptor = -1
+    completed = False
+    primary: BaseException | None = None
+    close_ok = True
     try:
         root_descriptor = os.open(generation_root.parent, flags)
         generation_descriptor = os.open(
@@ -5272,7 +9822,7 @@ def _remove_unregistered_generation(
             or generation_entry.st_ino != generation_details.st_ino
             or names - permitted_names
         ):
-            return
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
         for name in names:
             details = os.stat(
                 name,
@@ -5280,19 +9830,35 @@ def _remove_unregistered_generation(
                 follow_symlinks=False,
             )
             if not (stat.S_ISREG(details.st_mode) or stat.S_ISLNK(details.st_mode)):
-                return
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
         for name in sorted(names):
             os.unlink(name, dir_fd=generation_descriptor)
         os.rmdir(generation_root.name, dir_fd=root_descriptor)
-    except (OSError, RuntimeError):
-        return
+        completed = True
+    except BaseException as error:
+        primary = error
     finally:
         if generation_descriptor >= 0:
-            with suppress(OSError):
-                os.close(generation_descriptor)
+            descriptor = generation_descriptor
+            generation_descriptor = -1
+            try:
+                os.close(descriptor)
+            except OSError:
+                close_ok = False
         if root_descriptor >= 0:
-            with suppress(OSError):
-                os.close(root_descriptor)
+            descriptor = root_descriptor
+            root_descriptor = -1
+            try:
+                os.close(descriptor)
+            except OSError:
+                close_ok = False
+    if not close_ok:
+        _mark_process_cleanup_uncertain()
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+    if primary is not None or not completed:
+        if isinstance(primary, HarnessFailure):
+            raise primary
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
 
 
 def _cleanup_token_matches_identity(
@@ -5304,6 +9870,7 @@ def _cleanup_token_matches_identity(
     return bool(
         type(token) is StoreToken
         and type(token._nonce) is bytes
+        and len(token._nonce) == 32
         and token._pytest_root == registered.pytest_root
         and token._generation_root == registered.generation_root
         and token._database_path == registered.database_path
@@ -5384,6 +9951,7 @@ def _open_owned_generation_for_cleanup(
             )
         )
         if not cleanup_ok:
+            _mark_process_cleanup_uncertain()
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from error
         if isinstance(error, HarnessFailure):
             raise
@@ -5393,11 +9961,13 @@ def _open_owned_generation_for_cleanup(
 def _remove_owned_files(token: StoreToken) -> None:
     """Totally remove one owned generation or retain observable retry authority."""
 
-    if type(token) is not StoreToken or type(token._nonce) is not bytes:
+    if type(token) is not StoreToken or type(token._nonce) is not bytes or len(token._nonce) != 32:
         raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-    registered = _TOKEN_REGISTRY.get(token._nonce)
+    registered = _lookup_store_token_authority(token)
     if registered is None:
-        return
+        if _is_retired_store_token(token):
+            return
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
     if not _cleanup_token_matches_identity(token, registered):
         raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
     root_descriptor = -1
@@ -5434,42 +10004,56 @@ def _remove_owned_files(token: StoreToken) -> None:
             )
             for name in removal_order:
                 os.unlink(name, dir_fd=generation_descriptor)
-            try:
-                os.close(generation_descriptor)
-            except OSError:
-                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+            descriptor = generation_descriptor
             generation_descriptor = -1
-            os.rmdir(
-                registered.generation_root.name,
-                dir_fd=root_descriptor,
-            )
-            completed = True
+            try:
+                os.close(descriptor)
+            except OSError:
+                close_ok = False
+            if close_ok:
+                os.rmdir(
+                    registered.generation_root.name,
+                    dir_fd=root_descriptor,
+                )
+                completed = True
     except BaseException as error:
         primary = error
     finally:
         if generation_descriptor >= 0:
+            descriptor = generation_descriptor
+            generation_descriptor = -1
             try:
-                os.close(generation_descriptor)
+                os.close(descriptor)
             except OSError:
                 close_ok = False
         if root_descriptor >= 0:
+            descriptor = root_descriptor
+            root_descriptor = -1
             try:
-                os.close(root_descriptor)
+                os.close(descriptor)
             except OSError:
                 close_ok = False
-    if primary is not None or not close_ok or not completed:
+    if not close_ok:
+        _mark_process_cleanup_uncertain()
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+    if primary is not None or not completed:
         raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from primary
-    if _TOKEN_REGISTRY.get(token._nonce) is not registered:
+    if not _revoke_store_token_authority(token, registered):
         raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-    del _TOKEN_REGISTRY[token._nonce]
 
 
 @_operation_evidence_executor
-def bootstrap_store(pytest_root: Path) -> StoreToken:
+@_store_token_issuing_bootstrap
+def bootstrap_store(
+    pytest_root: Path,
+    issue_token: Callable[[_RegisteredIdentity], StoreToken],
+) -> StoreToken:
     """Create one empty, private, same-bootstrap-owned version-one generation."""
 
     root = _validate_bootstrap_root(pytest_root)
-    active_root = _ACTIVE_PYTEST_ROOTS[id(pytest_root)]
+    active_root = _lookup_active_pytest_root(pytest_root)
+    if active_root is None:
+        raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
     generation_name = _next_generation_name()
     generation_root = root / generation_name
     database_path = generation_root / _DATABASE_BASENAME
@@ -5548,19 +10132,11 @@ def bootstrap_store(pytest_root: Path) -> StoreToken:
     except BaseException:
         _remove_unregistered_generation(generation_root, database_path)
         raise
-    nonce = secrets.token_bytes(32)
-    _TOKEN_REGISTRY[nonce] = registered
-    token = StoreToken(
-        _nonce=nonce,
-        _pytest_root=registered.pytest_root,
-        _generation_root=registered.generation_root,
-        _database_path=registered.database_path,
-        _device=registered.device,
-        _inode=registered.inode,
-        _uid=registered.uid,
-        _mode=registered.mode,
-        _link_count=registered.link_count,
-    )
+    try:
+        token = issue_token(registered)
+    except BaseException:
+        _remove_unregistered_generation(generation_root, database_path)
+        raise
     try:
         connection, _ = _connect(token, writer=True, bootstrap=True)
         try:
@@ -5583,10 +10159,9 @@ def bootstrap_store(pytest_root: Path) -> StoreToken:
                 for statement in _schema_statements():
                     connection.execute(statement).close()
                 live_descriptor = installed_schema_descriptor(connection)
-                expected_descriptor = load_schema_descriptor()
-                if live_descriptor != expected_descriptor:
-                    raise HarnessFailure(HarnessFailureCode.CORRUPT)
-                fingerprint = load_schema_fingerprint()
+                fixture_snapshot = _load_schema_fixture_snapshot(
+                    expected_descriptor=live_descriptor
+                )
                 connection.execute(
                     """
                     INSERT INTO stream_store_metadata (
@@ -5606,7 +10181,7 @@ def bootstrap_store(pytest_root: Path) -> StoreToken:
                         SCHEMA_GENERATION,
                         NATURAL_IDENTITY_KEY_VERSION,
                         PAGE_SIZE,
-                        _digest_bytes(fingerprint),
+                        fixture_snapshot.fingerprint_bytes,
                     ),
                 ).close()
                 _verify_operation_authority(connection, token)
@@ -5621,6 +10196,9 @@ def bootstrap_store(pytest_root: Path) -> StoreToken:
     except BaseException:
         _remove_owned_files(token)
         raise
+
+
+del _store_token_issuing_bootstrap
 
 
 def provisional_schema_descriptor(pytest_root: Path) -> dict[str, object]:
@@ -5655,7 +10233,8 @@ def _verify_schema_identity(connection: sqlite3.Connection) -> str:
         FROM stream_store_metadata
         """,
     )
-    fingerprint = load_schema_fingerprint()
+    fixture_snapshot = _load_schema_fixture_snapshot(fingerprint_first=True)
+    fingerprint = fixture_snapshot.fingerprint
     if (
         tuple(metadata)
         != (
@@ -5665,9 +10244,9 @@ def _verify_schema_identity(connection: sqlite3.Connection) -> str:
             SCHEMA_GENERATION,
             NATURAL_IDENTITY_KEY_VERSION,
             PAGE_SIZE,
-            _digest_bytes(fingerprint),
+            fixture_snapshot.fingerprint_bytes,
         )
-        or installed_schema_descriptor(connection) != load_schema_descriptor()
+        or installed_schema_descriptor(connection) != fixture_snapshot.descriptor
     ):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     return fingerprint
@@ -5680,10 +10259,7 @@ def _verify_operation_authority(
     """Recheck active token authority and every pinned path identity."""
 
     registered = _require_token(token)
-    snapshot = _CONNECTION_PATH_SNAPSHOTS.get(id(connection))
-    if snapshot is None:
-        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-    _revalidate_operation_path_snapshot(registered, snapshot)
+    _revalidate_connection_path(registered, connection)
     return registered
 
 
@@ -5700,36 +10276,13 @@ def _operation_file_size(
     if name not in _OWNED_DATABASE_FILENAMES:
         raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
     registered = _verify_operation_authority(connection, token)
-    snapshot = _CONNECTION_PATH_SNAPSHOTS.get(id(connection))
-    if snapshot is None:
-        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-    try:
-        details = os.stat(
-            name,
-            dir_fd=snapshot.generation_descriptor,
-            follow_symlinks=False,
-        )
-    except FileNotFoundError:
-        if not required:
-            return 0
-        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
-    except OSError:
-        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
-    if (
-        not stat.S_ISREG(details.st_mode)
-        or details.st_dev != registered.device
-        or details.st_uid != registered.uid
-        or details.st_nlink != 1
-        or stat.S_IMODE(details.st_mode) != 0o600
-        or not 0 <= details.st_size <= maximum
-        or (
-            name == _DATABASE_BASENAME
-            and (details.st_ino != registered.inode or details.st_dev != registered.device)
-        )
-    ):
-        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-    _verify_operation_authority(connection, token)
-    return details.st_size
+    return _connection_operation_file_size(
+        registered,
+        connection,
+        name,
+        required,
+        maximum,
+    )
 
 
 def _verify_operation_snapshot(
@@ -5755,16 +10308,31 @@ def _verify_operation_snapshot(
         )
     ):
         raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-    source_id = cast(str, _fetch_one(connection, "SELECT sqlite_source_id()")[0])
-    compile_options = tuple(
-        sorted(cast(str, row[0]) for row in _fetch_all(connection, "PRAGMA compile_options"))
-    )
+    if connection.in_transaction is True:
+        runtime_evidence = _consume_connection_immutable_runtime(
+            connection,
+            token._nonce,
+            writer,
+        )
+        python_version = runtime_evidence.python_version
+        sqlite_version = runtime_evidence.sqlite_version
+        threadsafety = runtime_evidence.threadsafety
+        source_id = runtime_evidence.sqlite_source_id
+        compile_options = runtime_evidence.compile_options
+    else:
+        source_id = cast(str, _fetch_one(connection, "SELECT sqlite_source_id()")[0])
+        compile_options = tuple(
+            sorted(cast(str, row[0]) for row in _fetch_all(connection, "PRAGMA compile_options"))
+        )
+        python_version = ".".join(str(part) for part in sys.version_info[:3])
+        sqlite_version = sqlite3.sqlite_version
+        threadsafety = sqlite3.threadsafety
     if (
-        ".".join(str(part) for part in sys.version_info[:3]) != ACCEPTED_PYTHON_VERSION
-        or sqlite3.sqlite_version != ACCEPTED_SQLITE_VERSION
+        python_version != ACCEPTED_PYTHON_VERSION
+        or sqlite_version != ACCEPTED_SQLITE_VERSION
         or source_id != ACCEPTED_SQLITE_SOURCE_ID
         or compile_options != ACCEPTED_COMPILE_OPTIONS
-        or sqlite3.threadsafety != ACCEPTED_THREADSAFETY
+        or threadsafety != ACCEPTED_THREADSAFETY
     ):
         raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
     for name, enabled, required in _DBCONFIG:
@@ -5797,6 +10365,7 @@ def _verify_operation_snapshot(
         ("cell_size_check", 1),
         ("mmap_size", 0),
         ("temp_store", 2),
+        ("cache_size", -8192),
         ("locking_mode", "normal"),
         ("max_page_count", MAX_PAGE_COUNT),
         ("wal_autocheckpoint", WAL_AUTOCHECKPOINT_PAGES),
@@ -5838,6 +10407,7 @@ def verify_store(token: StoreToken) -> VerificationSummary:
     """Fresh-open format, schema, integrity, FK, and full-history verification."""
 
     connection, profile = _connect(token, writer=False)
+    history_cache: _HistorySnapshotCache | None = None
     try:
         connection.execute("BEGIN").close()
         try:
@@ -5887,9 +10457,12 @@ def verify_store(token: StoreToken) -> VerificationSummary:
                         minimum=1,
                         maximum=MAX_CONTRACT_INTEGER,
                     )
+                    creation_witness = _creation_from_stream_row(stream)
+                    policy = _policy_from_creation(creation_witness)
+                    history_cache = _new_history_snapshot_cache()
                     next_version = 1
                     observed_history = 0
-                    preceding_row: sqlite3.Row | None = None
+                    preceding_snapshot: _ValidatedHistoryRowSnapshot | None = None
                     current_entry: ContinuousPublicTradeStreamStoredHistoryEntryV1 | None = None
                     while next_version <= current_version:
                         page = _fetch_all(
@@ -5911,10 +10484,12 @@ def verify_store(token: StoreToken) -> VerificationSummary:
                             or page[0]["successor_version"] != next_version
                         ):
                             raise HarnessFailure(HarnessFailureCode.CORRUPT)
-                        entries = _validate_history_page_rows(
+                        snapshots = _validate_history_page_rows(
                             stream,
                             page,
-                            preceding_row=preceding_row,
+                            policy=policy,
+                            preceding_snapshot=preceding_snapshot,
+                            cache=history_cache,
                         )
                         last_version = _require_exact_int(
                             page[-1]["successor_version"],
@@ -5924,16 +10499,20 @@ def verify_store(token: StoreToken) -> VerificationSummary:
                         if last_version > current_version:
                             raise HarnessFailure(HarnessFailureCode.CORRUPT)
                         if next_version == 1:
-                            creation = entries[0]
-                            if type(creation) is not ContinuousPublicTradeStreamStoredCreationV1:
+                            creation = snapshots[0].entry
+                            if (
+                                type(creation) is not ContinuousPublicTradeStreamStoredCreationV1
+                                or creation != creation_witness
+                            ):
                                 raise HarnessFailure(HarnessFailureCode.CORRUPT)
-                            _validate_stream_projection(stream, creation)
                         observed_history += len(page)
                         history_count += len(page)
                         if stream_count + history_count > maximum_materialized_rows:
                             raise HarnessFailure(HarnessFailureCode.BOUNDS_EXCEEDED)
-                        preceding_row = page[-1]
-                        current_entry = entries[-1]
+                        preceding_snapshot = snapshots[-1]
+                        current_entry = preceding_snapshot.entry
+                        del snapshots
+                        history_cache.retain_boundary(preceding_snapshot)
                         next_version = last_version + 1
                         if last_version < current_version and len(page) < 100:
                             raise HarnessFailure(HarnessFailureCode.CORRUPT)
@@ -5966,6 +10545,8 @@ def verify_store(token: StoreToken) -> VerificationSummary:
                         != current_entry.history_root
                     ):
                         raise HarnessFailure(HarnessFailureCode.CORRUPT)
+                    history_cache.invalidate()
+                    history_cache = None
                 if len(streams) < 100:
                     break
             freelist_count = _require_exact_int(
@@ -5976,9 +10557,13 @@ def verify_store(token: StoreToken) -> VerificationSummary:
             _verify_operation_authority(connection, token)
             connection.execute("COMMIT").close()
         except BaseException:
+            if history_cache is not None:
+                _invalidate_history_snapshot_cache_preserving_primary(history_cache)
             _rollback_best_effort(connection)
             raise
     finally:
+        if history_cache is not None:
+            _invalidate_history_snapshot_cache_preserving_primary(history_cache)
         _close_preserving_primary(connection)
     writer_connection, writer_profile = _connect(token, writer=True)
     try:
@@ -6034,6 +10619,7 @@ def _stored_creation_without_scope(
     creation: ContinuousPublicTradeStreamCreationRecordV1,
     record_bytes: bytes,
     record_digest: str,
+    envelope: ContinuousPublicTradeStreamEnvelopeV1,
     envelope_bytes: bytes,
     envelope_digest: str,
     history_root: str,
@@ -6068,7 +10654,7 @@ def _stored_creation_without_scope(
         canonical_bytes=record_bytes,
         record_digest=record_digest,
         successor_envelope=ContinuousPublicTradeStreamStoredEnvelopeV1(
-            envelope=decode_stream_envelope(envelope_bytes),
+            envelope=envelope,
             canonical_bytes=envelope_bytes,
             envelope_digest=envelope_digest,
         ),
@@ -6082,10 +10668,11 @@ def _stored_transition_without_scopes(
     transition: ContinuousPublicTradeStreamTransitionRecordV1,
     record_bytes: bytes,
     record_digest: str,
+    envelope: ContinuousPublicTradeStreamEnvelopeV1,
     envelope_bytes: bytes,
     envelope_digest: str,
     history_root: str,
-    predecessor_record_bytes: bytes,
+    predecessor: _DecodedCanonicalHistoryRecord,
 ) -> ContinuousPublicTradeStreamStoredTransitionV1:
     """Construct a validated value with deterministic transition scopes."""
 
@@ -6097,10 +10684,9 @@ def _stored_transition_without_scopes(
         ContinuousPublicTradeStreamStoredEnvelopeV1,
     )
 
-    envelope = decode_stream_envelope(envelope_bytes)
     attachment = envelope.checkpoint.attachment
     payload = envelope.child_creation_payload
-    is_attach = transition.transition_kind.value == "ATTACH"
+    is_attach = transition.transition_kind is ContinuousPublicTradeTransitionKind.ATTACH
     authority_scope = ContinuousPublicTradeEvidenceScopeV1(
         evidence_kind=ContinuousPublicTradeEvidenceKind.STREAM_TRANSITION_AUTHORITY,
         stream_id=transition.stream_id,
@@ -6121,16 +10707,8 @@ def _stored_transition_without_scopes(
         stream_policy=None,
     )
     completion_scope: ContinuousPublicTradeEvidenceScopeV1 | None = None
-    if transition.transition_kind.value == "CHILD_COMPLETED":
-        if transition.prior_version == 1:
-            predecessor_envelope_hex = decode_stream_creation_record(
-                predecessor_record_bytes
-            ).successor_envelope_hex
-        else:
-            predecessor_envelope_hex = decode_stream_transition_record(
-                predecessor_record_bytes
-            ).successor_envelope_hex
-        predecessor_envelope = decode_stream_envelope(bytes.fromhex(predecessor_envelope_hex))
+    if transition.transition_kind is ContinuousPublicTradeTransitionKind.CHILD_COMPLETED:
+        predecessor_envelope = predecessor.successor_envelope
         predecessor_attachment = predecessor_envelope.checkpoint.attachment
         predecessor_payload = predecessor_envelope.child_creation_payload
         if predecessor_attachment is None or predecessor_payload is None:
@@ -6171,153 +10749,364 @@ def _exact_blob(value: object, *, minimum: int = 1, maximum: int) -> bytes:
     return value
 
 
-def _entry_from_history_row_unchecked(
+def _decode_canonical_history_record(
+    record_bytes: bytes,
+    *,
+    successor_version: int,
+    cache: _HistorySnapshotCache,
+    retain: bool = True,
+) -> _DecodedCanonicalHistoryRecord:
+    """Decode one canonical record once without granting it physical-row authority."""
+
+    cached = cache.decoded(record_bytes)
+    if cached is not None:
+        if cached.record.successor_version != successor_version:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        return cached
+    record: (
+        ContinuousPublicTradeStreamCreationRecordV1 | ContinuousPublicTradeStreamTransitionRecordV1
+    )
+    if successor_version == 1:
+        creation_record = decode_stream_creation_record(record_bytes)
+        record = creation_record
+        record_digest = stream_creation_digest(creation_record)
+        history_root = initial_stream_history_root(creation_record)
+        if (
+            encode_stream_creation_record(creation_record) != record_bytes
+            or creation_record.successor_version != successor_version
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    else:
+        transition_record = decode_stream_transition_record(record_bytes)
+        record = transition_record
+        record_digest = stream_transition_digest(transition_record)
+        history_root = next_stream_history_root(
+            transition_record.prior_history_root,
+            transition_record,
+        )
+        if (
+            encode_stream_transition_record(transition_record) != record_bytes
+            or transition_record.successor_version != successor_version
+            or transition_record.prior_version != successor_version - 1
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    envelope_bytes = _exact_blob(bytes.fromhex(record.successor_envelope_hex), maximum=16_384)
+    envelope = decode_stream_envelope(envelope_bytes)
+    envelope_digest = stream_envelope_digest(envelope)
+    if (
+        encode_stream_envelope(envelope) != envelope_bytes
+        or record.successor_envelope_digest != envelope_digest
+        or envelope.checkpoint.version != successor_version
+        or envelope.checkpoint.stream_id != record.stream_id
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    decoded = _DecodedCanonicalHistoryRecord(
+        record=record,
+        canonical_bytes=record_bytes,
+        record_digest=record_digest,
+        successor_envelope=envelope,
+        successor_envelope_bytes=envelope_bytes,
+        successor_envelope_digest=envelope_digest,
+        history_root=history_root,
+    )
+    if retain:
+        cache.issue_decoded(decoded)
+    return decoded
+
+
+def _predecessor_link_seal(
+    decoded: _DecodedCanonicalHistoryRecord,
+) -> _HistoryPredecessorLinkSeal:
+    version = decoded.record.successor_version
+    return _HistoryPredecessorLinkSeal(
+        stream_uuid=decoded.record.stream_id.bytes,
+        successor_version=version,
+        entry_kind=_ENTRY_CREATION if version == 1 else _ENTRY_TRANSITION,
+        canonical_bytes=decoded.canonical_bytes,
+        record_digest=decoded.record_digest,
+        successor_envelope_bytes=decoded.successor_envelope_bytes,
+        successor_envelope_digest=decoded.successor_envelope_digest,
+        history_root=decoded.history_root,
+        recorded_at=decoded.record.recorded_at,
+    )
+
+
+def _history_row_binding(row: sqlite3.Row) -> tuple[tuple[str, ...], tuple[object, ...]]:
+    keys = tuple(row.keys())
+    if keys != _HISTORY_ROW_COLUMNS:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    return keys, tuple(row[key] for key in keys)
+
+
+def _same_physical_history_row(row: sqlite3.Row, snapshot: _ValidatedHistoryRowSnapshot) -> bool:
+    return _history_row_binding(row) == _history_row_binding(snapshot.row)
+
+
+def _validate_history_snapshot_coherence(snapshot: _ValidatedHistoryRowSnapshot) -> None:
+    if type(snapshot) is not _ValidatedHistoryRowSnapshot:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    row = snapshot.row
+    decoded = snapshot.decoded
+    entry = snapshot.entry
+    successor_version = _require_exact_int(
+        row["successor_version"], minimum=1, maximum=MAX_CONTRACT_INTEGER
+    )
+    _require_exact_int(row["history_row_id"], minimum=1, maximum=MAX_CONTRACT_INTEGER)
+    _require_exact_int(row["stream_row_id"], minimum=1, maximum=MAX_CONTRACT_INTEGER)
+    if (
+        type(decoded) is not _DecodedCanonicalHistoryRecord
+        or decoded.record.successor_version != successor_version
+        or row["record_model_version"] != _MODEL_VERSION
+        or row["serialization_version"] != 1
+        or row["record_canonical_bytes"] != decoded.canonical_bytes
+        or row["record_digest"] != _digest_bytes(decoded.record_digest)
+        or row["successor_envelope_canonical_bytes"] != decoded.successor_envelope_bytes
+        or row["successor_envelope_digest"] != _digest_bytes(decoded.successor_envelope_digest)
+        or row["successor_history_root"] != _digest_bytes(decoded.history_root)
+        or entry.record != decoded.record
+        or entry.canonical_bytes != decoded.canonical_bytes
+        or entry.record_digest != decoded.record_digest
+        or entry.successor_envelope.envelope != decoded.successor_envelope
+        or entry.successor_envelope.canonical_bytes != decoded.successor_envelope_bytes
+        or entry.successor_envelope.envelope_digest != decoded.successor_envelope_digest
+        or entry.history_root != decoded.history_root
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if successor_version == 1:
+        if (
+            type(decoded.record) is not ContinuousPublicTradeStreamCreationRecordV1
+            or type(entry) is not ContinuousPublicTradeStreamStoredCreationV1
+            or snapshot.predecessor_link is not None
+            or row["entry_kind"] != _ENTRY_CREATION
+            or row["prior_version"] is not None
+            or row["prior_envelope_digest"] is not None
+            or row["prior_history_root"] is not None
+            or row["predecessor_record_canonical_bytes"] is not None
+            or row["predecessor_record_digest"] is not None
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        return
+    transition = decoded.record
+    predecessor = snapshot.predecessor_link
+    if (
+        type(transition) is not ContinuousPublicTradeStreamTransitionRecordV1
+        or type(entry) is not ContinuousPublicTradeStreamStoredTransitionV1
+        or type(predecessor) is not _HistoryPredecessorLinkSeal
+        or predecessor.stream_uuid != transition.stream_id.bytes
+        or predecessor.successor_version != transition.prior_version
+        or predecessor.entry_kind
+        != (_ENTRY_CREATION if transition.prior_version == 1 else _ENTRY_TRANSITION)
+        or row["entry_kind"] != _ENTRY_TRANSITION
+        or row["prior_version"] != transition.prior_version
+        or row["prior_envelope_digest"] != _digest_bytes(transition.prior_envelope_digest)
+        or row["prior_history_root"] != _digest_bytes(transition.prior_history_root)
+        or row["predecessor_record_canonical_bytes"] != predecessor.canonical_bytes
+        or row["predecessor_record_digest"] != _digest_bytes(predecessor.record_digest)
+        or predecessor.successor_envelope_digest != transition.prior_envelope_digest
+        or predecessor.history_root != transition.prior_history_root
+        or predecessor.recorded_at > transition.recorded_at
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+
+
+def _validate_predecessor_row_binding(
+    row: sqlite3.Row,
+    predecessor: _ValidatedHistoryRowSnapshot,
+    transition: ContinuousPublicTradeStreamTransitionRecordV1,
+    *,
+    cache: _HistorySnapshotCache,
+) -> None:
+    cache.require_snapshot(predecessor)
+    expected_kind = _ENTRY_CREATION if transition.prior_version == 1 else _ENTRY_TRANSITION
+    prior = predecessor.row
+    if (
+        prior["stream_row_id"] != row["stream_row_id"]
+        or prior["successor_version"] != transition.prior_version
+        or prior["entry_kind"] != expected_kind
+        or prior["record_model_version"] != _MODEL_VERSION
+        or prior["serialization_version"] != 1
+        or prior["record_canonical_bytes"] != row["predecessor_record_canonical_bytes"]
+        or prior["record_digest"] != row["predecessor_record_digest"]
+        or prior["successor_envelope_digest"] != row["prior_envelope_digest"]
+        or prior["successor_history_root"] != row["prior_history_root"]
+        or predecessor.decoded.canonical_bytes != row["predecessor_record_canonical_bytes"]
+        or predecessor.decoded.record.successor_version != transition.prior_version
+        or predecessor.decoded.record.stream_id != transition.stream_id
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+
+
+def _history_snapshot_from_row_unchecked(
     row: sqlite3.Row,
     *,
     policy: ContinuousPublicTradePolicy,
-    predecessor: sqlite3.Row | None = None,
-) -> ContinuousPublicTradeStreamStoredHistoryEntryV1:
-    """Decode and revalidate one retained history row without trusting projections."""
+    predecessor: _ValidatedHistoryRowSnapshot | None = None,
+    cache: _HistorySnapshotCache,
+    retain_embedded_predecessor: bool = True,
+) -> _ValidatedHistoryRowSnapshot:
+    """Decode and revalidate one retained physical row exactly once per local scope."""
 
-    _require_exact_int(row["stream_row_id"], minimum=1, maximum=MAX_CONTRACT_INTEGER)
+    stream_row_id = _require_exact_int(
+        row["stream_row_id"], minimum=1, maximum=MAX_CONTRACT_INTEGER
+    )
     successor_version = _require_exact_int(
         row["successor_version"],
         minimum=1,
         maximum=MAX_CONTRACT_INTEGER,
     )
+    row_key = (stream_row_id, successor_version)
+    cached_row = cache.cached_row(row_key)
+    if cached_row is not None:
+        if not _same_physical_history_row(row, cached_row):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        if predecessor is not None:
+            cached_record = cached_row.decoded.record
+            if type(cached_record) is not ContinuousPublicTradeStreamTransitionRecordV1:
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            _validate_predecessor_row_binding(
+                row,
+                predecessor,
+                cached_record,
+                cache=cache,
+            )
+        return cached_row
     if row["record_model_version"] != _MODEL_VERSION or row["serialization_version"] != 1:
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     record_bytes = _exact_blob(row["record_canonical_bytes"], maximum=65_536)
+    decoded = _decode_canonical_history_record(
+        record_bytes,
+        successor_version=successor_version,
+        cache=cache,
+    )
     envelope_bytes = _exact_blob(
         row["successor_envelope_canonical_bytes"],
         maximum=16_384,
     )
-    envelope = decode_stream_envelope(envelope_bytes)
-    envelope_digest = stream_envelope_digest(envelope)
     if (
-        encode_stream_envelope(envelope) != envelope_bytes
-        or _decode_digest(row["successor_envelope_digest"]) != envelope_digest
-        or envelope.checkpoint.version != successor_version
+        envelope_bytes != decoded.successor_envelope_bytes
+        or _decode_digest(row["record_digest"]) != decoded.record_digest
+        or _decode_digest(row["successor_envelope_digest"]) != decoded.successor_envelope_digest
+        or _decode_digest(row["successor_history_root"]) != decoded.history_root
     ):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
 
+    predecessor_decoded: _DecodedCanonicalHistoryRecord | None = None
     if successor_version == 1:
-        creation = decode_stream_creation_record(record_bytes)
-        record_digest = stream_creation_digest(creation)
-        history_root = initial_stream_history_root(creation)
-        if (
+        creation = decoded.record
+        if type(creation) is not ContinuousPublicTradeStreamCreationRecordV1 or (
             row["entry_kind"] != _ENTRY_CREATION
             or row["prior_version"] is not None
             or row["prior_envelope_digest"] is not None
             or row["prior_history_root"] is not None
             or row["predecessor_record_canonical_bytes"] is not None
             or row["predecessor_record_digest"] is not None
-            or encode_stream_creation_record(creation) != record_bytes
-            or creation.successor_version != 1
-            or creation.successor_envelope_hex != envelope_bytes.hex()
-            or creation.successor_envelope_digest != envelope_digest
         ):
             raise HarnessFailure(HarnessFailureCode.CORRUPT)
         entry: ContinuousPublicTradeStreamStoredHistoryEntryV1 = _stored_creation_without_scope(
             creation=creation,
             record_bytes=record_bytes,
-            record_digest=record_digest,
+            record_digest=decoded.record_digest,
+            envelope=decoded.successor_envelope,
             envelope_bytes=envelope_bytes,
-            envelope_digest=envelope_digest,
-            history_root=history_root,
+            envelope_digest=decoded.successor_envelope_digest,
+            history_root=decoded.history_root,
         )
     else:
-        transition = decode_stream_transition_record(record_bytes)
-        record_digest = stream_transition_digest(transition)
-        history_root = next_stream_history_root(
-            transition.prior_history_root,
-            transition,
-        )
+        transition = decoded.record
+        if type(transition) is not ContinuousPublicTradeStreamTransitionRecordV1:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
         predecessor_bytes = _exact_blob(
             row["predecessor_record_canonical_bytes"],
             maximum=65_536,
         )
-        if transition.prior_version == 1:
-            predecessor_creation = decode_stream_creation_record(predecessor_bytes)
-            predecessor_digest = stream_creation_digest(predecessor_creation)
-            predecessor_envelope_hex = predecessor_creation.successor_envelope_hex
-            predecessor_history_root = initial_stream_history_root(predecessor_creation)
-            predecessor_recorded_at = predecessor_creation.recorded_at
-        else:
-            predecessor_transition = decode_stream_transition_record(predecessor_bytes)
-            predecessor_digest = stream_transition_digest(predecessor_transition)
-            predecessor_envelope_hex = predecessor_transition.successor_envelope_hex
-            predecessor_history_root = next_stream_history_root(
-                predecessor_transition.prior_history_root,
-                predecessor_transition,
+        if predecessor is None:
+            predecessor_decoded = _decode_canonical_history_record(
+                predecessor_bytes,
+                successor_version=transition.prior_version,
+                cache=cache,
+                retain=retain_embedded_predecessor,
             )
-            predecessor_recorded_at = predecessor_transition.recorded_at
-        predecessor_envelope_bytes = bytes.fromhex(predecessor_envelope_hex)
-        predecessor_envelope = decode_stream_envelope(predecessor_envelope_bytes)
+        else:
+            _validate_predecessor_row_binding(
+                row,
+                predecessor,
+                transition,
+                cache=cache,
+            )
+            predecessor_decoded = predecessor.decoded
         if (
             row["entry_kind"] != _ENTRY_TRANSITION
-            or encode_stream_transition_record(transition) != record_bytes
-            or transition.successor_version != successor_version
-            or transition.prior_version != successor_version - 1
             or row["prior_version"] != transition.prior_version
             or _decode_digest(row["prior_envelope_digest"]) != transition.prior_envelope_digest
             or _decode_digest(row["prior_history_root"]) != transition.prior_history_root
-            or _decode_digest(row["predecessor_record_digest"]) != predecessor_digest
-            or stream_envelope_digest(predecessor_envelope) != transition.prior_envelope_digest
-            or predecessor_history_root != transition.prior_history_root
-            or transition.successor_envelope_hex != envelope_bytes.hex()
-            or transition.successor_envelope_digest != envelope_digest
-        ):
-            raise HarnessFailure(HarnessFailureCode.CORRUPT)
-        if predecessor is not None and (
-            predecessor["stream_row_id"] != row["stream_row_id"]
-            or predecessor["successor_version"] != transition.prior_version
-            or predecessor["record_canonical_bytes"] != predecessor_bytes
-            or predecessor["record_digest"] != row["predecessor_record_digest"]
-            or predecessor["successor_envelope_digest"] != row["prior_envelope_digest"]
-            or predecessor["successor_history_root"] != row["prior_history_root"]
+            or _decode_digest(row["predecessor_record_digest"]) != predecessor_decoded.record_digest
+            or predecessor_bytes != predecessor_decoded.canonical_bytes
+            or predecessor_decoded.successor_envelope_digest != transition.prior_envelope_digest
+            or predecessor_decoded.history_root != transition.prior_history_root
+            or predecessor_decoded.record.stream_id != transition.stream_id
         ):
             raise HarnessFailure(HarnessFailureCode.CORRUPT)
         entry = _stored_transition_without_scopes(
             transition=transition,
             record_bytes=record_bytes,
-            record_digest=record_digest,
+            record_digest=decoded.record_digest,
+            envelope=decoded.successor_envelope,
             envelope_bytes=envelope_bytes,
-            envelope_digest=envelope_digest,
-            history_root=history_root,
-            predecessor_record_bytes=predecessor_bytes,
+            envelope_digest=decoded.successor_envelope_digest,
+            history_root=decoded.history_root,
+            predecessor=predecessor_decoded,
         )
         _validate_transition_against_prior(
             entry,
-            prior_envelope=predecessor_envelope,
-            prior_history_root=predecessor_history_root,
-            prior_recorded_at=predecessor_recorded_at,
+            prior_envelope=predecessor_decoded.successor_envelope,
+            prior_history_root=predecessor_decoded.history_root,
+            prior_recorded_at=predecessor_decoded.record.recorded_at,
             policy=policy,
         )
-    if (
-        _decode_digest(row["record_digest"]) != record_digest
-        or _decode_digest(row["successor_history_root"]) != history_root
-    ):
-        raise HarnessFailure(HarnessFailureCode.CORRUPT)
-    return entry
+    snapshot = _ValidatedHistoryRowSnapshot(
+        row=row,
+        decoded=decoded,
+        predecessor_link=(
+            None
+            if successor_version == 1
+            else _predecessor_link_seal(cast(_DecodedCanonicalHistoryRecord, predecessor_decoded))
+        ),
+        entry=entry,
+    )
+    cache.issue_snapshot(snapshot)
+    return snapshot
 
 
-def _entry_from_history_row(
+def _history_snapshot_from_row(
     row: sqlite3.Row,
     *,
     policy: ContinuousPublicTradePolicy,
-    predecessor: sqlite3.Row | None = None,
-) -> ContinuousPublicTradeStreamStoredHistoryEntryV1:
+    predecessor: _ValidatedHistoryRowSnapshot | None = None,
+    cache: _HistorySnapshotCache | None = None,
+    retain_embedded_predecessor: bool = True,
+) -> _ValidatedHistoryRowSnapshot:
+    local_cache = _new_history_snapshot_cache() if cache is None else cache
+    owns_cache = cache is None
     try:
-        return _entry_from_history_row_unchecked(
+        result = _history_snapshot_from_row_unchecked(
             row,
             policy=policy,
             predecessor=predecessor,
+            cache=local_cache,
+            retain_embedded_predecessor=retain_embedded_predecessor,
         )
     except HarnessFailure:
+        _invalidate_history_snapshot_cache_preserving_primary(local_cache)
         raise
     except (AttributeError, TypeError, ValueError, OverflowError, UnicodeError):
+        _invalidate_history_snapshot_cache_preserving_primary(local_cache)
         raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+    except BaseException:
+        _invalidate_history_snapshot_cache_preserving_primary(local_cache)
+        raise
+    if owns_cache:
+        local_cache.invalidate()
+    return result
 
 
 def _validate_stream_projection(
@@ -6400,13 +11189,15 @@ def _validate_stream_projection(
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
 
 
-def _validate_bounded_current(
+def _validate_bounded_current_unchecked(
     stream: sqlite3.Row,
     history: Sequence[sqlite3.Row],
+    *,
+    cache: _HistorySnapshotCache,
 ) -> tuple[
-    ContinuousPublicTradeStreamStoredCreationV1,
-    ContinuousPublicTradeStreamStoredHistoryEntryV1 | None,
-    ContinuousPublicTradeStreamStoredHistoryEntryV1,
+    _ValidatedHistoryRowSnapshot,
+    _ValidatedHistoryRowSnapshot | None,
+    _ValidatedHistoryRowSnapshot,
 ]:
     """Validate current state from at most creation, predecessor, and tail rows."""
 
@@ -6423,21 +11214,39 @@ def _validate_bounded_current(
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     creation_witness = _creation_from_stream_row(stream)
     policy = _policy_from_creation(creation_witness)
-    creation = _entry_from_history_row(by_version[1], policy=policy)
+    creation_snapshot = _history_snapshot_from_row(
+        by_version[1],
+        policy=policy,
+        cache=cache,
+    )
+    creation = creation_snapshot.entry
     if (
         type(creation) is not ContinuousPublicTradeStreamStoredCreationV1
         or creation != creation_witness
     ):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
-    predecessor_row = by_version.get(current_version - 1) if current_version > 1 else None
-    current = _entry_from_history_row(
-        by_version[current_version],
-        policy=policy,
-        predecessor=predecessor_row,
-    )
-    predecessor = (
-        None if predecessor_row is None else _entry_from_history_row(predecessor_row, policy=policy)
-    )
+    if current_version == 1:
+        predecessor_snapshot = None
+        current_snapshot = creation_snapshot
+    else:
+        predecessor_version = current_version - 1
+        if predecessor_version == 1:
+            predecessor_snapshot = creation_snapshot
+        else:
+            predecessor_snapshot = _history_snapshot_from_row(
+                by_version[predecessor_version],
+                policy=policy,
+                predecessor=creation_snapshot if predecessor_version == 2 else None,
+                cache=cache,
+            )
+        current_snapshot = _history_snapshot_from_row(
+            by_version[current_version],
+            policy=policy,
+            predecessor=predecessor_snapshot,
+            cache=cache,
+        )
+    predecessor = None if predecessor_snapshot is None else predecessor_snapshot.entry
+    current = current_snapshot.entry
     expected_stream_uuid = stream["stream_uuid"]
     if (
         creation.record.stream_id.bytes != expected_stream_uuid
@@ -6455,7 +11264,33 @@ def _validate_bounded_current(
         or _decode_digest(stream["current_history_root"]) != current.history_root
     ):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
-    return creation, predecessor, current
+    return creation_snapshot, predecessor_snapshot, current_snapshot
+
+
+def _validate_bounded_current(
+    stream: sqlite3.Row,
+    history: Sequence[sqlite3.Row],
+    *,
+    cache: _HistorySnapshotCache | None = None,
+) -> tuple[
+    _ValidatedHistoryRowSnapshot,
+    _ValidatedHistoryRowSnapshot | None,
+    _ValidatedHistoryRowSnapshot,
+]:
+    local_cache = _new_history_snapshot_cache() if cache is None else cache
+    owns_cache = cache is None
+    try:
+        result = _validate_bounded_current_unchecked(
+            stream,
+            history,
+            cache=local_cache,
+        )
+    except BaseException:
+        _invalidate_history_snapshot_cache_preserving_primary(local_cache)
+        raise
+    if owns_cache:
+        local_cache.invalidate()
+    return result
 
 
 def _natural_key_from_expectation(
@@ -6472,16 +11307,15 @@ def _natural_key_from_expectation(
     )
 
 
-def _expectation_matches_retained(
+def _expectation_matches_creation(
     expectation: ContinuousPublicTradeStreamExpectationV1,
     creation: ContinuousPublicTradeStreamStoredCreationV1,
-    current_envelope: ContinuousPublicTradeStreamEnvelopeV1,
 ) -> bool:
-    """Compare a boundary-revalidated expectation with one fully valid retained view."""
+    """Compare immutable identity and the complete effective stream policy."""
 
     identity = expectation.identity
     record = creation.record
-    if (
+    return not (
         identity.stream_id != record.stream_id
         or identity.source != record.source
         or identity.venue != record.venue
@@ -6493,8 +11327,19 @@ def _expectation_matches_retained(
         or identity.stream_start_epoch_ms != record.stream_start_epoch_ms
         or project_continuous_public_trade_policy(expectation.effective_stream_policy)
         != record.stream_policy
-    ):
+    )
+
+
+def _expectation_matches_retained(
+    expectation: ContinuousPublicTradeStreamExpectationV1,
+    creation: ContinuousPublicTradeStreamStoredCreationV1,
+    current_envelope: ContinuousPublicTradeStreamEnvelopeV1,
+) -> bool:
+    """Compare a boundary-revalidated expectation with one fully valid retained view."""
+
+    if not _expectation_matches_creation(expectation, creation):
         return False
+    record = creation.record
     try:
         validate_stream_load_bindings(
             record,
@@ -6505,6 +11350,25 @@ def _expectation_matches_retained(
     except (ValueError, TypeError, AttributeError, OverflowError, RecursionError):
         return False
     return True
+
+
+def _cas_expectation_matches_transition(
+    expectation: ContinuousPublicTradeStreamExpectationV1,
+    creation: ContinuousPublicTradeStreamStoredCreationV1,
+    transition: ContinuousPublicTradeStreamStoredTransitionV1,
+) -> bool:
+    """Bind CAS expectation child state to the requested historical successor."""
+
+    if not _expectation_matches_creation(expectation, creation):
+        return False
+    payload = transition.successor_envelope.envelope.child_creation_payload
+    completion_scope = transition.child_completion_scope
+    expected_child_policy_fingerprint = (
+        payload.child_checkpoint.policy_fingerprint
+        if payload is not None
+        else (completion_scope.child_policy_fingerprint if completion_scope is not None else None)
+    )
+    return bool(expectation.effective_child_policy_fingerprint == expected_child_policy_fingerprint)
 
 
 _IDENTITY_SQL: Final = """
@@ -6688,18 +11552,11 @@ def _rollback_best_effort(connection: sqlite3.Connection) -> None:
 def _close_best_effort(connection: sqlite3.Connection | None) -> None:
     if connection is None:
         return
-    _CONNECTION_EVIDENCE_BINDINGS.pop(id(connection), None)
-    snapshot = _CONNECTION_PATH_SNAPSHOTS.pop(id(connection), None)
-    try:
-        with suppress(BaseException):
-            connection.close()
-    finally:
-        _close_operation_path_snapshot(snapshot)
+    with suppress(BaseException):
+        connection.close()
 
 
 def _close_checked(connection: sqlite3.Connection) -> None:
-    _CONNECTION_EVIDENCE_BINDINGS.pop(id(connection), None)
-    snapshot = _CONNECTION_PATH_SNAPSHOTS.pop(id(connection), None)
     try:
         connection.close()
     except sqlite3.Error as error:
@@ -6708,8 +11565,6 @@ def _close_checked(connection: sqlite3.Connection) -> None:
         raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
     except Exception:
         raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
-    finally:
-        _close_operation_path_snapshot(snapshot)
 
 
 def _close_preserving_primary(connection: sqlite3.Connection) -> None:
@@ -6867,7 +11722,11 @@ def _validated_identity_candidate_views(
     history_rows = 0
     for stream in streams:
         bounded_rows = _history_rows_for_current(connection, stream)
-        creation, _, current = _validate_bounded_current(stream, bounded_rows)
+        creation_snapshot, _, current_snapshot = _validate_bounded_current(stream, bounded_rows)
+        creation = creation_snapshot.entry
+        current = current_snapshot.entry
+        if type(creation) is not ContinuousPublicTradeStreamStoredCreationV1:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
         history_rows += len(bounded_rows)
         candidates.append(
             _ValidatedIdentityCandidate(
@@ -7153,7 +12012,14 @@ def load_current(
             )
         rows = _history_rows_for_current(connection, stream)
         history_rows = len(rows)
-        creation, predecessor, current = _validate_bounded_current(stream, rows)
+        creation_snapshot, predecessor_snapshot, current_snapshot = _validate_bounded_current(
+            stream, rows
+        )
+        creation = creation_snapshot.entry
+        predecessor = None if predecessor_snapshot is None else predecessor_snapshot.entry
+        current = current_snapshot.entry
+        if type(creation) is not ContinuousPublicTradeStreamStoredCreationV1:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
         decoded_rows = len(rows)
         if exact_expectation is not None and not _expectation_matches_retained(
             exact_expectation,
@@ -7231,6 +12097,7 @@ def compare_and_swap_stream(
     stream_rows = 0
     history_rows = 0
     committed = False
+    history_cache: _HistorySnapshotCache | None = None
     try:
         connection.execute("BEGIN IMMEDIATE").close()
         _invoke_seam(seam_hook, "after_lock")
@@ -7274,15 +12141,11 @@ def compare_and_swap_stream(
                     streams,
                 )
                 history_rows += retained_rows
-                target_candidates = tuple(
-                    candidate
-                    for candidate in candidate_views
-                    if candidate.creation.record.stream_id == record.stream_id
-                )
-                if len(target_candidates) > 1:
-                    raise HarnessFailure(HarnessFailureCode.CORRUPT)
-                if target_candidates:
-                    target = target_candidates[0]
+                if (
+                    len(candidate_views) == 1
+                    and candidate_views[0].creation.record.stream_id == record.stream_id
+                ):
+                    target = candidate_views[0]
                     _validate_transition_against_prior(
                         exact,
                         prior_envelope=target.current.successor_envelope.envelope,
@@ -7308,30 +12171,17 @@ def compare_and_swap_stream(
         )
         current_rows = _history_rows_for_current(connection, stream)
         history_rows += len(current_rows)
-        creation, _, current = _validate_bounded_current(stream, current_rows)
+        history_cache = _new_history_snapshot_cache()
+        creation_snapshot, _, current_snapshot = _validate_bounded_current(
+            stream,
+            current_rows,
+            cache=history_cache,
+        )
+        creation = creation_snapshot.entry
+        current = current_snapshot.entry
+        if type(creation) is not ContinuousPublicTradeStreamStoredCreationV1:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
         retained_policy = _policy_from_creation(creation)
-        if exact_expectation is not None and not _expectation_matches_retained(
-            exact_expectation,
-            creation,
-            current.successor_envelope.envelope,
-        ):
-            _validate_transition_against_prior(
-                exact,
-                prior_envelope=current.successor_envelope.envelope,
-                prior_history_root=current.history_root,
-                prior_recorded_at=current.record.recorded_at,
-                policy=retained_policy,
-            )
-            _verify_operation_authority(connection, token)
-            connection.execute("COMMIT").close()
-            committed = True
-            return MutationEvidence(
-                StoreClassification.CONFLICT,
-                statements,
-                stream_rows,
-                history_rows,
-                committed,
-            )
         current_version = _require_exact_int(
             stream["current_version"],
             minimum=1,
@@ -7362,10 +12212,25 @@ def compare_and_swap_stream(
                     history_rows,
                     committed,
                 )
-            retained = _entry_from_history_row(
+            requested_predecessor_snapshot = _history_snapshot_from_row(
+                predecessor_row,
+                policy=retained_policy,
+                cache=history_cache,
+            )
+            retained_snapshot = _history_snapshot_from_row(
                 successor_row,
                 policy=retained_policy,
-                predecessor=predecessor_row,
+                predecessor=requested_predecessor_snapshot,
+                cache=history_cache,
+            )
+            retained = retained_snapshot.entry
+            requested_predecessor = requested_predecessor_snapshot.entry
+            _validate_transition_against_prior(
+                exact,
+                prior_envelope=requested_predecessor.successor_envelope.envelope,
+                prior_history_root=requested_predecessor.history_root,
+                prior_recorded_at=requested_predecessor.record.recorded_at,
+                policy=retained_policy,
             )
             if current_version < record.successor_version:
                 classification = StoreClassification.CORRUPT
@@ -7375,6 +12240,14 @@ def compare_and_swap_stream(
                 and retained.successor_envelope.canonical_bytes
                 == exact.successor_envelope.canonical_bytes
                 and retained.history_root == exact.history_root
+                and (
+                    exact_expectation is None
+                    or _cas_expectation_matches_transition(
+                        exact_expectation,
+                        creation,
+                        exact,
+                    )
+                )
             ):
                 classification = StoreClassification.DUPLICATE
             else:
@@ -7411,6 +12284,34 @@ def compare_and_swap_stream(
                 history_rows,
                 committed,
             )
+        requested_predecessor_snapshot = _history_snapshot_from_row(
+            predecessor_row,
+            policy=retained_policy,
+            cache=history_cache,
+        )
+        requested_predecessor = requested_predecessor_snapshot.entry
+        _validate_transition_against_prior(
+            exact,
+            prior_envelope=requested_predecessor.successor_envelope.envelope,
+            prior_history_root=requested_predecessor.history_root,
+            prior_recorded_at=requested_predecessor.record.recorded_at,
+            policy=retained_policy,
+        )
+        if exact_expectation is not None and not _cas_expectation_matches_transition(
+            exact_expectation,
+            creation,
+            exact,
+        ):
+            _verify_operation_authority(connection, token)
+            connection.execute("COMMIT").close()
+            committed = True
+            return MutationEvidence(
+                StoreClassification.CONFLICT,
+                statements,
+                stream_rows,
+                history_rows,
+                committed,
+            )
         if (
             current_version != record.prior_version
             or current.canonical_bytes != predecessor_row["record_canonical_bytes"]
@@ -7429,13 +12330,6 @@ def compare_and_swap_stream(
                 committed,
             )
 
-        _validate_transition_against_prior(
-            exact,
-            prior_envelope=current.successor_envelope.envelope,
-            prior_history_root=current.history_root,
-            prior_recorded_at=current.record.recorded_at,
-            policy=retained_policy,
-        )
         connection.execute(
             _INSERT_HISTORY_SQL,
             (
@@ -7513,6 +12407,8 @@ def compare_and_swap_stream(
         _rollback_best_effort(connection)
         raise
     finally:
+        if history_cache is not None:
+            _invalidate_history_snapshot_cache_preserving_primary(history_cache)
         _close_preserving_primary(connection)
 
 
@@ -7534,6 +12430,7 @@ _CREATE_KILL_SEAMS: Final = frozenset(_CREATE_KILL_SEAM_ORDER)
 _CAS_KILL_SEAMS: Final = frozenset(_CAS_KILL_SEAM_ORDER)
 
 
+@_capture_fork_guard
 @_operation_evidence_executor
 def sqlite_result_code_fault_evidence(
     token: StoreToken,
@@ -7588,8 +12485,8 @@ def sqlite_result_code_fault_evidence(
             os.close(result_read)
             connection, _ = _connect(token, writer=True)
             _verify_operation_snapshot(connection, token, writer=True)
-            os.write(probe_ready_write, b"R")
-            if os.read(probe_control_read, 1) != b"C":
+            _write_process_packet("result_code_probe_ready", probe_ready_write, b"R")
+            if _read_process_packet("result_code_probe_control", probe_control_read, 1) != b"C":
                 os._exit(71)
             if seam == "readonly":
                 connection.execute("PRAGMA query_only = ON").close()
@@ -7611,7 +12508,9 @@ def sqlite_result_code_fault_evidence(
                 _rollback_best_effort(connection)
                 _close_best_effort(connection)
             try:
-                os.write(result_write, struct.pack(">i", code))
+                _write_process_packet(
+                    "result_code_probe_result", result_write, struct.pack(">i", code)
+                )
                 os.close(result_write)
                 exit_code = 0 if code >= 0 else 70
             except BaseException:
@@ -7635,14 +12534,7 @@ def sqlite_result_code_fault_evidence(
     probe_status: int | None = None
     try:
         close_owned(probe_ready_write, probe_control_read, result_write)
-        probe_selector = selectors.DefaultSelector()
-        try:
-            probe_selector.register(probe_ready_read, selectors.EVENT_READ)
-            probe_ready = (
-                os.read(probe_ready_read, 1) if probe_selector.select(timeout=10.0) else b""
-            )
-        finally:
-            probe_selector.close()
+        probe_ready = _read_process_packet("result_code_probe_ready", probe_ready_read, 1)
         close_owned(probe_ready_read)
         if probe_ready != b"R":
             return FaultEvidence(
@@ -7683,8 +12575,8 @@ def sqlite_result_code_fault_evidence(
                     os.close(result_read)
                     holder_connection, _ = _connect(token, writer=True)
                     holder_connection.execute("BEGIN IMMEDIATE").close()
-                    os.write(holder_ready_write, b"R")
-                    if os.read(holder_release_read, 1) != b"C":
+                    _write_process_packet("busy_holder_ready", holder_ready_write, b"R")
+                    if _read_process_packet("busy_holder_release", holder_release_read, 1) != b"C":
                         raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
                     _verify_operation_authority(holder_connection, token)
                     holder_connection.execute("ROLLBACK").close()
@@ -7696,12 +12588,7 @@ def sqlite_result_code_fault_evidence(
                 os._exit(exit_code)
             live_processes.add(holder_process_id)
             close_owned(holder_ready_write, holder_release_read)
-            selector = selectors.DefaultSelector()
-            try:
-                selector.register(holder_ready_read, selectors.EVENT_READ)
-                ready = os.read(holder_ready_read, 1) if selector.select(timeout=10.0) else b""
-            finally:
-                selector.close()
+            ready = _read_process_packet("busy_holder_ready", holder_ready_read, 1)
             close_owned(holder_ready_read)
             if ready != b"R":
                 return FaultEvidence(
@@ -7714,21 +12601,14 @@ def sqlite_result_code_fault_evidence(
                     reason="busy_holder_failed",
                 )
 
-        _write_process_packet(probe_control_write, b"C")
+        _write_process_packet("result_code_probe_control", probe_control_write, b"C")
         close_owned(probe_control_write)
-        selector = selectors.DefaultSelector()
-        try:
-            selector.register(result_read, selectors.EVENT_READ)
-            events = selector.select(timeout=10.0)
-            if events:
-                payload = os.read(result_read, 4)
-        finally:
-            selector.close()
+        payload = _read_process_packet("result_code_probe_result", result_read, 4)
         probe_status = _wait_or_terminate_owned_process(probe_process_id)
         live_processes.discard(probe_process_id)
         close_owned(result_read)
         if holder_process_id is not None and holder_release_write is not None:
-            _write_process_packet(holder_release_write, b"C")
+            _write_process_packet("busy_holder_release", holder_release_write, b"C")
             close_owned(holder_release_write)
             holder_status = _wait_or_terminate_owned_process(holder_process_id)
             live_processes.discard(holder_process_id)
@@ -7800,6 +12680,7 @@ _WRITER_PACKET_OUTCOMES: Final = {
 }
 
 
+@_capture_fork_guard
 @_operation_evidence_executor
 def fresh_process_writer_contention_evidence(
     token: StoreToken,
@@ -7910,10 +12791,7 @@ def fresh_process_writer_contention_evidence(
     def spawn_failed(
         process_ids: Sequence[int],
     ) -> WriterContentionEvidence:
-        descriptors_ok = _close_descriptors(all_descriptors)
-        processes_ok = _terminate_and_reap_processes(process_ids)
-        if not descriptors_ok or not processes_ok:
-            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        _finalize_process_resources(all_descriptors, process_ids)
         return WriterContentionEvidence(
             operation=operation,
             winner_outcome=None,
@@ -7944,14 +12822,14 @@ def fresh_process_writer_contention_evidence(
 
         def hold_after_lock(seam: str) -> None:
             if seam == "after_lock":
-                os.write(winner_locked_write, b"L")
-                if os.read(winner_release_read, 1) != b"R":
+                _write_process_packet("writer_winner_locked", winner_locked_write, b"L")
+                if _read_process_packet("writer_winner_release", winner_release_read, 1) != b"R":
                     raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
 
         packet = b"E"
         try:
-            os.write(winner_ready_write, b"R")
-            if os.read(winner_start_read, 1) != b"S":
+            _write_process_packet("writer_winner_ready", winner_ready_write, b"R")
+            if _read_process_packet("writer_winner_start", winner_start_read, 1) != b"S":
                 os._exit(71)
             packet = _WRITER_OUTCOME_PACKETS.get(run_operation(hold_after_lock), b"E")
         except HarnessFailure as error:
@@ -7959,7 +12837,7 @@ def fresh_process_writer_contention_evidence(
         except BaseException:
             packet = b"E"
         with suppress(OSError):
-            os.write(winner_result_write, packet)
+            _write_process_packet("writer_winner_result", winner_result_write, packet)
         os._exit(0 if packet != b"E" else 70)
 
     try:
@@ -7976,8 +12854,8 @@ def fresh_process_writer_contention_evidence(
         contender_connection: sqlite3.Connection | None = None
         try:
             contender_connection, _ = _connect(token, writer=True)
-            os.write(contender_ready_write, b"R")
-            if os.read(contender_start_read, 1) != b"C":
+            _write_process_packet("writer_contender_ready", contender_ready_write, b"R")
+            if _read_process_packet("writer_contender_start", contender_start_read, 1) != b"C":
                 os._exit(71)
             contender_connection.execute("BEGIN IMMEDIATE").close()
             packet = b"E" + struct.pack(">i", -1)
@@ -7997,7 +12875,7 @@ def fresh_process_writer_contention_evidence(
                 _rollback_best_effort(contender_connection)
                 _close_best_effort(contender_connection)
         with suppress(OSError):
-            os.write(contender_result_write, packet)
+            _write_process_packet("writer_contender_result", contender_result_write, packet)
         os._exit(0 if packet[:1] != b"E" else 70)
 
     child_descriptors = (
@@ -8012,12 +12890,7 @@ def fresh_process_writer_contention_evidence(
     )
 
     def read_packet(descriptor: int, size: int) -> bytes:
-        selector = selectors.DefaultSelector()
-        selector.register(descriptor, selectors.EVENT_READ)
-        try:
-            return os.read(descriptor, size) if selector.select(timeout=10.0) else b""
-        finally:
-            selector.close()
+        return _read_process_packet("writer_contention", descriptor, size)
 
     live_processes = {winner_process_id, contender_process_id}
     protocol_ok = True
@@ -8033,12 +12906,12 @@ def fresh_process_writer_contention_evidence(
         if winner_ready != b"R" or contender_ready != b"R":
             protocol_ok = False
         if protocol_ok:
-            os.write(winner_start_write, b"S")
+            _write_process_packet("writer_winner_start", winner_start_write, b"S")
             winner_locked = read_packet(winner_locked_read, 1)
             if winner_locked != b"L":
                 protocol_ok = False
         if protocol_ok:
-            os.write(contender_start_write, b"C")
+            _write_process_packet("writer_contender_start", contender_start_write, b"C")
             contender_packet = read_packet(contender_result_read, 5)
             if len(contender_packet) != 5:
                 protocol_ok = False
@@ -8058,7 +12931,7 @@ def fresh_process_writer_contention_evidence(
                 and os.WEXITSTATUS(contender_status) == 0
             )
         if protocol_ok:
-            os.write(winner_release_write, b"R")
+            _write_process_packet("writer_winner_release", winner_release_write, b"R")
             winner_packet = read_packet(winner_result_read, 1)
             winner_outcome = cast(
                 StoreClassification | HarnessFailureCode | None,
@@ -8111,6 +12984,7 @@ def fresh_process_writer_contention_evidence(
     )
 
 
+@_capture_fork_guard
 @_operation_evidence_executor
 def fresh_process_two_writer_evidence(
     token: StoreToken,
@@ -8185,12 +13059,10 @@ def fresh_process_two_writer_evidence(
         try:
             process_id = os.fork()
         except OSError:
-            descriptors_ok = _close_descriptors(all_descriptors)
-            processes_ok = _terminate_and_reap_processes(
-                tuple(child_process_id for child_process_id, _, _, _ in children)
+            _finalize_process_resources(
+                all_descriptors,
+                tuple(child_process_id for child_process_id, _, _, _ in children),
             )
-            if not descriptors_ok or not processes_ok:
-                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
             return TwoWriterEvidence(
                 operation=operation,
                 outcomes=(),
@@ -8207,8 +13079,8 @@ def fresh_process_two_writer_evidence(
                         os.close(descriptor)
             packet = b"E"
             try:
-                os.write(ready_write, b"R")
-                if os.read(control_read, 1) != b"C":
+                _write_process_packet("two_writer_ready", ready_write, b"R")
+                if _read_process_packet("two_writer_control", control_read, 1) != b"C":
                     os._exit(71)
                 if operation == "create":
                     outcome: StoreClassification | HarnessFailureCode = create_stream(
@@ -8227,7 +13099,7 @@ def fresh_process_two_writer_evidence(
             except BaseException:
                 packet = b"E"
             with suppress(OSError):
-                os.write(result_write, packet)
+                _write_process_packet("two_writer_result", result_write, packet)
             os._exit(0 if packet != b"E" else 70)
         children.append((process_id, ready_read, control_write, result_read))
 
@@ -8244,22 +13116,12 @@ def fresh_process_two_writer_evidence(
         _close_descriptors_checked(child_descriptors)
         owned_descriptors.difference_update(child_descriptors)
         for _, ready_read, _, _ in children:
-            selector = selectors.DefaultSelector()
-            selector.register(ready_read, selectors.EVENT_READ)
-            try:
-                readiness_packet = os.read(ready_read, 1) if selector.select(timeout=10.0) else b""
-            finally:
-                selector.close()
+            readiness_packet = _read_process_packet("two_writer_ready", ready_read, 1)
             protocol_ok = protocol_ok and readiness_packet == b"R"
         for process_id, _, control_write, result_read in children:
             if protocol_ok:
-                os.write(control_write, b"C")
-            selector = selectors.DefaultSelector()
-            selector.register(result_read, selectors.EVENT_READ)
-            try:
-                packet = os.read(result_read, 1) if selector.select(timeout=10.0) else b""
-            finally:
-                selector.close()
+                _write_process_packet("two_writer_control", control_write, b"C")
+            packet = _read_process_packet("two_writer_result", result_read, 1)
             status = _wait_or_terminate_owned_process(process_id)
             live_processes.remove(process_id)
             decoded_outcome = cast(
@@ -8303,6 +13165,7 @@ def fresh_process_two_writer_evidence(
     )
 
 
+@_capture_fork_guard
 @_operation_evidence_executor
 def fresh_process_kill_evidence(
     token: StoreToken,
@@ -8367,7 +13230,7 @@ def fresh_process_kill_evidence(
 
             def child_hook(observed_seam: str) -> None:
                 if observed_seam == seam:
-                    os.write(write_descriptor, b"R")
+                    _write_process_packet("kill_seam_ready", write_descriptor, b"R")
                     while True:
                         signal.pause()
 
@@ -8390,11 +13253,11 @@ def fresh_process_kill_evidence(
                     ),
                     seam_hook=child_hook,
                 )
-            os.write(write_descriptor, b"A")
+            _write_process_packet("kill_seam_result", write_descriptor, b"A")
             exit_code = 0
         except BaseException:
             with suppress(OSError):
-                os.write(write_descriptor, b"E")
+                _write_process_packet("kill_seam_result", write_descriptor, b"E")
         finally:
             with suppress(OSError):
                 os.close(write_descriptor)
@@ -8405,14 +13268,7 @@ def fresh_process_kill_evidence(
     try:
         _close_descriptors_checked((write_descriptor,))
         owned_descriptors.remove(write_descriptor)
-        selector = selectors.DefaultSelector()
-        try:
-            selector.register(read_descriptor, selectors.EVENT_READ)
-            events = selector.select(timeout=10.0)
-            if events:
-                observed = os.read(read_descriptor, 1)
-        finally:
-            selector.close()
+        observed = _read_process_packet("kill_seam_ready", read_descriptor, 1)
     finally:
         _finalize_process_resources(tuple(owned_descriptors), (process_id,))
     if observed != b"R":
@@ -8518,14 +13374,7 @@ def _trace_commit_page_write(
     descriptors = (ready_read, ready_write, control_read, control_write)
     handshake = b""
     try:
-        selector = selectors.DefaultSelector()
-        try:
-            selector.register(ready_read, selectors.EVENT_READ)
-            events = selector.select(timeout=10.0)
-            if events:
-                handshake = os.read(ready_read, 1)
-        finally:
-            selector.close()
+        handshake = _read_process_packet("commit_trace_ready", ready_read, 1)
         if handshake != b"R":
             return False, 1 if handshake == b"A" else 0, "commit_gate_handshake_failed"
 
@@ -8559,7 +13408,7 @@ def _trace_commit_page_write(
         if initial_status is None or not os.WIFSTOPPED(initial_status):
             return False, 0, "ptrace_initial_stop_failed"
 
-        os.write(control_write, b"C")
+        _write_process_packet("commit_trace_control", control_write, b"C")
         pending_header_offset: int | None = None
         completed_header_offset: int | None = None
         deadline = time.monotonic() + 10.0
@@ -8634,6 +13483,7 @@ def _trace_commit_page_write(
         _finalize_process_resources(descriptors, (process_id,))
 
 
+@_capture_fork_guard
 @_operation_evidence_executor
 def true_during_commit_evidence(
     token: StoreToken,
@@ -8684,8 +13534,8 @@ def true_during_commit_evidence(
 
             def commit_gate(observed_seam: str) -> None:
                 if observed_seam == "between_current_update_and_compare_and_swap_commit":
-                    os.write(ready_write, b"R")
-                    if os.read(control_read, 1) != b"C":
+                    _write_process_packet("true_commit_ready", ready_write, b"R")
+                    if _read_process_packet("true_commit_control", control_read, 1) != b"C":
                         raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
 
             compare_and_swap_stream(
@@ -8693,11 +13543,11 @@ def true_during_commit_evidence(
                 exact,
                 seam_hook=commit_gate,
             )
-            os.write(ready_write, b"A")
+            _write_process_packet("true_commit_result", ready_write, b"A")
             exit_code = 0
         except BaseException:
             with suppress(OSError):
-                os.write(ready_write, b"E")
+                _write_process_packet("true_commit_result", ready_write, b"E")
         finally:
             _close_descriptors((ready_write, control_read))
             os._exit(exit_code)
@@ -8771,6 +13621,7 @@ def true_during_commit_evidence(
     )
 
 
+@_capture_fork_guard
 @_operation_evidence_executor
 def ioerr_write_evidence(
     token: StoreToken,
@@ -8842,7 +13693,7 @@ def ioerr_write_evidence(
                 exact,
                 seam_hook=arm_file_limit,
             )
-            os.write(write_descriptor, b"A")
+            _write_process_packet("ioerr_result", write_descriptor, b"A")
             exit_code = 0
         except HarnessFailure as error:
             code = error.sqlite_errorcode
@@ -8852,13 +13703,13 @@ def ioerr_write_evidence(
                 + (b"\x01" if efbig_proven else b"\x00")
             )
             try:
-                os.write(write_descriptor, packet)
+                _write_process_packet("ioerr_result", write_descriptor, packet)
                 exit_code = 0
             except OSError:
                 exit_code = 70
         except BaseException:
             with suppress(OSError):
-                os.write(write_descriptor, b"X")
+                _write_process_packet("ioerr_result", write_descriptor, b"X")
         finally:
             with suppress(OSError):
                 os.close(write_descriptor)
@@ -8871,14 +13722,7 @@ def ioerr_write_evidence(
     try:
         _close_descriptors_checked((write_descriptor,))
         owned_descriptors.remove(write_descriptor)
-        selector = selectors.DefaultSelector()
-        try:
-            selector.register(read_descriptor, selectors.EVENT_READ)
-            events = selector.select(timeout=10.0)
-            if events:
-                packet = os.read(read_descriptor, 6)
-        finally:
-            selector.close()
+        packet = _read_process_packet("ioerr_result", read_descriptor, 6)
         status = _wait_or_terminate_owned_process(process_id)
         live_processes.remove(process_id)
     finally:
@@ -8934,6 +13778,7 @@ def ioerr_write_evidence(
     )
 
 
+@_capture_fork_guard
 @_operation_evidence_executor
 def max_page_count_evidence(
     token: StoreToken,
@@ -8998,7 +13843,11 @@ def max_page_count_evidence(
             code = -1
         finally:
             try:
-                os.write(write_descriptor, struct.pack(">i", code))
+                _write_process_packet(
+                    "max_page_count_result",
+                    write_descriptor,
+                    struct.pack(">i", code),
+                )
                 os.close(write_descriptor)
                 exit_code = 0 if code >= 0 else 70
             except BaseException:
@@ -9012,13 +13861,7 @@ def max_page_count_evidence(
     try:
         _close_descriptors_checked((write_descriptor,))
         owned_descriptors.remove(write_descriptor)
-        selector = selectors.DefaultSelector()
-        try:
-            selector.register(read_descriptor, selectors.EVENT_READ)
-            if selector.select(timeout=10.0):
-                payload = os.read(read_descriptor, 4)
-        finally:
-            selector.close()
+        payload = _read_process_packet("max_page_count_result", read_descriptor, 4)
         status = _wait_or_terminate_owned_process(process_id)
         live_processes.remove(process_id)
     finally:
@@ -9064,6 +13907,7 @@ def max_page_count_evidence(
     )
 
 
+@_capture_fork_guard
 @_operation_evidence_executor
 def wal_concurrency_evidence(
     token: StoreToken,
@@ -9099,9 +13943,6 @@ def wal_concurrency_evidence(
             maximum_wal_bytes=0,
             process_boundary="unavailable",
         )
-    if _CONNECTION_PATH_SNAPSHOTS:
-        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-
     try:
         (
             reader_control_pipe,
@@ -9145,10 +13986,7 @@ def wal_concurrency_evidence(
     live_processes: set[int] = set()
 
     def spawn_failed() -> WalConcurrencyEvidence:
-        descriptors_ok = _close_descriptors(all_descriptors)
-        processes_ok = _terminate_and_reap_processes(tuple(live_processes))
-        if not descriptors_ok or not processes_ok:
-            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        _finalize_process_resources(all_descriptors, tuple(live_processes))
         live_processes.clear()
         return WalConcurrencyEvidence(
             disposition=EvidenceDisposition.UNPROVEN,
@@ -9192,8 +14030,12 @@ def wal_concurrency_evidence(
                 minimum=1,
                 maximum=MAX_CONTRACT_INTEGER,
             )
-            os.write(reader_result_write, b"R" + struct.pack(">q", initial_version))
-            if os.read(reader_control_read, 1) != b"Q":
+            _write_process_packet(
+                "reader_ready",
+                reader_result_write,
+                b"R" + struct.pack(">q", initial_version),
+            )
+            if _read_process_packet("reader_control", reader_control_read, 1) != b"Q":
                 os._exit(71)
             retained_reader_row = _fetch_one(
                 reader,
@@ -9214,14 +14056,18 @@ def wal_concurrency_evidence(
             reader.execute("COMMIT").close()
             _close_checked(reader)
             reader = None
-            os.write(reader_result_write, b"S" + struct.pack(">q", retained_version))
+            _write_process_packet(
+                "reader_snapshot",
+                reader_result_write,
+                b"S" + struct.pack(">q", retained_version),
+            )
             os._exit(0)
         except BaseException:
             if reader is not None:
                 _rollback_best_effort(reader)
                 _close_best_effort(reader)
             with suppress(OSError):
-                os.write(reader_result_write, b"E")
+                _write_process_packet("reader_result", reader_result_write, b"E")
             os._exit(70)
 
     try:
@@ -9236,18 +14082,18 @@ def wal_concurrency_evidence(
                 with suppress(OSError):
                     os.close(descriptor)
         try:
-            os.write(writer_result_write, b"R")
+            _write_process_packet("writer_ready", writer_result_write, b"R")
             for item in exact_transitions:
-                if os.read(writer_control_read, 1) != b"W":
+                if _read_process_packet("writer_control", writer_control_read, 1) != b"W":
                     os._exit(71)
                 outcome = compare_and_swap_stream(token, item).classification
                 if outcome is not StoreClassification.UPDATED:
                     os._exit(72)
-                os.write(writer_result_write, b"W")
+                _write_process_packet("writer_ack", writer_result_write, b"W")
             os._exit(0)
         except BaseException:
             with suppress(OSError):
-                os.write(writer_result_write, b"E")
+                _write_process_packet("writer_result", writer_result_write, b"E")
             os._exit(70)
 
     try:
@@ -9264,9 +14110,9 @@ def wal_concurrency_evidence(
         checkpointer: sqlite3.Connection | None = None
         try:
             checkpointer, _ = _connect(token, writer=True)
-            os.write(checkpoint_result_write, b"R")
+            _write_process_packet("checkpoint_ready", checkpoint_result_write, b"R")
             for _ in exact_transitions:
-                if os.read(checkpoint_control_read, 1) != b"P":
+                if _read_process_packet("checkpoint_control", checkpoint_control_read, 1) != b"P":
                     os._exit(71)
                 _verify_operation_authority(checkpointer, token)
                 checkpoint_row = tuple(_fetch_one(checkpointer, "PRAGMA wal_checkpoint(PASSIVE)"))
@@ -9283,8 +14129,12 @@ def wal_concurrency_evidence(
                     maximum=MAX_TEST_WAL_BYTES,
                 )
                 packet = (*cast(tuple[int, int, int], checkpoint_row), wal_bytes)
-                os.write(checkpoint_result_write, struct.pack(">qqqq", *packet))
-            if os.read(checkpoint_control_read, 1) != b"T":
+                _write_process_packet(
+                    "checkpoint_sample",
+                    checkpoint_result_write,
+                    struct.pack(">qqqq", *packet),
+                )
+            if _read_process_packet("checkpoint_control", checkpoint_control_read, 1) != b"T":
                 os._exit(73)
             _verify_operation_authority(checkpointer, token)
             child_truncated = tuple(_fetch_one(checkpointer, "PRAGMA wal_checkpoint(TRUNCATE)"))
@@ -9295,7 +14145,8 @@ def wal_concurrency_evidence(
                 os._exit(74)
             _close_checked(checkpointer)
             checkpointer = None
-            os.write(
+            _write_process_packet(
+                "checkpoint_truncate",
                 checkpoint_result_write,
                 b"T" + struct.pack(">qqq", *cast(tuple[int, int, int], child_truncated)),
             )
@@ -9303,7 +14154,7 @@ def wal_concurrency_evidence(
         except BaseException:
             _close_best_effort(checkpointer)
             with suppress(OSError):
-                os.write(checkpoint_result_write, b"E")
+                _write_process_packet("checkpoint_result", checkpoint_result_write, b"E")
             os._exit(70)
 
     samples: list[tuple[int, int, int]] = []
@@ -9333,12 +14184,12 @@ def wal_concurrency_evidence(
         for _ in exact_transitions:
             if not protocol_ok:
                 break
-            os.write(writer_control_write, b"W")
+            _write_process_packet("writer_control", writer_control_write, b"W")
             if _read_process_packet("writer_ack", writer_result_read, 1) != b"W":
                 protocol_ok = False
                 break
             acknowledged_writes += 1
-            os.write(checkpoint_control_write, b"P")
+            _write_process_packet("checkpoint_control", checkpoint_control_write, b"P")
             payload = _read_process_packet(
                 "checkpoint_sample",
                 checkpoint_result_read,
@@ -9367,7 +14218,7 @@ def wal_concurrency_evidence(
             else:
                 protocol_ok = False
         if protocol_ok:
-            os.write(reader_control_write, b"Q")
+            _write_process_packet("reader_control", reader_control_write, b"Q")
             reader_result = _read_process_packet(
                 "reader_snapshot",
                 reader_result_read,
@@ -9385,7 +14236,7 @@ def wal_concurrency_evidence(
             else:
                 protocol_ok = False
         if protocol_ok:
-            os.write(checkpoint_control_write, b"T")
+            _write_process_packet("checkpoint_control", checkpoint_control_write, b"T")
             truncate_result = _read_process_packet(
                 "checkpoint_truncate",
                 checkpoint_result_read,
@@ -9410,11 +14261,8 @@ def wal_concurrency_evidence(
     except (OSError, ChildProcessError, struct.error):
         protocol_ok = False
     finally:
-        descriptors_ok = _close_descriptors(all_descriptors)
-        processes_ok = _terminate_and_reap_processes(tuple(live_processes))
+        _finalize_process_resources(all_descriptors, tuple(live_processes))
         live_processes.clear()
-        if (not descriptors_ok or not processes_ok) and sys.exception() is None:
-            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
 
     final = load_current(
         token,
@@ -9480,6 +14328,7 @@ def _creation_from_stream_row_unchecked(
         creation=record,
         record_bytes=record_bytes,
         record_digest=record_digest,
+        envelope=envelope,
         envelope_bytes=envelope_bytes,
         envelope_digest=envelope_digest,
         history_root=history_root,
@@ -9577,43 +14426,66 @@ def _validate_history_page_rows(
     stream: sqlite3.Row,
     rows: Sequence[sqlite3.Row],
     *,
-    preceding_row: sqlite3.Row | None = None,
-) -> tuple[ContinuousPublicTradeStreamStoredHistoryEntryV1, ...]:
-    policy = _policy_from_creation(_creation_from_stream_row(stream))
-    entries: list[ContinuousPublicTradeStreamStoredHistoryEntryV1] = []
-    prior_row = preceding_row
-    expected_stream_row_id = stream["stream_row_id"]
-    expected_stream_uuid = stream["stream_uuid"]
-    previous_version = (
-        None
-        if preceding_row is None
-        else _require_exact_int(
-            preceding_row["successor_version"],
-            minimum=1,
-            maximum=MAX_CONTRACT_INTEGER,
+    policy: ContinuousPublicTradePolicy,
+    preceding_snapshot: _ValidatedHistoryRowSnapshot | None = None,
+    cache: _HistorySnapshotCache | None = None,
+) -> tuple[_ValidatedHistoryRowSnapshot, ...]:
+    local_cache = _new_history_snapshot_cache() if cache is None else cache
+    owns_cache = cache is None
+    try:
+        if len(rows) + int(preceding_snapshot is not None) > _MAX_LOCAL_HISTORY_SNAPSHOTS:
+            raise HarnessFailure(HarnessFailureCode.BOUNDS_EXCEEDED)
+        if preceding_snapshot is not None:
+            local_cache.require_snapshot(preceding_snapshot)
+        snapshots: list[_ValidatedHistoryRowSnapshot] = []
+        prior_snapshot = preceding_snapshot
+        expected_stream_row_id = stream["stream_row_id"]
+        expected_stream_uuid = stream["stream_uuid"]
+        previous_version = (
+            None
+            if preceding_snapshot is None
+            else _require_exact_int(
+                preceding_snapshot.row["successor_version"],
+                minimum=1,
+                maximum=MAX_CONTRACT_INTEGER,
+            )
         )
-    )
-    for row in rows:
-        version = _require_exact_int(
-            row["successor_version"],
-            minimum=1,
-            maximum=MAX_CONTRACT_INTEGER,
-        )
-        if row["stream_row_id"] != expected_stream_row_id or (
-            previous_version is not None and version != previous_version + 1
-        ):
-            raise HarnessFailure(HarnessFailureCode.CORRUPT)
-        entry = _entry_from_history_row(
-            row,
-            policy=policy,
-            predecessor=prior_row,
-        )
-        if entry.record.stream_id.bytes != expected_stream_uuid:
-            raise HarnessFailure(HarnessFailureCode.CORRUPT)
-        entries.append(entry)
-        prior_row = row
-        previous_version = version
-    return tuple(entries)
+        for row in rows:
+            version = _require_exact_int(
+                row["successor_version"],
+                minimum=1,
+                maximum=MAX_CONTRACT_INTEGER,
+            )
+            if row["stream_row_id"] != expected_stream_row_id or (
+                previous_version is not None and version != previous_version + 1
+            ):
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            snapshot = _history_snapshot_from_row(
+                row,
+                policy=policy,
+                predecessor=prior_snapshot,
+                cache=local_cache,
+                retain_embedded_predecessor=False,
+            )
+            entry = snapshot.entry
+            if entry.record.stream_id.bytes != expected_stream_uuid:
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            snapshots.append(snapshot)
+            prior_snapshot = snapshot
+            previous_version = version
+        result = tuple(snapshots)
+    except HarnessFailure:
+        _invalidate_history_snapshot_cache_preserving_primary(local_cache)
+        raise
+    except (AttributeError, TypeError, ValueError, OverflowError, UnicodeError):
+        _invalidate_history_snapshot_cache_preserving_primary(local_cache)
+        raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+    except BaseException:
+        _invalidate_history_snapshot_cache_preserving_primary(local_cache)
+        raise
+    if owns_cache:
+        local_cache.invalidate()
+    return result
 
 
 def _validate_tail_binding(
@@ -9910,7 +14782,12 @@ def audit_history(
             or bounds.row_limit != bounds.high_version - bounds.low_version + 1
         ):
             raise HarnessFailure(HarnessFailureCode.CORRUPT)
-        entries = _validate_history_page_rows(stream, rows)
+        snapshots = _validate_history_page_rows(
+            stream,
+            rows,
+            policy=_policy_from_creation(creation),
+        )
+        entries = tuple(snapshot.entry for snapshot in snapshots)
         decoded_rows = len(entries)
         first = entries[0]
         if (
@@ -10531,10 +15408,15 @@ def _closed_file_manifest(token: StoreToken) -> tuple[tuple[str, int, str], ...]
         f"{_DATABASE_BASENAME}-wal",
         f"{_DATABASE_BASENAME}-shm",
     }
-    root_descriptor = -1
-    generation_descriptor = -1
+    acquisition = _begin_operation_path_acquisition(identity)
+    snapshot: _OperationPathSnapshot | None = None
+    manifest: list[tuple[str, int, str]] = []
+    pinned: list[_PinnedFile] = []
     try:
-        root_descriptor, generation_descriptor = _open_owned_generation(identity)
+        _, generation_descriptor = _open_owned_generation(
+            identity,
+            acquisition=acquisition,
+        )
         names = tuple(sorted(os.listdir(generation_descriptor)))
         if (
             _DATABASE_BASENAME not in names
@@ -10543,80 +15425,86 @@ def _closed_file_manifest(token: StoreToken) -> tuple[tuple[str, int, str], ...]
             or len(names) != len(set(names))
         ):
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-        manifest: list[tuple[str, int, str]] = []
-        file_flags = (
-            os.O_RDONLY
-            | getattr(os, "O_NONBLOCK", 0)
-            | getattr(os, "O_NOFOLLOW", 0)
-            | getattr(os, "O_CLOEXEC", 0)
-        )
         for name in names:
-            descriptor = os.open(
+            descriptor = _open_and_adopt_operation_path_descriptor(
+                acquisition,
+                "file",
                 name,
-                file_flags,
-                dir_fd=generation_descriptor,
+                False,
             )
-            try:
-                before = os.fstat(descriptor)
-                maximum = (
-                    MAX_TEST_DATABASE_BYTES if name == _DATABASE_BASENAME else MAX_TEST_WAL_BYTES
+            before = os.fstat(descriptor)
+            maximum = MAX_TEST_DATABASE_BYTES if name == _DATABASE_BASENAME else MAX_TEST_WAL_BYTES
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or before.st_uid != identity.uid
+                or before.st_nlink != 1
+                or stat.S_IMODE(before.st_mode) != 0o600
+                or before.st_size < 0
+                or before.st_size > maximum
+                or (
+                    name == _DATABASE_BASENAME
+                    and (before.st_dev != identity.device or before.st_ino != identity.inode)
                 )
-                if (
-                    not stat.S_ISREG(before.st_mode)
-                    or before.st_uid != identity.uid
-                    or before.st_nlink != 1
-                    or stat.S_IMODE(before.st_mode) != 0o600
-                    or before.st_size < 0
-                    or before.st_size > maximum
-                    or (
-                        name == _DATABASE_BASENAME
-                        and (before.st_dev != identity.device or before.st_ino != identity.inode)
-                    )
-                ):
-                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-                digest = hashlib.sha256()
-                total = 0
-                while True:
-                    block = os.read(descriptor, 65_536)
-                    if not block:
-                        break
-                    total += len(block)
-                    if total > maximum:
-                        raise HarnessFailure(HarnessFailureCode.BOUNDS_EXCEEDED)
-                    digest.update(block)
-                after = os.fstat(descriptor)
-                stable = (
-                    "st_dev",
-                    "st_ino",
-                    "st_mode",
-                    "st_uid",
-                    "st_nlink",
-                    "st_size",
-                    "st_mtime_ns",
-                    "st_ctime_ns",
+            ):
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            digest = hashlib.sha256()
+            total = 0
+            while True:
+                block = os.read(descriptor, 65_536)
+                if not block:
+                    break
+                total += len(block)
+                if total > maximum:
+                    raise HarnessFailure(HarnessFailureCode.BOUNDS_EXCEEDED)
+                digest.update(block)
+            after = os.fstat(descriptor)
+            stable = (
+                "st_dev",
+                "st_ino",
+                "st_mode",
+                "st_uid",
+                "st_nlink",
+                "st_size",
+                "st_mtime_ns",
+                "st_ctime_ns",
+            )
+            if total != before.st_size or any(
+                getattr(before, field) != getattr(after, field) for field in stable
+            ):
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            pinned.append(
+                _PinnedFile(
+                    name=name,
+                    descriptor=descriptor,
+                    device=before.st_dev,
+                    inode=before.st_ino,
+                    uid=before.st_uid,
+                    mode=stat.S_IMODE(before.st_mode),
+                    link_count=before.st_nlink,
                 )
-                if total != before.st_size or any(
-                    getattr(before, field) != getattr(after, field) for field in stable
-                ):
-                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-                manifest.append((name, total, f"sha256:{digest.hexdigest()}"))
-            finally:
-                with suppress(OSError):
-                    os.close(descriptor)
+            )
+            manifest.append((name, total, f"sha256:{digest.hexdigest()}"))
+        if tuple(sorted(os.listdir(generation_descriptor))) != names:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
         if _require_token(token) != identity:
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-        return tuple(manifest)
-    except HarnessFailure:
-        raise
-    except (OSError, RuntimeError):
+        snapshot = _complete_operation_path_acquisition(
+            acquisition,
+            tuple(pinned),
+        )
+    except BaseException as error:
+        try:
+            _fail_operation_path_acquisition(acquisition)
+        except HarnessFailure:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        if isinstance(error, HarnessFailure):
+            raise
         raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
-    finally:
-        if generation_descriptor >= 0:
-            with suppress(OSError):
-                os.close(generation_descriptor)
-        if root_descriptor >= 0:
-            with suppress(OSError):
-                os.close(root_descriptor)
+    try:
+        _close_operation_path_snapshot(snapshot)
+    except HarnessFailure:
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+    return tuple(manifest)
 
 
 def _stream_identities(token: StoreToken) -> tuple[tuple[UUID, bytes], ...]:
@@ -10903,6 +15791,7 @@ def _validated_applicable_transition_chain(
     return exact
 
 
+@_capture_fork_guard
 @_operation_evidence_executor
 def concurrent_write_backup_evidence(
     source: StoreToken,
@@ -10951,8 +15840,8 @@ def concurrent_write_backup_evidence(
             _ACTIVE_GATE_OPERATIONS.set(None)
             _ACTIVE_REJECTION_COLLECTOR.set(None)
             _ACTIVE_OPERATION_EXECUTOR_DEPTH.set(0)
-            _write_process_packet(result_write, b"R")
-            if os.read(control_read, 1) != b"S":
+            _write_process_packet("concurrent_backup_ready", result_write, b"R")
+            if _read_process_packet("concurrent_backup_control", control_read, 1) != b"S":
                 raise HarnessFailure(HarnessFailureCode.UNPROVEN)
             packet = bytearray(b"P")
             for transition in exact_transitions:
@@ -10978,11 +15867,15 @@ def concurrent_write_backup_evidence(
                 packet.extend(bytes.fromhex(_evidence_payload_digest(mutation)))
             if len(packet) != result_packet_size:
                 raise HarnessFailure(HarnessFailureCode.CORRUPT)
-            _write_process_packet(result_write, bytes(packet))
+            _write_process_packet(
+                "concurrent_backup_result",
+                result_write,
+                bytes(packet),
+            )
             exit_code = 0
         except BaseException:
             with suppress(OSError):
-                _write_process_packet(result_write, b"F")
+                _write_process_packet("concurrent_backup_failure", result_write, b"F")
         finally:
             if not _close_descriptors((control_read, result_write)):
                 exit_code = 70
@@ -11023,7 +15916,7 @@ def concurrent_write_backup_evidence(
         progress_observations += 1
         if progress_observations != 1 or control_write < 0:
             raise HarnessFailure(HarnessFailureCode.CORRUPT)
-        _write_process_packet(control_write, b"S")
+        _write_process_packet("concurrent_backup_control", control_write, b"S")
         os.close(control_write)
         control_write = -1
         writer_packet = _read_process_packet(
@@ -11112,7 +16005,7 @@ def concurrent_write_backup_evidence(
             _remove_owned_files(backup_token)
         raise
     finally:
-        descriptors_ok = _close_descriptors(
+        _finalize_process_resources(
             tuple(
                 descriptor
                 for descriptor in (
@@ -11122,11 +16015,10 @@ def concurrent_write_backup_evidence(
                     result_write,
                 )
                 if descriptor >= 0
-            )
+            ),
+            (process_id,),
+            code=HarnessFailureCode.UNPROVEN,
         )
-        processes_ok = _terminate_and_reap_processes((process_id,))
-        if (not descriptors_ok or not processes_ok) and sys.exception() is None:
-            raise HarnessFailure(HarnessFailureCode.UNPROVEN)
 
 
 def _complete_history(
@@ -11279,6 +16171,7 @@ for _closed_operation_authority_name in (
     "_freeze_operation_evidence_authority",
     "_operation_evidence_executor_unsealed",
     "_build_operation_evidence_authority",
+    "_capture_fork_guard",
     "_OPERATION_PRODUCERS_FROZEN",
     "_GATE_OPERATION_ALLOWLIST",
     "_FRESH_OPERATION_PRODUCER_SEQUENCE",
@@ -11464,7 +16357,8 @@ _private_gate_receipt_digest = _build_private_gate_receipt_authority(
 (
     seal_generated_evidence_run,
     _validate_issued_evidence_receipt,
-    _consume_issued_evidence_receipt,
+    _prepare_issued_evidence_receipt_consumption,
+    _arm_evidence_seal_transition_fault,
 ) = _build_evidence_receipt_authority(
     _private_gate_receipt_digest,
     _validate_issued_gate_observation,
@@ -11604,6 +16498,8 @@ for _closed_receipt_authority_name in (
     "_build_rejection_evidence_authority",
     "_build_private_gate_receipt_authority",
     "_private_gate_receipt_digest",
+    "_prepare_issued_evidence_run_consumption",
+    "_prepare_issued_evidence_run_seal",
     "_seal_generated_evidence_run_unsealed",
     "_build_evidence_receipt_authority",
 ):
@@ -11765,9 +16661,14 @@ def _remove_new_collector_token(
 ) -> None:
     """Remove only one live output generation owned by this invocation."""
 
-    if type(token) is not StoreToken or token._nonce in retained_nonces:
+    if (
+        type(token) is not StoreToken
+        or type(token._nonce) is not bytes
+        or len(token._nonce) != 32
+        or token._nonce in retained_nonces
+    ):
         raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-    registered = _TOKEN_REGISTRY.get(token._nonce)
+    registered = _lookup_store_token_authority(token)
     if registered is None or registered.pytest_registration is not run._pytest_registration:
         raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
     _remove_owned_files(token)
@@ -12222,7 +17123,7 @@ def finalize_atomicity_evidence(
         transition_b_v2_binding,
         transition_b_v3_binding,
         mixed_create_binding,
-        transition_a_v4_conflict_binding,
+        mixed_transition_v2_conflict_binding,
     ) = input_bindings
     creation_bindings = (
         create_a_binding,
@@ -12236,7 +17137,7 @@ def finalize_atomicity_evidence(
         replay_transition_a_v3_binding,
         transition_b_v2_binding,
         transition_b_v3_binding,
-        transition_a_v4_conflict_binding,
+        mixed_transition_v2_conflict_binding,
     )
     if any(
         type(binding.stored_record) is not ContinuousPublicTradeStreamStoredCreationV1
@@ -12279,9 +17180,9 @@ def finalize_atomicity_evidence(
         ContinuousPublicTradeStreamStoredCreationV1,
         mixed_create_binding.stored_record,
     )
-    transition_a_v4_conflict = cast(
+    mixed_transition_v2_conflict = cast(
         ContinuousPublicTradeStreamStoredTransitionV1,
-        transition_a_v4_conflict_binding.stored_record,
+        mixed_transition_v2_conflict_binding.stored_record,
     )
     if (
         create_a_binding.policy_digest != _stored_creation_policy_digest(creation_a)
@@ -12294,8 +17195,8 @@ def finalize_atomicity_evidence(
         or not _transition_follows_binding(creation_b, transition_b_v2)
         or not _transition_follows_binding(transition_b_v2, transition_b_v3)
         or not _transition_follows_binding(
-            transition_a_v3,
-            transition_a_v4_conflict,
+            mixed_creation,
+            mixed_transition_v2_conflict,
         )
         or creation_a.record.stream_id == creation_b.record.stream_id
         or _stored_creation_natural_key(creation_a) == _stored_creation_natural_key(creation_b)
@@ -12308,21 +17209,22 @@ def finalize_atomicity_evidence(
             or binding.expectation_child_policy_fingerprint is not None
             for binding in transition_bindings[:-1]
         )
-        or transition_a_v4_conflict_binding.expectation_identity
-        != _stored_creation_identity_binding(creation_b)
-        or transition_a_v4_conflict_binding.expectation_policy_digest
-        != _stored_creation_policy_digest(creation_b)
-        or transition_a_v4_conflict_binding.expectation_child_policy_fingerprint is not None
+        or mixed_transition_v2_conflict_binding.expectation_identity
+        != _stored_creation_identity_binding(mixed_creation)
+        or mixed_transition_v2_conflict_binding.expectation_policy_digest
+        != _stored_creation_policy_digest(mixed_creation)
+        or mixed_transition_v2_conflict_binding.expectation_child_policy_fingerprint is not None
     ):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     creation_a_policy = _policy_from_creation(creation_a)
     creation_b_policy = _policy_from_creation(creation_b)
+    mixed_creation_policy = _policy_from_creation(mixed_creation)
     for prior, transition, policy in (
         (creation_a, transition_a_v2, creation_a_policy),
         (transition_a_v2, transition_a_v3, creation_a_policy),
         (creation_b, transition_b_v2, creation_b_policy),
         (transition_b_v2, transition_b_v3, creation_b_policy),
-        (transition_a_v3, transition_a_v4_conflict, creation_a_policy),
+        (mixed_creation, mixed_transition_v2_conflict, mixed_creation_policy),
     ):
         _validate_transition_against_prior(
             transition,
@@ -13366,11 +18268,14 @@ def _derived_report_gates(
             ContinuousPublicTradeStreamStoredCreationV1,
             ContinuousPublicTradeStreamStoredTransitionV1,
         }
-        or projection.current.record.stream_id != projection.creation.record.stream_id
     ):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    creation = projection.creation
+    current = projection.current
+    if current.record.stream_id != creation.record.stream_id:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
     _validated_report_query_rows(projection.query_evidence)
-    record = projection.creation.record
+    record = creation.record
     try:
         observed_projection = load_current(
             bootstrap.token,
@@ -13887,7 +18792,18 @@ def _write_evidence_report_unbound(
         [Path, _EvidenceReceipt, GeneratedEvidenceAggregate, bool],
         _EvidenceLedger,
     ],
-    consume_receipt: Callable[[_EvidenceReceipt], None],
+    prepare_receipt_consumption: Callable[
+        [_EvidenceReceipt],
+        tuple[
+            Callable[[], bool],
+            Callable[[], bool],
+            Callable[[], bool],
+        ],
+    ],
+    mark_cleanup_uncertain: Callable[[], None],
+    cleanup_uncertain_observed: Callable[[], bool],
+    root_lookup: Callable[[Path], _ActivePytestRoot | None],
+    serialize_report: Callable[[Mapping[str, object]], bytes],
     pytest_root: Path,
     *,
     receipt: _EvidenceReceipt,
@@ -13895,6 +18811,8 @@ def _write_evidence_report_unbound(
 ) -> Path:
     """Write canonical generated evidence beneath one validated pytest root only."""
 
+    if cleanup_uncertain_observed():
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
     if type(report) is not EvidenceReport:
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     root = _validate_bootstrap_root(pytest_root)
@@ -14074,13 +18992,20 @@ def _write_evidence_report_unbound(
             for name, disposition, reason in gates
         ],
     }
-    raw = canonical_descriptor_bytes(document) + b"\n"
-    validate_receipt(
+    raw = serialize_report(document)
+    exact_receipt_ledger = validate_receipt(
         pytest_root,
         receipt,
         report.evidence,
         True,
     )
+    if exact_receipt_ledger is not receipt_ledger:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    (
+        commit_receipt_consumption,
+        terminalize_receipt_consumption,
+        receipt_consumption_terminal,
+    ) = prepare_receipt_consumption(receipt)
     report_name = "task064-evidence.json"
     path = root / report_name
     stage_name = f".task064-evidence-{secrets.token_hex(16)}.tmp"
@@ -14093,8 +19018,12 @@ def _write_evidence_report_unbound(
     )
     root_descriptor = -1
     stage_descriptor = -1
+    readback_descriptor = -1
     stage_created = False
+    publication_attempted = False
     published = False
+    publication_readback_verified = False
+    cleanup_uncertain = False
     stage_details: os.stat_result | None = None
     try:
         directory_flags = (
@@ -14104,7 +19033,9 @@ def _write_evidence_report_unbound(
             | getattr(os, "O_CLOEXEC", 0)
         )
         root_descriptor = os.open(root, directory_flags)
-        active_root = _ACTIVE_PYTEST_ROOTS[id(pytest_root)]
+        active_root = root_lookup(pytest_root)
+        if active_root is None:
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
         root_details = os.fstat(root_descriptor)
         if (
             root_details.st_dev != active_root.device
@@ -14134,8 +19065,13 @@ def _write_evidence_report_unbound(
             or stage_details.st_size != len(raw)
         ):
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-        os.close(stage_descriptor)
+        descriptor = stage_descriptor
         stage_descriptor = -1
+        try:
+            os.close(descriptor)
+        except OSError:
+            cleanup_uncertain = True
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
 
         final_ledger = validate_receipt(
             pytest_root,
@@ -14153,6 +19089,7 @@ def _write_evidence_report_unbound(
             or stat.S_IMODE(final_root_details.st_mode) != stat.S_IMODE(root_details.st_mode)
         ):
             raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        publication_attempted = True
         os.link(
             stage_name,
             report_name,
@@ -14164,11 +19101,18 @@ def _write_evidence_report_unbound(
         os.unlink(stage_name, dir_fd=root_descriptor)
         stage_created = False
         os.fsync(root_descriptor)
-        final_details = os.stat(
+        final_path_details = os.stat(
             report_name,
             dir_fd=root_descriptor,
             follow_symlinks=False,
         )
+        readback_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        readback_descriptor = os.open(
+            report_name,
+            readback_flags,
+            dir_fd=root_descriptor,
+        )
+        final_details = os.fstat(readback_descriptor)
         if (
             stage_details is None
             or final_details.st_dev != stage_details.st_dev
@@ -14178,45 +19122,95 @@ def _write_evidence_report_unbound(
             or final_details.st_nlink != 1
             or not stat.S_ISREG(final_details.st_mode)
             or stat.S_IMODE(final_details.st_mode) != 0o600
+            or final_path_details.st_dev != final_details.st_dev
+            or final_path_details.st_ino != final_details.st_ino
+            or final_path_details.st_uid != final_details.st_uid
+            or final_path_details.st_mode != final_details.st_mode
+            or final_path_details.st_nlink != final_details.st_nlink
+            or final_path_details.st_size != final_details.st_size
         ):
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-        consume_receipt(receipt)
-        receipt_ledger.consumed = True
-        try:
-            os.close(root_descriptor)
-        except OSError:
-            root_descriptor = -1
-            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
-        root_descriptor = -1
-    except BaseException as error:
-        cleanup_ok = True
-        if stage_descriptor >= 0:
+        observed = bytearray()
+        while len(observed) < len(raw):
             try:
-                os.close(stage_descriptor)
+                chunk = os.read(
+                    readback_descriptor,
+                    len(raw) - len(observed),
+                )
+            except InterruptedError:
+                continue
+            if not chunk:
+                break
+            observed.extend(chunk)
+        while True:
+            try:
+                trailing = os.read(readback_descriptor, 1)
+                break
+            except InterruptedError:
+                continue
+        if bytes(observed) != raw or trailing != b"":
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        # Local fsync plus exact immediate readback verifies the temporary report bytes
+        # at publication time only; it is not durability evidence. The draft PR and CI
+        # logs remain the separately governed durable evidence channel.
+        publication_readback_verified = True
+        descriptor = readback_descriptor
+        readback_descriptor = -1
+        try:
+            os.close(descriptor)
+        except OSError:
+            cleanup_uncertain = True
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        descriptor = root_descriptor
+        root_descriptor = -1
+        try:
+            os.close(descriptor)
+        except OSError:
+            cleanup_uncertain = True
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        if not commit_receipt_consumption() or not receipt_consumption_terminal():
+            cleanup_uncertain = True
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        return path
+    except BaseException as error:
+        cleanup_ok = not cleanup_uncertain
+        if readback_descriptor >= 0:
+            descriptor = readback_descriptor
+            readback_descriptor = -1
+            try:
+                os.close(descriptor)
             except OSError:
                 cleanup_ok = False
+        if stage_descriptor >= 0:
+            descriptor = stage_descriptor
             stage_descriptor = -1
-        if root_descriptor >= 0 and stage_details is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                cleanup_ok = False
+        if root_descriptor >= 0 and publication_attempted and not publication_readback_verified:
             try:
                 final_details = os.stat(
                     report_name,
                     dir_fd=root_descriptor,
                     follow_symlinks=False,
                 )
-                same_staged_inode = (
+                same_staged_inode = stage_details is not None and (
                     final_details.st_dev == stage_details.st_dev
                     and final_details.st_ino == stage_details.st_ino
                 )
                 if same_staged_inode:
                     os.unlink(report_name, dir_fd=root_descriptor)
                     published = False
-                elif published or not isinstance(error, FileExistsError):
+                elif isinstance(error, FileExistsError) and not published:
+                    pass
+                else:
                     cleanup_ok = False
             except FileNotFoundError:
-                pass
+                published = False
             except OSError:
                 cleanup_ok = False
-        if root_descriptor >= 0 and stage_created and stage_details is not None:
+        if root_descriptor >= 0 and stage_created:
             try:
                 pending_details = os.stat(
                     stage_name,
@@ -14224,42 +19218,56 @@ def _write_evidence_report_unbound(
                     follow_symlinks=False,
                 )
                 if (
-                    pending_details.st_dev != stage_details.st_dev
-                    or pending_details.st_ino != stage_details.st_ino
+                    (
+                        stage_details is not None
+                        and (
+                            pending_details.st_dev != stage_details.st_dev
+                            or pending_details.st_ino != stage_details.st_ino
+                        )
+                    )
+                    or not stat.S_ISREG(pending_details.st_mode)
+                    or pending_details.st_uid != os.getuid()
+                    or stat.S_IMODE(pending_details.st_mode) != 0o600
+                    or pending_details.st_nlink != 1
                 ):
                     cleanup_ok = False
                 else:
                     os.unlink(stage_name, dir_fd=root_descriptor)
                     stage_created = False
-            except OSError:
-                cleanup_ok = False
-        elif root_descriptor >= 0 and stage_created:
-            try:
-                os.unlink(stage_name, dir_fd=root_descriptor)
+            except FileNotFoundError:
                 stage_created = False
             except OSError:
                 cleanup_ok = False
-        if root_descriptor >= 0:
+        if root_descriptor >= 0 and not publication_readback_verified:
             try:
                 os.fsync(root_descriptor)
             except OSError:
                 cleanup_ok = False
+        if root_descriptor >= 0:
+            descriptor = root_descriptor
+            root_descriptor = -1
+            try:
+                os.close(descriptor)
+            except OSError:
+                cleanup_ok = False
+        elif stage_created or (
+            publication_attempted
+            and not publication_readback_verified
+            and not isinstance(error, FileExistsError)
+        ):
+            cleanup_ok = False
         if not cleanup_ok:
-            consume_receipt(receipt)
-            receipt_ledger.consumed = True
+            mark_cleanup_uncertain()
+        if publication_readback_verified or not cleanup_ok:
+            terminalized = terminalize_receipt_consumption()
+            if not terminalized and not receipt_consumption_terminal():
+                mark_cleanup_uncertain()
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
         if isinstance(error, HarnessFailure):
             raise
         if isinstance(error, (MemoryError, OSError)):
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
         raise
-    finally:
-        if stage_descriptor >= 0:
-            with suppress(OSError):
-                os.close(stage_descriptor)
-        if root_descriptor >= 0:
-            with suppress(OSError):
-                os.close(root_descriptor)
-    return path
 
 
 def _build_evidence_report_writer(
@@ -14267,12 +19275,39 @@ def _build_evidence_report_writer(
         [_EvidenceReceipt, GeneratedEvidenceAggregate, bool],
         bool,
     ],
-    consume_receipt: Callable[[_EvidenceReceipt], None],
+    prepare_receipt_consumption: Callable[
+        [_EvidenceReceipt],
+        tuple[
+            Callable[[], bool],
+            Callable[[], bool],
+            Callable[[], bool],
+        ],
+    ],
 ) -> Callable[..., Path]:
     """Capture receipt validation and consumption behind the public writer."""
 
     validation_implementation = _validate_evidence_receipt_unbound
     writer_implementation = _write_evidence_report_unbound
+    mark_cleanup_uncertain = _mark_process_cleanup_uncertain
+    cleanup_uncertain_observed = _has_process_cleanup_uncertainty
+    root_lookup = _lookup_active_pytest_root
+    json_serializer = json.dumps
+
+    def serialize_report(document: Mapping[str, object]) -> bytes:
+        try:
+            return (
+                json_serializer(
+                    document,
+                    allow_nan=False,
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+                + b"\n"
+            )
+        except MemoryError:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        except (TypeError, ValueError):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
 
     def validate_receipt(
         pytest_root: Path,
@@ -14296,7 +19331,11 @@ def _build_evidence_report_writer(
     ) -> Path:
         return writer_implementation(
             validate_receipt,
-            consume_receipt,
+            prepare_receipt_consumption,
+            mark_cleanup_uncertain,
+            cleanup_uncertain_observed,
+            root_lookup,
+            serialize_report,
             pytest_root,
             receipt=receipt,
             report=report,
@@ -14307,14 +19346,14 @@ def _build_evidence_report_writer(
 
 write_evidence_report = _build_evidence_report_writer(
     _validate_issued_evidence_receipt,
-    _consume_issued_evidence_receipt,
+    _prepare_issued_evidence_receipt_consumption,
 )
 for _closed_report_writer_authority_name in (
     "_build_evidence_report_writer",
     "_validate_evidence_receipt_unbound",
     "_write_evidence_report_unbound",
     "_validate_issued_evidence_receipt",
-    "_consume_issued_evidence_receipt",
+    "_prepare_issued_evidence_receipt_consumption",
 ):
     globals().pop(_closed_report_writer_authority_name, None)
 globals().pop("_closed_report_writer_authority_name", None)

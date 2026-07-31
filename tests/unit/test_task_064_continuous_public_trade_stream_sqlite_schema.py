@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import contextvars
+import inspect
 import json
+import os
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
+from types import FunctionType
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -17,18 +21,247 @@ if TYPE_CHECKING:
 else:
     import tests.support.continuous_public_trade_stream_sqlite_harness as harness
 
+
+def _bind_task064_harness_module() -> None:
+    harness._bind_task064_test_module()
+
+
+_bind_task064_harness_module()
+del _bind_task064_harness_module
+
+
 EXPECTED_SCHEMA_FINGERPRINT = (
     "sha256:0410c1f08390a411c73427b3d07c542f3d1828def7c6adebab51cd57375355b3"
 )
+_FIXTURE_REQUEST_TYPE = pytest.FixtureRequest
+_TEMP_PATH_FACTORY_TYPE = pytest.TempPathFactory
+_TEMP_PATH_MKTEMP = pytest.TempPathFactory.mktemp
+type _Task064FixtureCallable = Callable[
+    [pytest.FixtureRequest, Path, pytest.TempPathFactory],
+    Iterator[harness._PytestRootCapability],
+]
 
 
-@pytest.fixture(autouse=True)
-def _active_task064_pytest_root(
-    tmp_path: Path,
-    request: pytest.FixtureRequest,
-) -> Iterator[None]:
-    with harness._pytest_root_scope(tmp_path, node_id=request.node.nodeid):
-        yield
+def _build_active_task064_pytest_root_fixture() -> Callable[..., object]:
+    module_globals = globals()
+    module_name = __name__
+    module_file = __file__
+    pytest_module = pytest
+    harness_module = harness
+    inspect_module = inspect
+    os_module = os
+    contextvars_module = contextvars
+    fixture_request_type = _FIXTURE_REQUEST_TYPE
+    temp_path_factory_type = _TEMP_PATH_FACTORY_TYPE
+    temp_path_mktemp = _TEMP_PATH_MKTEMP
+    path_type = Path
+    function_type = FunctionType
+    pytest_fixture = pytest.fixture
+    unwrap_fixture = inspect.unwrap
+    environment = os.environ
+    context_type = contextvars.Context
+    begin_registration = harness._begin_pytest_root_registration
+    root_scope = harness._pytest_root_scope
+    cancel_registration = harness._cancel_pytest_root_registration
+    authenticate_child_provenance = harness._authenticate_task064_child_provenance
+    activate_child_provenance = harness._activate_task064_child_provenance
+    claim_post_return_child_provenance = harness._claim_task064_post_return_child_provenance
+    claim_child_dispatch_provenance = harness._claim_task064_child_dispatch_provenance
+    finish_child_provenance = harness._finish_task064_child_provenance
+    cancel_child_provenance = harness._cancel_task064_child_provenance
+    harness_failure_type = harness.HarnessFailure
+    harness_failure_code_type = harness.HarnessFailureCode
+    invalid_bootstrap_code = harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+    dict_get = dict.get
+    getattr_value = getattr
+    isinstance_value = isinstance
+    type_of = type
+    bool_type = bool
+    str_type = str
+    runtime_error_type = RuntimeError
+    assertion_error_type = AssertionError
+    base_exception_type = BaseException
+    next_value = next
+    raw_fixture: _Task064FixtureCallable | None = None
+    exported_fixture: Callable[..., object] | None = None
+
+    def invoke_fixture_callable(
+        fixture: _Task064FixtureCallable,
+        fixture_request: pytest.FixtureRequest,
+        fixture_root: Path,
+        fixture_factory: pytest.TempPathFactory,
+    ) -> Iterator[harness._PytestRootCapability]:
+        return fixture(fixture_request, fixture_root, fixture_factory)
+
+    def bindings_are_exact() -> bool:
+        return bool_type(
+            raw_fixture is not None
+            and exported_fixture is not None
+            and dict_get(module_globals, "__name__") == module_name
+            and dict_get(module_globals, "__file__") == module_file
+            and dict_get(module_globals, "pytest") is pytest_module
+            and dict_get(module_globals, "harness") is harness_module
+            and dict_get(module_globals, "inspect") is inspect_module
+            and dict_get(module_globals, "os") is os_module
+            and dict_get(module_globals, "contextvars") is contextvars_module
+            and dict_get(module_globals, "Path") is path_type
+            and dict_get(module_globals, "FunctionType") is function_type
+            and dict_get(module_globals, "_FIXTURE_REQUEST_TYPE") is fixture_request_type
+            and dict_get(module_globals, "_TEMP_PATH_FACTORY_TYPE") is temp_path_factory_type
+            and dict_get(module_globals, "_TEMP_PATH_MKTEMP") is temp_path_mktemp
+            and dict_get(module_globals, "_active_task064_pytest_root") is exported_fixture
+            and getattr_value(pytest_module, "FixtureRequest", None) is fixture_request_type
+            and getattr_value(pytest_module, "TempPathFactory", None) is temp_path_factory_type
+            and getattr_value(temp_path_factory_type, "mktemp", None) is temp_path_mktemp
+            and getattr_value(pytest_module, "fixture", None) is pytest_fixture
+            and getattr_value(inspect_module, "unwrap", None) is unwrap_fixture
+            and getattr_value(os_module, "environ", None) is environment
+            and getattr_value(contextvars_module, "Context", None) is context_type
+            and getattr_value(harness_module, "_begin_pytest_root_registration", None)
+            is begin_registration
+            and getattr_value(harness_module, "_pytest_root_scope", None) is root_scope
+            and getattr_value(harness_module, "_cancel_pytest_root_registration", None)
+            is cancel_registration
+            and getattr_value(
+                harness_module,
+                "_authenticate_task064_child_provenance",
+                None,
+            )
+            is authenticate_child_provenance
+            and getattr_value(harness_module, "_activate_task064_child_provenance", None)
+            is activate_child_provenance
+            and getattr_value(
+                harness_module,
+                "_claim_task064_post_return_child_provenance",
+                None,
+            )
+            is claim_post_return_child_provenance
+            and getattr_value(
+                harness_module,
+                "_claim_task064_child_dispatch_provenance",
+                None,
+            )
+            is claim_child_dispatch_provenance
+            and getattr_value(harness_module, "_finish_task064_child_provenance", None)
+            is finish_child_provenance
+            and getattr_value(harness_module, "_cancel_task064_child_provenance", None)
+            is cancel_child_provenance
+            and getattr_value(harness_module, "HarnessFailure", None) is harness_failure_type
+            and getattr_value(harness_module, "HarnessFailureCode", None)
+            is harness_failure_code_type
+            and getattr_value(harness_failure_code_type, "INVALID_BOOTSTRAP_ROOT", None)
+            is invalid_bootstrap_code
+            and unwrap_fixture(exported_fixture) is raw_fixture
+        )
+
+    def _active_task064_pytest_root(
+        request: pytest.FixtureRequest,
+        tmp_path: Path,
+        tmp_path_factory: pytest.TempPathFactory,
+    ) -> Iterator[harness._PytestRootCapability]:
+        sealed_raw_fixture = raw_fixture
+        sealed_exported_fixture = exported_fixture
+        if (
+            not bindings_are_exact()
+            or sealed_raw_fixture is None
+            or sealed_exported_fixture is None
+        ):
+            raise runtime_error_type("invalid TASK064 pytest fixture dependency seal")
+        if (
+            not isinstance_value(request, fixture_request_type)
+            or not isinstance_value(tmp_path_factory, temp_path_factory_type)
+            or not isinstance_value(tmp_path, path_type)
+            or type_of(request.node.nodeid) is not str_type
+        ):
+            raise runtime_error_type("invalid TASK064 pytest fixture authority")
+        node_id = request.node.nodeid
+        ticket = authenticate_child_provenance(node_id)
+        permit = None
+        try:
+            activate_child_provenance(ticket, node_id, tmp_path)
+            replay_mode = claim_post_return_child_provenance(ticket, node_id)
+            replay_fixture = unwrap_fixture(sealed_exported_fixture)
+            if (
+                type_of(replay_fixture) is not function_type
+                or replay_fixture is not sealed_raw_fixture
+            ):
+                raise runtime_error_type("invalid TASK064 pytest fixture callable")
+            permit = begin_registration(node_id, tmp_path)
+            fixture_roots = (
+                temp_path_mktemp(tmp_path_factory, "task064-secondary-0"),
+                temp_path_mktemp(tmp_path_factory, "task064-secondary-1"),
+                temp_path_mktemp(tmp_path_factory, "task064-secondary-2"),
+                temp_path_mktemp(tmp_path_factory, "task064-secondary-3"),
+            )
+            fixture_scope = root_scope(permit, fixture_roots)
+            failures_before_yield = request.session.testsfailed
+            with fixture_scope as capability:
+                yield capability
+            if ticket is not None and request.session.testsfailed != failures_before_yield:
+                raise runtime_error_type("TASK064 authenticated child body failed")
+            if replay_mode:
+                replay_root = temp_path_mktemp(
+                    tmp_path_factory,
+                    "task064-returned-replay",
+                )
+                replay_parent = replay_root.parent
+                replay_inventory = tuple(replay_parent.iterdir())
+                replay_calls = 0
+
+                def invoke_exact_fixture() -> Iterator[harness._PytestRootCapability]:
+                    nonlocal replay_calls
+                    replay_calls += 1
+                    return invoke_fixture_callable(
+                        sealed_raw_fixture,
+                        request,
+                        replay_root,
+                        tmp_path_factory,
+                    )
+
+                replay_generator: Iterator[harness._PytestRootCapability] | None = None
+                replay_context = context_type()
+                try:
+                    replay_generator = replay_context.run(invoke_exact_fixture)
+                    try:
+                        replay_context.run(next_value, replay_generator)
+                    except harness_failure_type as error:
+                        if error.code is not invalid_bootstrap_code:
+                            raise
+                    else:
+                        raise assertion_error_type(
+                            "returned fixture lifecycle replay minted authority"
+                        )
+                finally:
+                    if replay_generator is not None:
+                        replay_generator.close()  # type: ignore[attr-defined]
+                assert replay_calls == 1
+                assert tuple(replay_parent.iterdir()) == replay_inventory
+                assert tuple(replay_root.iterdir()) == ()
+            finish_child_provenance(ticket, node_id)
+        except base_exception_type as fixture_error:
+            cleanup_errors: list[BaseException] = []
+            if permit is not None:
+                try:
+                    cancel_registration(permit)
+                except base_exception_type as cleanup_error:
+                    cleanup_errors.append(cleanup_error)
+            try:
+                cancel_child_provenance(ticket, node_id)
+            except base_exception_type as cleanup_error:
+                cleanup_errors.append(cleanup_error)
+            if cleanup_errors:
+                raise harness_failure_type(invalid_bootstrap_code) from fixture_error
+            raise
+
+    raw_fixture = _active_task064_pytest_root
+    exported_fixture = pytest_fixture(autouse=True)(raw_fixture)
+    if unwrap_fixture(exported_fixture) is not raw_fixture:
+        raise runtime_error_type("invalid TASK064 pytest fixture decoration")
+    return exported_fixture
+
+
+_active_task064_pytest_root = _build_active_task064_pytest_root_fixture()
+del _build_active_task064_pytest_root_fixture
 
 
 def test_golden_descriptor_matches_live_catalog_without_self_blessing(
@@ -45,6 +278,289 @@ def test_golden_descriptor_matches_live_catalog_without_self_blessing(
     assert harness.schema_fingerprint(descriptor) == EXPECTED_SCHEMA_FINGERPRINT
     assert harness.load_schema_fingerprint() == EXPECTED_SCHEMA_FINGERPRINT
     assert harness.provisional_schema_descriptor(tmp_path) == descriptor
+
+
+def test_schema_fixture_snapshot_scopes_have_exact_single_pass_counters(
+    tmp_path: Path,
+) -> None:
+    events: list[str] = []
+    counts = {
+        "descriptor_read": 0,
+        "fingerprint_read": 0,
+        "parse": 0,
+        "canonicalize": 0,
+        "hash": 0,
+        "digest_decode": 0,
+        "installed": 0,
+    }
+    real_read_bytes = Path.read_bytes
+    real_parse = harness._parse_schema_descriptor_document
+    real_canonicalize = harness.canonical_descriptor_bytes
+    real_hash = harness._schema_fingerprint_from_canonical_bytes
+    real_digest_decode = harness._digest_bytes
+    real_installed = harness.installed_schema_descriptor
+
+    def observed_read_bytes(path: Path) -> bytes:
+        if path == harness.SCHEMA_DESCRIPTOR_PATH:
+            counts["descriptor_read"] += 1
+            events.append("descriptor_read")
+        elif path == harness.SCHEMA_FINGERPRINT_PATH:
+            counts["fingerprint_read"] += 1
+            events.append("fingerprint_read")
+        return real_read_bytes(path)
+
+    def observed_parse(document: bytes) -> dict[str, object]:
+        counts["parse"] += 1
+        events.append("parse")
+        return real_parse(document)
+
+    def observed_canonicalize(descriptor: Mapping[str, object]) -> bytes:
+        counts["canonicalize"] += 1
+        events.append("canonicalize")
+        return real_canonicalize(descriptor)
+
+    def observed_hash(canonical_bytes: bytes) -> str:
+        counts["hash"] += 1
+        events.append("hash")
+        return real_hash(canonical_bytes)
+
+    def observed_digest_decode(value: str) -> bytes:
+        counts["digest_decode"] += 1
+        events.append("digest_decode")
+        return real_digest_decode(value)
+
+    def observed_installed(connection: sqlite3.Connection) -> dict[str, object]:
+        counts["installed"] += 1
+        events.append("installed")
+        return real_installed(connection)
+
+    def reset_counts() -> None:
+        events.clear()
+        for name in counts:
+            counts[name] = 0
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(Path, "read_bytes", observed_read_bytes)
+        patch.setattr(harness, "_parse_schema_descriptor_document", observed_parse)
+        patch.setattr(harness, "canonical_descriptor_bytes", observed_canonicalize)
+        patch.setattr(harness, "_schema_fingerprint_from_canonical_bytes", observed_hash)
+        patch.setattr(harness, "_digest_bytes", observed_digest_decode)
+        patch.setattr(harness, "installed_schema_descriptor", observed_installed)
+
+        assert harness.load_schema_descriptor()["descriptor_version"] == 1
+        assert counts == {
+            "descriptor_read": 1,
+            "fingerprint_read": 0,
+            "parse": 1,
+            "canonicalize": 1,
+            "hash": 0,
+            "digest_decode": 0,
+            "installed": 0,
+        }
+        assert events == ["descriptor_read", "parse", "canonicalize"]
+
+        reset_counts()
+        assert harness.load_schema_fingerprint() == EXPECTED_SCHEMA_FINGERPRINT
+        assert counts == {
+            "descriptor_read": 1,
+            "fingerprint_read": 1,
+            "parse": 1,
+            "canonicalize": 1,
+            "hash": 1,
+            "digest_decode": 1,
+            "installed": 0,
+        }
+        assert events == [
+            "fingerprint_read",
+            "digest_decode",
+            "descriptor_read",
+            "parse",
+            "canonicalize",
+            "hash",
+        ]
+
+        reset_counts()
+
+        def skip_post_bootstrap_verify(_token: harness.StoreToken) -> None:
+            return None
+
+        with pytest.MonkeyPatch.context() as bootstrap_patch:
+            bootstrap_patch.setattr(harness, "verify_store", skip_post_bootstrap_verify)
+            token = harness.bootstrap_store(tmp_path)
+        assert counts == {
+            "descriptor_read": 1,
+            "fingerprint_read": 1,
+            "parse": 1,
+            "canonicalize": 1,
+            "hash": 1,
+            "digest_decode": 1,
+            "installed": 1,
+        }
+        assert events == [
+            "installed",
+            "descriptor_read",
+            "parse",
+            "canonicalize",
+            "fingerprint_read",
+            "digest_decode",
+            "hash",
+        ]
+
+        connection, _ = harness._connect(token, writer=False)
+        try:
+            connection.execute("BEGIN").close()
+            reset_counts()
+            assert harness._verify_schema_identity(connection) == EXPECTED_SCHEMA_FINGERPRINT
+            assert counts == {
+                "descriptor_read": 1,
+                "fingerprint_read": 1,
+                "parse": 1,
+                "canonicalize": 1,
+                "hash": 1,
+                "digest_decode": 1,
+                "installed": 1,
+            }
+            assert events == [
+                "fingerprint_read",
+                "digest_decode",
+                "descriptor_read",
+                "parse",
+                "canonicalize",
+                "hash",
+                "installed",
+            ]
+            connection.execute("ROLLBACK").close()
+        finally:
+            connection.close()
+
+
+def test_schema_fixture_snapshots_are_distinct_and_failures_are_not_memoized() -> None:
+    first = harness._load_schema_fixture_snapshot()
+    second = harness._load_schema_fixture_snapshot()
+    assert first is not second
+    assert first.descriptor is not second.descriptor
+    assert first.descriptor == second.descriptor
+    assert first.fingerprint == second.fingerprint == EXPECTED_SCHEMA_FINGERPRINT
+    assert (
+        first.fingerprint_bytes
+        == second.fingerprint_bytes
+        == EXPECTED_SCHEMA_FINGERPRINT.encode("ascii")
+    )
+
+    real_read_bytes = Path.read_bytes
+    descriptor_reads = 0
+    fingerprint_reads = 0
+
+    def fail_once_then_read_fresh(path: Path) -> bytes:
+        nonlocal descriptor_reads, fingerprint_reads
+        if path == harness.SCHEMA_DESCRIPTOR_PATH:
+            descriptor_reads += 1
+        elif path == harness.SCHEMA_FINGERPRINT_PATH:
+            fingerprint_reads += 1
+            if fingerprint_reads == 1:
+                return b"sha256:" + (b"0" * 64) + b"\n"
+        return real_read_bytes(path)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(Path, "read_bytes", fail_once_then_read_fresh)
+        with pytest.raises(harness.HarnessFailure) as first_failure:
+            harness.load_schema_fingerprint()
+        assert first_failure.value.code is harness.HarnessFailureCode.CORRUPT
+        assert harness.load_schema_fingerprint() == EXPECTED_SCHEMA_FINGERPRINT
+    assert descriptor_reads == 2
+    assert fingerprint_reads == 2
+
+
+def test_schema_fixture_unexpected_failure_is_rethrown_and_not_memoized() -> None:
+    real_read_bytes = Path.read_bytes
+    unexpected = RuntimeError("schema-fixture-unexpected")
+    descriptor_reads = 0
+
+    def fail_once_then_read_fresh(path: Path) -> bytes:
+        nonlocal descriptor_reads
+        if path == harness.SCHEMA_DESCRIPTOR_PATH:
+            descriptor_reads += 1
+            if descriptor_reads == 1:
+                raise unexpected
+        return real_read_bytes(path)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(Path, "read_bytes", fail_once_then_read_fresh)
+        with pytest.raises(RuntimeError) as first_failure:
+            harness.load_schema_fingerprint()
+        assert first_failure.value is unexpected
+        assert harness.load_schema_fingerprint() == EXPECTED_SCHEMA_FINGERPRINT
+    assert descriptor_reads == 2
+
+
+def test_bootstrap_and_identity_verification_have_one_descriptor_read_traps(
+    tmp_path: Path,
+) -> None:
+    real_read_bytes = Path.read_bytes
+    descriptor_reads = 0
+
+    def reject_a_second_descriptor_read(path: Path) -> bytes:
+        nonlocal descriptor_reads
+        if path == harness.SCHEMA_DESCRIPTOR_PATH:
+            descriptor_reads += 1
+            if descriptor_reads > 1:
+                raise AssertionError("descriptor fixture read more than once in one scope")
+        return real_read_bytes(path)
+
+    def skip_post_bootstrap_verify(_token: harness.StoreToken) -> None:
+        return None
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(Path, "read_bytes", reject_a_second_descriptor_read)
+        patch.setattr(harness, "verify_store", skip_post_bootstrap_verify)
+        token = harness.bootstrap_store(tmp_path)
+    assert descriptor_reads == 1
+
+    connection, _ = harness._connect(token, writer=False)
+    try:
+        connection.execute("BEGIN").close()
+        descriptor_reads = 0
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(Path, "read_bytes", reject_a_second_descriptor_read)
+            assert harness._verify_schema_identity(connection) == EXPECTED_SCHEMA_FINGERPRINT
+        assert descriptor_reads == 1
+        connection.execute("ROLLBACK").close()
+    finally:
+        connection.close()
+
+
+def test_schema_fixture_live_drift_is_observed_by_the_next_identity_scope(
+    tmp_path: Path,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    descriptor_raw = harness.SCHEMA_DESCRIPTOR_PATH.read_bytes()
+    descriptor = json.loads(descriptor_raw)
+    assert type(descriptor) is dict
+    descriptor["page_size"] = harness.PAGE_SIZE * 2
+    drifted_raw = harness.canonical_descriptor_bytes(descriptor) + b"\n"
+    real_read_bytes = Path.read_bytes
+    descriptor_reads = 0
+
+    def drift_between_scopes(path: Path) -> bytes:
+        nonlocal descriptor_reads
+        if path == harness.SCHEMA_DESCRIPTOR_PATH:
+            descriptor_reads += 1
+            return descriptor_raw if descriptor_reads == 1 else drifted_raw
+        return real_read_bytes(path)
+
+    connection, _ = harness._connect(token, writer=False)
+    try:
+        connection.execute("BEGIN").close()
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(Path, "read_bytes", drift_between_scopes)
+            assert harness._verify_schema_identity(connection) == EXPECTED_SCHEMA_FINGERPRINT
+            with pytest.raises(harness.HarnessFailure) as drifted:
+                harness._verify_schema_identity(connection)
+        assert drifted.value.code is harness.HarnessFailureCode.CORRUPT
+        assert descriptor_reads == 2
+        connection.execute("ROLLBACK").close()
+    finally:
+        connection.close()
 
 
 def test_descriptor_freezes_only_the_permitted_physical_projections() -> None:
@@ -177,6 +693,365 @@ def test_bootstrap_reopens_with_the_exact_runtime_and_empty_schema(
     assert summary.profile.defensive_enabled
     assert dict(summary.profile.pragmas)["max_page_count"] == harness.MAX_PAGE_COUNT
     assert dict(summary.profile.pragmas)["wal_autocheckpoint"] == harness.WAL_AUTOCHECKPOINT_PAGES
+    assert dict(summary.profile.pragmas)["cache_size"] == -8192
+
+
+def _connection_runtime_records() -> dict[int, dict[str, object]]:
+    exact_record = inspect.getclosurevars(harness._consume_connection_immutable_runtime).nonlocals[
+        "exact_runtime_record"
+    ]
+    records = inspect.getclosurevars(exact_record).nonlocals["connection_records"]
+    assert type(records) is dict
+    return records
+
+
+def test_transaction_reuses_exact_connection_local_immutable_runtime_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    connection, profile = harness._connect(token, writer=True)
+    record = _connection_runtime_records()[id(connection)]
+    stored_evidence = record["runtime_evidence"]
+    consumed = harness._consume_connection_immutable_runtime(
+        connection,
+        token._nonce,
+        True,
+    )
+    assert consumed == stored_evidence
+    assert consumed is not stored_evidence
+    assert profile.python_version == consumed.python_version
+    assert profile.sqlite_version == consumed.sqlite_version
+    assert profile.threadsafety == consumed.threadsafety
+    assert profile.sqlite_source_id == consumed.sqlite_source_id
+    assert profile.compile_options == consumed.compile_options
+
+    counters = {
+        "python_version": 0,
+        "sqlite_version": 0,
+        "threadsafety": 0,
+        "source_id": 0,
+        "compile_options": 0,
+    }
+    real_sys = __import__("sys")
+    real_sqlite = sqlite3
+    real_fetch_one = harness._fetch_one
+    real_fetch_all = harness._fetch_all
+
+    class CountingSystem:
+        def __getattr__(self, name: str) -> object:
+            if name == "version_info":
+                counters["python_version"] += 1
+            return getattr(real_sys, name)
+
+    class CountingSqlite:
+        def __getattr__(self, name: str) -> object:
+            if name in {"sqlite_version", "threadsafety"}:
+                counters[name] += 1
+            return getattr(real_sqlite, name)
+
+    def counted_fetch_one(
+        observed_connection: sqlite3.Connection,
+        sql: str,
+        parameters: Sequence[object] = (),
+    ) -> sqlite3.Row:
+        if sql == "SELECT sqlite_source_id()":
+            counters["source_id"] += 1
+        return real_fetch_one(observed_connection, sql, parameters)
+
+    def counted_fetch_all(
+        observed_connection: sqlite3.Connection,
+        sql: str,
+        parameters: Sequence[object] = (),
+    ) -> list[sqlite3.Row]:
+        if sql == "PRAGMA compile_options":
+            counters["compile_options"] += 1
+        return real_fetch_all(observed_connection, sql, parameters)
+
+    try:
+        monkeypatch.setattr(harness, "sys", CountingSystem())
+        monkeypatch.setattr(harness, "sqlite3", CountingSqlite())
+        monkeypatch.setattr(harness, "_fetch_one", counted_fetch_one)
+        monkeypatch.setattr(harness, "_fetch_all", counted_fetch_all)
+
+        assert harness._verify_operation_snapshot(connection, token, writer=True)
+        assert counters == {
+            "python_version": 1,
+            "sqlite_version": 1,
+            "threadsafety": 1,
+            "source_id": 1,
+            "compile_options": 1,
+        }
+        for name in counters:
+            counters[name] = 0
+
+        connection.execute("BEGIN IMMEDIATE").close()
+        assert harness._verify_operation_snapshot(connection, token, writer=True)
+        assert counters == {
+            "python_version": 0,
+            "sqlite_version": 0,
+            "threadsafety": 0,
+            "source_id": 0,
+            "compile_options": 0,
+        }
+        connection.execute("ROLLBACK").close()
+    finally:
+        if connection.in_transaction:
+            connection.execute("ROLLBACK").close()
+        connection.close()
+
+
+def test_connection_runtime_binding_rejects_hostile_lifecycle_and_cross_binding(
+    tmp_path: Path,
+    _active_task064_pytest_root: harness._PytestRootCapability,
+) -> None:
+    first_token = harness.bootstrap_store(tmp_path)
+    second_token = harness.bootstrap_store(_active_task064_pytest_root.roots[0])
+    first, _ = harness._connect(first_token, writer=True)
+    second, _ = harness._connect(second_token, writer=False)
+    records = _connection_runtime_records()
+    first_record = records[id(first)]
+    second_record = records[id(second)]
+    try:
+        for action in (
+            lambda: harness._capture_connection_immutable_runtime(first),
+            lambda: harness._seal_connection_immutable_runtime(first),
+            lambda: harness._consume_connection_immutable_runtime(
+                first,
+                b"x" * 32,
+                True,
+            ),
+            lambda: harness._consume_connection_immutable_runtime(
+                first,
+                first_token._nonce,
+                False,
+            ),
+            lambda: harness._consume_connection_immutable_runtime(
+                first,
+                second_token._nonce,
+                True,
+            ),
+        ):
+            with pytest.raises(harness.HarnessFailure) as rejected:
+                action()
+            assert rejected.value.code is harness.HarnessFailureCode.UNAVAILABLE
+
+        for field, hostile_value in (
+            ("creator_pid", os.getpid() + 1),
+            ("state", "CLOSING"),
+            ("state", "CLOSE_UNCERTAIN"),
+            ("runtime_state", "UNBOUND"),
+            ("runtime_state", "CAPTURED"),
+        ):
+            original = first_record[field]
+            first_record[field] = hostile_value
+            try:
+                with pytest.raises(harness.HarnessFailure) as rejected:
+                    harness._consume_connection_immutable_runtime(
+                        first,
+                        first_token._nonce,
+                        True,
+                    )
+                assert rejected.value.code is harness.HarnessFailureCode.UNAVAILABLE
+            finally:
+                first_record[field] = original
+
+        swapped_fields = (
+            "runtime_evidence",
+            "runtime_evidence_fields",
+            "runtime_evidence_binding",
+            "runtime_seal",
+        )
+        first_values = tuple(first_record[name] for name in swapped_fields)
+        second_values = tuple(second_record[name] for name in swapped_fields)
+        for name, value in zip(swapped_fields, second_values, strict=True):
+            first_record[name] = value
+        for name, value in zip(swapped_fields, first_values, strict=True):
+            second_record[name] = value
+        try:
+            for connection, token, writer in (
+                (first, first_token, True),
+                (second, second_token, False),
+            ):
+                with pytest.raises(harness.HarnessFailure) as rejected:
+                    harness._consume_connection_immutable_runtime(
+                        connection,
+                        token._nonce,
+                        writer,
+                    )
+                assert rejected.value.code is harness.HarnessFailureCode.UNAVAILABLE
+        finally:
+            for name, value in zip(swapped_fields, first_values, strict=True):
+                first_record[name] = value
+            for name, value in zip(swapped_fields, second_values, strict=True):
+                second_record[name] = value
+
+        unregistered = sqlite3.connect(":memory:")
+        try:
+            with pytest.raises(harness.HarnessFailure) as missing:
+                harness._consume_connection_immutable_runtime(
+                    unregistered,
+                    first_token._nonce,
+                    True,
+                )
+            assert missing.value.code is harness.HarnessFailureCode.UNAVAILABLE
+        finally:
+            unregistered.close()
+    finally:
+        first.close()
+        second.close()
+
+    with pytest.raises(harness.HarnessFailure) as closed:
+        harness._consume_connection_immutable_runtime(
+            first,
+            first_token._nonce,
+            True,
+        )
+    assert closed.value.code is harness.HarnessFailureCode.UNAVAILABLE
+
+
+def test_connection_runtime_creator_pid_rejects_inherited_authority(
+    tmp_path: Path,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    connection, _ = harness._connect(token, writer=True)
+    read_descriptor, write_descriptor = os.pipe()
+    child_pid = os.fork()
+    if child_pid == 0:
+        os.close(read_descriptor)
+        payload = b"E"
+        try:
+            child_os: Any = harness.__dict__["os"]
+            child_os.getpid = lambda: os.getppid()
+            harness._consume_connection_immutable_runtime(
+                connection,
+                token._nonce,
+                True,
+            )
+        except harness.HarnessFailure as error:
+            if error.code is harness.HarnessFailureCode.UNAVAILABLE:
+                payload = b"P"
+        except BaseException:
+            payload = b"E"
+        try:
+            os.write(write_descriptor, payload)
+        finally:
+            os.close(write_descriptor)
+        os._exit(0 if payload == b"P" else 70)
+    os.close(write_descriptor)
+    try:
+        assert os.read(read_descriptor, 1) == b"P"
+    finally:
+        os.close(read_descriptor)
+    _, status = os.waitpid(child_pid, 0)
+    assert os.WIFEXITED(status)
+    assert os.WEXITSTATUS(status) == 0
+    assert (
+        harness._consume_connection_immutable_runtime(
+            connection,
+            token._nonce,
+            True,
+        ).sqlite_source_id
+        == harness.ACCEPTED_SQLITE_SOURCE_ID
+    )
+    connection.close()
+    assert not harness._has_fork_unsafe_connection_authority()
+
+
+def test_fresh_mutable_control_and_schema_format_checks_survive_runtime_reuse(
+    tmp_path: Path,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    connection, _ = harness._connect(token, writer=True)
+    try:
+        connection.execute("PRAGMA cache_size = -4096").close()
+        connection.execute("BEGIN IMMEDIATE").close()
+        with pytest.raises(harness.HarnessFailure) as cache_drift:
+            harness._verify_operation_snapshot(connection, token, writer=True)
+        assert cache_drift.value.code is harness.HarnessFailureCode.UNAVAILABLE
+        connection.execute("ROLLBACK").close()
+
+        connection.execute("PRAGMA cache_size = -8192").close()
+        connection.execute("PRAGMA user_version = 2").close()
+        connection.execute("BEGIN IMMEDIATE").close()
+        with pytest.raises(harness.HarnessFailure) as format_drift:
+            harness._verify_operation_snapshot(connection, token, writer=True)
+        assert format_drift.value.code is harness.HarnessFailureCode.CORRUPT
+        connection.execute("ROLLBACK").close()
+    finally:
+        if connection.in_transaction:
+            connection.execute("ROLLBACK").close()
+        connection.close()
+
+
+@pytest.mark.parametrize("partial_registration", (False, True))
+def test_failed_connection_registration_is_failure_atomic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    partial_registration: bool,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    captured_connections: list[sqlite3.Connection] = []
+    real_connect = sqlite3.connect
+    real_register = harness._register_live_connection
+    sentinel = RuntimeError("synthetic registration failure")
+
+    def tracked_connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        connection = cast(sqlite3.Connection, real_connect(*args, **kwargs))
+        captured_connections.append(connection)
+        return connection
+
+    def rejected_register(*args: Any, **kwargs: Any) -> None:
+        if partial_registration:
+            real_register(*args, **kwargs)
+        raise sentinel
+
+    monkeypatch.setattr(sqlite3, "connect", tracked_connect)
+    monkeypatch.setattr(harness, "_register_live_connection", rejected_register)
+    with pytest.raises(RuntimeError) as rejected:
+        harness._connect(token, writer=True)
+    assert rejected.value is sentinel
+    assert len(captured_connections) == 1
+    connection = captured_connections[0]
+    assert harness._connection_authority_state(connection) == "CLOSED"
+    assert id(connection) not in _connection_runtime_records()
+    assert not harness._has_fork_unsafe_connection_authority()
+
+
+def test_row_factory_failure_after_registration_closes_exact_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    captured_connections: list[sqlite3.Connection] = []
+    real_connect = sqlite3.connect
+    sentinel = RuntimeError("synthetic row-factory failure")
+
+    def tracked_connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        connection = cast(sqlite3.Connection, real_connect(*args, **kwargs))
+        captured_connections.append(connection)
+        return connection
+
+    def reject_row_factory(
+        _connection: sqlite3.Connection,
+        _value: object,
+    ) -> None:
+        raise sentinel
+
+    monkeypatch.setattr(sqlite3, "connect", tracked_connect)
+    monkeypatch.setattr(
+        harness._MeteredConnection,
+        "row_factory",
+        property(fset=reject_row_factory),
+    )
+    with pytest.raises(RuntimeError) as rejected:
+        harness._connect(token, writer=True)
+    assert rejected.value is sentinel
+    assert len(captured_connections) == 1
+    connection = captured_connections[0]
+    assert harness._connection_authority_state(connection) == "CLOSED"
+    assert id(connection) not in _connection_runtime_records()
+    assert not harness._has_fork_unsafe_connection_authority()
 
 
 def test_audit_bounds_never_evaluate_an_overflowing_sum() -> None:

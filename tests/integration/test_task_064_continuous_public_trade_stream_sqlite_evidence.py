@@ -4,23 +4,35 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import contextvars
+import dis
 import errno
 import hashlib
+import importlib.util
+import inspect
 import json
+import marshal
 import os
+import secrets
 import selectors
 import signal
 import sqlite3
 import stat
+import subprocess
+import sys
+import textwrap
+import threading
 import time
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import CodeType, FunctionType
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 import pytest
+from _pytest.assertion.rewrite import _rewrite_test
 
 from wealth.domain.continuous_public_trade import (
     ContinuousPublicTradePolicy,
@@ -80,16 +92,2126 @@ if TYPE_CHECKING:
 else:
     import tests.support.continuous_public_trade_stream_sqlite_harness as harness
 
+
+def _bind_task064_harness_module() -> None:
+    harness._bind_task064_test_module()
+
+
+_bind_task064_harness_module()
+del _bind_task064_harness_module
+
+
 RECORDED_AT = datetime(2026, 7, 29, 0, 0, tzinfo=UTC)
+_FIXTURE_REQUEST_TYPE = pytest.FixtureRequest
+_TEMP_PATH_FACTORY_TYPE = pytest.TempPathFactory
+_TEMP_PATH_MKTEMP = pytest.TempPathFactory.mktemp
+type _Task064FixtureCallable = Callable[
+    [pytest.FixtureRequest, Path, pytest.TempPathFactory],
+    Iterator[harness._PytestRootCapability],
+]
 
 
-@pytest.fixture(autouse=True)
-def _active_task064_pytest_root(
-    tmp_path: Path,
+def _fresh_subprocess_pycache_environment(
+    pycache_root: Path,
+    *,
+    label: str,
+) -> tuple[dict[str, str], Path]:
+    """Exclude every pre-existing pytest-rewrite cache from child authority code."""
+
+    if (
+        not isinstance(pycache_root, Path)
+        or not pycache_root.is_absolute()
+        or type(label) is not str
+        or not label.startswith("task064-")
+        or "/" in label
+        or "\\" in label
+    ):
+        raise AssertionError("invalid TASK064 subprocess pycache isolation")
+    pycache_prefix = pycache_root / label
+    if pycache_prefix.exists():
+        raise AssertionError("TASK064 subprocess pycache prefix already exists")
+    environment = os.environ.copy()
+    environment.pop(harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT, None)
+    for reserved_name in harness._TASK064_LEGACY_CHILD_MODE_ENVIRONMENTS:
+        environment.pop(reserved_name, None)
+    environment["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    environment["PYTHONPYCACHEPREFIX"] = str(pycache_prefix)
+    assert Path(environment["PYTHONPYCACHEPREFIX"]) == pycache_prefix
+    return environment, pycache_prefix
+
+
+def _assert_task064_child_fixture_fingerprint_budget() -> None:
+    begin_closure = inspect.getclosurevars(harness._begin_pytest_root_registration)
+    authenticate_fixture_call = cast(
+        FunctionType,
+        begin_closure.nonlocals["authenticate_fixture_call"],
+    )
+    authenticate_closure = inspect.getclosurevars(authenticate_fixture_call)
+    fingerprint = cast(
+        Callable[[CodeType, str], str],
+        authenticate_closure.nonlocals["code_fingerprint"],
+    )
+    metrics = inspect.getclosurevars(fingerprint).nonlocals
+    assert metrics["fingerprint_requests"] == 3
+    assert metrics["fingerprint_computations"] == 2
+    assert len(cast(dict[object, object], metrics["fingerprint_cache"])) == 2
+
+
+def _task064_child_dispatch_plan(
+    protocol: str,
+    node_id: str,
+    modes: tuple[str, ...],
+) -> tuple[str | None, tuple[str, ...]]:
+    child_mode = harness._claim_task064_child_dispatch_provenance(
+        protocol,
+        node_id,
+        modes,
+    )
+    if child_mode is not None:
+        _assert_task064_child_fixture_fingerprint_budget()
+    return child_mode, (() if child_mode is not None else modes)
+
+
+def _run_task064_pytest_child(
+    pytest_root: Path,
+    *,
+    protocol: str,
+    issuer_node_id: str,
+    target_node_id: str,
+    mode: str,
+    pycache_label: str,
+    timeout_seconds: int,
+) -> tuple[subprocess.CompletedProcess[str], float]:
+    environment, pycache_prefix = _fresh_subprocess_pycache_environment(
+        pytest_root,
+        label=pycache_label,
+    )
+    provenance = harness._issue_task064_child_provenance(
+        pytest_root,
+        protocol,
+        issuer_node_id,
+        target_node_id,
+        mode,
+    )
+    environment[harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT] = provenance.envelope
+    started = time.monotonic()
+    try:
+        completed = subprocess.run(
+            (
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "-p",
+                "no:cacheprovider",
+                target_node_id,
+            ),
+            cwd=Path(__file__).resolve().parents[2],
+            env=environment,
+            pass_fds=(provenance.descriptor,),
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    finally:
+        provenance_consumed = harness._close_task064_child_provenance(provenance)
+    elapsed_seconds = time.monotonic() - started
+    assert provenance_consumed, (
+        f"TASK064 child did not consume one-shot provenance for {protocol!r}/{mode!r}"
+    )
+    assert not pycache_prefix.exists()
+    return completed, elapsed_seconds
+
+
+def _run_task064_exec_isolated(
     request: pytest.FixtureRequest,
-) -> Iterator[None]:
-    with harness._pytest_root_scope(tmp_path, node_id=request.node.nodeid):
-        yield
+    pycache_root: Path,
+) -> bool:
+    """Run one poison-producing parameter in a fresh interpreter exactly once."""
+
+    isolated_node_id, dispatch_modes = _task064_child_dispatch_plan(
+        "exec_isolation",
+        request.node.nodeid,
+        (request.node.nodeid,),
+    )
+    if isolated_node_id is not None:
+        assert isolated_node_id == request.node.nodeid
+        assert dispatch_modes == ()
+        return False
+    assert dispatch_modes == (request.node.nodeid,)
+    completed, _ = _run_task064_pytest_child(
+        pycache_root,
+        protocol="exec_isolation",
+        issuer_node_id=request.node.nodeid,
+        target_node_id=request.node.nodeid,
+        mode=request.node.nodeid,
+        pycache_label="task064-exec-isolation-pycache",
+        timeout_seconds=180,
+    )
+    assert completed.returncode == 0, (
+        f"isolated TASK064 probe failed for {request.node.nodeid!r}\n"
+        f"stdout:\n{completed.stdout}\n"
+        f"stderr:\n{completed.stderr}"
+    )
+    return True
+
+
+class _HostileMapping(dict[object, object]):
+    """Mapping subclass whose polymorphic iteration must never be invoked."""
+
+    items_calls: int
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.items_calls = 0
+
+    def items(self) -> Any:
+        self.items_calls += 1
+        raise AssertionError("hostile Mapping.items() must not be called")
+
+
+def _build_active_task064_pytest_root_fixture() -> Callable[..., object]:
+    module_globals = globals()
+    module_name = __name__
+    module_file = __file__
+    pytest_module = pytest
+    harness_module = harness
+    inspect_module = inspect
+    os_module = os
+    contextvars_module = contextvars
+    fixture_request_type = _FIXTURE_REQUEST_TYPE
+    temp_path_factory_type = _TEMP_PATH_FACTORY_TYPE
+    temp_path_mktemp = _TEMP_PATH_MKTEMP
+    path_type = Path
+    function_type = FunctionType
+    pytest_fixture = pytest.fixture
+    unwrap_fixture = inspect.unwrap
+    environment = os.environ
+    context_type = contextvars.Context
+    begin_registration = harness._begin_pytest_root_registration
+    root_scope = harness._pytest_root_scope
+    cancel_registration = harness._cancel_pytest_root_registration
+    authenticate_child_provenance = harness._authenticate_task064_child_provenance
+    activate_child_provenance = harness._activate_task064_child_provenance
+    claim_post_return_child_provenance = harness._claim_task064_post_return_child_provenance
+    claim_child_dispatch_provenance = harness._claim_task064_child_dispatch_provenance
+    finish_child_provenance = harness._finish_task064_child_provenance
+    cancel_child_provenance = harness._cancel_task064_child_provenance
+    harness_failure_type = harness.HarnessFailure
+    harness_failure_code_type = harness.HarnessFailureCode
+    invalid_bootstrap_code = harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+    dict_get = dict.get
+    getattr_value = getattr
+    isinstance_value = isinstance
+    type_of = type
+    bool_type = bool
+    str_type = str
+    runtime_error_type = RuntimeError
+    assertion_error_type = AssertionError
+    base_exception_type = BaseException
+    next_value = next
+    raw_fixture: _Task064FixtureCallable | None = None
+    exported_fixture: Callable[..., object] | None = None
+
+    def invoke_fixture_callable(
+        fixture: _Task064FixtureCallable,
+        fixture_request: pytest.FixtureRequest,
+        fixture_root: Path,
+        fixture_factory: pytest.TempPathFactory,
+    ) -> Iterator[harness._PytestRootCapability]:
+        return fixture(fixture_request, fixture_root, fixture_factory)
+
+    def bindings_are_exact() -> bool:
+        return bool_type(
+            raw_fixture is not None
+            and exported_fixture is not None
+            and dict_get(module_globals, "__name__") == module_name
+            and dict_get(module_globals, "__file__") == module_file
+            and dict_get(module_globals, "pytest") is pytest_module
+            and dict_get(module_globals, "harness") is harness_module
+            and dict_get(module_globals, "inspect") is inspect_module
+            and dict_get(module_globals, "os") is os_module
+            and dict_get(module_globals, "contextvars") is contextvars_module
+            and dict_get(module_globals, "Path") is path_type
+            and dict_get(module_globals, "FunctionType") is function_type
+            and dict_get(module_globals, "_FIXTURE_REQUEST_TYPE") is fixture_request_type
+            and dict_get(module_globals, "_TEMP_PATH_FACTORY_TYPE") is temp_path_factory_type
+            and dict_get(module_globals, "_TEMP_PATH_MKTEMP") is temp_path_mktemp
+            and dict_get(module_globals, "_active_task064_pytest_root") is exported_fixture
+            and getattr_value(pytest_module, "FixtureRequest", None) is fixture_request_type
+            and getattr_value(pytest_module, "TempPathFactory", None) is temp_path_factory_type
+            and getattr_value(temp_path_factory_type, "mktemp", None) is temp_path_mktemp
+            and getattr_value(pytest_module, "fixture", None) is pytest_fixture
+            and getattr_value(inspect_module, "unwrap", None) is unwrap_fixture
+            and getattr_value(os_module, "environ", None) is environment
+            and getattr_value(contextvars_module, "Context", None) is context_type
+            and getattr_value(harness_module, "_begin_pytest_root_registration", None)
+            is begin_registration
+            and getattr_value(harness_module, "_pytest_root_scope", None) is root_scope
+            and getattr_value(harness_module, "_cancel_pytest_root_registration", None)
+            is cancel_registration
+            and getattr_value(
+                harness_module,
+                "_authenticate_task064_child_provenance",
+                None,
+            )
+            is authenticate_child_provenance
+            and getattr_value(harness_module, "_activate_task064_child_provenance", None)
+            is activate_child_provenance
+            and getattr_value(
+                harness_module,
+                "_claim_task064_post_return_child_provenance",
+                None,
+            )
+            is claim_post_return_child_provenance
+            and getattr_value(
+                harness_module,
+                "_claim_task064_child_dispatch_provenance",
+                None,
+            )
+            is claim_child_dispatch_provenance
+            and getattr_value(harness_module, "_finish_task064_child_provenance", None)
+            is finish_child_provenance
+            and getattr_value(harness_module, "_cancel_task064_child_provenance", None)
+            is cancel_child_provenance
+            and getattr_value(harness_module, "HarnessFailure", None) is harness_failure_type
+            and getattr_value(harness_module, "HarnessFailureCode", None)
+            is harness_failure_code_type
+            and getattr_value(harness_failure_code_type, "INVALID_BOOTSTRAP_ROOT", None)
+            is invalid_bootstrap_code
+            and unwrap_fixture(exported_fixture) is raw_fixture
+        )
+
+    def _active_task064_pytest_root(
+        request: pytest.FixtureRequest,
+        tmp_path: Path,
+        tmp_path_factory: pytest.TempPathFactory,
+    ) -> Iterator[harness._PytestRootCapability]:
+        sealed_raw_fixture = raw_fixture
+        sealed_exported_fixture = exported_fixture
+        if (
+            not bindings_are_exact()
+            or sealed_raw_fixture is None
+            or sealed_exported_fixture is None
+        ):
+            raise runtime_error_type("invalid TASK064 pytest fixture dependency seal")
+        if (
+            not isinstance_value(request, fixture_request_type)
+            or not isinstance_value(tmp_path_factory, temp_path_factory_type)
+            or not isinstance_value(tmp_path, path_type)
+            or type_of(request.node.nodeid) is not str_type
+        ):
+            raise runtime_error_type("invalid TASK064 pytest fixture authority")
+        node_id = request.node.nodeid
+        ticket = authenticate_child_provenance(node_id)
+        permit = None
+        try:
+            activate_child_provenance(ticket, node_id, tmp_path)
+            replay_mode = claim_post_return_child_provenance(ticket, node_id)
+            replay_fixture = unwrap_fixture(sealed_exported_fixture)
+            if (
+                type_of(replay_fixture) is not function_type
+                or replay_fixture is not sealed_raw_fixture
+            ):
+                raise runtime_error_type("invalid TASK064 pytest fixture callable")
+            permit = begin_registration(node_id, tmp_path)
+            fixture_roots = (
+                temp_path_mktemp(tmp_path_factory, "task064-secondary-0"),
+                temp_path_mktemp(tmp_path_factory, "task064-secondary-1"),
+                temp_path_mktemp(tmp_path_factory, "task064-secondary-2"),
+                temp_path_mktemp(tmp_path_factory, "task064-secondary-3"),
+            )
+            fixture_scope = root_scope(permit, fixture_roots)
+            failures_before_yield = request.session.testsfailed
+            with fixture_scope as capability:
+                yield capability
+            if ticket is not None and request.session.testsfailed != failures_before_yield:
+                raise runtime_error_type("TASK064 authenticated child body failed")
+            if replay_mode:
+                replay_root = temp_path_mktemp(
+                    tmp_path_factory,
+                    "task064-returned-replay",
+                )
+                replay_parent = replay_root.parent
+                replay_inventory = tuple(replay_parent.iterdir())
+                replay_calls = 0
+
+                def invoke_exact_fixture() -> Iterator[harness._PytestRootCapability]:
+                    nonlocal replay_calls
+                    replay_calls += 1
+                    return invoke_fixture_callable(
+                        sealed_raw_fixture,
+                        request,
+                        replay_root,
+                        tmp_path_factory,
+                    )
+
+                replay_generator: Iterator[harness._PytestRootCapability] | None = None
+                replay_context = context_type()
+                try:
+                    replay_generator = replay_context.run(invoke_exact_fixture)
+                    try:
+                        replay_context.run(next_value, replay_generator)
+                    except harness_failure_type as error:
+                        if error.code is not invalid_bootstrap_code:
+                            raise
+                    else:
+                        raise assertion_error_type(
+                            "returned fixture lifecycle replay minted authority"
+                        )
+                finally:
+                    if replay_generator is not None:
+                        replay_generator.close()  # type: ignore[attr-defined]
+                assert replay_calls == 1
+                assert tuple(replay_parent.iterdir()) == replay_inventory
+                assert tuple(replay_root.iterdir()) == ()
+            finish_child_provenance(ticket, node_id)
+        except base_exception_type as fixture_error:
+            cleanup_errors: list[BaseException] = []
+            if permit is not None:
+                try:
+                    cancel_registration(permit)
+                except base_exception_type as cleanup_error:
+                    cleanup_errors.append(cleanup_error)
+            try:
+                cancel_child_provenance(ticket, node_id)
+            except base_exception_type as cleanup_error:
+                cleanup_errors.append(cleanup_error)
+            if cleanup_errors:
+                raise harness_failure_type(invalid_bootstrap_code) from fixture_error
+            raise
+
+    raw_fixture = _active_task064_pytest_root
+    exported_fixture = pytest_fixture(autouse=True)(raw_fixture)
+    if unwrap_fixture(exported_fixture) is not raw_fixture:
+        raise runtime_error_type("invalid TASK064 pytest fixture decoration")
+    return exported_fixture
+
+
+_active_task064_pytest_root = _build_active_task064_pytest_root_fixture()
+del _build_active_task064_pytest_root_fixture
+
+
+def _run_task064_pytest_children_concurrently(
+    pytest_root: Path,
+    *,
+    protocol: str,
+    issuer_node_id: str,
+    target_node_id: str,
+    modes: tuple[str, ...],
+    pycache_label: str,
+    timeout_seconds: float,
+) -> dict[str, tuple[subprocess.CompletedProcess[str], float]]:
+    """Run one authenticated child per mode beneath one shared deadline."""
+
+    if (
+        type(protocol) is not str
+        or type(issuer_node_id) is not str
+        or type(target_node_id) is not str
+        or type(modes) is not tuple
+        or not modes
+        or any(type(mode) is not str or not mode for mode in modes)
+        or len(set(modes)) != len(modes)
+        or type(pycache_label) is not str
+        or not pycache_label
+        or type(timeout_seconds) not in {int, float}
+        or timeout_seconds <= 0
+    ):
+        raise AssertionError("invalid TASK064 concurrent child request")
+
+    prepared: dict[
+        str,
+        tuple[
+            dict[str, str],
+            Path,
+            harness._Task064ChildProvenance,
+        ],
+    ] = {}
+    processes: dict[str, subprocess.Popen[bytes]] = {}
+    process_starts: dict[str, float] = {}
+    drain_threads: dict[str, threading.Thread] = {}
+    started_drain_modes: set[str] = set()
+    drained: dict[str, tuple[str, str, int, float]] = {}
+    drain_errors: dict[str, BaseException] = {}
+    provenance_consumed: dict[str, bool] = {}
+    cleanup_errors: list[BaseException] = []
+    condition = threading.Condition()
+    maximum_output_stream_bytes = 1_048_576
+    maximum_output_aggregate_bytes = 4_194_304
+    aggregate_output_bytes = 0
+    batch_started = time.monotonic()
+    shared_deadline = batch_started + timeout_seconds
+    orchestration_error: BaseException | None = None
+
+    def drain_child(mode: str, process: subprocess.Popen[bytes]) -> None:
+        nonlocal aggregate_output_bytes
+
+        stdout_buffer = bytearray()
+        stderr_buffer = bytearray()
+        selector = selectors.DefaultSelector()
+        try:
+            if process.stdout is None or process.stderr is None:
+                raise AssertionError("TASK064 child pipes were not captured")
+            selector.register(process.stdout, selectors.EVENT_READ, ("stdout", stdout_buffer))
+            selector.register(process.stderr, selectors.EVENT_READ, ("stderr", stderr_buffer))
+            while selector.get_map():
+                for key, _ in selector.select():
+                    stream_name, stream_buffer = cast(tuple[str, bytearray], key.data)
+                    fragment = os.read(key.fd, 65_536)
+                    if fragment == b"":
+                        selector.unregister(key.fileobj)
+                        continue
+                    if len(stream_buffer) + len(fragment) > maximum_output_stream_bytes:
+                        raise AssertionError(
+                            f"TASK064 child {mode!r} exceeded its {stream_name} byte ceiling"
+                        )
+                    with condition:
+                        if aggregate_output_bytes + len(fragment) > maximum_output_aggregate_bytes:
+                            raise AssertionError(
+                                "TASK064 concurrent children exceeded their aggregate "
+                                "output byte ceiling"
+                            )
+                        aggregate_output_bytes += len(fragment)
+                    stream_buffer.extend(fragment)
+            returncode = process.wait()
+            if type(returncode) is not int:
+                raise AssertionError("invalid TASK064 child completion")
+            stdout = bytes(stdout_buffer).decode("utf-8", errors="replace")
+            stderr = bytes(stderr_buffer).decode("utf-8", errors="replace")
+            completed_at = time.monotonic()
+        except BaseException as error:
+            with condition:
+                drain_errors[mode] = error
+                condition.notify_all()
+        else:
+            with condition:
+                drained[mode] = (stdout, stderr, returncode, completed_at)
+                condition.notify_all()
+        finally:
+            stream_cleanup_errors: list[BaseException] = []
+            try:
+                selector.close()
+            except BaseException as error:
+                stream_cleanup_errors.append(error)
+            for stream in (process.stdout, process.stderr):
+                if stream is None:
+                    continue
+                try:
+                    stream.close()
+                except BaseException as error:
+                    stream_cleanup_errors.append(error)
+            if stream_cleanup_errors:
+                with condition:
+                    cleanup_errors.extend(stream_cleanup_errors)
+                    condition.notify_all()
+
+    def record_cleanup_error(mode: str, operation: str, error: BaseException) -> None:
+        cleanup_errors.append(
+            RuntimeError(f"TASK064 concurrent child {operation} failed for {mode!r}: {error!r}")
+        )
+
+    def process_is_live(mode: str, process: subprocess.Popen[bytes]) -> bool:
+        try:
+            return process.poll() is None
+        except BaseException as error:
+            record_cleanup_error(mode, "poll", error)
+            return True
+
+    def signal_live_children(signal_number: signal.Signals) -> None:
+        for mode, process in processes.items():
+            if not process_is_live(mode, process):
+                continue
+            try:
+                os.killpg(process.pid, signal_number)
+            except ProcessLookupError:
+                continue
+            except BaseException as error:
+                record_cleanup_error(mode, f"killpg-{signal_number.name}", error)
+                try:
+                    if signal_number is signal.SIGTERM:
+                        process.terminate()
+                    else:
+                        process.kill()
+                except BaseException as fallback_error:
+                    record_cleanup_error(
+                        mode,
+                        f"fallback-{signal_number.name}",
+                        fallback_error,
+                    )
+
+    def wait_for_drains(deadline: float) -> None:
+        with condition:
+            while any(
+                mode not in drained and mode not in drain_errors for mode in started_drain_modes
+            ):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return
+                condition.wait(timeout=remaining)
+
+    def close_unstarted_child_pipes() -> None:
+        for mode, process in processes.items():
+            if mode in started_drain_modes:
+                continue
+            for stream_name, stream in (
+                ("stdout", process.stdout),
+                ("stderr", process.stderr),
+            ):
+                if stream is None:
+                    record_cleanup_error(
+                        mode,
+                        f"close-unstarted-{stream_name}",
+                        AssertionError("TASK064 child pipe was not captured"),
+                    )
+                    continue
+                try:
+                    stream.close()
+                except BaseException as error:
+                    record_cleanup_error(mode, f"close-unstarted-{stream_name}", error)
+
+    def wait_for_unstarted_children(deadline: float, *, final: bool) -> None:
+        for mode, process in processes.items():
+            if mode in started_drain_modes:
+                continue
+            remaining = max(0.0, deadline - time.monotonic())
+            try:
+                returncode = process.wait(timeout=remaining)
+            except (subprocess.TimeoutExpired, TimeoutError) as error:
+                if final:
+                    record_cleanup_error(mode, "wait-unstarted-timeout", error)
+            except BaseException as error:
+                record_cleanup_error(mode, "wait-unstarted", error)
+            else:
+                if type(returncode) is not int:
+                    record_cleanup_error(
+                        mode,
+                        "wait-unstarted",
+                        AssertionError("invalid TASK064 child completion"),
+                    )
+
+    try:
+        for index, mode in enumerate(modes):
+            environment, pycache_prefix = _fresh_subprocess_pycache_environment(
+                pytest_root,
+                label=f"{pycache_label}-{index:02d}-{mode.replace('_', '-')}",
+            )
+            provenance = harness._issue_task064_child_provenance(
+                pytest_root,
+                protocol,
+                issuer_node_id,
+                target_node_id,
+                mode,
+            )
+            environment[harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT] = provenance.envelope
+            prepared[mode] = (environment, pycache_prefix, provenance)
+        if (
+            len(prepared) != len(modes)
+            or len({id(environment) for environment, _, _ in prepared.values()}) != len(modes)
+            or len({prefix for _, prefix, _ in prepared.values()}) != len(modes)
+            or len({item.descriptor for _, _, item in prepared.values()}) != len(modes)
+            or len({item.envelope for _, _, item in prepared.values()}) != len(modes)
+            or len({item.marker_path for _, _, item in prepared.values()}) != len(modes)
+        ):
+            raise AssertionError("TASK064 child preparation did not remain isolated")
+
+        for mode in modes:
+            environment, _, provenance = prepared[mode]
+            process_starts[mode] = time.monotonic()
+            processes[mode] = subprocess.Popen(
+                (
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "-p",
+                    "no:cacheprovider",
+                    target_node_id,
+                ),
+                cwd=Path(__file__).resolve().parents[2],
+                env=environment,
+                pass_fds=(provenance.descriptor,),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
+    except BaseException as error:
+        orchestration_error = error
+    finally:
+        for mode, process in processes.items():
+            try:
+                thread = threading.Thread(
+                    target=drain_child,
+                    args=(mode, process),
+                    name=f"task064-child-drain-{mode}",
+                    daemon=True,
+                )
+                thread.start()
+            except BaseException as error:
+                if orchestration_error is None:
+                    orchestration_error = error
+                with condition:
+                    drain_errors[mode] = error
+                    condition.notify_all()
+                continue
+            drain_threads[mode] = thread
+            started_drain_modes.add(mode)
+
+        if orchestration_error is None:
+            with condition:
+                while len(drained) + len(drain_errors) < len(processes):
+                    if drain_errors or any(
+                        returncode != 0 for _, _, returncode, _ in drained.values()
+                    ):
+                        orchestration_error = AssertionError(
+                            "TASK064 child failed before its siblings completed"
+                        )
+                        break
+                    remaining = shared_deadline - time.monotonic()
+                    if remaining <= 0:
+                        orchestration_error = TimeoutError(
+                            "TASK064 concurrent children exceeded their shared deadline"
+                        )
+                        break
+                    condition.wait(timeout=remaining)
+            if orchestration_error is None and (
+                len(drained) != len(processes)
+                or drain_errors
+                or any(returncode != 0 for _, _, returncode, _ in drained.values())
+            ):
+                orchestration_error = AssertionError(
+                    "TASK064 concurrent children did not all complete successfully"
+                )
+
+        if orchestration_error is not None:
+            signal_live_children(signal.SIGTERM)
+            close_unstarted_child_pipes()
+            term_deadline = time.monotonic() + 2.0
+            wait_for_drains(term_deadline)
+            wait_for_unstarted_children(term_deadline, final=False)
+            signal_live_children(signal.SIGKILL)
+        kill_deadline = time.monotonic() + 10.0
+        wait_for_drains(kill_deadline)
+        wait_for_unstarted_children(kill_deadline, final=True)
+        join_deadline = time.monotonic() + 2.0
+        for mode, thread in drain_threads.items():
+            try:
+                thread.join(timeout=max(0.0, join_deadline - time.monotonic()))
+            except BaseException as error:
+                record_cleanup_error(mode, "join-started-drain", error)
+                continue
+            try:
+                if thread.is_alive():
+                    cleanup_errors.append(
+                        AssertionError(f"TASK064 child drain remained live for {mode!r}")
+                    )
+            except BaseException as error:
+                record_cleanup_error(mode, "query-started-drain", error)
+        for mode, process in processes.items():
+            if process_is_live(mode, process):
+                cleanup_errors.append(
+                    AssertionError(f"TASK064 child process remained live for {mode!r}")
+                )
+        if any(mode not in drained and mode not in drain_errors for mode in started_drain_modes):
+            cleanup_errors.append(
+                AssertionError("TASK064 concurrent child cleanup did not reap every process")
+            )
+
+        for mode, (_, pycache_prefix, provenance) in prepared.items():
+            try:
+                provenance_consumed[mode] = harness._close_task064_child_provenance(provenance)
+            except BaseException as error:
+                cleanup_errors.append(error)
+                provenance_consumed[mode] = False
+            try:
+                marker_exists = provenance.marker_path.exists()
+            except BaseException as error:
+                record_cleanup_error(mode, "marker-residue-check", error)
+            else:
+                if marker_exists:
+                    cleanup_errors.append(
+                        AssertionError(f"TASK064 child marker residue for {mode!r}")
+                    )
+            try:
+                pycache_exists = pycache_prefix.exists()
+            except BaseException as error:
+                record_cleanup_error(mode, "pycache-residue-check", error)
+            else:
+                if pycache_exists:
+                    cleanup_errors.append(
+                        AssertionError(f"TASK064 child pycache residue for {mode!r}")
+                    )
+
+    completed: dict[str, tuple[subprocess.CompletedProcess[str], float]] = {}
+    for mode, (stdout, stderr, returncode, completed_at) in drained.items():
+        process = processes[mode]
+        completed[mode] = (
+            subprocess.CompletedProcess(
+                args=process.args,
+                returncode=returncode,
+                stdout=stdout,
+                stderr=stderr,
+            ),
+            completed_at - process_starts[mode],
+        )
+    failed_modes = {
+        mode: result.returncode for mode, (result, _) in completed.items() if result.returncode != 0
+    }
+    if (
+        orchestration_error is not None
+        or drain_errors
+        or cleanup_errors
+        or set(completed) != set(modes)
+        or failed_modes
+        or provenance_consumed != dict.fromkeys(modes, True)
+    ):
+        diagnostics = "\n".join(
+            (f"{mode}: rc={result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}")
+            for mode, (result, _) in completed.items()
+        )
+        raise AssertionError(
+            "TASK064 concurrent child orchestration failed: "
+            f"orchestration={orchestration_error!r}, "
+            f"drain={drain_errors!r}, cleanup={cleanup_errors!r}, "
+            f"consumed={provenance_consumed!r}, failed={failed_modes!r}\n"
+            f"{diagnostics}"
+        )
+    return {mode: completed[mode] for mode in modes}
+
+
+@pytest.mark.parametrize(
+    ("protocol", "legacy_environment", "ambient_mode", "dispatch_modes"),
+    (
+        (
+            "exec_isolation",
+            "WEALTH_TASK064_EXEC_ISOLATION",
+            "<node>",
+            ("<node>",),
+        ),
+        (
+            "post_return_fixture_replay",
+            "WEALTH_TASK064_POST_RETURN_FIXTURE_REPLAY",
+            "<node>",
+            ("<node>",),
+        ),
+        (
+            "root_latch",
+            "WEALTH_TASK064_ROOT_LATCH_PROBE",
+            "revocation_flag_write",
+            (
+                "revocation_flag_write",
+                "revocation_flag_flush",
+                "revocation_after_flush",
+                "revocation_close",
+                "evidence_run_close",
+                "poison_mmap_write",
+                "poison_mmap_flush",
+                "poison_pipe_write",
+                "poison_mmap_probe",
+                "poison_pipe_probe",
+            ),
+        ),
+        (
+            "shared_cleanup",
+            "WEALTH_TASK064_SHARED_CLEANUP_PROBE",
+            "run",
+            ("run",),
+        ),
+        (
+            "report_close",
+            "WEALTH_TASK064_REPORT_ROOT_CLOSE_PROBE",
+            "staging_close_ambiguity",
+            (
+                "readback_verified_root_close_ambiguity",
+                "staging_close_ambiguity",
+                "readback_close_ambiguity",
+                "reentrant_root_revocation",
+            ),
+        ),
+    ),
+)
+def test_bare_legacy_child_modes_are_scrubbed_without_shortening_parent_matrix(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    protocol: str,
+    legacy_environment: str,
+    ambient_mode: str,
+    dispatch_modes: tuple[str, ...],
+) -> None:
+    node_id = request.node.nodeid
+    resolved_ambient_mode = node_id if ambient_mode == "<node>" else ambient_mode
+    resolved_dispatch_modes = tuple(
+        node_id if mode == "<node>" else mode for mode in dispatch_modes
+    )
+    monkeypatch.setenv(legacy_environment, resolved_ambient_mode)
+
+    child_mode, remaining_modes = _task064_child_dispatch_plan(
+        protocol,
+        node_id,
+        resolved_dispatch_modes,
+    )
+
+    assert child_mode is None
+    assert remaining_modes == resolved_dispatch_modes
+    assert harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT not in os.environ
+    assert all(name not in os.environ for name in harness._TASK064_LEGACY_CHILD_MODE_ENVIRONMENTS)
+
+
+@pytest.mark.parametrize("raw_envelope", (b"\xff", "\N{LATIN SMALL LETTER E WITH ACUTE}".encode()))
+def test_non_ascii_child_provenance_envelopes_fail_closed_as_harness_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+    raw_envelope: bytes,
+) -> None:
+    environment_bytes = os.environb
+    envelope_name = harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT.encode("ascii")
+    monkeypatch.setitem(environment_bytes, envelope_name, raw_envelope)
+
+    with pytest.raises(harness.HarnessFailure) as rejected:
+        harness._authenticate_task064_child_provenance(request.node.nodeid)
+
+    assert rejected.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+
+
+@pytest.mark.parametrize(
+    ("protocol", "mode", "allowed_modes"),
+    (
+        ("exec_isolation", "<node>", ("<node>",)),
+        (
+            "root_latch",
+            "revocation_flag_write",
+            (
+                "revocation_flag_write",
+                "revocation_flag_flush",
+                "revocation_after_flush",
+                "revocation_close",
+                "evidence_run_close",
+                "poison_mmap_write",
+                "poison_mmap_flush",
+                "poison_pipe_write",
+                "poison_mmap_probe",
+                "poison_pipe_probe",
+            ),
+        ),
+        ("shared_cleanup", "run", ("run",)),
+        (
+            "report_close",
+            "staging_close_ambiguity",
+            (
+                "readback_verified_root_close_ambiguity",
+                "staging_close_ambiguity",
+                "readback_close_ambiguity",
+                "reentrant_root_revocation",
+            ),
+        ),
+    ),
+    ids=("exec-isolation", "root-latch", "shared-cleanup", "report-close"),
+)
+def test_child_provenance_binds_issuer_target_mode_and_is_consumed_once(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    protocol: str,
+    mode: str,
+    allowed_modes: tuple[str, ...],
+) -> None:
+    node_id = request.node.nodeid
+    resolved_mode = node_id if mode == "<node>" else mode
+    resolved_allowed_modes = tuple(
+        node_id if candidate == "<node>" else candidate for candidate in allowed_modes
+    )
+    claim_closure = inspect.getclosurevars(
+        harness._claim_task064_child_dispatch_provenance
+    ).nonlocals
+    active_ticket_context = cast(
+        contextvars.ContextVar[object | None],
+        claim_closure["active_body_ticket"],
+    )
+    ticket_records = cast(dict[int, dict[str, object]], claim_closure["ticket_records"])
+    active_ticket = active_ticket_context.get()
+    if active_ticket is not None and protocol == "exec_isolation":
+        active_record = ticket_records[id(active_ticket)]
+
+        def assert_still_activated() -> None:
+            assert active_ticket_context.get() is active_ticket
+            assert ticket_records[id(active_ticket)] is active_record
+            assert active_record["state"] == "ACTIVATED"
+
+        for reserved_name, reserved_value in (
+            ("WEALTH_TASK064_EXEC_ISOLATION", node_id),
+            (harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT, "{}"),
+        ):
+            os.environ[reserved_name] = reserved_value
+            with pytest.raises(harness.HarnessFailure) as rejected_late_environment:
+                harness._claim_task064_child_dispatch_provenance(
+                    protocol,
+                    node_id,
+                    resolved_allowed_modes,
+                )
+            assert rejected_late_environment.value.code is (
+                harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+            )
+            assert all(
+                name not in os.environ
+                for name in (
+                    harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT,
+                    *harness._TASK064_LEGACY_CHILD_MODE_ENVIRONMENTS,
+                )
+            )
+            assert_still_activated()
+
+        wrong_node_id = f"{node_id}::wrong-node"
+        for wrong_protocol, wrong_node, wrong_modes in (
+            ("shared_cleanup", node_id, ("run",)),
+            (protocol, wrong_node_id, (wrong_node_id,)),
+            (protocol, node_id, (wrong_node_id,)),
+        ):
+            with pytest.raises(harness.HarnessFailure) as rejected_binding:
+                harness._claim_task064_child_dispatch_provenance(
+                    wrong_protocol,
+                    wrong_node,
+                    wrong_modes,
+                )
+            assert rejected_binding.value.code is (
+                harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+            )
+            assert_still_activated()
+
+        for isolated_context in (contextvars.Context(), contextvars.copy_context()):
+            with pytest.raises(harness.HarnessFailure) as rejected_context:
+                isolated_context.run(
+                    harness._claim_task064_child_dispatch_provenance,
+                    protocol,
+                    node_id,
+                    resolved_allowed_modes,
+                )
+            assert rejected_context.value.code is (
+                harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+            )
+            assert_still_activated()
+
+        thread_errors: list[harness.HarnessFailure] = []
+
+        def claim_in_thread() -> None:
+            try:
+                harness._claim_task064_child_dispatch_provenance(
+                    protocol,
+                    node_id,
+                    resolved_allowed_modes,
+                )
+            except harness.HarnessFailure as error:
+                thread_errors.append(error)
+
+        claim_thread = threading.Thread(target=claim_in_thread)
+        claim_thread.start()
+        claim_thread.join(timeout=10)
+        assert not claim_thread.is_alive()
+        assert len(thread_errors) == 1
+        assert thread_errors[0].code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+        assert_still_activated()
+
+        result_read, result_write = os.pipe()
+        child_pid = os.fork()
+        if child_pid == 0:
+            os.close(result_read)
+            child_result = b"F"
+            try:
+                try:
+                    harness._claim_task064_child_dispatch_provenance(
+                        protocol,
+                        node_id,
+                        resolved_allowed_modes,
+                    )
+                except harness.HarnessFailure as error:
+                    if error.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT:
+                        child_result = b"P"
+            finally:
+                with contextlib.suppress(OSError):
+                    os.write(result_write, child_result)
+                with contextlib.suppress(OSError):
+                    os.close(result_write)
+                os._exit(0)
+        os.close(result_write)
+        os.set_blocking(result_read, False)
+        result_selector = selectors.DefaultSelector()
+        result_selector.register(result_read, selectors.EVENT_READ)
+        child_reaped = False
+        try:
+            ready = result_selector.select(timeout=10)
+            assert ready
+            assert os.read(result_read, 1) == b"P"
+            reap_deadline = time.monotonic() + 10
+            while True:
+                waited_pid, child_status = os.waitpid(child_pid, os.WNOHANG)
+                if waited_pid == child_pid:
+                    child_reaped = True
+                    break
+                assert time.monotonic() < reap_deadline
+                time.sleep(0.01)
+        finally:
+            result_selector.close()
+            os.close(result_read)
+            if not child_reaped:
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(child_pid, signal.SIGKILL)
+                with contextlib.suppress(ChildProcessError):
+                    os.waitpid(child_pid, 0)
+        assert os.WIFEXITED(child_status)
+        assert os.WEXITSTATUS(child_status) == 0
+        assert_still_activated()
+
+    child_mode, remaining_modes = _task064_child_dispatch_plan(
+        protocol,
+        node_id,
+        resolved_allowed_modes,
+    )
+    if child_mode is not None:
+        assert child_mode == resolved_mode
+        assert remaining_modes == ()
+        with pytest.raises(harness.HarnessFailure) as replayed_claim:
+            _task064_child_dispatch_plan(protocol, node_id, resolved_allowed_modes)
+        assert replayed_claim.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+        return
+    assert remaining_modes == resolved_allowed_modes
+    inventory_before_invalid_mode = tuple(tmp_path.iterdir())
+    with pytest.raises(harness.HarnessFailure) as invalid_mode:
+        harness._issue_task064_child_provenance(
+            tmp_path,
+            protocol,
+            node_id,
+            node_id,
+            "task064-wrong-mode",
+        )
+    assert invalid_mode.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+    assert tuple(tmp_path.iterdir()) == inventory_before_invalid_mode
+    completed, _ = _run_task064_pytest_child(
+        tmp_path,
+        protocol=protocol,
+        issuer_node_id=node_id,
+        target_node_id=node_id,
+        mode=resolved_mode,
+        pycache_label=f"task064-child-provenance-{protocol}-pycache",
+        timeout_seconds=180,
+    )
+    assert completed.returncode == 0, (
+        f"TASK064 fixture-order provenance probe failed for {protocol!r}\n"
+        f"stdout:\n{completed.stdout}\n"
+        f"stderr:\n{completed.stderr}"
+    )
+
+
+def test_post_return_ticket_is_claimed_locally_once(
+    request: pytest.FixtureRequest,
+) -> None:
+    claim_closure = inspect.getclosurevars(
+        harness._claim_task064_post_return_child_provenance
+    ).nonlocals
+    active_ticket_context = cast(
+        contextvars.ContextVar[object | None],
+        claim_closure["active_body_ticket"],
+    )
+    active_ticket = active_ticket_context.get()
+    exact_ticket_record = cast(
+        FunctionType,
+        claim_closure["exact_ticket_record"],
+    )
+    exact_record_closure = inspect.getclosurevars(exact_ticket_record).nonlocals
+    ticket_records = cast(
+        dict[int, dict[str, object]],
+        exact_record_closure["ticket_records"],
+    )
+    matching_records = tuple(
+        (ticket_key, record)
+        for ticket_key, record in ticket_records.items()
+        if record["owner_process_id"] == os.getpid() and record["node_id"] == request.node.nodeid
+    )
+    if active_ticket is None:
+        assert not matching_records
+        return
+    assert type(active_ticket) is harness._Task064ChildProvenanceTicket
+    assert len(matching_records) == 1
+    ticket_key, record = matching_records[0]
+    assert ticket_key == id(active_ticket)
+    assert ticket_records[id(active_ticket)] is record
+    assert record["ticket"] is active_ticket
+    assert exact_ticket_record(active_ticket, request.node.nodeid) is record
+    assert record["owner_process_id"] == os.getpid()
+    assert record["node_id"] == request.node.nodeid
+    assert record["protocol"] == "post_return_fixture_replay"
+    assert record["mode"] == request.node.nodeid
+    assert record["state"] == "CLAIMED"
+    ticket = active_ticket
+    for invocation_context in (None, contextvars.Context(), contextvars.copy_context()):
+        with pytest.raises(harness.HarnessFailure) as replayed_claim:
+            if invocation_context is None:
+                harness._claim_task064_post_return_child_provenance(
+                    ticket,
+                    request.node.nodeid,
+                )
+            else:
+                invocation_context.run(
+                    harness._claim_task064_post_return_child_provenance,
+                    ticket,
+                    request.node.nodeid,
+                )
+        assert replayed_claim.value.code is (harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        assert record["state"] == "CLAIMED"
+
+
+def test_unclaimed_authenticated_child_ticket_is_terminalized_at_teardown(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+) -> None:
+    claim_closure = inspect.getclosurevars(
+        harness._claim_task064_child_dispatch_provenance
+    ).nonlocals
+    active_ticket_context = cast(
+        contextvars.ContextVar[object | None],
+        claim_closure["active_body_ticket"],
+    )
+    active_ticket = active_ticket_context.get()
+    if active_ticket is not None:
+        ticket_records = cast(dict[int, dict[str, object]], claim_closure["ticket_records"])
+        record = ticket_records[id(active_ticket)]
+        assert record["node_id"] == request.node.nodeid
+        assert record["protocol"] == "exec_isolation"
+        assert record["state"] == "ACTIVATED"
+
+        class UnclaimedTerminalProbe:
+            checked = False
+
+            @pytest.hookimpl(trylast=True)
+            def pytest_sessionfinish(
+                self,
+                session: pytest.Session,
+                exitstatus: int,
+            ) -> None:
+                del session, exitstatus
+                cancel_closure = inspect.getclosurevars(
+                    harness._cancel_task064_child_provenance
+                ).nonlocals
+                terminalize_closure = inspect.getclosurevars(
+                    cancel_closure["terminalize_fixture_ticket"]
+                ).nonlocals
+                remaining = cast(
+                    dict[int, dict[str, object]],
+                    terminalize_closure["ticket_records"],
+                )
+                terminal = cast(
+                    dict[int, tuple[object, int, str, str]],
+                    terminalize_closure["terminal_ticket_records"],
+                )
+                assert remaining == {}
+                assert terminalize_closure["active_body_ticket"].get() is None
+                assert len(terminal) == 1
+                terminal_ticket, owner_pid, node_id, state = next(iter(terminal.values()))
+                assert terminal_ticket is active_ticket
+                assert owner_pid == os.getpid()
+                assert node_id == request.node.nodeid
+                assert state == "UNCLAIMED"
+                self.checked = True
+                print("TASK064_UNCLAIMED_TICKET_TERMINALIZED")
+
+        probe = UnclaimedTerminalProbe()
+        request.config.pluginmanager.register(
+            probe,
+            name="task064-unclaimed-ticket-terminal-probe",
+        )
+        return
+
+    completed, _ = _run_task064_pytest_child(
+        tmp_path,
+        protocol="exec_isolation",
+        issuer_node_id=request.node.nodeid,
+        target_node_id=request.node.nodeid,
+        mode=request.node.nodeid,
+        pycache_label="task064-unclaimed-ticket-pycache",
+        timeout_seconds=180,
+    )
+    assert completed.returncode != 0
+    assert "TASK064_UNCLAIMED_TICKET_TERMINALIZED" in completed.stdout
+
+
+def test_authenticated_ticket_cleanup_is_total_across_fixture_failures(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+) -> None:
+    failure_environment = "WEALTH_TASK064_TICKET_CLEANUP_TEST"
+    failure_mode = os.environ.get(failure_environment)
+    if failure_mode is not None:
+        assert failure_mode in {"body-failure", "teardown-failure"}
+        child_mode, remaining_modes = _task064_child_dispatch_plan(
+            "exec_isolation",
+            request.node.nodeid,
+            (request.node.nodeid,),
+        )
+        assert child_mode == request.node.nodeid
+        assert remaining_modes == ()
+        if failure_mode == "body-failure":
+            raise RuntimeError("injected TASK064 authenticated body failure")
+        return
+
+    repository_root = Path(__file__).resolve().parents[2]
+    failure_modes = (
+        "begin",
+        "mktemp-0",
+        "mktemp-1",
+        "mktemp-2",
+        "mktemp-3",
+        "scope-construction",
+        "scope-entry",
+        "body-failure",
+        "teardown-failure",
+    )
+    for mode in failure_modes:
+        environment, pycache_prefix = _fresh_subprocess_pycache_environment(
+            tmp_path,
+            label=f"task064-ticket-cleanup-{mode}-pycache",
+        )
+        provenance = harness._issue_task064_child_provenance(
+            tmp_path,
+            "exec_isolation",
+            request.node.nodeid,
+            request.node.nodeid,
+            request.node.nodeid,
+        )
+        environment[harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT] = provenance.envelope
+        environment[failure_environment] = mode
+        program = textwrap.dedent(
+            f"""
+            import inspect
+            import os
+            import pytest
+            import _pytest.tmpdir as pytest_tmpdir
+            import tests.support.continuous_public_trade_stream_sqlite_harness as harness
+
+            target_node_id = {request.node.nodeid!r}
+            failure_mode = {mode!r}
+
+            class CleanupProbe:
+                def __init__(self):
+                    self.checked = False
+                    self.real_make_numbered_dir = pytest_tmpdir.make_numbered_dir
+                    self.make_numbered_calls = 0
+
+                @pytest.hookimpl(tryfirst=True)
+                def pytest_configure(self, config):
+                    del config
+                    if failure_mode == "begin":
+                        harness._arm_pytest_root_authority_fault("poison_mmap_probe")
+                    elif failure_mode.startswith("mktemp-"):
+                        target_prefix = (
+                            "task064-secondary-"
+                            + failure_mode.rsplit("-", 1)[1]
+                        )
+
+                        def fail_exact_mktemp(*args, **kwargs):
+                            self.make_numbered_calls += 1
+                            prefix = kwargs.get(
+                                "prefix",
+                                args[1] if len(args) > 1 else None,
+                            )
+                            if isinstance(prefix, str) and prefix.startswith(target_prefix):
+                                raise OSError("injected TASK064 mktemp failure")
+                            return self.real_make_numbered_dir(*args, **kwargs)
+
+                        pytest_tmpdir.make_numbered_dir = fail_exact_mktemp
+                    elif failure_mode == "scope-construction":
+                        harness._arm_pytest_root_authority_fault(
+                            "permit_scope_construction"
+                        )
+                    elif failure_mode == "scope-entry":
+                        harness._arm_pytest_root_authority_fault("permit_scope_entry")
+                    elif failure_mode == "teardown-failure":
+                        harness._arm_pytest_root_authority_fault("revocation_flag_write")
+
+                @pytest.hookimpl(trylast=True)
+                def pytest_sessionfinish(self, session, exitstatus):
+                    del session, exitstatus
+                    pytest_tmpdir.make_numbered_dir = self.real_make_numbered_dir
+                    cancel_closure = inspect.getclosurevars(
+                        harness._cancel_task064_child_provenance
+                    ).nonlocals
+                    terminalize_closure = inspect.getclosurevars(
+                        cancel_closure["terminalize_fixture_ticket"]
+                    ).nonlocals
+                    assert terminalize_closure["ticket_records"] == {{}}
+                    assert terminalize_closure["active_body_ticket"].get() is None
+                    terminal = terminalize_closure["terminal_ticket_records"]
+                    assert len(terminal) == 1
+                    ticket, owner_pid, node_id, state = next(iter(terminal.values()))
+                    assert ticket is not None
+                    assert owner_pid == os.getpid()
+                    assert node_id == target_node_id
+                    assert state == "CANCELLED"
+                    root_closure = inspect.getclosurevars(
+                        harness._cancel_pytest_root_registration
+                    ).nonlocals
+                    assert root_closure["active_node_lifecycle"] is None
+                    self.checked = True
+                    print(
+                        "TASK064_TICKET_CLEANUP_OK:"
+                        + failure_mode
+                        + ":"
+                        + state
+                    )
+
+            probe = CleanupProbe()
+            exit_code = pytest.main(
+                ["-q", "-s", "-p", "no:cacheprovider", target_node_id],
+                plugins=[probe],
+            )
+            assert exit_code != pytest.ExitCode.OK
+            assert probe.checked
+            """
+        )
+        try:
+            completed = subprocess.run(
+                (sys.executable, "-c", program),
+                cwd=repository_root,
+                env=environment,
+                pass_fds=(provenance.descriptor,),
+                capture_output=True,
+                text=True,
+                timeout=180,
+                check=False,
+            )
+        finally:
+            packet_consumed = harness._close_task064_child_provenance(provenance)
+        assert packet_consumed
+        assert not pycache_prefix.exists()
+        assert completed.returncode == 0, (
+            f"authenticated ticket cleanup probe failed for {mode!r}\n"
+            f"stdout:\n{completed.stdout}\n"
+            f"stderr:\n{completed.stderr}"
+        )
+        assert f"TASK064_TICKET_CLEANUP_OK:{mode}:CANCELLED" in completed.stdout
+
+
+@pytest.mark.parametrize("output_limit_failure", (False, True))
+def test_concurrent_report_close_children_preissue_drain_and_cleanup_causally(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    output_limit_failure: bool,
+) -> None:
+    modes = (
+        "readback_verified_root_close_ambiguity",
+        "staging_close_ambiguity",
+        "readback_close_ambiguity",
+        "reentrant_root_revocation",
+    )
+    main_thread = threading.get_ident()
+    issued: list[str] = []
+    closed: list[str] = []
+    launched: list[str] = []
+    signaled: list[tuple[str, int]] = []
+    prefixes: list[Path] = []
+    processes_by_pid: dict[int, FakeProcess] = {}
+    overflow_descriptors: set[int] = set()
+    overflow_emitted: set[int] = set()
+
+    class FakeProvenance:
+        def __init__(self, mode: str, descriptor: int) -> None:
+            self.mode = mode
+            self.envelope = f"task064-envelope:{mode}"
+            self.descriptor = descriptor
+            self.marker_path = tmp_path / f".task064-fake-marker-{mode}.json"
+
+    class FakeProcess:
+        def __init__(
+            self,
+            args: Sequence[str],
+            **kwargs: object,
+        ) -> None:
+            environment = cast(dict[str, str], kwargs["env"])
+            envelope = environment[harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT]
+            mode = envelope.removeprefix("task064-envelope:")
+            assert issued == list(modes)
+            assert mode in modes
+            assert mode not in launched
+            assert kwargs["pass_fds"] == (500 + modes.index(mode),)
+            assert kwargs["start_new_session"] is True
+            assert kwargs["stdout"] is subprocess.PIPE
+            assert kwargs["stderr"] is subprocess.PIPE
+            self.mode = mode
+            self.args = args
+            self.pid = 10_000 + modes.index(mode)
+            self.returncode: int | None = None
+            stdout_read, self._stdout_write = os.pipe()
+            stderr_read, self._stderr_write = os.pipe()
+            self.stdout = os.fdopen(stdout_read, "rb", buffering=0)
+            self.stderr = os.fdopen(stderr_read, "rb", buffering=0)
+            self._finished = threading.Event()
+            processes_by_pid[self.pid] = self
+            launched.append(mode)
+            if output_limit_failure:
+                if mode == modes[0]:
+                    os.write(self._stdout_write, b"x")
+                    overflow_descriptors.add(self.stdout.fileno())
+            else:
+                os.write(self._stdout_write, f"stdout:{mode}".encode())
+                os.write(self._stderr_write, f"stderr:{mode}".encode())
+                self._finish(0)
+
+        def _finish(self, returncode: int) -> None:
+            if self.returncode is not None:
+                return
+            self.returncode = returncode
+            for attribute in ("_stdout_write", "_stderr_write"):
+                descriptor = cast(int, getattr(self, attribute))
+                if descriptor >= 0:
+                    os.close(descriptor)
+                    setattr(self, attribute, -1)
+            self._finished.set()
+
+        def poll(self) -> int | None:
+            return self.returncode
+
+        def wait(self, timeout: float | None = None) -> int:
+            if not self._finished.wait(timeout=timeout):
+                raise TimeoutError("fake TASK064 child was not terminated")
+            assert self.returncode is not None
+            return self.returncode
+
+        def terminate(self) -> None:
+            self._finish(-int(signal.SIGTERM))
+
+        def kill(self) -> None:
+            self._finish(-int(signal.SIGKILL))
+
+    def fake_environment(pycache_root: Path, *, label: str) -> tuple[dict[str, str], Path]:
+        prefix = pycache_root / label
+        prefixes.append(prefix)
+        return {}, prefix
+
+    def fake_issue(
+        _pytest_root: Path,
+        protocol: str,
+        issuer_node_id: str,
+        target_node_id: str,
+        mode: str,
+    ) -> FakeProvenance:
+        assert threading.get_ident() == main_thread
+        assert protocol == "report_close"
+        assert issuer_node_id == target_node_id == "tests/fake.py::test_report"
+        issued.append(mode)
+        return FakeProvenance(mode, 500 + modes.index(mode))
+
+    def fake_close(provenance: FakeProvenance) -> bool:
+        assert threading.get_ident() == main_thread
+        closed.append(provenance.mode)
+        return not output_limit_failure
+
+    def fake_killpg(process_id: int, signal_number: int) -> None:
+        process = processes_by_pid[process_id]
+        signaled.append((process.mode, signal_number))
+        process._finish(-signal_number)
+
+    real_read = os.read
+
+    def bounded_fake_read(descriptor: int, size: int) -> bytes:
+        if descriptor in overflow_descriptors and descriptor not in overflow_emitted:
+            overflow_emitted.add(descriptor)
+            return b"x" * 1_048_577
+        return real_read(descriptor, size)
+
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "_fresh_subprocess_pycache_environment",
+        fake_environment,
+    )
+    monkeypatch.setattr(harness, "_issue_task064_child_provenance", fake_issue)
+    monkeypatch.setattr(harness, "_close_task064_child_provenance", fake_close)
+    monkeypatch.setattr(subprocess, "Popen", FakeProcess)
+    monkeypatch.setattr(os, "killpg", fake_killpg)
+    monkeypatch.setattr(os, "read", bounded_fake_read)
+
+    def invoke() -> dict[str, tuple[subprocess.CompletedProcess[str], float]]:
+        return _run_task064_pytest_children_concurrently(
+            tmp_path,
+            protocol="report_close",
+            issuer_node_id="tests/fake.py::test_report",
+            target_node_id="tests/fake.py::test_report",
+            modes=modes,
+            pycache_label="task064-fake-concurrent-pycache",
+            timeout_seconds=2.0,
+        )
+
+    if output_limit_failure:
+        with pytest.raises(AssertionError) as rejected:
+            invoke()
+        assert "byte ceiling" in str(rejected.value)
+        assert {mode for mode, _ in signaled} == set(modes)
+        assert all(signal_number == signal.SIGTERM for _, signal_number in signaled)
+        assert overflow_emitted
+    else:
+        results = invoke()
+        assert tuple(results) == modes
+        assert all(
+            result.returncode == 0
+            and result.stdout == f"stdout:{mode}"
+            and result.stderr == f"stderr:{mode}"
+            for mode, (result, _) in results.items()
+        )
+        assert signaled == []
+    assert issued == launched == closed == list(modes)
+    assert len(set(prefixes)) == len(modes)
+    assert all(process.poll() is not None for process in processes_by_pid.values())
+
+
+@pytest.mark.parametrize(
+    "thread_failure",
+    ("constructor", "partial-start"),
+    ids=("constructor-failure", "partial-start-failure"),
+)
+def test_concurrent_child_drain_start_failures_cannot_bypass_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    thread_failure: str,
+) -> None:
+    modes = (
+        "readback_verified_root_close_ambiguity",
+        "staging_close_ambiguity",
+        "readback_close_ambiguity",
+        "reentrant_root_revocation",
+    )
+    failing_mode = modes[0] if thread_failure == "constructor" else modes[1]
+    failure_label = f"task064-{thread_failure}-failure"
+    main_thread = threading.get_ident()
+    real_thread_type = threading.Thread
+    issued: list[str] = []
+    closed: list[str] = []
+    launched: list[str] = []
+    signaled: list[tuple[str, int]] = []
+    constructed_threads: list[str] = []
+    start_attempts: list[str] = []
+    started_threads: list[str] = []
+    joined_threads: list[str] = []
+    queried_threads: list[str] = []
+    prefixes: dict[str, Path] = {}
+    provenances: dict[str, FakeProvenance] = {}
+    processes_by_pid: dict[int, FakeProcess] = {}
+    wait_threads: dict[str, list[int]] = {mode: [] for mode in modes}
+    wait_timeouts: dict[str, list[float | None]] = {mode: [] for mode in modes}
+
+    class FakeProvenance:
+        def __init__(self, mode: str, descriptor: int) -> None:
+            self.mode = mode
+            self.envelope = f"task064-thread-failure-envelope:{mode}"
+            self.descriptor = descriptor
+            self.marker_path = tmp_path / f".task064-thread-failure-{mode}.json"
+            self.marker_path.write_text("marker", encoding="utf-8")
+
+    class FakeProcess:
+        def __init__(
+            self,
+            args: Sequence[str],
+            **kwargs: object,
+        ) -> None:
+            environment = cast(dict[str, str], kwargs["env"])
+            envelope = environment[harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT]
+            mode = envelope.removeprefix("task064-thread-failure-envelope:")
+            assert issued == list(modes)
+            assert mode in modes
+            assert mode not in launched
+            assert kwargs["pass_fds"] == (700 + modes.index(mode),)
+            assert kwargs["start_new_session"] is True
+            assert kwargs["stdout"] is subprocess.PIPE
+            assert kwargs["stderr"] is subprocess.PIPE
+            self.mode = mode
+            self.args = args
+            self.pid = 20_000 + modes.index(mode)
+            self.returncode: int | None = None
+            stdout_read, self._stdout_write = os.pipe()
+            stderr_read, self._stderr_write = os.pipe()
+            self.stdout = os.fdopen(stdout_read, "rb", buffering=0)
+            self.stderr = os.fdopen(stderr_read, "rb", buffering=0)
+            self._finished = threading.Event()
+            os.write(self._stdout_write, f"stdout:{mode}".encode())
+            os.write(self._stderr_write, f"stderr:{mode}".encode())
+            processes_by_pid[self.pid] = self
+            launched.append(mode)
+
+        def _finish(self, returncode: int) -> None:
+            if self.returncode is not None:
+                return
+            self.returncode = returncode
+            for attribute in ("_stdout_write", "_stderr_write"):
+                descriptor = cast(int, getattr(self, attribute))
+                if descriptor >= 0:
+                    os.close(descriptor)
+                    setattr(self, attribute, -1)
+            if self.mode != failing_mode:
+                prefixes[self.mode].rmdir()
+            self._finished.set()
+
+        def poll(self) -> int | None:
+            return self.returncode
+
+        def wait(self, timeout: float | None = None) -> int:
+            wait_threads[self.mode].append(threading.get_ident())
+            wait_timeouts[self.mode].append(timeout)
+            if not self._finished.wait(timeout=timeout):
+                raise TimeoutError("fake TASK064 child was not terminated")
+            assert self.returncode is not None
+            return self.returncode
+
+        def terminate(self) -> None:
+            self._finish(-int(signal.SIGTERM))
+
+        def kill(self) -> None:
+            self._finish(-int(signal.SIGKILL))
+
+    class TrackingThread:
+        def __init__(
+            self,
+            mode: str,
+            *,
+            target: Callable[..., object],
+            arguments: tuple[object, ...],
+            name: str,
+            daemon: bool,
+        ) -> None:
+            self.mode = mode
+            self._thread = real_thread_type(
+                target=target,
+                args=arguments,
+                name=name,
+                daemon=daemon,
+            )
+
+        def start(self) -> None:
+            start_attempts.append(self.mode)
+            if thread_failure == "partial-start" and self.mode == failing_mode:
+                raise RuntimeError(failure_label)
+            self._thread.start()
+            started_threads.append(self.mode)
+
+        def join(self, timeout: float | None = None) -> None:
+            joined_threads.append(self.mode)
+            self._thread.join(timeout=timeout)
+
+        def is_alive(self) -> bool:
+            queried_threads.append(self.mode)
+            return self._thread.is_alive()
+
+    def fake_environment(pycache_root: Path, *, label: str) -> tuple[dict[str, str], Path]:
+        mode = modes[len(prefixes)]
+        prefix = pycache_root / label
+        prefix.mkdir()
+        prefixes[mode] = prefix
+        return {}, prefix
+
+    def fake_issue(
+        _pytest_root: Path,
+        protocol: str,
+        issuer_node_id: str,
+        target_node_id: str,
+        mode: str,
+    ) -> FakeProvenance:
+        assert threading.get_ident() == main_thread
+        assert protocol == "report_close"
+        assert issuer_node_id == target_node_id == "tests/fake.py::test_report"
+        issued.append(mode)
+        provenance = FakeProvenance(mode, 700 + modes.index(mode))
+        provenances[mode] = provenance
+        return provenance
+
+    def fake_close(provenance: FakeProvenance) -> bool:
+        assert threading.get_ident() == main_thread
+        closed.append(provenance.mode)
+        if provenance.mode != failing_mode:
+            provenance.marker_path.unlink()
+        return True
+
+    def fake_killpg(process_id: int, signal_number: int) -> None:
+        process = processes_by_pid[process_id]
+        signaled.append((process.mode, signal_number))
+        process._finish(-signal_number)
+
+    def fake_thread(*_args: object, **kwargs: object) -> TrackingThread:
+        target = cast(Callable[..., object], kwargs["target"])
+        arguments = cast(tuple[object, ...], kwargs["args"])
+        mode = cast(str, arguments[0])
+        constructed_threads.append(mode)
+        if thread_failure == "constructor" and mode == failing_mode:
+            raise RuntimeError(failure_label)
+        return TrackingThread(
+            mode,
+            target=target,
+            arguments=arguments,
+            name=cast(str, kwargs["name"]),
+            daemon=cast(bool, kwargs["daemon"]),
+        )
+
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "_fresh_subprocess_pycache_environment",
+        fake_environment,
+    )
+    monkeypatch.setattr(harness, "_issue_task064_child_provenance", fake_issue)
+    monkeypatch.setattr(harness, "_close_task064_child_provenance", fake_close)
+    monkeypatch.setattr(subprocess, "Popen", FakeProcess)
+    monkeypatch.setattr(os, "killpg", fake_killpg)
+    monkeypatch.setattr(threading, "Thread", fake_thread)
+
+    with pytest.raises(AssertionError) as rejected:
+        _run_task064_pytest_children_concurrently(
+            tmp_path,
+            protocol="report_close",
+            issuer_node_id="tests/fake.py::test_report",
+            target_node_id="tests/fake.py::test_report",
+            modes=modes,
+            pycache_label="task064-thread-failure-pycache",
+            timeout_seconds=2.0,
+        )
+
+    diagnostics = str(rejected.value)
+    expected_started_modes = [mode for mode in modes if mode != failing_mode]
+    assert failure_label in diagnostics
+    assert f"TASK064 child marker residue for {failing_mode!r}" in diagnostics
+    assert f"TASK064 child pycache residue for {failing_mode!r}" in diagnostics
+    assert issued == launched == closed == list(modes)
+    assert {mode for mode, _ in signaled} == set(modes)
+    assert all(signal_number == signal.SIGTERM for _, signal_number in signaled)
+    assert started_threads == joined_threads == queried_threads == expected_started_modes
+    assert failing_mode not in joined_threads
+    assert failing_mode not in queried_threads
+    if thread_failure == "constructor":
+        assert failing_mode not in start_attempts
+    else:
+        assert start_attempts == list(modes)
+    assert wait_threads[failing_mode]
+    assert set(wait_threads[failing_mode]) == {main_thread}
+    assert all(
+        thread_id != main_thread
+        for mode in expected_started_modes
+        for thread_id in wait_threads[mode]
+    )
+    assert all(timeout is None or 0.0 <= timeout <= 10.0 for timeout in wait_timeouts[failing_mode])
+    assert all(process.poll() is not None for process in processes_by_pid.values())
+    assert all(
+        process.stdout.closed and process.stderr.closed for process in processes_by_pid.values()
+    )
+    assert all(
+        not provenance.marker_path.exists()
+        for mode, provenance in provenances.items()
+        if mode != failing_mode
+    )
+    assert all(not prefix.exists() for mode, prefix in prefixes.items() if mode != failing_mode)
+
+
+def test_report_close_orchestration_keeps_full_positive_evidence_and_parent_negatives() -> None:
+    helper_tree = ast.parse(
+        textwrap.dedent(inspect.getsource(_run_task064_pytest_children_concurrently))
+    )
+    helper = cast(ast.FunctionDef, helper_tree.body[0])
+    helper_calls = tuple(node for node in ast.walk(helper) if isinstance(node, ast.Call))
+    issue_calls = tuple(
+        call
+        for call in helper_calls
+        if isinstance(call.func, ast.Attribute)
+        and call.func.attr == "_issue_task064_child_provenance"
+    )
+    launch_calls = tuple(
+        call
+        for call in helper_calls
+        if isinstance(call.func, ast.Attribute) and call.func.attr == "Popen"
+    )
+    thread_calls = tuple(
+        call
+        for call in helper_calls
+        if isinstance(call.func, ast.Attribute) and call.func.attr == "Thread"
+    )
+    assert len(issue_calls) == len(launch_calls) == len(thread_calls) == 1
+    assert issue_calls[0].lineno < launch_calls[0].lineno < thread_calls[0].lineno
+    drain_child = next(
+        node
+        for node in helper.body
+        if isinstance(node, ast.FunctionDef) and node.name == "drain_child"
+    )
+    assert not {
+        node.attr
+        for node in ast.walk(drain_child)
+        if isinstance(node, ast.Attribute)
+        and node.attr
+        in {
+            "_issue_task064_child_provenance",
+            "_close_task064_child_provenance",
+            "_lookup_active_pytest_root",
+            "_pytest_root_session_owns",
+        }
+    }
+    literal_assignments = {
+        target.id: node.value.value
+        for node in helper.body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance((target := node.targets[0]), ast.Name)
+        and isinstance(node.value, ast.Constant)
+    }
+    assert literal_assignments["maximum_output_stream_bytes"] == 1_048_576
+    assert literal_assignments["maximum_output_aggregate_bytes"] == 4_194_304
+    assert (
+        sum(
+            isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "os"
+            and call.func.attr == "read"
+            for call in helper_calls
+        )
+        == 1
+    )
+
+    report_tree = ast.parse(
+        textwrap.dedent(
+            inspect.getsource(test_finite_typical_workload_measurements_and_sanitized_report)
+        )
+    )
+    report = cast(ast.FunctionDef, report_tree.body[0])
+    report_calls = tuple(node for node in ast.walk(report) if isinstance(node, ast.Call))
+    assert (
+        sum(
+            isinstance(call.func, ast.Name)
+            and call.func.id == "_run_task064_pytest_children_concurrently"
+            for call in report_calls
+        )
+        == 1
+    )
+    assert not any(
+        isinstance(call.func, ast.Name) and call.func.id == "_run_task064_pytest_child"
+        for call in report_calls
+    )
+
+    normal_guards = tuple(
+        node
+        for node in ast.walk(report)
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.Compare)
+        and isinstance(node.test.left, ast.Name)
+        and node.test.left.id == "close_probe_mode"
+        and len(node.test.ops) == 1
+        and isinstance(node.test.ops[0], ast.Is)
+        and len(node.test.comparators) == 1
+        and isinstance(node.test.comparators[0], ast.Constant)
+        and node.test.comparators[0].value is None
+    )
+    normal_only_nodes = {
+        id(node)
+        for guard in normal_guards
+        for statement in guard.body
+        for node in ast.walk(statement)
+    }
+    negative_names = {
+        "historical_binding_substitution",
+        "semantic_substitution",
+        "missing_expectation_substitution",
+        "same_shape_query_splice",
+        "coherent_query_splice",
+        "shallow_conflicts",
+        "mismatch_second_aggregate_digest",
+        "second_pass_mismatch",
+    }
+    for negative_name in negative_names:
+        occurrences = tuple(
+            node
+            for node in ast.walk(report)
+            if (
+                (isinstance(node, ast.Name) and node.id == negative_name)
+                or (isinstance(node, ast.FunctionDef) and node.name == negative_name)
+            )
+        )
+        assert occurrences
+        assert all(id(node) in normal_only_nodes for node in occurrences)
+    arm_calls = tuple(
+        call
+        for call in report_calls
+        if isinstance(call.func, ast.Attribute)
+        and call.func.attr == "_arm_evidence_seal_transition_fault"
+    )
+    assert len(arm_calls) == 1 and id(arm_calls[0]) in normal_only_nodes
+
+    positive_calls = {
+        "collect_backup_restore_evidence",
+        "collect_schema_identity_evidence",
+        "finalize_bootstrap_path_evidence",
+        "collect_runtime_connection_controls_evidence",
+        "collect_projection_roundtrip_evidence",
+        "finalize_schema_corruption_evidence",
+        "finalize_fresh_process_evidence",
+        "finalize_atomicity_evidence",
+        "finalize_bounded_query_evidence",
+        "collect_closed_error_mapping_evidence",
+        "collect_generation_copy_evidence",
+        "collect_workload_threshold_evidence",
+    }
+    unconditional_positive_lines: list[int] = []
+    for positive_name in positive_calls:
+        matches = tuple(
+            call
+            for call in report_calls
+            if isinstance(call.func, ast.Attribute)
+            and call.func.attr == positive_name
+            and id(call) not in normal_only_nodes
+        )
+        assert matches
+        unconditional_positive_lines.append(min(call.lineno for call in matches))
+    unconditional_seals = tuple(
+        call
+        for call in report_calls
+        if isinstance(call.func, ast.Attribute)
+        and call.func.attr == "seal_generated_evidence_run"
+        and id(call) not in normal_only_nodes
+    )
+    assert len(unconditional_seals) == 1
+    assert (
+        sum(
+            isinstance(call.func, ast.Attribute)
+            and call.func.attr == "GeneratedEvidenceAggregate"
+            and id(call) not in normal_only_nodes
+            for call in report_calls
+        )
+        == 1
+    )
+    close_branch = next(
+        node
+        for node in report.body
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.Compare)
+        and isinstance(node.test.left, ast.Name)
+        and node.test.left.id == "close_probe_mode"
+        and isinstance(node.test.ops[0], ast.IsNot)
+    )
+    assert (
+        sum(
+            isinstance(call.func, ast.Name)
+            and call.func.id == "_evidence_report"
+            and id(call) not in normal_only_nodes
+            and call.lineno < close_branch.lineno
+            for call in report_calls
+        )
+        == 1
+    )
+    assert max((*unconditional_positive_lines, unconditional_seals[0].lineno)) < (
+        close_branch.lineno
+    )
+
+
+def test_fresh_subprocess_pycache_prefix_excludes_valid_stale_pytest_rewrite_pyc(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module_root = tmp_path / "task064-stale-pytest-rewrite-module"
+    module_root.mkdir(mode=0o700)
+    source_path = module_root / "test_task064_stale_rewrite_probe.py"
+    stale_source = (
+        b"def test_task064_marker() -> None:\n    print('TASK064_STALE')\n    assert True\n"
+    )
+    fresh_source = (
+        b"def test_task064_marker() -> None:\n    print('TASK064_FRESH')\n    assert True\n"
+    )
+    assert len(stale_source) == len(fresh_source)
+    source_path.write_bytes(stale_source)
+    source_details = source_path.stat()
+    pytest_command = (
+        sys.executable,
+        "-m",
+        "pytest",
+        "-q",
+        "-s",
+        "--assert=rewrite",
+        "-p",
+        "no:cacheprovider",
+        source_path.name,
+    )
+    seed_environment = os.environ.copy()
+    seed_environment["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+    seed_environment.pop("PYTHONDONTWRITEBYTECODE", None)
+    seed_environment.pop("PYTHONPYCACHEPREFIX", None)
+    seeded = subprocess.run(
+        pytest_command,
+        cwd=module_root,
+        env=seed_environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert seeded.returncode == 0
+    assert "TASK064_STALE" in seeded.stdout
+    assert "TASK064_FRESH" not in seeded.stdout
+    assert seeded.stderr == ""
+    rewrite_caches = tuple(
+        (module_root / "__pycache__").glob(
+            f"{source_path.stem}.*-pytest-*.pyc",
+        )
+    )
+    assert len(rewrite_caches) == 1
+    stale_bytecode = rewrite_caches[0]
+    stale_bytecode_raw = stale_bytecode.read_bytes()
+    assert stale_bytecode_raw[:4] == importlib.util.MAGIC_NUMBER
+    assert int.from_bytes(stale_bytecode_raw[4:8], "little") == 0
+    assert (
+        int.from_bytes(stale_bytecode_raw[8:12], "little")
+        == (source_details.st_mtime_ns // 1_000_000_000) & 0xFFFF_FFFF
+    )
+    assert int.from_bytes(stale_bytecode_raw[12:16], "little") == len(stale_source)
+    stale_bytecode_digest = hashlib.sha256(stale_bytecode_raw).hexdigest()
+
+    source_path.write_bytes(fresh_source)
+    os.utime(
+        source_path,
+        ns=(source_details.st_atime_ns, source_details.st_mtime_ns),
+    )
+    assert source_path.stat().st_size == source_details.st_size
+    assert (source_path.stat().st_mtime_ns // 1_000_000_000) & 0xFFFF_FFFF == int.from_bytes(
+        stale_bytecode_raw[8:12],
+        "little",
+    )
+    unisolated_environment = os.environ.copy()
+    unisolated_environment["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+    unisolated_environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    unisolated_environment.pop("PYTHONPYCACHEPREFIX", None)
+
+    monkeypatch.setenv("PYTHONPYCACHEPREFIX", str(stale_bytecode.parent))
+    isolated_environment, fresh_prefix = _fresh_subprocess_pycache_environment(
+        tmp_path,
+        label="task064-hermetic-pycache",
+    )
+    assert os.environ["PYTHONPYCACHEPREFIX"] == str(stale_bytecode.parent)
+    assert isolated_environment["PYTHONPYCACHEPREFIX"] == str(fresh_prefix)
+    for environment, expected, rejected in (
+        (unisolated_environment, "TASK064_STALE", "TASK064_FRESH"),
+        (isolated_environment, "TASK064_FRESH", "TASK064_STALE"),
+        (isolated_environment, "TASK064_FRESH", "TASK064_STALE"),
+        (unisolated_environment, "TASK064_STALE", "TASK064_FRESH"),
+    ):
+        result = subprocess.run(
+            pytest_command,
+            cwd=module_root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert result.returncode == 0
+        assert expected in result.stdout
+        assert rejected not in result.stdout
+        assert result.stderr == ""
+        assert not fresh_prefix.exists()
+        assert hashlib.sha256(stale_bytecode.read_bytes()).hexdigest() == (stale_bytecode_digest)
+
+    collision_prefix = tmp_path / "task064-collision-pycache"
+    collision_prefix.mkdir(mode=0o700)
+    with pytest.raises(AssertionError, match="pycache"):
+        _fresh_subprocess_pycache_environment(
+            tmp_path,
+            label=collision_prefix.name,
+        )
+    assert os.environ["PYTHONPYCACHEPREFIX"] == str(stale_bytecode.parent)
+    assert not fresh_prefix.exists()
+    assert stale_bytecode.is_file()
 
 
 def _digest(label: str) -> str:
@@ -308,6 +2430,162 @@ def _retain(
     return stored
 
 
+def _child_lifecycle_transition(
+    prior: ContinuousPublicTradeStreamStoredHistoryEntryV1,
+    policy: ContinuousPublicTradePolicy,
+    kind: ContinuousPublicTradeTransitionKind,
+    *,
+    child_job_id: UUID,
+    child_policy_fingerprint: str,
+) -> ContinuousPublicTradeStreamStoredTransitionV1:
+    assert kind in (
+        ContinuousPublicTradeTransitionKind.ATTACH,
+        ContinuousPublicTradeTransitionKind.CHILD_COMPLETED,
+    )
+    prior_envelope = prior.successor_envelope.envelope
+    prior_checkpoint = prior_envelope.checkpoint
+    successor_version = prior_checkpoint.version + 1
+    recorded_at = RECORDED_AT + timedelta(microseconds=successor_version)
+    if kind is ContinuousPublicTradeTransitionKind.ATTACH:
+        plan, payload = finalize_continuous_public_trade_attachment(
+            prior_checkpoint,
+            policy,
+            candidate_job_id=child_job_id,
+            child_policy_fingerprint=child_policy_fingerprint,
+            now=recorded_at,
+        )
+        assert plan.attachment is not None
+        assert payload is not None
+        successor_checkpoint = ContinuousPublicTradeStreamCheckpoint.model_validate(
+            prior_checkpoint.model_dump()
+            | {
+                "attachment": plan.attachment,
+                "version": successor_version,
+            }
+        )
+        successor_value = ContinuousPublicTradeStreamEnvelopeV1(
+            checkpoint=successor_checkpoint,
+            child_creation_payload=payload,
+        )
+    else:
+        prior_attachment = prior_checkpoint.attachment
+        prior_payload = prior_envelope.child_creation_payload
+        assert prior_attachment is not None
+        assert prior_payload is not None
+        assert prior_attachment.job_id == child_job_id
+        assert prior_payload.child_checkpoint.policy_fingerprint == child_policy_fingerprint
+        successor_checkpoint = ContinuousPublicTradeStreamCheckpoint.model_validate(
+            prior_checkpoint.model_dump()
+            | {
+                "cursor_epoch_ms": prior_attachment.window_end_epoch_ms,
+                "attachment": None,
+                "version": successor_version,
+            }
+        )
+        successor_value = ContinuousPublicTradeStreamEnvelopeV1(
+            checkpoint=successor_checkpoint,
+        )
+    successor = _stored_envelope(successor_value)
+    successor_attachment = successor_checkpoint.attachment
+    successor_payload = successor_value.child_creation_payload
+    authority_scope = ContinuousPublicTradeEvidenceScopeV1(
+        evidence_kind=ContinuousPublicTradeEvidenceKind.STREAM_TRANSITION_AUTHORITY,
+        stream_id=prior_checkpoint.stream_id,
+        transition_kind=kind,
+        prior_version=prior_checkpoint.version,
+        prior_envelope_digest=prior.successor_envelope.envelope_digest,
+        prior_history_root=prior.history_root,
+        successor_version=successor_version,
+        successor_envelope_digest=(
+            None
+            if kind is ContinuousPublicTradeTransitionKind.ATTACH
+            else successor.envelope_digest
+        ),
+        child_job_id=(
+            successor_attachment.job_id
+            if kind is ContinuousPublicTradeTransitionKind.ATTACH
+            and successor_attachment is not None
+            else None
+        ),
+        child_policy_fingerprint=(
+            successor_payload.child_checkpoint.policy_fingerprint
+            if kind is ContinuousPublicTradeTransitionKind.ATTACH and successor_payload is not None
+            else None
+        ),
+        child_creation_fingerprint=None,
+        reason_code=None,
+        stream_policy=None,
+    )
+    completion_scope: ContinuousPublicTradeEvidenceScopeV1 | None = None
+    if kind is ContinuousPublicTradeTransitionKind.CHILD_COMPLETED:
+        prior_attachment = prior_checkpoint.attachment
+        prior_payload = prior_envelope.child_creation_payload
+        assert prior_attachment is not None
+        assert prior_payload is not None
+        completion_scope = ContinuousPublicTradeEvidenceScopeV1(
+            evidence_kind=ContinuousPublicTradeEvidenceKind.CHILD_COMPLETION,
+            stream_id=prior_checkpoint.stream_id,
+            transition_kind=kind,
+            prior_version=prior_checkpoint.version,
+            prior_envelope_digest=prior.successor_envelope.envelope_digest,
+            prior_history_root=prior.history_root,
+            successor_version=successor_version,
+            successor_envelope_digest=successor.envelope_digest,
+            child_job_id=prior_attachment.job_id,
+            child_policy_fingerprint=prior_payload.child_checkpoint.policy_fingerprint,
+            child_creation_fingerprint=prior_attachment.creation_fingerprint,
+            reason_code=None,
+            stream_policy=None,
+        )
+    record = ContinuousPublicTradeStreamTransitionRecordV1(
+        stream_id=prior_checkpoint.stream_id,
+        prior_version=prior_checkpoint.version,
+        successor_version=successor_version,
+        transition_kind=kind,
+        prior_history_root=prior.history_root,
+        prior_envelope_digest=prior.successor_envelope.envelope_digest,
+        successor_envelope_hex=successor.canonical_bytes.hex(),
+        successor_envelope_digest=successor.envelope_digest,
+        reason_code=None,
+        transition_authority_reference=_reference(
+            ContinuousPublicTradeEvidenceKind.STREAM_TRANSITION_AUTHORITY,
+            evidence_scope_digest(authority_scope),
+            suffix=f"{kind.value.lower()}-{successor_version}",
+            recorded_at=recorded_at,
+        ),
+        child_completion_reference=(
+            None
+            if completion_scope is None
+            else _reference(
+                ContinuousPublicTradeEvidenceKind.CHILD_COMPLETION,
+                evidence_scope_digest(completion_scope),
+                suffix=f"child-completed-{successor_version}",
+                recorded_at=recorded_at,
+            )
+        ),
+        recorded_at=recorded_at,
+    )
+    stored = ContinuousPublicTradeStreamStoredTransitionV1(
+        record=record,
+        canonical_bytes=encode_stream_transition_record(record),
+        record_digest=stream_transition_digest(record),
+        successor_envelope=successor,
+        history_root=next_stream_history_root(prior.history_root, record),
+        transition_authority_scope=authority_scope,
+        child_completion_scope=completion_scope,
+    )
+    validate_stream_transition_link(
+        prior_envelope,
+        record,
+        policy=policy,
+        prior_history_root=prior.history_root,
+        prior_recorded_at=prior.record.recorded_at,
+        transition_authority_scope=authority_scope,
+        child_completion_scope=completion_scope,
+    )
+    return stored
+
+
 def _with_recorded_at(
     prior: ContinuousPublicTradeStreamStoredHistoryEntryV1,
     transition: ContinuousPublicTradeStreamStoredTransitionV1,
@@ -485,6 +2763,7 @@ def _capture_sqlite_rejection(
 def _report_bootstrap_path_evidence(
     tmp_path: Path,
     token: harness.StoreToken,
+    fixture_capability: harness._PytestRootCapability,
 ) -> harness.BootstrapPathEvidence:
     checks: list[tuple[str, harness.HarnessFailureCode]] = [
         _capture_rejection(
@@ -527,31 +2806,29 @@ def _report_bootstrap_path_evidence(
         )
     )
 
-    node_id = os.environ["PYTEST_CURRENT_TEST"].rsplit(" (", maxsplit=1)[0]
-    scoped_root = tmp_path / "report-scoped-root"
-    scoped_root.mkdir(mode=0o700)
-    with harness._pytest_root_scope(scoped_root, node_id=node_id):
-        scoped_token = harness.bootstrap_store(scoped_root)
-        checks.extend(
-            (
-                _capture_rejection(
-                    "wrong_process_root",
-                    pytest_root=scoped_root,
-                ),
-                _capture_rejection(
-                    "wrong_process_token",
-                    token=scoped_token,
-                ),
-                _capture_rejection(
-                    "wrong_node_root",
-                    pytest_root=scoped_root,
-                ),
-                _capture_rejection(
-                    "wrong_node_token",
-                    token=scoped_token,
-                ),
-            )
+    scoped_root = fixture_capability.roots[1]
+    scoped_token = harness.bootstrap_store(scoped_root)
+    checks.extend(
+        (
+            _capture_rejection(
+                "wrong_process_root",
+                pytest_root=scoped_root,
+            ),
+            _capture_rejection(
+                "wrong_process_token",
+                token=scoped_token,
+            ),
+            _capture_rejection(
+                "wrong_node_root",
+                pytest_root=scoped_root,
+            ),
+            _capture_rejection(
+                "wrong_node_token",
+                token=scoped_token,
+            ),
         )
+    )
+    harness._revoke_fixture_root(fixture_capability, scoped_root)
     checks.extend(
         (
             _capture_rejection(
@@ -565,25 +2842,22 @@ def _report_bootstrap_path_evidence(
         )
     )
     harness._remove_owned_files(scoped_token)
-    scoped_root.rmdir()
 
-    registered_root = tmp_path / "report-replaced-root"
+    registered_root = fixture_capability.roots[2]
+    retained_root = registered_root.with_name(f"{registered_root.name}-retained")
+    registered_root.rename(retained_root)
     registered_root.mkdir(mode=0o700)
-    retained_root = tmp_path / "report-replaced-root-retained"
-    with harness._pytest_root_scope(registered_root, node_id=node_id):
-        registered_root.rename(retained_root)
-        registered_root.mkdir(mode=0o700)
-        try:
-            checks.append(
-                _capture_rejection(
-                    "replaced_registered_root",
-                    pytest_root=registered_root,
-                )
+    try:
+        checks.append(
+            _capture_rejection(
+                "replaced_registered_root",
+                pytest_root=registered_root,
             )
-        finally:
-            registered_root.rmdir()
-            retained_root.rename(registered_root)
-    registered_root.rmdir()
+        )
+    finally:
+        registered_root.rmdir()
+        retained_root.rename(registered_root)
+    harness._revoke_fixture_root(fixture_capability, registered_root)
 
     hardlink_token = harness.bootstrap_store(tmp_path)
     hardlink = tmp_path / "forbidden-hardlink.sqlite3"
@@ -1398,24 +3672,30 @@ def _report_atomicity_evidence(
         mixed_creation,
         mixed_policy,
     )
-    conflict_prior, conflict_policy, conflict_expectation = (
-        (transition_b_v3, policy_b, _expectation(policy_a, creation_a))
-        if substitute_semantics
-        else (transition_a_v3, policy_a, _expectation(policy_b, creation_b))
-    )
     conflict_transition = _retain(
-        conflict_prior,
-        conflict_policy,
+        mixed_creation,
+        mixed_policy,
         reason=(
-            "report-atomicity-substituted-v4-conflict"
+            "report-atomicity-substituted-mixed-v2-conflict"
             if substitute_semantics
-            else "report-atomicity-a-v4-conflict"
+            else "report-atomicity-mixed-v2-conflict"
         ),
+    )
+    conflict_expectation = _expectation(mixed_policy, mixed_creation)
+    conflict_command = ContinuousPublicTradeStreamCompareAndSwapCommandV1(
+        expectation=conflict_expectation,
+        expected_version=conflict_transition.record.prior_version,
+        expected_envelope_digest=conflict_transition.record.prior_envelope_digest,
+        expected_history_root=conflict_transition.record.prior_history_root,
+        transition=conflict_transition,
+    )
+    exact_conflict_command = (
+        ContinuousPublicTradeStreamCompareAndSwapCommandV1.revalidate_at_boundary(conflict_command)
     )
     conflicting_compare_and_swap = harness.compare_and_swap_stream(
         token,
-        conflict_transition,
-        expectation=conflict_expectation,
+        exact_conflict_command.transition,
+        expectation=exact_conflict_command.expectation,
     )
     return harness.AtomicityClassificationEvidence(
         mutations=(
@@ -1726,6 +4006,7 @@ def _expectation(
     creation: ContinuousPublicTradeStreamStoredCreationV1,
     *,
     source: str | None = None,
+    child_policy_fingerprint: str | None = None,
 ) -> ContinuousPublicTradeStreamExpectationV1:
     record = creation.record
     return ContinuousPublicTradeStreamExpectationV1(
@@ -1741,7 +4022,7 @@ def _expectation(
             stream_start_epoch_ms=record.stream_start_epoch_ms,
         ),
         effective_stream_policy=policy,
-        effective_child_policy_fingerprint=None,
+        effective_child_policy_fingerprint=child_policy_fingerprint,
     )
 
 
@@ -2241,6 +4522,39 @@ def test_audit_expectation_conflict_cannot_mask_corrupt_candidate_history(
     assert corrupt.value.code is harness.HarnessFailureCode.CORRUPT
 
 
+def test_compare_and_swap_pre_cache_paths_preserve_outcomes(tmp_path: Path) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    policy, creation = _creation(seed=3_412)
+    transition = _retain(creation, policy, reason="pre-cache-outcome")
+    real_cache_factory = harness._new_history_snapshot_cache
+    issued_caches: list[harness._HistorySnapshotCache] = []
+
+    def observe_cache_factory() -> harness._HistorySnapshotCache:
+        cache = real_cache_factory()
+        issued_caches.append(cache)
+        return cache
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(harness, "_new_history_snapshot_cache", observe_cache_factory)
+        conflict = harness.compare_and_swap_stream(token, transition)
+    assert conflict.classification is harness.StoreClassification.CONFLICT
+    assert conflict.committed is True
+    assert issued_caches == []
+
+    def stop_after_lock(seam: str) -> None:
+        if seam == "after_lock":
+            raise harness.HarnessFailure(harness.HarnessFailureCode.UNAVAILABLE)
+
+    with (
+        pytest.MonkeyPatch.context() as patch,
+        pytest.raises(harness.HarnessFailure) as early_error,
+    ):
+        patch.setattr(harness, "_new_history_snapshot_cache", observe_cache_factory)
+        harness.compare_and_swap_stream(token, transition, seam_hook=stop_after_lock)
+    assert early_error.value.code is harness.HarnessFailureCode.UNAVAILABLE
+    assert issued_caches == []
+
+
 def test_compare_and_swap_competing_successor_and_historical_duplicate(
     tmp_path: Path,
 ) -> None:
@@ -2255,16 +4569,471 @@ def test_compare_and_swap_competing_successor_and_historical_duplicate(
     assert harness.compare_and_swap_stream(token, accepted).classification is (
         harness.StoreClassification.UPDATED
     )
+    regressed_competing = _with_recorded_at(
+        creation,
+        competing,
+        creation.record.recorded_at - timedelta(microseconds=1),
+    )
+    with pytest.raises(harness.HarnessFailure) as corrupt_competing:
+        harness.compare_and_swap_stream(token, regressed_competing)
+    assert corrupt_competing.value.code is harness.HarnessFailureCode.CORRUPT
     assert harness.compare_and_swap_stream(token, competing).classification is (
         harness.StoreClassification.CONFLICT
     )
-    assert harness.compare_and_swap_stream(token, third).classification is (
+    real_decode = harness._decode_canonical_history_record
+    decoded_calls: list[bytes] = []
+
+    def observe_decode(record_bytes: bytes, **kwargs: Any) -> Any:
+        decoded_calls.append(record_bytes)
+        return real_decode(record_bytes, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(harness, "_decode_canonical_history_record", observe_decode)
+        assert harness.compare_and_swap_stream(token, third).classification is (
+            harness.StoreClassification.UPDATED
+        )
+    assert decoded_calls == [creation.canonical_bytes, accepted.canonical_bytes]
+
+    decoded_calls.clear()
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(harness, "_decode_canonical_history_record", observe_decode)
+        assert harness.compare_and_swap_stream(token, accepted).classification is (
+            harness.StoreClassification.DUPLICATE
+        )
+    assert decoded_calls == [
+        creation.canonical_bytes,
+        accepted.canonical_bytes,
+        third.canonical_bytes,
+    ]
+    assert harness.verify_store(token).history_count == 3
+
+
+def test_compare_and_swap_replays_historical_attach_after_child_completion_and_v6(
+    tmp_path: Path,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    policy, creation = _creation(seed=341)
+    child_job_id = UUID("00000000-0000-4000-8000-000000000341")
+    child_policy_fingerprint = _digest("task064-historical-child-policy")
+    attached = _child_lifecycle_transition(
+        creation,
+        policy,
+        ContinuousPublicTradeTransitionKind.ATTACH,
+        child_job_id=child_job_id,
+        child_policy_fingerprint=child_policy_fingerprint,
+    )
+    completed = _child_lifecycle_transition(
+        attached,
+        policy,
+        ContinuousPublicTradeTransitionKind.CHILD_COMPLETED,
+        child_job_id=child_job_id,
+        child_policy_fingerprint=child_policy_fingerprint,
+    )
+    fourth = _retain(completed, policy, reason="historical-attach-v4")
+    fifth = _retain(fourth, policy, reason="historical-attach-v5")
+    sixth = _retain(fifth, policy, reason="historical-attach-v6")
+
+    assert harness.create_stream(token, creation, policy).classification is (
+        harness.StoreClassification.INSERTED
+    )
+    assert (
+        harness.compare_and_swap_stream(
+            token,
+            attached,
+            expectation=_expectation(
+                policy,
+                creation,
+                child_policy_fingerprint=child_policy_fingerprint,
+            ),
+        ).classification
+        is harness.StoreClassification.UPDATED
+    )
+    assert (
+        harness.compare_and_swap_stream(
+            token,
+            completed,
+            expectation=_expectation(
+                policy,
+                creation,
+                child_policy_fingerprint=child_policy_fingerprint,
+            ),
+        ).classification
+        is harness.StoreClassification.UPDATED
+    )
+
+    real_transition_decode = decode_stream_transition_record
+    transition_decode_calls: list[bytes] = []
+
+    def observe_transition_decode(record_bytes: bytes) -> Any:
+        transition_decode_calls.append(record_bytes)
+        return real_transition_decode(record_bytes)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(harness, "decode_stream_transition_record", observe_transition_decode)
+        loaded_after_completion = harness.load_current(
+            token,
+            stream_id=creation.record.stream_id,
+            natural_key=_natural_key(creation),
+        )
+    assert loaded_after_completion.classification is harness.StoreClassification.FOUND
+    assert transition_decode_calls == [attached.canonical_bytes, completed.canonical_bytes]
+
+    for transition in (fourth, fifth, sixth):
+        assert (
+            harness.compare_and_swap_stream(
+                token,
+                transition,
+                expectation=_expectation(policy, creation),
+            ).classification
+            is harness.StoreClassification.UPDATED
+        )
+
+    replay = harness.compare_and_swap_stream(
+        token,
+        attached,
+        expectation=_expectation(
+            policy,
+            creation,
+            child_policy_fingerprint=child_policy_fingerprint,
+        ),
+    )
+    assert replay.classification is harness.StoreClassification.DUPLICATE
+    assert replay.stream_rows == 1
+    assert replay.history_rows == 5
+    assert replay.committed is True
+
+    drifted_policy = ContinuousPublicTradePolicy.model_validate(
+        policy.model_dump() | {"max_jobs_per_invocation": policy.max_jobs_per_invocation + 1}
+    )
+    drifted_replay = harness.compare_and_swap_stream(
+        token,
+        attached,
+        expectation=_expectation(
+            drifted_policy,
+            creation,
+            child_policy_fingerprint=child_policy_fingerprint,
+        ),
+    )
+    assert drifted_replay.classification is harness.StoreClassification.CONFLICT
+    assert drifted_replay.stream_rows == 1
+    assert drifted_replay.history_rows == 5
+    assert drifted_replay.committed is True
+    summary = harness.verify_store(token)
+    assert summary.stream_count == 1
+    assert summary.history_count == 6
+
+
+def test_history_snapshot_rebinding_and_decoded_only_predecessors_fail_closed(
+    tmp_path: Path,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    policy, creation = _creation(seed=3_411)
+    transition = _retain(creation, policy, reason="snapshot-rebinding")
+    assert harness.create_stream(token, creation, policy).classification is (
+        harness.StoreClassification.INSERTED
+    )
+    assert harness.compare_and_swap_stream(token, transition).classification is (
         harness.StoreClassification.UPDATED
     )
-    assert harness.compare_and_swap_stream(token, accepted).classification is (
-        harness.StoreClassification.DUPLICATE
-    )
-    assert harness.verify_store(token).history_count == 3
+
+    def rebound_row(source: sqlite3.Row, **changes: object) -> sqlite3.Row:
+        columns = tuple(source.keys())
+        probe = sqlite3.connect(":memory:", autocommit=True)
+        probe.row_factory = sqlite3.Row
+        try:
+            aliases = ", ".join(f'? AS "{column}"' for column in columns)
+            row = cast(
+                sqlite3.Row | None,
+                probe.execute(
+                    f"SELECT {aliases}",
+                    tuple(changes.get(column, source[column]) for column in columns),
+                ).fetchone(),
+            )
+            assert row is not None
+            return row
+        finally:
+            probe.close()
+
+    connection, _ = harness._connect(token, writer=False)
+    try:
+        connection.execute("BEGIN").close()
+        harness._verify_operation_snapshot(connection, token, writer=False)
+        stream = connection.execute(
+            "SELECT * FROM continuous_public_trade_stream WHERE stream_uuid = ?",
+            (creation.record.stream_id.bytes,),
+        ).fetchone()
+        assert stream is not None
+        rows = connection.execute(
+            "SELECT * FROM continuous_public_trade_history ORDER BY successor_version"
+        ).fetchall()
+        assert len(rows) == 2
+        assert tuple(rows[0].keys()) == harness._HISTORY_ROW_COLUMNS
+
+        def issued_creation() -> tuple[
+            harness._HistorySnapshotCache,
+            harness._ValidatedHistoryRowSnapshot,
+        ]:
+            snapshot_cache = harness._new_history_snapshot_cache()
+            snapshot = harness._history_snapshot_from_row(
+                rows[0],
+                policy=policy,
+                cache=snapshot_cache,
+            )
+            return snapshot_cache, snapshot
+
+        def assert_invalid_cache(snapshot_cache: harness._HistorySnapshotCache) -> None:
+            assert snapshot_cache.valid is False
+            assert type(snapshot_cache.decoded_records) is dict
+            assert type(snapshot_cache.decoded_issued) is dict
+            assert type(snapshot_cache.validated_rows) is dict
+            assert type(snapshot_cache.snapshot_issued) is dict
+            assert not snapshot_cache.decoded_records
+            assert not snapshot_cache.decoded_issued
+            assert not snapshot_cache.validated_rows
+            assert not snapshot_cache.snapshot_issued
+
+        snapshot_cache, creation_snapshot = issued_creation()
+        transition_snapshot = harness._history_snapshot_from_row(
+            rows[1],
+            policy=policy,
+            predecessor=creation_snapshot,
+            cache=snapshot_cache,
+        )
+        assert transition_snapshot.entry == transition
+        assert snapshot_cache.cardinalities() == (2, 2, 2, 2)
+        snapshot_cache.retain_boundary(transition_snapshot)
+        assert snapshot_cache.cardinalities() == (1, 1, 1, 1)
+        assert snapshot_cache.decoded_records == {
+            transition.canonical_bytes: transition_snapshot.decoded
+        }
+        assert tuple(snapshot_cache.validated_rows.values()) == (transition_snapshot,)
+        assert tuple(snapshot_cache.snapshot_issued) == (id(transition_snapshot),)
+        snapshot_cache.invalidate()
+
+        real_cache_factory = harness._new_history_snapshot_cache
+        observed_caches: list[harness._HistorySnapshotCache] = []
+
+        def observe_cache_factory() -> harness._HistorySnapshotCache:
+            observed_cache = real_cache_factory()
+            observed_caches.append(observed_cache)
+            return observed_cache
+
+        def fail_after_decoded_issue(**_kwargs: Any) -> Any:
+            assert observed_caches[-1].decoded_records
+            raise RuntimeError("unexpected-after-decoded-issue")
+
+        with (
+            pytest.MonkeyPatch.context() as patch,
+            pytest.raises(RuntimeError, match="unexpected-after-decoded-issue"),
+        ):
+            patch.setattr(harness, "_new_history_snapshot_cache", observe_cache_factory)
+            patch.setattr(harness, "_stored_creation_without_scope", fail_after_decoded_issue)
+            harness._history_snapshot_from_row(rows[0], policy=policy)
+        assert len(observed_caches) == 1
+        assert_invalid_cache(observed_caches[0])
+        with pytest.raises(harness.HarnessFailure) as unexpected_reuse:
+            observed_caches[0].decoded(creation.canonical_bytes)
+        assert unexpected_reuse.value.code is harness.HarnessFailureCode.CORRUPT
+
+        observed_caches.clear()
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(harness, "_new_history_snapshot_cache", observe_cache_factory)
+            standalone_snapshot = harness._history_snapshot_from_row(rows[0], policy=policy)
+        assert standalone_snapshot.entry == creation
+        assert len(observed_caches) == 1
+        assert_invalid_cache(observed_caches[0])
+
+        page_cache = harness._new_history_snapshot_cache()
+        real_snapshot_from_row = harness._history_snapshot_from_row
+
+        def fail_after_page_issue(*args: Any, **kwargs: Any) -> None:
+            real_snapshot_from_row(*args, **kwargs)
+            assert page_cache.cardinalities() == (1, 1, 1, 1)
+            raise RuntimeError("unexpected-after-page-issue")
+
+        with (
+            pytest.MonkeyPatch.context() as patch,
+            pytest.raises(RuntimeError, match="unexpected-after-page-issue"),
+        ):
+            patch.setattr(harness, "_history_snapshot_from_row", fail_after_page_issue)
+            harness._validate_history_page_rows(
+                stream,
+                (rows[0],),
+                policy=policy,
+                cache=page_cache,
+            )
+        assert_invalid_cache(page_cache)
+        with pytest.raises(harness.HarnessFailure) as page_cache_reuse:
+            page_cache.decoded(creation.canonical_bytes)
+        assert page_cache_reuse.value.code is harness.HarnessFailureCode.CORRUPT
+
+        def decode_must_not_run(*_args: Any, **_kwargs: Any) -> Any:
+            raise AssertionError("oversized page must fail before decoding")
+
+        with (
+            pytest.MonkeyPatch.context() as patch,
+            pytest.raises(harness.HarnessFailure) as oversized_page,
+        ):
+            snapshot_cache, creation_snapshot = issued_creation()
+            patch.setattr(harness, "_history_snapshot_from_row", decode_must_not_run)
+            harness._validate_history_page_rows(
+                stream,
+                (rows[1],) * 101,
+                policy=policy,
+                preceding_snapshot=creation_snapshot,
+                cache=snapshot_cache,
+            )
+        assert oversized_page.value.code is harness.HarnessFailureCode.BOUNDS_EXCEEDED
+        assert_invalid_cache(snapshot_cache)
+
+        conflicting_binding = rebound_row(rows[0], entry_kind=b"transition")
+        snapshot_cache, _ = issued_creation()
+        with pytest.raises(harness.HarnessFailure) as same_bytes_wrong_binding:
+            harness._history_snapshot_from_row(
+                conflicting_binding,
+                policy=policy,
+                cache=snapshot_cache,
+            )
+        assert same_bytes_wrong_binding.value.code is harness.HarnessFailureCode.CORRUPT
+
+        snapshot_cache, creation_snapshot = issued_creation()
+        with pytest.raises(harness.HarnessFailure) as decoded_is_not_physical:
+            harness._history_snapshot_from_row(
+                rows[1],
+                policy=policy,
+                predecessor=cast(Any, creation_snapshot.decoded),
+                cache=snapshot_cache,
+            )
+        assert decoded_is_not_physical.value.code is harness.HarnessFailureCode.CORRUPT
+
+        for forged_predecessor in (
+            replace(issued_creation()[1]),
+            harness._ValidatedHistoryRowSnapshot(
+                row=rows[0],
+                decoded=issued_creation()[1].decoded,
+                predecessor_link=None,
+                entry=creation,
+            ),
+        ):
+            snapshot_cache, _ = issued_creation()
+            with pytest.raises(harness.HarnessFailure) as unissued_snapshot:
+                harness._history_snapshot_from_row(
+                    rows[1],
+                    policy=policy,
+                    predecessor=forged_predecessor,
+                    cache=snapshot_cache,
+                )
+            assert unissued_snapshot.value.code is harness.HarnessFailureCode.CORRUPT
+
+        raw_rebindings = (
+            {"history_row_id": rows[0]["history_row_id"] + 1},
+            {"stream_row_id": rows[0]["stream_row_id"] + 1},
+            {"successor_version": 2},
+            {"entry_kind": b"transition"},
+            {"record_model_version": b"2.0"},
+            {"serialization_version": 2},
+            {"record_canonical_bytes": creation.canonical_bytes + b" "},
+            {"record_digest": _digest("snapshot-record").encode("ascii")},
+            {
+                "successor_envelope_canonical_bytes": (
+                    creation.successor_envelope.canonical_bytes + b" "
+                )
+            },
+            {"successor_envelope_digest": _digest("snapshot-envelope").encode("ascii")},
+            {"successor_history_root": _digest("snapshot-root").encode("ascii")},
+            {"prior_version": 1},
+            {"prior_envelope_digest": creation.successor_envelope.envelope_digest.encode("ascii")},
+            {"prior_history_root": creation.history_root.encode("ascii")},
+            {"predecessor_record_canonical_bytes": creation.canonical_bytes},
+            {"predecessor_record_digest": creation.record_digest.encode("ascii")},
+        )
+        for changes in raw_rebindings:
+            snapshot_cache, creation_snapshot = issued_creation()
+            forged_predecessor = replace(
+                creation_snapshot,
+                row=rebound_row(rows[0], **changes),
+            )
+            with pytest.raises(harness.HarnessFailure) as rebound:
+                harness._history_snapshot_from_row(
+                    rows[1],
+                    policy=policy,
+                    predecessor=forged_predecessor,
+                    cache=snapshot_cache,
+                )
+            assert rebound.value.code is harness.HarnessFailureCode.CORRUPT
+
+        snapshot_cache, creation_snapshot = issued_creation()
+        snapshot_cache.process_id = -1
+        with pytest.raises(harness.HarnessFailure) as wrong_process:
+            snapshot_cache.require_snapshot(creation_snapshot)
+        assert wrong_process.value.code is harness.HarnessFailureCode.CORRUPT
+        assert_invalid_cache(snapshot_cache)
+
+        snapshot_cache, creation_snapshot = issued_creation()
+        with pytest.raises(harness.HarnessFailure) as forged_mismatch:
+            snapshot_cache.require_snapshot(replace(creation_snapshot))
+        assert forged_mismatch.value.code is harness.HarnessFailureCode.CORRUPT
+        assert_invalid_cache(snapshot_cache)
+        with pytest.raises(harness.HarnessFailure) as mismatch_reuse:
+            snapshot_cache.require_snapshot(creation_snapshot)
+        assert mismatch_reuse.value.code is harness.HarnessFailureCode.CORRUPT
+
+        class HostileDecodedRegistry(dict[bytes, harness._DecodedCanonicalHistoryRecord]):
+            clear_calls = 0
+
+            def clear(self) -> None:
+                self.clear_calls += 1
+                raise RuntimeError("hostile-registry-clear")
+
+        snapshot_cache, creation_snapshot = issued_creation()
+        hostile_registry = HostileDecodedRegistry(snapshot_cache.decoded_records)
+        snapshot_cache.decoded_records = hostile_registry
+        with pytest.raises(harness.HarnessFailure) as nonexact_registry:
+            snapshot_cache.cardinalities()
+        assert nonexact_registry.value.code is harness.HarnessFailureCode.CORRUPT
+        assert hostile_registry.clear_calls == 1
+        assert hostile_registry
+        assert_invalid_cache(snapshot_cache)
+        with pytest.raises(harness.HarnessFailure) as nonexact_registry_reuse:
+            snapshot_cache.require_snapshot(creation_snapshot)
+        assert nonexact_registry_reuse.value.code is harness.HarnessFailureCode.CORRUPT
+
+        snapshot_cache, creation_snapshot = issued_creation()
+        with pytest.raises(harness.HarnessFailure) as failed_compaction:
+            snapshot_cache.retain_boundary(replace(creation_snapshot))
+        assert failed_compaction.value.code is harness.HarnessFailureCode.CORRUPT
+        assert_invalid_cache(snapshot_cache)
+
+        snapshot_cache, creation_snapshot = issued_creation()
+        transition_snapshot = harness._history_snapshot_from_row(
+            rows[1],
+            policy=policy,
+            predecessor=creation_snapshot,
+            cache=snapshot_cache,
+        )
+
+        def fail_after_boundary_swap(
+            _snapshot_cache: harness._HistorySnapshotCache,
+        ) -> tuple[int, int, int, int]:
+            raise RuntimeError("unexpected-after-boundary-swap")
+
+        with (
+            pytest.MonkeyPatch.context() as patch,
+            pytest.raises(RuntimeError, match="unexpected-after-boundary-swap"),
+        ):
+            patch.setattr(
+                harness._HistorySnapshotCache,
+                "cardinalities",
+                fail_after_boundary_swap,
+            )
+            snapshot_cache.retain_boundary(transition_snapshot)
+        assert_invalid_cache(snapshot_cache)
+        with pytest.raises(harness.HarnessFailure) as boundary_reuse:
+            snapshot_cache.require_snapshot(transition_snapshot)
+        assert boundary_reuse.value.code is harness.HarnessFailureCode.CORRUPT
+        connection.execute("ROLLBACK").close()
+    finally:
+        connection.close()
 
 
 def test_compare_and_swap_rejects_a_self_consistent_time_regression(
@@ -2341,14 +5110,45 @@ def test_expectation_conflicts_cannot_mask_transition_link_corruption(
             harness.compare_and_swap_stream(mature, third).classification
             is harness.StoreClassification.UPDATED
         )
-    with pytest.raises(harness.HarnessFailure) as two_candidates:
+    mixed_policy, mixed_creation = _creation(
+        seed=342,
+        stream_id_seed=342,
+        identity_seed=343,
+    )
+    mixed_transition = _retain(
+        mixed_creation,
+        mixed_policy,
+        reason="reachable-mixed-identity-v2",
+    )
+    mixed_expectation = _expectation(mixed_policy, mixed_creation)
+    mixed_command = ContinuousPublicTradeStreamCompareAndSwapCommandV1(
+        expectation=mixed_expectation,
+        expected_version=mixed_transition.record.prior_version,
+        expected_envelope_digest=mixed_transition.record.prior_envelope_digest,
+        expected_history_root=mixed_transition.record.prior_history_root,
+        transition=mixed_transition,
+    )
+    exact_mixed_command = ContinuousPublicTradeStreamCompareAndSwapCommandV1.revalidate_at_boundary(
+        mixed_command
+    )
+    two_candidates = harness.compare_and_swap_stream(
+        mature,
+        exact_mixed_command.transition,
+        expectation=exact_mixed_command.expectation,
+    )
+    assert two_candidates.classification is harness.StoreClassification.CONFLICT
+    assert two_candidates.stream_rows == 2
+    assert two_candidates.history_rows == 6
+    assert harness.verify_store(mature).history_count == 6
+
+    _corrupt_creation_history_record(mature, creation_b)
+    with pytest.raises(harness.HarnessFailure) as corrupt_retained_candidate:
         harness.compare_and_swap_stream(
             mature,
-            regressed_a_v4,
-            expectation=_expectation(policy_b, creation_b),
+            exact_mixed_command.transition,
+            expectation=exact_mixed_command.expectation,
         )
-    assert two_candidates.value.code is harness.HarnessFailureCode.CORRUPT
-    assert harness.verify_store(mature).history_count == 6
+    assert corrupt_retained_candidate.value.code is harness.HarnessFailureCode.CORRUPT
 
 
 def test_load_and_verify_reject_a_persisted_time_regression(
@@ -2579,6 +5379,7 @@ def test_online_backup_restore_generation_copy_and_report(tmp_path: Path) -> Non
 def test_report_collectors_reject_cross_root_before_delegate_and_preserve_slots(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    _active_task064_pytest_root: harness._PytestRootCapability,
 ) -> None:
     def exact_inventory(root: Path) -> tuple[tuple[str, str, int, str], ...]:
         result: list[tuple[str, str, int, str]] = []
@@ -2682,10 +5483,8 @@ def test_report_collectors_reject_cross_root_before_delegate_and_preserve_slots(
     monkeypatch.setattr(harness, "concurrent_write_backup_evidence", counted_backup)
     monkeypatch.setattr(harness, "same_format_generation_copy", counted_copy)
 
-    node_id = os.environ["PYTEST_CURRENT_TEST"].rsplit(" (", maxsplit=1)[0]
-    foreign_backup_root = tmp_path / "foreign-backup-root"
-    foreign_backup_root.mkdir(mode=0o700)
-    with harness._pytest_root_scope(foreign_backup_root, node_id=node_id):
+    foreign_backup_root = _active_task064_pytest_root.roots[1]
+    with contextlib.nullcontext():
         foreign_source = harness.bootstrap_store(foreign_backup_root)
         before_summary = harness.verify_store(source)
         before_tails = harness._tail_manifest(source)
@@ -2697,6 +5496,28 @@ def test_report_collectors_reject_cross_root_before_delegate_and_preserve_slots(
             dict(ledger.operation_runs),
             dict(ledger.rejection_runs),
         )
+        cyclic_transitions: list[object] = []
+        cyclic_transitions.append(cyclic_transitions)
+        hostile_transitions = _HostileMapping()
+        depth_65_transitions: object = "leaf"
+        for _ in range(65):
+            depth_65_transitions = [depth_65_transitions]
+        for invalid_transitions in (
+            cyclic_transitions,
+            hostile_transitions,
+            depth_65_transitions,
+        ):
+            with pytest.raises(harness.HarnessFailure) as invalid_shape:
+                harness.collect_backup_restore_evidence(
+                    run,
+                    source,
+                    tmp_path,
+                    transitions=cast(Any, invalid_transitions),
+                    backup_recorded_at_utc="2026-07-29T06:35:00.000000Z",
+                    restore_recorded_at_utc="2026-07-29T06:36:00.000000Z",
+                )
+            assert invalid_shape.value.code is harness.HarnessFailureCode.CORRUPT
+        assert hostile_transitions.items_calls == 0
         for candidate_token, candidate_root in (
             (foreign_source, tmp_path),
             (source, foreign_backup_root),
@@ -2735,7 +5556,11 @@ def test_report_collectors_reject_cross_root_before_delegate_and_preserve_slots(
     assert (chain_calls, backup_calls) == (4, 1)
     report_token = backup_restore.backup_token
     with harness.bootstrap_path_operation_scope(run):
-        _report_bootstrap_path_evidence(tmp_path, report_token)
+        _report_bootstrap_path_evidence(
+            tmp_path,
+            report_token,
+            _active_task064_pytest_root,
+        )
     harness.finalize_bootstrap_path_evidence(run, report_token)
 
     before_summary = harness.verify_store(report_token)
@@ -2767,9 +5592,8 @@ def test_report_collectors_reject_cross_root_before_delegate_and_preserve_slots(
         dict(ledger.rejection_runs),
     ) == before_ledger
 
-    foreign_copy_root = tmp_path / "foreign-copy-root"
-    foreign_copy_root.mkdir(mode=0o700)
-    with harness._pytest_root_scope(foreign_copy_root, node_id=node_id):
+    foreign_copy_root = _active_task064_pytest_root.roots[3]
+    with contextlib.nullcontext():
         foreign_report = harness.bootstrap_store(foreign_copy_root)
         before_summary = harness.verify_store(report_token)
         before_tails = harness._tail_manifest(report_token)
@@ -2869,7 +5693,7 @@ def test_online_backup_rejects_malformed_evidence_time_before_destination(
     tmp_path: Path,
 ) -> None:
     source = harness.bootstrap_store(tmp_path)
-    token_nonces = frozenset(harness._TOKEN_REGISTRY)
+    token_nonces = frozenset(harness._token_authority_snapshot())
     with pytest.raises(harness.HarnessFailure) as malformed:
         harness.online_backup(
             source,
@@ -2877,13 +5701,14 @@ def test_online_backup_rejects_malformed_evidence_time_before_destination(
             evidence_recorded_at_utc="2026-07-29T06:00:00Z",
         )
     assert malformed.value.code is harness.HarnessFailureCode.CORRUPT
-    assert frozenset(harness._TOKEN_REGISTRY) == token_nonces
+    assert frozenset(harness._token_authority_snapshot()) == token_nonces
     assert harness.verify_store(source).history_count == 0
 
 
 def test_direct_backup_and_copy_apis_reject_cross_scope_before_access(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    _active_task064_pytest_root: harness._PytestRootCapability,
 ) -> None:
     source = harness.bootstrap_store(tmp_path)
     policy, creation = _creation(seed=5_850)
@@ -2902,11 +5727,9 @@ def test_direct_backup_and_copy_apis_reject_cross_scope_before_access(
         transitions.append(transition)
         prior = transition
     exact_transitions = tuple(transitions)
-    node_id = os.environ["PYTEST_CURRENT_TEST"].rsplit(" (", maxsplit=1)[0]
-    foreign_root = tmp_path / "direct-foreign-root"
-    foreign_root.mkdir(mode=0o700)
+    foreign_root = _active_task064_pytest_root.roots[1]
     foreign_token: harness.StoreToken | None = None
-    with harness._pytest_root_scope(foreign_root, node_id=node_id):
+    with contextlib.nullcontext():
         foreign_token = harness.bootstrap_store(foreign_root)
         source_summary = harness.verify_store(source)
         source_tails = harness._tail_manifest(source)
@@ -3010,7 +5833,7 @@ def test_online_backup_post_copy_failure_preserves_primary_and_cleans_destinatio
     assert failed.value is primary
     assert created_destinations
     destination = created_destinations[-1]
-    assert destination._nonce not in harness._TOKEN_REGISTRY
+    assert destination._nonce not in harness._token_authority_snapshot()
     assert not destination._generation_root.exists()
     assert harness.verify_store(source).history_count == 1
 
@@ -3841,6 +6664,25 @@ def test_direct_run_constructor_cannot_mint_evidence_authority(tmp_path: Path) -
         "_build_private_gate_receipt_authority",
         "_build_rejection_evidence_authority",
         "_build_evidence_receipt_authority",
+        "_EvidenceRunCloseCapability",
+        "_PreparedEvidenceRunConsumption",
+        "_PreparedEvidenceReceiptConsumption",
+        "_close_issued_evidence_run",
+        "_is_issued_evidence_run_closed",
+        "_prepare_issued_evidence_run_consumption",
+        "_prepare_issued_evidence_run_seal",
+        "_capture_fork_guard",
+        "_build_fork_safe_connection_requirement",
+        "_build_protected_token_requirement",
+        "_TOKEN_REGISTRY",
+        "_ACTIVE_PYTEST_ROOTS",
+        "_REVOKED_PYTEST_ROOTS",
+        "_CONNECTION_PATH_SNAPSHOTS",
+        "_CONNECTION_EVIDENCE_BINDINGS",
+        "_store_token_issuing_bootstrap",
+        "_build_store_token_authority",
+        "_build_pytest_root_authority",
+        "_build_connection_authority",
     ):
         assert not hasattr(harness, removed_issuer)
     run = harness.begin_generated_evidence_run(tmp_path)
@@ -3856,6 +6698,1941 @@ def test_direct_run_constructor_cannot_mint_evidence_authority(tmp_path: Path) -
         harness._ACTIVE_EVIDENCE_RUN.reset(context_token)
         ledger.run = run
     assert harness._validated_evidence_run(run) is ledger
+
+
+@pytest.mark.parametrize(
+    ("stage_fault", "rollback_fault"),
+    (
+        ("after_record_reservation", None),
+        ("after_ledger_run", None),
+        ("after_ledger_recording", None),
+        ("after_context_set", None),
+        ("after_context_set", "rollback_context_reset"),
+        ("after_ledger_recording", "rollback_ledger_restore"),
+    ),
+)
+def test_evidence_run_begin_is_failure_atomic_and_poisoned_on_uncertain_rollback(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    stage_fault: str,
+    rollback_fault: str | None,
+) -> None:
+    if _run_task064_exec_isolated(request, tmp_path):
+        return
+    registration = harness._lookup_active_pytest_root(tmp_path)
+    assert registration is not None
+    ledger = registration.evidence_ledger
+    ledger_collections = (
+        ledger.observations,
+        ledger.operation_runs,
+        ledger.rejection_runs,
+    )
+    run_records = inspect.getclosurevars(harness.begin_generated_evidence_run).nonlocals["records"]
+    initial_record_ids = frozenset(run_records)
+    harness._arm_evidence_run_begin_fault(stage_fault)
+    if rollback_fault is not None:
+        harness._arm_evidence_run_begin_fault(rollback_fault)
+    with pytest.raises(harness.HarnessFailure) as failed_begin:
+        harness.begin_generated_evidence_run(tmp_path)
+    aborted_records = [
+        record for identity, record in run_records.items() if identity not in initial_record_ids
+    ]
+    assert len(aborted_records) == 1
+    assert aborted_records[0]["phase"] == "ABORTED"
+    assert aborted_records[0]["run"] is not None
+
+    if rollback_fault is None:
+        assert failed_begin.value.code is harness.HarnessFailureCode.CORRUPT
+        assert harness._ACTIVE_EVIDENCE_RUN.get() is None
+        assert ledger.run is None
+        assert ledger.receipt is None
+        assert not ledger.recording
+        assert not ledger.closed
+        assert not ledger.consumed
+        assert ledger.observations is ledger_collections[0]
+        assert ledger.operation_runs is ledger_collections[1]
+        assert ledger.rejection_runs is ledger_collections[2]
+        assert all(not collection for collection in ledger_collections)
+        assert not harness._pytest_root_authority_uncertain()
+        retry = harness.begin_generated_evidence_run(tmp_path)
+        assert harness._ACTIVE_EVIDENCE_RUN.get() is retry
+        assert harness._validated_evidence_run(retry) is ledger
+        return
+
+    assert failed_begin.value.code is harness.HarnessFailureCode.UNAVAILABLE
+    assert harness._pytest_root_authority_uncertain()
+    retained_run = ledger.run
+    if retained_run is not None:
+        with pytest.raises(harness.HarnessFailure) as retained_authority:
+            harness._validated_evidence_run(retained_run)
+        assert retained_authority.value.code is harness.HarnessFailureCode.CORRUPT
+    with pytest.raises(harness.HarnessFailure) as retry_rejected:
+        harness.begin_generated_evidence_run(tmp_path)
+    assert retry_rejected.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+
+
+def test_pytest_fixture_authority_has_exactly_two_stdlib_only_issuers() -> None:
+    harness_path = Path(harness.__file__).resolve()
+    harness_tree = ast.parse(harness_path.read_text(encoding="utf-8"))
+    forbidden_names = {"FixtureLookupError", "FixtureRequest", "TempPathFactory"}
+    for node in ast.walk(harness_tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            imported = (
+                tuple(alias.name for alias in node.names)
+                if isinstance(node, ast.Import)
+                else (() if node.module is None else (node.module,))
+            )
+            assert all(name != "pytest" and not name.startswith("_pytest") for name in imported)
+        assert not (isinstance(node, ast.Name) and node.id in forbidden_names)
+        assert not (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "sys"
+            and node.attr == "modules"
+        )
+
+    builder = next(
+        node
+        for node in harness_tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "_build_pytest_root_authority"
+    )
+    policy_assignment = next(
+        node
+        for node in builder.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "fixture_policy"
+            for target in node.targets
+        )
+    )
+    expected_fixture_policy_prefixes = (
+        (
+            "tests/unit/test_task_064_continuous_public_trade_stream_sqlite_schema.py",
+            "tests.unit.test_task_064_continuous_public_trade_stream_sqlite_schema",
+            "_active_task064_pytest_root",
+            "tests/unit/test_task_064_continuous_public_trade_stream_sqlite_schema.py",
+            "7136d6ff216b9b1d3bdf32030918302d8fa5a87dfd8555df68c81939bde2dd34",
+            410,
+            494,
+            "_bind_task064_harness_module",
+            "41d05f3670974dedbcdb1b12e85b39bb2f1b306eb13686ba016caa07c2eeeb06",
+            34,
+        ),
+        (
+            "tests/integration/test_task_064_continuous_public_trade_stream_sqlite_evidence.py",
+            "tests.integration.test_task_064_continuous_public_trade_stream_sqlite_evidence",
+            "_active_task064_pytest_root",
+            "tests/integration/test_task_064_continuous_public_trade_stream_sqlite_evidence.py",
+            "f80cf4107910768e202a7f9b02df75d70c9c2c279129a4f99b9cb7f32895c47a",
+            410,
+            494,
+            "_bind_task064_harness_module",
+            "e4bba9b8f370dc1c66fcf977d36438dc870ade6792cd281e1f4ff5ed0fbfc330",
+            34,
+        ),
+    )
+    literal_fixture_policy = ast.literal_eval(policy_assignment.value)
+    assert tuple(policy[:-1] for policy in literal_fixture_policy) == (
+        expected_fixture_policy_prefixes
+    )
+    assert all(
+        type(policy[-1]) is str
+        and len(policy[-1]) == 64
+        and set(policy[-1]) <= set("0123456789abcdef")
+        for policy in literal_fixture_policy
+    )
+    expected_fixture_sites = {policy[0]: policy[1:7] for policy in expected_fixture_policy_prefixes}
+
+    test_root = harness_path.parents[1]
+    for relative_path in (
+        "unit/test_task_064_continuous_public_trade_stream_sqlite_schema.py",
+        "integration/test_task_064_continuous_public_trade_stream_sqlite_evidence.py",
+    ):
+        source_path = test_root / relative_path
+        source = source_path.read_text(encoding="utf-8")
+        module_tree = ast.parse(source)
+        module_attributes = [
+            node.attr for node in ast.walk(module_tree) if isinstance(node, ast.Attribute)
+        ]
+        assert module_attributes.count("_register_task064_fixture_issuer") == 0
+        assert module_attributes.count("_begin_pytest_root_registration") >= 1
+        root_scope_attribute_contexts = tuple(
+            function.name
+            for function in module_tree.body
+            if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
+            for node in ast.walk(function)
+            if isinstance(node, ast.Attribute) and node.attr == "_pytest_root_scope"
+        )
+        expected_root_scope_contexts = (
+            (
+                "_build_active_task064_pytest_root_fixture",
+                "test_pytest_fixture_authority_has_exactly_two_stdlib_only_issuers",
+            )
+            if relative_path.startswith("integration/")
+            else ("_build_active_task064_pytest_root_fixture",)
+        )
+        assert root_scope_attribute_contexts == expected_root_scope_contexts
+        assert len(root_scope_attribute_contexts) == module_attributes.count("_pytest_root_scope")
+        fixture_factory = next(
+            node
+            for node in module_tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "_build_active_task064_pytest_root_fixture"
+        )
+        fixture = next(
+            node
+            for node in ast.walk(fixture_factory)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "_active_task064_pytest_root"
+        )
+        assert not any(
+            isinstance(decorator, ast.Attribute)
+            and decorator.attr == "_register_task064_fixture_issuer"
+            for decorator in fixture.decorator_list
+        )
+        fixture_calls = [node for node in ast.walk(fixture) if isinstance(node, ast.Call)]
+        binding_seal_calls = [
+            node
+            for node in fixture_calls
+            if isinstance(node.func, ast.Name) and node.func.id == "bindings_are_exact"
+        ]
+        authenticate_provenance_calls = [
+            node
+            for node in fixture_calls
+            if isinstance(node.func, ast.Name) and node.func.id == "authenticate_child_provenance"
+        ]
+        activate_provenance_calls = [
+            node
+            for node in fixture_calls
+            if isinstance(node.func, ast.Name) and node.func.id == "activate_child_provenance"
+        ]
+        post_return_claim_calls = [
+            node
+            for node in fixture_calls
+            if isinstance(node.func, ast.Name)
+            and node.func.id == "claim_post_return_child_provenance"
+        ]
+        finish_provenance_calls = [
+            node
+            for node in fixture_calls
+            if isinstance(node.func, ast.Name) and node.func.id == "finish_child_provenance"
+        ]
+        cancel_provenance_calls = [
+            node
+            for node in fixture_calls
+            if isinstance(node.func, ast.Name) and node.func.id == "cancel_child_provenance"
+        ]
+        begin_calls = [
+            node
+            for node in fixture_calls
+            if isinstance(node.func, ast.Name) and node.func.id == "begin_registration"
+        ]
+        scope_calls = [
+            node
+            for node in fixture_calls
+            if isinstance(node.func, ast.Name) and node.func.id == "root_scope"
+        ]
+        cancel_calls = [
+            node
+            for node in fixture_calls
+            if isinstance(node.func, ast.Name) and node.func.id == "cancel_registration"
+        ]
+        root_calls = [
+            node
+            for node in fixture_calls
+            if isinstance(node.func, ast.Name) and node.func.id == "temp_path_mktemp"
+        ]
+        yields = [node for node in ast.walk(fixture) if isinstance(node, ast.Yield)]
+        assert len(binding_seal_calls) == len(authenticate_provenance_calls) == 1
+        assert len(activate_provenance_calls) == len(post_return_claim_calls) == 1
+        assert len(finish_provenance_calls) == len(cancel_provenance_calls) == 1
+        assert len(begin_calls) == len(scope_calls) == len(yields) == 1
+        assert len(cancel_calls) == 1
+        assert len(root_calls) == 5
+        setup_try = next(node for node in fixture.body if isinstance(node, ast.Try))
+        setup_calls = [node for node in ast.walk(setup_try) if isinstance(node, ast.Call)]
+        setup_root_calls = [
+            node
+            for node in setup_calls
+            if isinstance(node.func, ast.Name) and node.func.id == "temp_path_mktemp"
+        ]
+        setup_scope_calls = [
+            node
+            for node in setup_calls
+            if isinstance(node.func, ast.Name) and node.func.id == "root_scope"
+        ]
+        setup_with = [node for node in ast.walk(setup_try) if isinstance(node, ast.With)]
+        setup_cancel_calls = [
+            node
+            for node in setup_calls
+            if isinstance(node.func, ast.Name) and node.func.id == "cancel_registration"
+        ]
+        assert len(setup_root_calls) == 5
+        pre_yield_root_calls = [node for node in setup_root_calls if node.lineno < yields[0].lineno]
+        post_yield_root_calls = [
+            node for node in setup_root_calls if node.lineno > yields[0].lineno
+        ]
+        assert len(pre_yield_root_calls) == 4
+        assert len(post_yield_root_calls) == 1
+        assert setup_scope_calls == scope_calls
+        assert len(setup_with) == 1
+        assert setup_cancel_calls == cancel_calls
+        assert len(setup_try.handlers) == 1
+        assert isinstance(setup_try.handlers[0].type, ast.Name)
+        assert setup_try.handlers[0].type.id == "base_exception_type"
+        assert (
+            binding_seal_calls[0].lineno
+            < authenticate_provenance_calls[0].lineno
+            < setup_try.lineno
+            < activate_provenance_calls[0].lineno
+            < post_return_claim_calls[0].lineno
+            < begin_calls[0].lineno
+            <= min(node.lineno for node in pre_yield_root_calls)
+            <= max(node.lineno for node in pre_yield_root_calls)
+            < yields[0].lineno
+            < post_yield_root_calls[0].lineno
+            < finish_provenance_calls[0].lineno
+        )
+        assert scope_calls[0].lineno < yields[0].lineno
+        assert cancel_calls[0].lineno < cancel_provenance_calls[0].lineno
+
+    runtime_suffix = (
+        "tests/integration/test_task_064_continuous_public_trade_stream_sqlite_evidence.py"
+    )
+    runtime_site = expected_fixture_sites[runtime_suffix]
+    runtime_fixture_function = inspect.unwrap(_active_task064_pytest_root)
+    assert type(runtime_fixture_function) is FunctionType
+    runtime_fixture_code = runtime_fixture_function.__code__
+    runtime_fixture_closure = inspect.getclosurevars(runtime_fixture_function)
+    runtime_fixture_globals = runtime_fixture_closure.globals
+    assert set(runtime_fixture_globals) == {"@py_builtins", "@pytest_ar"}
+    builtins_module = inspect.getmodule(len)
+    assertion_rewrite_module = inspect.getmodule(_rewrite_test)
+    assert builtins_module is not None
+    assert assertion_rewrite_module is not None
+    assert builtins_module.__name__ == "builtins"
+    assert assertion_rewrite_module.__name__ == "_pytest.assertion.rewrite"
+    assert runtime_fixture_globals["@py_builtins"] is builtins_module
+    assert runtime_fixture_globals["@pytest_ar"] is assertion_rewrite_module
+    runtime_fixture_nonlocals = runtime_fixture_closure.nonlocals
+    assert runtime_fixture_nonlocals["begin_registration"] is (
+        harness._begin_pytest_root_registration
+    )
+    assert runtime_fixture_nonlocals["root_scope"] is harness._pytest_root_scope
+    assert runtime_fixture_nonlocals["cancel_registration"] is (
+        harness._cancel_pytest_root_registration
+    )
+    for closure_name, authority in (
+        (
+            "authenticate_child_provenance",
+            harness._authenticate_task064_child_provenance,
+        ),
+        ("activate_child_provenance", harness._activate_task064_child_provenance),
+        (
+            "claim_post_return_child_provenance",
+            harness._claim_task064_post_return_child_provenance,
+        ),
+        ("finish_child_provenance", harness._finish_task064_child_provenance),
+        ("cancel_child_provenance", harness._cancel_task064_child_provenance),
+    ):
+        assert runtime_fixture_nonlocals[closure_name] is authority
+    bindings_are_exact = cast(
+        Callable[[], bool],
+        runtime_fixture_nonlocals["bindings_are_exact"],
+    )
+    assert bindings_are_exact()
+    binding_closure = inspect.getclosurevars(bindings_are_exact)
+    assert binding_closure.globals == {}
+    assert binding_closure.nonlocals["module_globals"] is globals()
+    assert binding_closure.nonlocals["pytest_module"] is pytest
+    assert binding_closure.nonlocals["harness_module"] is harness
+    assert binding_closure.nonlocals["inspect_module"] is inspect
+    assert binding_closure.nonlocals["os_module"] is os
+    assert binding_closure.nonlocals["contextvars_module"] is contextvars
+    assert binding_closure.nonlocals["path_type"] is Path
+    assert binding_closure.nonlocals["function_type"] is FunctionType
+    assert binding_closure.nonlocals["fixture_request_type"] is pytest.FixtureRequest
+    assert binding_closure.nonlocals["temp_path_factory_type"] is pytest.TempPathFactory
+    assert binding_closure.nonlocals["temp_path_mktemp"] is pytest.TempPathFactory.mktemp
+    for closure_name, sealed_authority in (
+        (
+            "authenticate_child_provenance",
+            harness._authenticate_task064_child_provenance,
+        ),
+        ("activate_child_provenance", harness._activate_task064_child_provenance),
+        (
+            "claim_post_return_child_provenance",
+            harness._claim_task064_post_return_child_provenance,
+        ),
+        (
+            "claim_child_dispatch_provenance",
+            harness._claim_task064_child_dispatch_provenance,
+        ),
+        ("finish_child_provenance", harness._finish_task064_child_provenance),
+        ("cancel_child_provenance", harness._cancel_task064_child_provenance),
+    ):
+        assert binding_closure.nonlocals[closure_name] is sealed_authority
+    assert (
+        binding_closure.nonlocals["raw_fixture"] is runtime_fixture_function
+        and binding_closure.nonlocals["exported_fixture"] is _active_task064_pytest_root
+    )
+    begin_closure = inspect.getclosurevars(harness._begin_pytest_root_registration)
+    authenticate_fixture_call = cast(
+        FunctionType,
+        begin_closure.nonlocals["authenticate_fixture_call"],
+    )
+    authenticate_closure = inspect.getclosurevars(authenticate_fixture_call)
+    fixture_policy = authenticate_closure.nonlocals["fixture_policy"]
+    allowed_fixture_paths = authenticate_closure.nonlocals["allowed_fixture_paths"]
+    assert fixture_policy == literal_fixture_policy
+    assert type(fixture_policy) is tuple
+    assert type(allowed_fixture_paths) is tuple
+    with pytest.raises(TypeError):
+        cast(Any, fixture_policy)[0] = fixture_policy[0]
+    with pytest.raises(TypeError):
+        cast(Any, allowed_fixture_paths)[0] = allowed_fixture_paths[0]
+    fingerprint = cast(
+        Callable[[CodeType, str], str],
+        authenticate_closure.nonlocals["code_fingerprint"],
+    )
+    for policy, (_, source_path) in zip(
+        fixture_policy,
+        allowed_fixture_paths,
+        strict=True,
+    ):
+        assert hashlib.sha256(source_path.read_bytes()).hexdigest() == policy[10]
+    assert fingerprint(runtime_fixture_code, runtime_suffix) == runtime_site[3]
+
+    def exact_call_offset(closure_name: str) -> int:
+        instructions = tuple(dis.get_instructions(runtime_fixture_code))
+        loads = tuple(
+            index
+            for index, instruction in enumerate(instructions)
+            if instruction.opname == "LOAD_DEREF" and instruction.argval == closure_name
+        )
+        assert len(loads) == 1
+        return next(
+            instruction.offset
+            for instruction in instructions[loads[0] + 1 :]
+            if instruction.opname == "CALL"
+        )
+
+    assert exact_call_offset("begin_registration") == runtime_site[4]
+    assert exact_call_offset("root_scope") == runtime_site[5]
+
+    expected_fixture_paths = {
+        str((test_root / relative_path).resolve())
+        for relative_path in (
+            "unit/test_task_064_continuous_public_trade_stream_sqlite_schema.py",
+            "integration/test_task_064_continuous_public_trade_stream_sqlite_evidence.py",
+        )
+    }
+
+    def contains_forbidden_identity(value: object, seen: set[int]) -> bool:
+        identity = id(value)
+        if identity in seen:
+            return False
+        seen.add(identity)
+        value_module = getattr(value, "__module__", "")
+        type_module = type(value).__module__
+        if any(
+            name == "pytest" or name.startswith("_pytest")
+            for name in (value_module, type_module)
+            if isinstance(name, str)
+        ):
+            return True
+        if type(value) is FunctionType:
+            function = value
+            if (
+                function.__code__.co_name == "_active_task064_pytest_root"
+                and function.__code__.co_filename in expected_fixture_paths
+            ):
+                return True
+            closure_values = tuple(
+                cell.cell_contents
+                for cell in (function.__closure__ or ())
+                if hasattr(cell, "cell_contents")
+            )
+            referenced_globals = tuple(
+                function.__globals__[name]
+                for name in function.__code__.co_names
+                if name in function.__globals__
+            )
+            return any(
+                contains_forbidden_identity(item, seen)
+                for item in (
+                    function.__defaults__,
+                    function.__kwdefaults__,
+                    function.__annotations__,
+                    closure_values,
+                    referenced_globals,
+                )
+            )
+        if type(value) is dict:
+            return any(
+                contains_forbidden_identity(key, seen) or contains_forbidden_identity(item, seen)
+                for key, item in dict.items(value)
+            )
+        if type(value) is tuple or type(value) is list:
+            return any(
+                contains_forbidden_identity(item, seen)
+                for item in cast(tuple[object, ...] | list[object], value)
+            )
+        if type(value) is set or type(value) is frozenset:
+            return any(
+                contains_forbidden_identity(item, seen)
+                for item in cast(set[object] | frozenset[object], value)
+            )
+        slot_names: list[str] = []
+        for base in type(value).__mro__:
+            slots = getattr(base, "__slots__", ())
+            slot_names.extend((slots,) if isinstance(slots, str) else slots)
+        return any(
+            slot not in {"__dict__", "__weakref__"}
+            and hasattr(value, slot)
+            and contains_forbidden_identity(getattr(value, slot), seen)
+            for slot in slot_names
+        )
+
+    authorities = tuple(
+        getattr(harness, name)
+        for name in (
+            "_bind_task064_test_module",
+            "_begin_pytest_root_registration",
+            "_cancel_pytest_root_registration",
+            "_pytest_root_scope",
+            "_lookup_active_pytest_root",
+            "_validate_pytest_root_identity",
+            "_lookup_revoked_pytest_root",
+            "_revoke_fixture_root",
+            "_pytest_root_session_owns",
+            "_pytest_root_authority_fault_hit",
+            "_pytest_root_poison_channels",
+            "_pytest_root_authority_uncertain",
+        )
+    )
+    for authority in authorities:
+        assert not contains_forbidden_identity(authority, set())
+
+
+def test_fixture_code_fingerprint_is_canonical_bounded_and_domain_separated(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+) -> None:
+    begin_closure = inspect.getclosurevars(harness._begin_pytest_root_registration)
+    authenticate_fixture_call = cast(
+        FunctionType,
+        begin_closure.nonlocals["authenticate_fixture_call"],
+    )
+    authenticate_closure = inspect.getclosurevars(authenticate_fixture_call)
+    fixture_policy = cast(
+        tuple[tuple[object, ...], ...],
+        authenticate_closure.nonlocals["fixture_policy"],
+    )
+    allowed_fixture_paths = cast(
+        tuple[tuple[str, Path], ...],
+        authenticate_closure.nonlocals["allowed_fixture_paths"],
+    )
+    fingerprint = cast(
+        Callable[[CodeType, str], str],
+        authenticate_closure.nonlocals["code_fingerprint"],
+    )
+    parent_metrics_before = inspect.getclosurevars(fingerprint).nonlocals
+    parent_cache_before = cast(
+        dict[tuple[int, str], tuple[CodeType, str]],
+        parent_metrics_before["fingerprint_cache"],
+    )
+    parent_cache_entries_before = tuple(
+        (key, code, digest) for key, (code, digest) in parent_cache_before.items()
+    )
+    parent_requests_before = cast(int, parent_metrics_before["fingerprint_requests"])
+    parent_computations_before = cast(int, parent_metrics_before["fingerprint_computations"])
+    if _run_task064_exec_isolated(request, tmp_path):
+        parent_metrics_after = inspect.getclosurevars(fingerprint).nonlocals
+        parent_cache_after = cast(
+            dict[tuple[int, str], tuple[CodeType, str]],
+            parent_metrics_after["fingerprint_cache"],
+        )
+        assert parent_cache_after is parent_cache_before
+        assert cast(int, parent_metrics_after["fingerprint_requests"]) == (parent_requests_before)
+        assert cast(int, parent_metrics_after["fingerprint_computations"]) == (
+            parent_computations_before
+        )
+        parent_cache_entries_after = tuple(
+            (key, code, digest) for key, (code, digest) in parent_cache_after.items()
+        )
+        assert len(parent_cache_entries_after) == len(parent_cache_entries_before)
+        assert all(
+            after_key == before_key and after_code is before_code and after_digest == before_digest
+            for (after_key, after_code, after_digest), (
+                before_key,
+                before_code,
+                before_digest,
+            ) in zip(
+                parent_cache_entries_after,
+                parent_cache_entries_before,
+                strict=True,
+            )
+        )
+        return
+    fingerprint_closure = inspect.getclosurevars(fingerprint).nonlocals
+    assert fingerprint_closure["implementation_name"] == sys.implementation.name == "cpython"
+    assert fingerprint_closure["implementation_cache_tag"] == sys.implementation.cache_tag
+    assert fingerprint_closure["accepted_python_version"] == harness.ACCEPTED_PYTHON_VERSION
+    assert fingerprint_closure["runtime_python_version"] == harness.ACCEPTED_PYTHON_VERSION
+    assert fingerprint_closure["optimization_level"] == sys.flags.optimize == 0
+    assert b"TASK064-CODE-FINGERPRINT-TLV-V3" in fingerprint.__code__.co_consts
+    assert b"CONST-GRAPH-ALIAS-PARTITION-V3" in fingerprint.__code__.co_consts
+    fingerprint_tree = ast.parse(textwrap.dedent(inspect.getsource(fingerprint)))
+    serialize_code_node = next(
+        node
+        for node in ast.walk(fingerprint_tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "serialize_code"
+    )
+    constant_snapshot_assignments = [
+        node
+        for node in ast.walk(serialize_code_node)
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "constants"
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "snapshot_constants"
+        and len(node.value.args) == 1
+        and isinstance(node.value.args[0], ast.Name)
+        and node.value.args[0].id == "candidate"
+    ]
+    assert len(constant_snapshot_assignments) == 1
+    tagged_candidate_fields: dict[bytes, str] = {}
+    for call in ast.walk(serialize_code_node):
+        if not (
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and call.func.id == "frame"
+            and len(call.args) == 2
+            and isinstance(call.args[0], ast.Constant)
+            and type(call.args[0].value) is bytes
+            and isinstance(call.args[1], ast.Call)
+            and isinstance(call.args[1].func, ast.Name)
+            and call.args[1].func.id == "serialize_constant"
+            and call.args[1].args
+        ):
+            continue
+        serialized_argument = call.args[1].args[0]
+        if (
+            isinstance(serialized_argument, ast.Attribute)
+            and isinstance(serialized_argument.value, ast.Name)
+            and serialized_argument.value.id == "candidate"
+        ):
+            field_name = serialized_argument.attr
+        elif isinstance(serialized_argument, ast.Name) and serialized_argument.id == "constants":
+            field_name = "co_consts"
+        else:
+            continue
+        tagged_candidate_fields[call.args[0].value] = field_name
+    assert tagged_candidate_fields == {
+        b"ac": "co_argcount",
+        b"pa": "co_posonlyargcount",
+        b"ka": "co_kwonlyargcount",
+        b"nl": "co_nlocals",
+        b"ss": "co_stacksize",
+        b"fg": "co_flags",
+        b"bc": "co_code",
+        b"cs": "co_consts",
+        b"ns": "co_names",
+        b"vn": "co_varnames",
+        b"nm": "co_name",
+        b"qn": "co_qualname",
+        b"lt": "co_linetable",
+        b"et": "co_exceptiontable",
+        b"fv": "co_freevars",
+        b"cv": "co_cellvars",
+    }
+    runtime_suffix = (
+        "tests/integration/test_task_064_continuous_public_trade_stream_sqlite_evidence.py"
+    )
+    runtime_fixture = inspect.unwrap(_active_task064_pytest_root)
+    assert type(runtime_fixture) is FunctionType
+    runtime_fixture_code = runtime_fixture.__code__
+    restored_runtime_fixture = marshal.loads(marshal.dumps(runtime_fixture_code))
+    assert type(restored_runtime_fixture) is CodeType
+    assert restored_runtime_fixture == runtime_fixture_code
+    assert restored_runtime_fixture is not runtime_fixture_code
+    assert fingerprint(restored_runtime_fixture, runtime_suffix) == fingerprint(
+        runtime_fixture_code,
+        runtime_suffix,
+    )
+
+    def unique_nested_code(module_code: CodeType, name: str) -> CodeType:
+        matches: list[CodeType] = []
+
+        def visit(candidate: CodeType) -> None:
+            if candidate.co_name == name:
+                matches.append(candidate)
+            for constant in candidate.co_consts:
+                if type(constant) is CodeType:
+                    visit(constant)
+
+        visit(module_code)
+        assert len(matches) == 1
+        return matches[0]
+
+    compiled_sites: dict[tuple[str, str], CodeType] = {}
+    for policy, (_, source_path) in zip(
+        fixture_policy,
+        allowed_fixture_paths,
+        strict=True,
+    ):
+        suffix = cast(str, policy[0])
+        _, module_code = _rewrite_test(source_path, request.config)
+        restored_module = marshal.loads(marshal.dumps(module_code))
+        assert type(restored_module) is CodeType
+        for name in (cast(str, policy[2]), cast(str, policy[7])):
+            fresh_code = unique_nested_code(module_code, name)
+            restored_code = unique_nested_code(restored_module, name)
+            assert fresh_code == restored_code
+            assert fresh_code is not restored_code
+            assert fingerprint(fresh_code, suffix) == fingerprint(restored_code, suffix)
+            compiled_sites[(suffix, name)] = fresh_code
+
+    baseline = compiled_sites[(runtime_suffix, "_active_task064_pytest_root")]
+    baseline_digest = fingerprint(baseline, runtime_suffix)
+    cache_probe = baseline.replace(co_filename=baseline.co_filename)
+    assert cache_probe is not baseline
+    metrics_before = inspect.getclosurevars(fingerprint).nonlocals
+    requests_before = cast(int, metrics_before["fingerprint_requests"])
+    computations_before = cast(int, metrics_before["fingerprint_computations"])
+    cache_size_before = len(cast(dict[object, object], metrics_before["fingerprint_cache"]))
+    cache_probe_digest = fingerprint(cache_probe, runtime_suffix)
+    for _ in range(127):
+        assert fingerprint(cache_probe, runtime_suffix) == cache_probe_digest
+    metrics_after = inspect.getclosurevars(fingerprint).nonlocals
+    assert cast(int, metrics_after["fingerprint_requests"]) - requests_before == 128
+    assert cast(int, metrics_after["fingerprint_computations"]) - computations_before == 1
+    assert (
+        len(cast(dict[object, object], metrics_after["fingerprint_cache"]))
+        == cache_size_before + 1
+        <= cast(int, metrics_after["maximum_cached_fingerprints"])
+    )
+    extended_varnames = (*baseline.co_varnames, "task064_extra_local")
+    coupled_locals_mutation = baseline.replace(
+        co_nlocals=baseline.co_nlocals + 1,
+        co_varnames=extended_varnames,
+    )
+    renamed_varnames = (
+        *baseline.co_varnames[:-1],
+        f"{baseline.co_varnames[-1]}_task064",
+    )
+    field_mutations = {
+        "co_argcount": baseline.replace(co_argcount=baseline.co_argcount - 1),
+        "co_posonlyargcount": baseline.replace(co_posonlyargcount=1),
+        "co_kwonlyargcount": baseline.replace(co_kwonlyargcount=1),
+        "co_nlocals": coupled_locals_mutation,
+        "co_stacksize": baseline.replace(co_stacksize=baseline.co_stacksize + 1),
+        "co_flags": baseline.replace(co_flags=baseline.co_flags ^ inspect.CO_NESTED),
+        "co_code": baseline.replace(co_code=baseline.co_code + b"\x00\x00"),
+        "co_consts": baseline.replace(
+            co_consts=(*baseline.co_consts, "task064-extra-constant"),
+        ),
+        "co_names": baseline.replace(co_names=(*baseline.co_names, "task064_extra")),
+        "co_varnames": baseline.replace(co_varnames=renamed_varnames),
+        "co_name": baseline.replace(co_name=f"{baseline.co_name}_task064"),
+        "co_qualname": baseline.replace(co_qualname=f"{baseline.co_qualname}_task064"),
+        "co_linetable": baseline.replace(co_linetable=baseline.co_linetable + b"\x00"),
+        "co_exceptiontable": baseline.replace(
+            co_exceptiontable=baseline.co_exceptiontable + b"\x00",
+        ),
+        "co_freevars": baseline.replace(
+            co_freevars=(*baseline.co_freevars, "task064_extra_free"),
+        ),
+        "co_cellvars": baseline.replace(
+            co_cellvars=(*baseline.co_cellvars, "task064_extra_cell"),
+        ),
+    }
+    assert set(field_mutations) == {
+        "co_argcount",
+        "co_posonlyargcount",
+        "co_kwonlyargcount",
+        "co_nlocals",
+        "co_stacksize",
+        "co_flags",
+        "co_code",
+        "co_consts",
+        "co_names",
+        "co_varnames",
+        "co_name",
+        "co_qualname",
+        "co_linetable",
+        "co_exceptiontable",
+        "co_freevars",
+        "co_cellvars",
+    }
+    assert all(
+        fingerprint(mutated, runtime_suffix) != baseline_digest
+        for mutated in field_mutations.values()
+    )
+
+    relocated = baseline.replace(
+        co_filename="/untrusted/task064/location.py",
+        co_firstlineno=baseline.co_firstlineno + 10_000,
+    )
+    assert fingerprint(relocated, runtime_suffix) == baseline_digest
+    assert fingerprint(baseline, f"{runtime_suffix}.other") != baseline_digest
+
+    shared_leaf = (b"task064-shared-leaf",)
+    distinct_leaf = (bytes(bytearray(shared_leaf[0])),)
+    assert distinct_leaf == shared_leaf
+    assert distinct_leaf is not shared_leaf
+    assert distinct_leaf[0] is not shared_leaf[0]
+    aliased = baseline.replace(co_consts=(shared_leaf, shared_leaf))
+    unaliased = baseline.replace(co_consts=(shared_leaf, distinct_leaf))
+    assert aliased.co_consts == unaliased.co_consts
+    assert fingerprint(aliased, runtime_suffix) != fingerprint(unaliased, runtime_suffix)
+
+    metadata_shared_tuple = ("task064-metadata-alias",)
+    metadata_distinct_tuple = tuple(["task064-metadata-alias"])
+    assert metadata_shared_tuple == metadata_distinct_tuple
+    assert metadata_shared_tuple is not metadata_distinct_tuple
+    cross_scope_shared = baseline.replace(
+        co_consts=metadata_shared_tuple,
+        co_names=metadata_shared_tuple,
+    )
+    cross_scope_distinct = baseline.replace(
+        co_consts=metadata_shared_tuple,
+        co_names=metadata_distinct_tuple,
+    )
+    assert cross_scope_shared.co_consts is cross_scope_shared.co_names
+    assert cross_scope_distinct.co_consts is not cross_scope_distinct.co_names
+    assert cross_scope_shared == cross_scope_distinct
+    assert fingerprint(cross_scope_shared, runtime_suffix) == fingerprint(
+        cross_scope_distinct,
+        runtime_suffix,
+    )
+
+    def identity_probe() -> bool:
+        pair = (b"left", b"right")
+        return pair[0] is pair[1]
+
+    probe_code = identity_probe.__code__
+    pair_index = next(
+        index
+        for index, constant in enumerate(probe_code.co_consts)
+        if constant == (b"left", b"right")
+    )
+    shared_bytes = bytes(bytearray(b"task064-identity"))
+    distinct_bytes = bytes(bytearray(shared_bytes))
+    assert shared_bytes == distinct_bytes
+    assert shared_bytes is not distinct_bytes
+    shared_constants = list(probe_code.co_consts)
+    distinct_constants = list(probe_code.co_consts)
+    shared_constants[pair_index] = (shared_bytes, shared_bytes)
+    distinct_constants[pair_index] = (shared_bytes, distinct_bytes)
+    shared_code = probe_code.replace(co_consts=tuple(shared_constants))
+    distinct_code = probe_code.replace(co_consts=tuple(distinct_constants))
+    assert shared_code == distinct_code
+    assert shared_code.co_consts == distinct_code.co_consts
+    assert FunctionType(shared_code, {})() is True
+    assert FunctionType(distinct_code, {})() is False
+    assert fingerprint(shared_code, runtime_suffix) != fingerprint(
+        distinct_code,
+        runtime_suffix,
+    )
+    for candidate, expected in (
+        (shared_code, True),
+        (distinct_code, False),
+    ):
+        restored_candidate = marshal.loads(marshal.dumps(candidate))
+        assert type(restored_candidate) is CodeType
+        assert FunctionType(restored_candidate, {})() is expected
+        assert fingerprint(restored_candidate, runtime_suffix) == fingerprint(
+            candidate,
+            runtime_suffix,
+        )
+
+    def code_with_unretained_leaf() -> CodeType:
+        leaf = bytes(bytearray(b"task064-external-reference"))
+        return (lambda: None).__code__.replace(co_consts=(None, leaf))
+
+    unreferenced_code = code_with_unretained_leaf()
+    externally_referenced_code = code_with_unretained_leaf()
+    assert unreferenced_code is not externally_referenced_code
+    assert unreferenced_code.co_consts == externally_referenced_code.co_consts
+    assert unreferenced_code.co_consts[1] is not externally_referenced_code.co_consts[1]
+    externally_referenced_leaf = externally_referenced_code.co_consts[1]
+    external_references = [externally_referenced_leaf] * 1_000
+    assert external_references[0] is externally_referenced_leaf
+    assert fingerprint(unreferenced_code, runtime_suffix) == fingerprint(
+        externally_referenced_code,
+        runtime_suffix,
+    )
+    external_reference_control = subprocess.run(
+        (
+            sys.executable,
+            "-c",
+            textwrap.dedent(
+                """
+                import marshal
+
+                def make_code():
+                    leaf = bytes(bytearray(b"task064-external-reference"))
+                    return (lambda: None).__code__.replace(co_consts=(None, leaf))
+
+                code = make_code()
+                before = marshal.dumps(code)
+                leaf = code.co_consts[1]
+                references = [leaf] * 1000
+                after = marshal.dumps(code)
+                assert references[0] is leaf
+                assert before != after
+                print("TASK064_EXTERNAL_REF_MARSHAL_CONTROL")
+                """
+            ),
+        ),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert external_reference_control.returncode == 0
+    assert external_reference_control.stdout == "TASK064_EXTERNAL_REF_MARSHAL_CONTROL\n"
+    assert external_reference_control.stderr == ""
+
+    def digest_for_constants(*constants: object) -> str:
+        return fingerprint(
+            baseline.replace(co_consts=constants),
+            runtime_suffix,
+        )
+
+    assert digest_for_constants(("ab", "c")) != digest_for_constants(("a", "bc"))
+    assert digest_for_constants(("a", "b")) != digest_for_constants(
+        frozenset({"a", "b"}),
+    )
+    assert digest_for_constants(True) != digest_for_constants(1)
+    assert digest_for_constants(-1) != digest_for_constants(1)
+    assert digest_for_constants(0.0) != digest_for_constants(-0.0)
+    assert digest_for_constants(1 + 2j) != digest_for_constants((1.0, 2.0))
+    assert digest_for_constants("task064") != digest_for_constants(b"task064")
+    assert len(digest_for_constants(Ellipsis, "\ud800")) == 64
+    assert digest_for_constants(frozenset(("alpha", "beta"))) == digest_for_constants(
+        frozenset(("beta", "alpha")),
+    )
+    first_nan = float("nan")
+    second_nan = float("nan")
+    ambiguous_frozenset = frozenset((first_nan, second_nan))
+    assert first_nan is not second_nan
+    assert first_nan != second_nan
+    assert len(ambiguous_frozenset) == 2
+    invalid_cache = cast(
+        dict[tuple[int, str], tuple[CodeType, str]],
+        inspect.getclosurevars(fingerprint).nonlocals["fingerprint_cache"],
+    )
+    invalid_cache_entries_before = tuple(
+        (key, code, digest) for key, (code, digest) in invalid_cache.items()
+    )
+    with pytest.raises(harness.HarnessFailure) as ambiguous_frozenset_order:
+        digest_for_constants(ambiguous_frozenset)
+    assert ambiguous_frozenset_order.value.code is (
+        harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+    )
+
+    class _UnsupportedInteger(int):
+        pass
+
+    unsupported_integer = _UnsupportedInteger(1)
+    assert type(unsupported_integer) is _UnsupportedInteger
+    for unsupported in (object(), unsupported_integer, NotImplemented):
+        with pytest.raises(harness.HarnessFailure) as unsupported_constant:
+            digest_for_constants(unsupported)
+        assert unsupported_constant.value.code is (
+            harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+        )
+
+    deep_constant: object = None
+    for _ in range(65):
+        deep_constant = (deep_constant,)
+    with pytest.raises(harness.HarnessFailure) as excessive_depth:
+        digest_for_constants(deep_constant)
+    assert excessive_depth.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+
+    shared_large_constant = b"x" * (4 * 1024 * 1024)
+    with pytest.raises(harness.HarnessFailure) as excessive_materialization:
+        digest_for_constants((shared_large_constant, shared_large_constant))
+    assert excessive_materialization.value.code is (
+        harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+    )
+    invalid_cache_entries_after = tuple(
+        (key, code, digest) for key, (code, digest) in invalid_cache.items()
+    )
+    assert len(invalid_cache_entries_after) == len(invalid_cache_entries_before)
+    assert all(
+        after_key == before_key and after_code is before_code and after_digest == before_digest
+        for (after_key, after_code, after_digest), (
+            before_key,
+            before_code,
+            before_digest,
+        ) in zip(
+            invalid_cache_entries_after,
+            invalid_cache_entries_before,
+            strict=True,
+        )
+    )
+
+    final_metrics = inspect.getclosurevars(fingerprint).nonlocals
+    fingerprint_cache = cast(
+        dict[tuple[int, str], tuple[CodeType, str]],
+        final_metrics["fingerprint_cache"],
+    )
+    maximum_cached_fingerprints = cast(
+        int,
+        final_metrics["maximum_cached_fingerprints"],
+    )
+    retained_capacity_probes: list[CodeType] = []
+    while len(fingerprint_cache) < maximum_cached_fingerprints:
+        capacity_probe = baseline.replace(
+            co_consts=(
+                None,
+                f"task064-cache-capacity-{len(retained_capacity_probes):04d}",
+            ),
+        )
+        retained_capacity_probes.append(capacity_probe)
+        assert len(fingerprint(capacity_probe, runtime_suffix)) == 64
+    assert len(fingerprint_cache) == maximum_cached_fingerprints
+    assert all(
+        cache_key == (id(cached_code), cache_key[1])
+        and cached_code is fingerprint_cache[cache_key][0]
+        for cache_key, (cached_code, _digest) in fingerprint_cache.items()
+    )
+    overflow_probe = baseline.replace(co_consts=(None, "task064-cache-overflow"))
+    with pytest.raises(harness.HarnessFailure) as exhausted_cache:
+        fingerprint(overflow_probe, runtime_suffix)
+    assert exhausted_cache.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+    assert len(fingerprint_cache) == maximum_cached_fingerprints
+    assert fingerprint(baseline, runtime_suffix) == baseline_digest
+
+
+def test_fixture_code_replay_with_forged_globals_fails_in_new_context_and_thread(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    runtime_fixture = inspect.unwrap(_active_task064_pytest_root)
+    assert type(runtime_fixture) is FunctionType
+    copied_globals = dict(runtime_fixture.__globals__)
+    copied_globals["__name__"] = runtime_fixture.__module__
+    fixture_io_calls = 0
+
+    def forbidden_fixture_io(*_args: object, **_kwargs: object) -> Path:
+        nonlocal fixture_io_calls
+        fixture_io_calls += 1
+        raise AssertionError("forged fixture replay must fail before creating roots")
+
+    copied_globals["_TEMP_PATH_MKTEMP"] = forbidden_fixture_io
+    forged_fixture = FunctionType(
+        runtime_fixture.__code__,
+        copied_globals,
+        runtime_fixture.__name__,
+        runtime_fixture.__defaults__,
+        runtime_fixture.__closure__,
+    )
+    forged_fixture.__kwdefaults__ = runtime_fixture.__kwdefaults__
+
+    def invoke() -> None:
+        generator = forged_fixture(request, tmp_path, tmp_path_factory)
+        try:
+            next(generator)
+        finally:
+            generator.close()
+
+    with pytest.raises(harness.HarnessFailure) as empty_context_replay:
+        contextvars.Context().run(invoke)
+    assert empty_context_replay.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+
+    thread_errors: list[BaseException] = []
+
+    def invoke_in_thread() -> None:
+        try:
+            invoke()
+        except BaseException as error:
+            thread_errors.append(error)
+
+    replay_thread = threading.Thread(target=invoke_in_thread)
+    replay_thread.start()
+    replay_thread.join(timeout=10)
+    assert not replay_thread.is_alive()
+    assert len(thread_errors) == 1
+    assert isinstance(thread_errors[0], harness.HarnessFailure)
+    assert thread_errors[0].code is (harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+    assert fixture_io_calls == 0
+
+
+@pytest.mark.parametrize(
+    "target_node_id",
+    (
+        (
+            "tests/unit/"
+            "test_task_064_continuous_public_trade_stream_sqlite_schema.py::"
+            "test_descriptor_freezes_only_the_permitted_physical_projections"
+        ),
+        (
+            "tests/integration/"
+            "test_task_064_continuous_public_trade_stream_sqlite_evidence.py::"
+            "test_frozen_minimum_typical_and_maximum_contract_shape_record_sizes"
+        ),
+    ),
+)
+def test_exact_fixture_rejects_same_globals_dependency_rebinding_before_begin(
+    target_node_id: str,
+    tmp_path: Path,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[2]
+    program = textwrap.dedent(
+        f"""
+        import inspect
+        import stat
+        import sys
+        import pytest
+
+        target_node_id = {target_node_id!r}
+
+        class RebindingProbe:
+            def __init__(self):
+                self.ran = False
+
+            @pytest.hookimpl(tryfirst=True)
+            def pytest_runtest_setup(self, item):
+                if item.nodeid != target_node_id:
+                    return
+                assert not self.ran
+                self.ran = True
+                module = item.module
+                harness = module.harness
+                request = item._request
+                factory = item.config._tmp_path_factory
+                assert isinstance(request, pytest.FixtureRequest)
+                assert isinstance(factory, pytest.TempPathFactory)
+                real_mktemp = module._TEMP_PATH_MKTEMP
+                primary_root = real_mktemp(factory, "task064-same-globals-primary")
+                sibling_roots = tuple(
+                    real_mktemp(factory, f"task064-same-globals-sibling-{{index}}")
+                    for index in range(4)
+                )
+                all_roots = (primary_root, *sibling_roots)
+                for root in all_roots:
+                    details = root.lstat()
+                    assert stat.S_ISDIR(details.st_mode)
+                    assert stat.S_IMODE(details.st_mode) == 0o700
+                    assert tuple(root.iterdir()) == ()
+
+                raw_fixture = inspect.unwrap(module._active_task064_pytest_root)
+                fixture_globals = raw_fixture.__globals__
+                authority = inspect.getclosurevars(
+                    harness._cancel_pytest_root_registration
+                ).nonlocals
+                permits_before = tuple(authority["permits"].values())
+                active_before = authority["active_node_lifecycle"]
+                tombstones_before = authority["returned_node_tombstones"]
+                counters = {{
+                    "mktemp": 0,
+                    "begin": 0,
+                    "scope": 0,
+                    "cancel": 0,
+                    "ticket": 0,
+                }}
+
+                def fake_mktemp(*_args, **_kwargs):
+                    counters["mktemp"] += 1
+                    raise AssertionError("rebound mktemp executed")
+
+                def fake_begin(*_args, **_kwargs):
+                    counters["begin"] += 1
+                    raise AssertionError("rebound begin executed")
+
+                def fake_scope(*_args, **_kwargs):
+                    counters["scope"] += 1
+                    raise AssertionError("rebound scope executed")
+
+                def fake_cancel(*_args, **_kwargs):
+                    counters["cancel"] += 1
+                    raise AssertionError("rebound cancel executed")
+
+                def fake_ticket(*_args, **_kwargs):
+                    counters["ticket"] += 1
+                    raise AssertionError("rebound child-ticket authority executed")
+
+                mutation_groups = (
+                    (
+                        (
+                            fixture_globals,
+                            "_FIXTURE_REQUEST_TYPE",
+                            object,
+                        ),
+                    ),
+                    (
+                        (
+                            fixture_globals,
+                            "_TEMP_PATH_FACTORY_TYPE",
+                            object,
+                        ),
+                    ),
+                    (
+                        (
+                            fixture_globals,
+                            "_TEMP_PATH_MKTEMP",
+                            fake_mktemp,
+                        ),
+                    ),
+                    ((fixture_globals, "pytest", object()),),
+                    ((fixture_globals, "harness", object()),),
+                    ((fixture_globals, "inspect", object()),),
+                    ((fixture_globals, "os", object()),),
+                    ((fixture_globals, "contextvars", object()),),
+                    ((fixture_globals, "Path", object),),
+                    ((fixture_globals, "FunctionType", object),),
+                    (
+                        (
+                            fixture_globals,
+                            "_active_task064_pytest_root",
+                            object(),
+                        ),
+                    ),
+                    ((pytest.__dict__, "FixtureRequest", object),),
+                    ((pytest.__dict__, "TempPathFactory", object),),
+                    ((pytest.__dict__, "fixture", object()),),
+                    ((inspect.__dict__, "unwrap", object()),),
+                    ((module.os.__dict__, "environ", object()),),
+                    ((module.contextvars.__dict__, "Context", object),),
+                    (
+                        (
+                            harness.__dict__,
+                            "_begin_pytest_root_registration",
+                            fake_begin,
+                        ),
+                        (
+                            harness.__dict__,
+                            "_pytest_root_scope",
+                            fake_scope,
+                        ),
+                        (
+                            harness.__dict__,
+                            "_cancel_pytest_root_registration",
+                            fake_cancel,
+                        ),
+                        (
+                            harness.__dict__,
+                            "_authenticate_task064_child_provenance",
+                            fake_ticket,
+                        ),
+                        (
+                            harness.__dict__,
+                            "_activate_task064_child_provenance",
+                            fake_ticket,
+                        ),
+                        (
+                            harness.__dict__,
+                            "_claim_task064_post_return_child_provenance",
+                            fake_ticket,
+                        ),
+                        (
+                            harness.__dict__,
+                            "_claim_task064_child_dispatch_provenance",
+                            fake_ticket,
+                        ),
+                        (
+                            harness.__dict__,
+                            "_finish_task064_child_provenance",
+                            fake_ticket,
+                        ),
+                        (
+                            harness.__dict__,
+                            "_cancel_task064_child_provenance",
+                            fake_ticket,
+                        ),
+                    ),
+                    ((harness.__dict__, "HarnessFailure", object),),
+                    ((harness.__dict__, "HarnessFailureCode", object),),
+                )
+                for mutations in mutation_groups:
+                    originals = [
+                        (mapping, name, mapping[name])
+                        for mapping, name, _replacement in mutations
+                    ]
+                    generator = None
+                    try:
+                        for mapping, name, replacement in mutations:
+                            mapping[name] = replacement
+                        generator = raw_fixture(
+                            request,
+                            primary_root,
+                            factory,
+                        )
+                        try:
+                            next(generator)
+                        except RuntimeError as error:
+                            assert str(error) == (
+                                "invalid TASK064 pytest fixture dependency seal"
+                            )
+                        else:
+                            raise AssertionError(
+                                "same-globals rebinding minted fixture authority"
+                            )
+                    finally:
+                        if generator is not None:
+                            generator.close()
+                        for mapping, name, original in reversed(originals):
+                            mapping[name] = original
+
+                assert counters == {{
+                    "mktemp": 0,
+                    "begin": 0,
+                    "scope": 0,
+                    "cancel": 0,
+                    "ticket": 0,
+                }}
+                assert tuple(authority["permits"].values()) == permits_before
+                assert authority["active_node_lifecycle"] is active_before
+                assert authority["returned_node_tombstones"] == tombstones_before
+                assert not [
+                    record
+                    for record in authority["permits"].values()
+                    if record["node_id"] == target_node_id
+                ]
+                for root in all_roots:
+                    assert tuple(root.iterdir()) == ()
+
+        probe = RebindingProbe()
+        exit_code = pytest.main(
+            ["-q", "-p", "no:cacheprovider", target_node_id],
+            plugins=[probe],
+        )
+        assert exit_code == pytest.ExitCode.OK
+        assert probe.ran
+        """
+    )
+    environment, pycache_prefix = _fresh_subprocess_pycache_environment(
+        tmp_path,
+        label="task064-same-globals-rebinding-pycache",
+    )
+    completed = subprocess.run(
+        (sys.executable, "-c", program),
+        cwd=repository_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    assert not pycache_prefix.exists()
+    assert completed.returncode == 0, (
+        f"same-globals fixture rebinding probe failed for {target_node_id!r}\n"
+        f"stdout:\n{completed.stdout}\n"
+        f"stderr:\n{completed.stderr}"
+    )
+
+
+def test_exact_fixture_callable_replay_is_rejected_after_real_lifecycle_return(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+) -> None:
+    node_ids = (
+        (
+            "tests/unit/"
+            "test_task_064_continuous_public_trade_stream_sqlite_schema.py::"
+            "test_descriptor_freezes_only_the_permitted_physical_projections"
+        ),
+        (
+            "tests/integration/"
+            "test_task_064_continuous_public_trade_stream_sqlite_evidence.py::"
+            "test_post_return_ticket_is_claimed_locally_once"
+        ),
+    )
+    binding_target_node_id = node_ids[0]
+    inventory_before_invalid_binding = tuple(tmp_path.iterdir())
+    for issuer_node_id, target_node_id, mode in (
+        (
+            f"{request.node.nodeid}::wrong-issuer",
+            binding_target_node_id,
+            binding_target_node_id,
+        ),
+        (request.node.nodeid, "task064-wrong-target", "task064-wrong-target"),
+        (
+            request.node.nodeid,
+            binding_target_node_id,
+            f"{binding_target_node_id}::wrong-mode",
+        ),
+    ):
+        with pytest.raises(harness.HarnessFailure) as invalid_binding:
+            harness._issue_task064_child_provenance(
+                tmp_path,
+                "post_return_fixture_replay",
+                issuer_node_id,
+                target_node_id,
+                mode,
+            )
+        assert invalid_binding.value.code is (harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        assert tuple(tmp_path.iterdir()) == inventory_before_invalid_binding
+
+    repository_root = Path(__file__).resolve().parents[2]
+    for wrong_packet in ("protocol", "target", "mode"):
+        environment, pycache_prefix = _fresh_subprocess_pycache_environment(
+            tmp_path,
+            label=f"task064-wrong-packet-{wrong_packet}-pycache",
+        )
+        provenance = harness._issue_task064_child_provenance(
+            tmp_path,
+            "post_return_fixture_replay",
+            request.node.nodeid,
+            binding_target_node_id,
+            binding_target_node_id,
+        )
+        packet = json.loads(os.pread(provenance.descriptor, 8_192, 0))
+        if wrong_packet == "protocol":
+            packet["protocol"] = "exec_isolation"
+            packet["legacy_environment"] = "WEALTH_TASK064_EXEC_ISOLATION"
+        elif wrong_packet == "target":
+            packet["target_node_id"] = node_ids[1]
+            packet["mode"] = node_ids[1]
+        else:
+            packet["mode"] = f"{binding_target_node_id}::wrong-mode"
+        forged_packet = json.dumps(
+            packet,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        os.ftruncate(provenance.descriptor, 0)
+        assert os.pwrite(provenance.descriptor, forged_packet, 0) == len(forged_packet)
+        os.fsync(provenance.descriptor)
+        envelope = json.loads(provenance.envelope)
+        envelope["packet_sha256"] = hashlib.sha256(forged_packet).hexdigest()
+        environment[harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT] = json.dumps(
+            envelope,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        program = textwrap.dedent(
+            f"""
+            import sys
+            import pytest
+            import tests.support.continuous_public_trade_stream_sqlite_harness as harness
+
+            target_node_id = {binding_target_node_id!r}
+            observed = []
+            body_called = False
+            watched = {{
+                harness._activate_task064_child_provenance.__code__: "activate",
+                harness._claim_task064_post_return_child_provenance.__code__: "claim",
+                harness._begin_pytest_root_registration.__code__: "begin",
+                harness._pytest_root_scope.__code__: "scope",
+                harness._cancel_pytest_root_registration.__code__: "permit-cancel",
+                harness._finish_task064_child_provenance.__code__: "ticket-finish",
+                harness._cancel_task064_child_provenance.__code__: "ticket-cancel",
+            }}
+            mktemp_code = pytest.TempPathFactory.mktemp.__code__
+
+            def profile(frame, event, arg):
+                del arg
+                if event != "call":
+                    return
+                if frame.f_code is mktemp_code:
+                    basename = frame.f_locals.get("basename")
+                    if isinstance(basename, str) and basename.startswith("task064-"):
+                        observed.append("mktemp:" + basename)
+                    return
+                name = watched.get(frame.f_code)
+                if name is not None:
+                    observed.append(name)
+
+            class PreBeginProbe:
+                checked = False
+
+                @pytest.hookimpl(trylast=True)
+                def pytest_configure(self, config):
+                    del config
+                    sys.setprofile(profile)
+
+                @pytest.hookimpl(tryfirst=True)
+                def pytest_runtest_call(self, item):
+                    global body_called
+                    if item.nodeid == target_node_id:
+                        body_called = True
+
+                @pytest.hookimpl(trylast=True)
+                def pytest_sessionfinish(self, session, exitstatus):
+                    del session, exitstatus
+                    sys.setprofile(None)
+                    assert observed == []
+                    assert body_called is False
+                    self.checked = True
+                    print("TASK064_WRONG_PACKET_PREBEGIN_OK:{wrong_packet}")
+
+            probe = PreBeginProbe()
+            exit_code = pytest.main(
+                ["-q", "-s", "-p", "no:cacheprovider", target_node_id],
+                plugins=[probe],
+            )
+            assert exit_code != pytest.ExitCode.OK
+            assert probe.checked
+            """
+        )
+        try:
+            completed = subprocess.run(
+                (sys.executable, "-c", program),
+                cwd=repository_root,
+                env=environment,
+                pass_fds=(provenance.descriptor,),
+                capture_output=True,
+                text=True,
+                timeout=180,
+                check=False,
+            )
+        finally:
+            packet_consumed = harness._close_task064_child_provenance(provenance)
+        assert not packet_consumed
+        assert not provenance.marker_path.exists()
+        assert not pycache_prefix.exists()
+        assert completed.returncode == 0, (
+            f"wrong-packet pre-BEGIN probe failed for {wrong_packet!r}\n"
+            f"stdout:\n{completed.stdout}\n"
+            f"stderr:\n{completed.stderr}"
+        )
+        assert f"TASK064_WRONG_PACKET_PREBEGIN_OK:{wrong_packet}" in completed.stdout
+
+    for node_id in node_ids:
+        completed, _ = _run_task064_pytest_child(
+            tmp_path,
+            protocol="post_return_fixture_replay",
+            issuer_node_id=request.node.nodeid,
+            target_node_id=node_id,
+            mode=node_id,
+            pycache_label="task064-exact-replay-pycache",
+            timeout_seconds=120,
+        )
+        assert completed.returncode == 0, (
+            f"post-return exact fixture replay probe failed for {node_id!r}\n"
+            f"stdout:\n{completed.stdout}\n"
+            f"stderr:\n{completed.stderr}"
+        )
+
+
+def test_adr0032_keeps_concrete_guards_inside_the_controlled_process_boundary() -> None:
+    adr_path = (
+        Path(__file__).resolve().parents[2]
+        / "docs"
+        / "decisions"
+        / "0032-continuous-public-trade-stream-sqlite-schema-evidence-harness.md"
+    )
+    decision = adr_path.read_text(encoding="utf-8")
+    for required in (
+        "private closure cells",
+        "closure-owned authority",
+        "debugger state",
+        "`ctypes`",
+        "raw process memory",
+        "forged or mutated caller-held capabilities",
+        "direct exported",
+        "module-global substitution",
+        "fixture/node/path/PID/UID/mode/nonce",
+        "revocation or cleanup failure",
+        "filesystem identity and ownership failure",
+        "production blocker",
+    ):
+        assert required in decision
+    assert "controlled pytest/cooperating-process threat model" in decision
+    assert "never `PASS`" in decision
+
+
+@pytest.mark.parametrize(
+    "failure_mode",
+    (
+        "scope_construction",
+        "scope_entry",
+        "partial_activation",
+        "cancellation_uncertainty",
+    ),
+)
+def test_fixture_setup_failure_cancels_exact_permit_and_retains_tombstone(
+    failure_mode: str,
+    tmp_path: Path,
+) -> None:
+    repository_root = Path(__file__).resolve().parents[2]
+    first_node = (
+        "tests/unit/test_task_064_continuous_public_trade_stream_sqlite_schema.py::"
+        "test_descriptor_freezes_only_the_permitted_physical_projections"
+    )
+    second_node = (
+        "tests/unit/test_task_064_continuous_public_trade_stream_sqlite_schema.py::"
+        "test_natural_identity_key_is_strict_reversible_and_length_delimited"
+    )
+    program = textwrap.dedent(
+        f"""
+        import inspect
+        import sys
+        import pytest
+
+        mode = {failure_mode!r}
+        first_node = {first_node!r}
+        second_node = {second_node!r}
+
+        class Recorder:
+            def __init__(self):
+                self.passed_calls = []
+                self.failed_setups = []
+                self.module = None
+                self.harness = None
+
+            def pytest_collection_finish(self, session):
+                del session
+                module = sys.modules[
+                    "tests.unit.test_task_064_continuous_public_trade_stream_sqlite_schema"
+                ]
+                harness = module.harness
+                self.module = module
+                self.harness = harness
+
+                fault_for_mode = {{
+                    "scope_construction": "permit_scope_construction",
+                    "scope_entry": "permit_scope_entry",
+                    "partial_activation": "permit_partial_activation",
+                }}.get(mode)
+                if mode == "cancellation_uncertainty":
+                    harness._arm_pytest_root_authority_fault(
+                        "permit_scope_construction"
+                    )
+                    harness._arm_pytest_root_authority_fault("permit_cancel")
+                elif fault_for_mode is not None:
+                    harness._arm_pytest_root_authority_fault(fault_for_mode)
+
+            def pytest_runtest_logreport(self, report):
+                if report.when == "call" and report.passed:
+                    self.passed_calls.append(report.nodeid)
+                if report.when == "setup" and report.failed:
+                    self.failed_setups.append(report.nodeid)
+
+        recorder = Recorder()
+        exit_code = pytest.main(
+            ["-q", "-p", "no:cacheprovider", first_node, second_node],
+            plugins=[recorder],
+        )
+        module = recorder.module
+        harness = recorder.harness
+        assert module is not None
+        assert harness is not None
+        cancel_closure = inspect.getclosurevars(
+            harness._cancel_pytest_root_registration
+        ).nonlocals
+        permits = tuple(cancel_closure["permits"].values())
+        first_records = [
+            record for record in permits if record["node_id"] == first_node
+        ]
+        assert len(first_records) == 1
+        first_record = first_records[0]
+        assert cancel_closure["active_node_lifecycle"] is None
+        assert (
+            first_record["owner_process_id"],
+            first_record["node_id"],
+        ) in cancel_closure["returned_node_tombstones"]
+        assert first_node in recorder.failed_setups
+        assert exit_code == pytest.ExitCode.TESTS_FAILED
+
+        if mode == "cancellation_uncertainty":
+            assert first_record["state"] == "CANCEL_UNCERTAIN"
+            assert second_node in recorder.failed_setups
+            assert not recorder.passed_calls
+            assert harness._pytest_root_authority_uncertain()
+        else:
+            assert first_record["state"] == "CANCELLED"
+            assert recorder.passed_calls == [second_node]
+            assert second_node not in recorder.failed_setups
+            second_records = [
+                record for record in permits if record["node_id"] == second_node
+            ]
+            assert len(second_records) == 1
+            assert second_records[0]["state"] == "RETURNED"
+            try:
+                harness._pytest_root_scope(first_record["permit"], ())
+            except harness.HarnessFailure as error:
+                assert (
+                    error.code
+                    is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+                )
+            else:
+                raise AssertionError("cancelled permit remained activatable")
+        """
+    )
+    environment, pycache_prefix = _fresh_subprocess_pycache_environment(
+        tmp_path,
+        label="task064-cancellation-pycache",
+    )
+    completed = subprocess.run(
+        (sys.executable, "-c", program),
+        cwd=repository_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    assert not pycache_prefix.exists()
+    assert completed.returncode == 0, (
+        f"fixture cancellation probe {failure_mode!r} failed\n"
+        f"stdout:\n{completed.stdout}\n"
+        f"stderr:\n{completed.stderr}"
+    )
+
+
+def test_evidence_normalization_rejects_cycles_depth_and_mapping_subclasses(
+    tmp_path: Path,
+) -> None:
+    registration = harness._lookup_active_pytest_root(tmp_path)
+    assert registration is not None
+    before_inventory = tuple(tmp_path.iterdir())
+
+    cyclic: list[object] = []
+    cyclic.append(cyclic)
+    hostile = _HostileMapping()
+    for candidate in (cyclic, hostile):
+        with pytest.raises(harness.HarnessFailure) as digest_failure:
+            harness._evidence_payload_digest(candidate)
+        assert digest_failure.value.code is harness.HarnessFailureCode.CORRUPT
+
+        with pytest.raises(harness.HarnessFailure) as collection_failure:
+            harness._collect_evidence_registrations(candidate, [], [])
+        assert collection_failure.value.code is harness.HarnessFailureCode.CORRUPT
+
+        with pytest.raises(harness.HarnessFailure) as registration_failure:
+            harness._validate_collector_value_registration(
+                candidate,
+                registration,
+            )
+        assert registration_failure.value.code is harness.HarnessFailureCode.CORRUPT
+
+        with pytest.raises(harness.HarnessFailure) as authority_failure:
+            harness._validate_collector_value_authority(
+                candidate,
+                registration,
+            )
+        assert authority_failure.value.code is harness.HarnessFailureCode.CORRUPT
+
+    assert hostile.items_calls == 0
+    depth_64: object = "leaf"
+    for _ in range(64):
+        depth_64 = [depth_64]
+    assert len(harness._evidence_payload_digest(depth_64)) == 64
+    depth_65: object = [depth_64]
+    with pytest.raises(harness.HarnessFailure) as depth_failure:
+        harness._evidence_payload_digest(depth_65)
+    assert depth_failure.value.code is harness.HarnessFailureCode.CORRUPT
+
+    shared = ["shared"]
+    aliased_dag = [shared, shared]
+    assert harness._evidence_payload_digest(aliased_dag) == (
+        harness._evidence_payload_digest([["shared"], ["shared"]])
+    )
+    assert tuple(tmp_path.iterdir()) == before_inventory
+    assert not (tmp_path / "task064-evidence.json").exists()
+    assert not tuple(tmp_path.glob(".task064-evidence-*.tmp"))
+
+
+def test_token_and_root_authority_rejects_clones_collisions_and_module_mirrors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _active_task064_pytest_root: harness._PytestRootCapability,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    registered = harness._lookup_store_token_authority(token)
+    assert registered is not None
+    snapshot = harness._token_authority_snapshot()
+    view = snapshot[token._nonce]
+    with pytest.raises(TypeError):
+        cast(Any, snapshot)[token._nonce] = view
+    assert harness._token_authority_snapshot()[token._nonce] == view
+    assert harness._token_authority_snapshot()[token._nonce] is not view
+
+    same_nonce_clone = replace(token)
+    assert same_nonce_clone._nonce == token._nonce
+    assert same_nonce_clone is not token
+    with pytest.raises(harness.HarnessFailure) as cloned:
+        harness.verify_store(same_nonce_clone)
+    assert cloned.value.code is harness.HarnessFailureCode.INVALID_TOKEN
+    with pytest.raises(harness.HarnessFailure) as cloned_cleanup:
+        harness._remove_owned_files(same_nonce_clone)
+    assert cloned_cleanup.value.code is harness.HarnessFailureCode.UNAVAILABLE
+    assert harness._token_authority_snapshot()[token._nonce] == view
+
+    before_inventory = tuple(sorted(path.name for path in tmp_path.iterdir()))
+    before_authority = dict(harness._token_authority_snapshot())
+    monkeypatch.setattr(secrets, "token_bytes", lambda _size: token._nonce)
+    captured_entropy_token = harness.bootstrap_store(tmp_path)
+    assert captured_entropy_token._nonce != token._nonce
+    assert captured_entropy_token._nonce not in before_authority
+    harness._remove_owned_files(captured_entropy_token)
+    monkeypatch.undo()
+    assert tuple(sorted(path.name for path in tmp_path.iterdir())) == before_inventory
+    assert dict(harness._token_authority_snapshot()) == before_authority
+
+    short_nonce_clone = replace(token, _nonce=b"short-nonce")
+    with pytest.raises(harness.HarnessFailure) as short_require:
+        harness.verify_store(short_nonce_clone)
+    assert short_require.value.code is harness.HarnessFailureCode.INVALID_TOKEN
+    with pytest.raises(harness.HarnessFailure) as short_cleanup:
+        harness._remove_owned_files(short_nonce_clone)
+    assert short_cleanup.value.code is harness.HarnessFailureCode.UNAVAILABLE
+
+    first_registered_view = harness._lookup_store_token_authority(token)
+    second_registered_view = harness._lookup_store_token_authority(token)
+    assert first_registered_view == second_registered_view
+    assert first_registered_view is not second_registered_view
+    assert first_registered_view is not None
+    original_registered_inode = first_registered_view.inode
+    object.__setattr__(first_registered_view, "inode", -1)
+    assert harness._lookup_store_token_authority(token) == second_registered_view
+    assert harness.verify_store(token).stream_count == 0
+    object.__setattr__(first_registered_view, "inode", original_registered_inode)
+
+    unauthorized_issuer_name = "_begin_pytest_root_registration"
+    exact_node_id = (
+        "tests/integration/"
+        "test_task_064_continuous_public_trade_stream_sqlite_evidence.py::"
+        "test_token_and_root_authority_rejects_clones_collisions_and_module_mirrors"
+    )
+    with pytest.raises(harness.HarnessFailure) as second_session:
+        getattr(harness, unauthorized_issuer_name)(
+            exact_node_id,
+            tmp_path,
+        )
+    assert second_session.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+
+    foreign_fixture_source = """
+def _active_task064_pytest_root(node_id, pytest_root):
+    marker = "foreign-code-object"
+    del marker
+    return harness._begin_pytest_root_registration(node_id, pytest_root)
+"""
+    expected_module_name = (
+        "tests.integration.test_task_064_continuous_public_trade_stream_sqlite_evidence"
+    )
+    for forged_filename in (
+        str(Path(__file__).resolve()),
+        str(
+            tmp_path
+            / "copied-checkout"
+            / "tests"
+            / "integration"
+            / "test_task_064_continuous_public_trade_stream_sqlite_evidence.py"
+        ),
+    ):
+        foreign_namespace: dict[str, object] = {
+            "__name__": expected_module_name,
+            "harness": harness,
+        }
+        exec(
+            compile(foreign_fixture_source, forged_filename, "exec"),
+            foreign_namespace,
+        )
+        foreign_fixture = cast(
+            Callable[[str, Path], object],
+            foreign_namespace["_active_task064_pytest_root"],
+        )
+        with pytest.raises(harness.HarnessFailure) as foreign_callsite:
+            foreign_fixture(exact_node_id, tmp_path)
+        assert foreign_callsite.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+
+    cloned_capability = replace(_active_task064_pytest_root)
+    assert cloned_capability == _active_task064_pytest_root
+    assert cloned_capability is not _active_task064_pytest_root
+    with pytest.raises(harness.HarnessFailure) as cloned_capability_revoke:
+        harness._revoke_fixture_root(
+            cloned_capability,
+            _active_task064_pytest_root.roots[4],
+        )
+    assert cloned_capability_revoke.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+    capability_probe = harness.bootstrap_store(_active_task064_pytest_root.roots[4])
+    harness._remove_owned_files(capability_probe)
+
+    original_capability_roots = _active_task064_pytest_root.roots
+    original_capability_nonce = _active_task064_pytest_root._nonce
+    try:
+        object.__setattr__(
+            _active_task064_pytest_root,
+            "roots",
+            (
+                original_capability_roots[0],
+                original_capability_roots[0],
+                *original_capability_roots[2:],
+            ),
+        )
+        object.__setattr__(_active_task064_pytest_root, "_nonce", b"mutated")
+        with pytest.raises(harness.HarnessFailure) as mutated_capability_revoke:
+            harness._revoke_fixture_root(
+                _active_task064_pytest_root,
+                original_capability_roots[4],
+            )
+        assert (
+            mutated_capability_revoke.value.code
+            is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+        )
+        with pytest.raises(harness.HarnessFailure) as mutated_capability_token:
+            harness.verify_store(token)
+        assert mutated_capability_token.value.code is harness.HarnessFailureCode.INVALID_TOKEN
+    finally:
+        object.__setattr__(
+            _active_task064_pytest_root,
+            "roots",
+            original_capability_roots,
+        )
+        object.__setattr__(
+            _active_task064_pytest_root,
+            "_nonce",
+            original_capability_nonce,
+        )
+    assert harness.verify_store(token).stream_count == 0
+    mutated_capability_probe = harness.bootstrap_store(original_capability_roots[4])
+    harness._remove_owned_files(mutated_capability_probe)
+
+    active_root = harness._lookup_active_pytest_root(tmp_path)
+    assert active_root is not None
+    original_process_id = active_root.process_id
+    object.__setattr__(active_root, "process_id", -1)
+    try:
+        with pytest.raises(harness.HarnessFailure) as mutated_root:
+            harness.bootstrap_store(tmp_path)
+        assert mutated_root.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+    finally:
+        object.__setattr__(active_root, "process_id", original_process_id)
+    assert harness.verify_store(token).stream_count == 0
+
+    monkeypatch.setattr(os, "getpid", lambda: -1)
+    monkeypatch.setattr(os, "getppid", lambda: -1)
+    monkeypatch.setattr(os, "getuid", lambda: -1)
+    assert harness._lookup_active_pytest_root(tmp_path) is active_root
+    assert harness._pytest_root_session_owns(active_root, False)
+    monkeypatch.undo()
+    assert harness.verify_store(token).stream_count == 0
+
+    def missing_context_capability() -> None:
+        with pytest.raises(harness.HarnessFailure) as missing_context:
+            harness.bootstrap_store(tmp_path)
+        assert missing_context.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+
+    contextvars.Context().run(missing_context_capability)
+
+    harness.__dict__["_TOKEN_REGISTRY"] = {token._nonce: registered}
+    harness.__dict__["_ACTIVE_PYTEST_ROOTS"] = {Path(str(tmp_path)): object()}
+    try:
+        with pytest.raises(harness.HarnessFailure) as mirrored_token:
+            harness.verify_store(same_nonce_clone)
+        assert mirrored_token.value.code is harness.HarnessFailureCode.INVALID_TOKEN
+        assert harness.verify_store(token).stream_count == 0
+    finally:
+        harness.__dict__.pop("_TOKEN_REGISTRY")
+        harness.__dict__.pop("_ACTIVE_PYTEST_ROOTS")
+    assert harness.verify_store(token).stream_count == 0
 
 
 def test_rejection_scenario_mutation_cannot_rebind_outcome(tmp_path: Path) -> None:
@@ -3937,16 +8714,18 @@ def test_live_connection_path_revalidation_is_lock_neutral(tmp_path: Path) -> No
             with contextlib.suppress(sqlite3.Error):
                 connection.execute("ROLLBACK").close()
         connection.close()
+    assert harness._connection_authority_state(connection) == "CLOSED"
+    connection.close()
+    assert not harness._has_fork_unsafe_connection_authority()
 
 
 def test_pytest_root_registration_expires_and_rejects_wrong_process_or_node(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    _active_task064_pytest_root: harness._PytestRootCapability,
 ) -> None:
-    node_id = os.environ["PYTEST_CURRENT_TEST"].rsplit(" (", maxsplit=1)[0]
-    scoped_root = tmp_path / "separately-scoped-root"
-    scoped_root.mkdir(mode=0o700)
-    with harness._pytest_root_scope(scoped_root, node_id=node_id):
+    scoped_root = _active_task064_pytest_root.roots[1]
+    with contextlib.nullcontext():
         token = harness.bootstrap_store(scoped_root)
         assert harness.verify_store(token).stream_count == 0
         child_read, child_write = os.pipe()
@@ -3972,21 +8751,21 @@ def test_pytest_root_registration_expires_and_rejects_wrong_process_or_node(
         assert os.WIFEXITED(child_status)
         assert os.WEXITSTATUS(child_status) == 0
         monkeypatch.setattr(os, "getpid", lambda: -1)
-        with pytest.raises(harness.HarnessFailure) as wrong_process:
-            harness.bootstrap_store(scoped_root)
-        assert wrong_process.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
-        with pytest.raises(harness.HarnessFailure) as wrong_token_process:
-            harness.verify_store(token)
-        assert wrong_token_process.value.code is harness.HarnessFailureCode.INVALID_TOKEN
+        monkeypatch.setattr(os, "getppid", lambda: -1)
+        module_pid_probe = harness.bootstrap_store(scoped_root)
+        assert harness.verify_store(token).stream_count == 0
+        harness._remove_owned_files(module_pid_probe)
         monkeypatch.undo()
-        monkeypatch.setenv("PYTEST_CURRENT_TEST", f"{node_id}::wrong (call)")
-        with pytest.raises(harness.HarnessFailure) as wrong_node:
-            harness.bootstrap_store(scoped_root)
-        assert wrong_node.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
-        with pytest.raises(harness.HarnessFailure) as wrong_token_node:
-            harness.verify_store(token)
-        assert wrong_token_node.value.code is harness.HarnessFailureCode.INVALID_TOKEN
-        monkeypatch.undo()
+
+        def missing_context_authority() -> None:
+            with pytest.raises(harness.HarnessFailure) as wrong_node:
+                harness.bootstrap_store(scoped_root)
+            assert wrong_node.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+            with pytest.raises(harness.HarnessFailure) as wrong_token_node:
+                harness.verify_store(token)
+            assert wrong_token_node.value.code is harness.HarnessFailureCode.INVALID_TOKEN
+
+        contextvars.Context().run(missing_context_authority)
         late_ready_read, late_ready_write = os.pipe()
         late_control_read, late_control_write = os.pipe()
         late_result_read, late_result_write = os.pipe()
@@ -4023,6 +8802,7 @@ def test_pytest_root_registration_expires_and_rejects_wrong_process_or_node(
         finally:
             late_ready_selector.close()
             os.close(late_ready_read)
+        harness._revoke_fixture_root(_active_task064_pytest_root, scoped_root)
     with pytest.raises(harness.HarnessFailure) as expired:
         harness.bootstrap_store(scoped_root)
     assert expired.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
@@ -4056,17 +8836,15 @@ def test_pytest_root_registration_expires_and_rejects_wrong_process_or_node(
     assert os.WIFEXITED(late_status)
     assert os.WEXITSTATUS(late_status) == 0
     harness._remove_owned_files(token)
-    scoped_root.rmdir()
 
 
 def test_inflight_create_rolls_back_when_fixture_authority_expires(
     tmp_path: Path,
+    _active_task064_pytest_root: harness._PytestRootCapability,
 ) -> None:
-    node_id = os.environ["PYTEST_CURRENT_TEST"].rsplit(" (", maxsplit=1)[0]
-    scoped_root = tmp_path / "inflight-revocation-root"
-    scoped_root.mkdir(mode=0o700)
+    scoped_root = _active_task064_pytest_root.roots[1]
     policy, creation = _creation(seed=77)
-    with harness._pytest_root_scope(scoped_root, node_id=node_id):
+    with contextlib.nullcontext():
         token = harness.bootstrap_store(scoped_root)
         ready_read, ready_write = os.pipe()
         control_read, control_write = os.pipe()
@@ -4142,6 +8920,7 @@ def test_inflight_create_rolls_back_when_fixture_authority_expires(
         finally:
             ready_selector.close()
             os.close(ready_read)
+        harness._revoke_fixture_root(_active_task064_pytest_root, scoped_root)
 
     result_selector = selectors.DefaultSelector()
     result_selector.register(result_read, selectors.EVENT_READ)
@@ -4170,7 +8949,299 @@ def test_inflight_create_rolls_back_when_fixture_authority_expires(
     assert os.WIFEXITED(child_status)
     assert os.WEXITSTATUS(child_status) == 0
     harness._remove_owned_files(token)
-    scoped_root.rmdir()
+
+
+def test_root_revocation_flush_and_callback_failures_are_fail_closed(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    _active_task064_pytest_root: harness._PytestRootCapability,
+) -> None:
+    probe_modes = (
+        "revocation_flag_write",
+        "revocation_flag_flush",
+        "revocation_after_flush",
+        "revocation_close",
+        "evidence_run_close",
+        "poison_mmap_write",
+        "poison_mmap_flush",
+        "poison_pipe_write",
+        "poison_mmap_probe",
+        "poison_pipe_probe",
+    )
+    probe_mode, dispatch_modes = _task064_child_dispatch_plan(
+        "root_latch",
+        request.node.nodeid,
+        probe_modes,
+    )
+    if probe_mode is None:
+        assert dispatch_modes == probe_modes
+        for mode in dispatch_modes:
+            completed, _ = _run_task064_pytest_child(
+                tmp_path,
+                protocol="root_latch",
+                issuer_node_id=request.node.nodeid,
+                target_node_id=request.node.nodeid,
+                mode=mode,
+                pycache_label="task064-root-latch-pycache",
+                timeout_seconds=180,
+            )
+            assert completed.returncode == 0, (
+                f"{mode} isolated latch probe failed\n"
+                f"stdout:\n{completed.stdout}\n"
+                f"stderr:\n{completed.stderr}"
+            )
+        return
+
+    assert probe_mode in probe_modes
+    assert dispatch_modes == ()
+    poison_root = _active_task064_pytest_root.roots[2]
+    survivor_root = _active_task064_pytest_root.roots[3]
+    poison_token = harness.bootstrap_store(poison_root)
+    survivor_token = harness.bootstrap_store(survivor_root)
+    policy, creation = _creation(seed=7_464)
+    transition = _retain(creation, policy, reason="revocation-uncertainty-latch")
+    assert (
+        harness.create_stream(survivor_token, creation, policy).classification
+        is harness.StoreClassification.INSERTED
+    )
+
+    ready_read, ready_write = os.pipe()
+    control_read, control_write = os.pipe()
+    result_read, result_write = os.pipe()
+    child_process_id = os.fork()
+    if child_process_id == 0:
+        os.close(ready_read)
+        os.close(control_write)
+        os.close(result_read)
+        packet = b"E"
+        try:
+            os.write(ready_write, b"R")
+            if os.read(control_read, 1) != b"C":
+                os._exit(71)
+            if probe_mode in {
+                "poison_mmap_write",
+                "poison_mmap_flush",
+                "poison_pipe_write",
+            }:
+                mmap_poisoned, pipe_poisoned = harness._pytest_root_poison_channels()
+                expected_channel_observed = (
+                    pipe_poisoned
+                    if probe_mode in {"poison_mmap_write", "poison_mmap_flush"}
+                    else mmap_poisoned
+                )
+                if expected_channel_observed:
+                    packet = b"D"
+            else:
+                global_uncertainty_observed = harness._pytest_root_authority_uncertain()
+                with pytest.raises(harness.HarnessFailure) as revoked:
+                    harness.verify_store(survivor_token)
+                if (
+                    global_uncertainty_observed
+                    and revoked.value.code is harness.HarnessFailureCode.INVALID_TOKEN
+                ):
+                    packet = b"I"
+        except BaseException:
+            packet = b"E"
+        with contextlib.suppress(OSError):
+            os.write(result_write, packet)
+        os._exit(0 if packet in {b"D", b"I"} else 70)
+
+    os.close(ready_write)
+    os.close(control_read)
+    os.close(result_write)
+    child_reaped = False
+    control_open = True
+    result_open = True
+
+    def release_and_reap_child(expected_packet: bytes) -> None:
+        nonlocal child_reaped
+        nonlocal control_open
+        nonlocal result_open
+        os.write(control_write, b"C")
+        os.close(control_write)
+        control_open = False
+        result_selector = selectors.DefaultSelector()
+        result_selector.register(result_read, selectors.EVENT_READ)
+        try:
+            assert result_selector.select(timeout=10)
+            assert os.read(result_read, 1) == expected_packet
+        finally:
+            result_selector.close()
+            os.close(result_read)
+            result_open = False
+        _, child_status = os.waitpid(child_process_id, 0)
+        child_reaped = True
+        assert os.WIFEXITED(child_status)
+        assert os.WEXITSTATUS(child_status) == 0
+
+    try:
+        ready_selector = selectors.DefaultSelector()
+        ready_selector.register(ready_read, selectors.EVENT_READ)
+        try:
+            assert ready_selector.select(timeout=10)
+            assert os.read(ready_read, 1) == b"R"
+        finally:
+            ready_selector.close()
+            os.close(ready_read)
+
+        authority_run = harness.begin_generated_evidence_run(poison_root)
+        assert authority_run._pytest_registration.evidence_ledger.run is authority_run
+        harness._arm_pytest_root_authority_fault(probe_mode)
+        if probe_mode in {"poison_mmap_probe", "poison_pipe_probe"}:
+            assert harness._pytest_root_authority_uncertain()
+            harness._revoke_fixture_root(
+                _active_task064_pytest_root,
+                poison_root,
+            )
+        elif probe_mode in {
+            "poison_mmap_write",
+            "poison_mmap_flush",
+            "poison_pipe_write",
+        }:
+            harness._latch_pytest_root_authority_uncertainty()
+            assert harness._pytest_root_authority_fault_hit(probe_mode)
+            release_and_reap_child(b"D")
+            assert harness._pytest_root_authority_uncertain()
+            harness._revoke_fixture_root(
+                _active_task064_pytest_root,
+                poison_root,
+            )
+        else:
+            with pytest.raises(harness.HarnessFailure) as revocation_failure:
+                harness._revoke_fixture_root(
+                    _active_task064_pytest_root,
+                    poison_root,
+                )
+            assert (
+                revocation_failure.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+            )
+        assert harness._pytest_root_authority_uncertain()
+        assert harness._lookup_active_pytest_root(poison_root) is None
+        assert harness._lookup_revoked_pytest_root(poison_root) is not None
+        assert harness._lookup_active_pytest_root(survivor_root) is None
+        poison_registration = authority_run._pytest_registration
+        assert not harness._pytest_root_session_owns(poison_registration, False)
+        assert harness._ACTIVE_EVIDENCE_RUN.get() is None
+
+        with pytest.raises(harness.HarnessFailure) as old_token:
+            harness.verify_store(survivor_token)
+        assert old_token.value.code is harness.HarnessFailureCode.INVALID_TOKEN
+        with pytest.raises(harness.HarnessFailure) as new_bootstrap:
+            harness.bootstrap_store(survivor_root)
+        assert new_bootstrap.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+        with pytest.raises(harness.HarnessFailure) as main_bootstrap:
+            harness.bootstrap_store(tmp_path)
+        assert main_bootstrap.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+        with pytest.raises(harness.HarnessFailure) as old_run:
+            harness._validated_evidence_run(authority_run)
+        assert old_run.value.code is harness.HarnessFailureCode.CORRUPT
+        with pytest.raises(harness.HarnessFailure) as new_run:
+            harness.begin_generated_evidence_run(survivor_root)
+        assert new_run.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+
+        forged_receipt = object.__new__(harness._EvidenceReceipt)
+        forged_report = object.__new__(harness.EvidenceReport)
+        with pytest.raises(harness.HarnessFailure) as report_publication:
+            harness.write_evidence_report(
+                survivor_root,
+                receipt=forged_receipt,
+                report=forged_report,
+            )
+        assert report_publication.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+        assert not (survivor_root / "task064-evidence.json").exists()
+        assert not tuple(survivor_root.glob(".task064-evidence-*.tmp"))
+
+        fork_calls = 0
+
+        def forbidden_fork() -> int:
+            nonlocal fork_calls
+            fork_calls += 1
+            raise AssertionError("fork must not run after root-authority uncertainty")
+
+        calls: tuple[Callable[[], object], ...] = (
+            lambda: harness.sqlite_result_code_fault_evidence(
+                survivor_token,
+                seam="readonly",
+            ),
+            lambda: harness.fresh_process_writer_contention_evidence(
+                survivor_token,
+                operation="create",
+                natural_key=_natural_key(creation),
+                creation=creation,
+                policy=policy,
+            ),
+            lambda: harness.fresh_process_two_writer_evidence(
+                survivor_token,
+                operation="create",
+                creations=(creation, creation),
+                policy=policy,
+            ),
+            lambda: harness.fresh_process_kill_evidence(
+                survivor_token,
+                seam="before_transaction",
+                creation=creation,
+                policy=policy,
+                natural_key=_natural_key(creation),
+            ),
+            lambda: harness.true_during_commit_evidence(
+                survivor_token,
+                transition=transition,
+                natural_key=_natural_key(creation),
+            ),
+            lambda: harness.ioerr_write_evidence(
+                survivor_token,
+                transition=transition,
+                natural_key=_natural_key(creation),
+            ),
+            lambda: harness.max_page_count_evidence(
+                survivor_token,
+                transition=transition,
+                natural_key=_natural_key(creation),
+            ),
+            lambda: harness.wal_concurrency_evidence(
+                survivor_token,
+                transitions=(transition,),
+                natural_key=_natural_key(creation),
+            ),
+            lambda: harness.concurrent_write_backup_evidence(
+                survivor_token,
+                survivor_root,
+                transitions=(transition,) * harness.CONCURRENT_BACKUP_TRANSITIONS,
+                evidence_recorded_at_utc="2026-07-29T06:42:00.000000Z",
+            ),
+        )
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(os, "fork", forbidden_fork)
+            for invoke in calls:
+                with pytest.raises(harness.HarnessFailure) as guarded:
+                    invoke()
+                assert guarded.value.code is harness.HarnessFailureCode.UNPROVEN
+        assert len(calls) == 9
+        assert fork_calls == 0
+
+        if not child_reaped:
+            release_and_reap_child(b"I")
+
+        harness._remove_owned_files(poison_token)
+        harness._remove_owned_files(survivor_token)
+        harness._revoke_fixture_root(
+            _active_task064_pytest_root,
+            survivor_root,
+        )
+        assert harness._lookup_revoked_pytest_root(survivor_root) is not None
+        assert harness._pytest_root_authority_uncertain()
+    finally:
+        if control_open:
+            with contextlib.suppress(OSError):
+                os.close(control_write)
+        if result_open:
+            with contextlib.suppress(OSError):
+                os.close(result_read)
+        if not child_reaped:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(child_process_id, signal.SIGKILL)
+            with contextlib.suppress(ChildProcessError):
+                os.waitpid(child_process_id, 0)
 
 
 def test_registered_pytest_root_inode_replacement_is_rejected(tmp_path: Path) -> None:
@@ -4243,6 +9314,178 @@ def test_manifest_rejects_unexpected_entries_and_allowed_name_aliases(
         retained.rename(alias)
 
 
+@pytest.mark.parametrize("fault", ("file_close", "generation_close", "root_close"))
+def test_closed_file_manifest_requires_every_close_to_be_proven(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    fault: str,
+) -> None:
+    if _run_task064_exec_isolated(request, tmp_path):
+        return
+    token = harness.bootstrap_store(tmp_path)
+    expected_manifest = harness._closed_file_manifest(token)
+    probe_process_id = os.fork()
+    if probe_process_id == 0:
+        exit_code = 70
+        try:
+            module_close_calls = 0
+
+            def forbidden_module_close(_descriptor: int) -> None:
+                nonlocal module_close_calls
+                module_close_calls += 1
+                raise AssertionError("captured close authority must ignore module mutation")
+
+            harness._arm_connection_authority_fault(fault)
+            returned_manifest = False
+            manifest_failure: harness.HarnessFailure | None = None
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(os, "close", forbidden_module_close)
+                try:
+                    harness._closed_file_manifest(token)
+                    returned_manifest = True
+                except harness.HarnessFailure as error:
+                    manifest_failure = error
+            fork_calls = 0
+
+            def forbidden_fork() -> int:
+                nonlocal fork_calls
+                fork_calls += 1
+                raise AssertionError("fork must not run after manifest close uncertainty")
+
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(os, "fork", forbidden_fork)
+                with pytest.raises(harness.HarnessFailure) as guarded:
+                    harness.sqlite_result_code_fault_evidence(
+                        token,
+                        seam="readonly",
+                    )
+            if (
+                not returned_manifest
+                and manifest_failure is not None
+                and manifest_failure.code is harness.HarnessFailureCode.UNAVAILABLE
+                and str(manifest_failure) == "unavailable"
+                and manifest_failure.__cause__ is None
+                and module_close_calls == 0
+                and guarded.value.code is harness.HarnessFailureCode.UNPROVEN
+                and fork_calls == 0
+            ):
+                exit_code = 0
+        except BaseException:
+            exit_code = 70
+        os._exit(exit_code)
+    _, probe_status = os.waitpid(probe_process_id, 0)
+    assert os.WIFEXITED(probe_status)
+    assert os.WEXITSTATUS(probe_status) == 0
+    assert expected_manifest
+    assert harness._has_process_cleanup_uncertainty()
+    with pytest.raises(harness.HarnessFailure) as poisoned_manifest:
+        harness._closed_file_manifest(token)
+    assert poisoned_manifest.value.code is harness.HarnessFailureCode.INVALID_TOKEN
+    harness._remove_owned_files(token)
+    assert not token._generation_root.exists()
+
+
+@pytest.mark.parametrize(
+    ("name", "required", "prepare_wal", "fault"),
+    (
+        *(
+            ("store.sqlite3", True, False, fault)
+            for fault in ("file_close", "generation_close", "root_close")
+        ),
+        *(
+            ("store.sqlite3-wal", False, True, fault)
+            for fault in ("file_close", "generation_close", "root_close")
+        ),
+        ("store.sqlite3-wal", False, False, "generation_close"),
+        ("store.sqlite3-wal", False, False, "root_close"),
+    ),
+)
+def test_owned_file_size_returns_only_after_every_close_is_proven(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    name: str,
+    required: bool,
+    prepare_wal: bool,
+    fault: str,
+) -> None:
+    if _run_task064_exec_isolated(request, tmp_path):
+        return
+    token = harness.bootstrap_store(tmp_path)
+    registered = harness._lookup_store_token_authority(token)
+    assert registered is not None
+    wal_path = token._generation_root / "store.sqlite3-wal"
+    if prepare_wal:
+        wal_path.write_bytes(b"task064-owned-wal-probe")
+        wal_path.chmod(0o600)
+    else:
+        with contextlib.suppress(FileNotFoundError):
+            wal_path.unlink()
+    expected = harness._owned_file_size(
+        registered,
+        name,
+        required=required,
+        maximum=(
+            harness.MAX_TEST_DATABASE_BYTES
+            if name == "store.sqlite3"
+            else harness.MAX_TEST_WAL_BYTES
+        ),
+    )
+
+    probe_process_id = os.fork()
+    if probe_process_id == 0:
+        exit_code = 70
+        try:
+            module_close_calls = 0
+
+            def forbidden_module_close(_descriptor: int) -> None:
+                nonlocal module_close_calls
+                module_close_calls += 1
+                raise AssertionError("captured close authority must ignore module mutation")
+
+            harness._arm_connection_authority_fault(fault)
+            with (
+                pytest.MonkeyPatch.context() as patch,
+                pytest.raises(harness.HarnessFailure) as size_failure,
+            ):
+                patch.setattr(os, "close", forbidden_module_close)
+                harness._owned_file_size(
+                    registered,
+                    name,
+                    required=required,
+                    maximum=(
+                        harness.MAX_TEST_DATABASE_BYTES
+                        if name == "store.sqlite3"
+                        else harness.MAX_TEST_WAL_BYTES
+                    ),
+                )
+            if (
+                size_failure.value.code is harness.HarnessFailureCode.UNAVAILABLE
+                and module_close_calls == 0
+                and harness._has_fork_unsafe_connection_authority()
+            ):
+                exit_code = 0
+        except BaseException:
+            exit_code = 70
+        os._exit(exit_code)
+
+    _, probe_status = os.waitpid(probe_process_id, 0)
+    assert os.WIFEXITED(probe_status)
+    assert os.WEXITSTATUS(probe_status) == 0
+    assert (
+        harness._owned_file_size(
+            registered,
+            name,
+            required=required,
+            maximum=(
+                harness.MAX_TEST_DATABASE_BYTES
+                if name == "store.sqlite3"
+                else harness.MAX_TEST_WAL_BYTES
+            ),
+        )
+        == expected
+    )
+
+
 def test_cleanup_never_follows_a_replaced_generation_alias(tmp_path: Path) -> None:
     token = harness.bootstrap_store(tmp_path)
     original_generation = token._generation_root
@@ -4258,14 +9501,14 @@ def test_cleanup_never_follows_a_replaced_generation_alias(tmp_path: Path) -> No
             harness._remove_owned_files(token)
         assert replaced_alias.value.code is harness.HarnessFailureCode.UNAVAILABLE
         assert sentinel.read_bytes() == b"sentinel-must-survive"
-        assert token._nonce in harness._TOKEN_REGISTRY
+        assert token._nonce in harness._token_authority_snapshot()
     finally:
         original_generation.unlink()
         retained_generation.rename(original_generation)
         harness._remove_owned_files(token)
         sentinel.unlink()
         sentinel_root.rmdir()
-    assert token._nonce not in harness._TOKEN_REGISTRY
+    assert token._nonce not in harness._token_authority_snapshot()
     assert not original_generation.exists()
 
 
@@ -4274,11 +9517,15 @@ def test_cleanup_never_follows_a_replaced_generation_alias(tmp_path: Path) -> No
     ("unlink", "rmdir", "generation_close", "root_close"),
 )
 def test_owned_cleanup_failures_retain_retry_authority(
+    request: pytest.FixtureRequest,
     tmp_path: Path,
     fault: str,
 ) -> None:
+    if _run_task064_exec_isolated(request, tmp_path):
+        return
     token = harness.bootstrap_store(tmp_path)
-    registered = harness._TOKEN_REGISTRY[token._nonce]
+    registered = harness._lookup_store_token_authority(token)
+    assert registered is not None
     real_unlink = os.unlink
     real_rmdir = os.rmdir
     real_close = os.close
@@ -4310,38 +9557,89 @@ def test_owned_cleanup_failures_retain_retry_authority(
         registered.generation_inode if fault == "generation_close" else registered.pytest_root_inode
     )
 
-    def fail_close(descriptor: int) -> None:
-        nonlocal injected
-        details = os.fstat(descriptor)
-        if (
-            not injected
-            and details.st_dev
-            == (
-                registered.generation_device
-                if fault == "generation_close"
-                else registered.pytest_root_device
-            )
-            and details.st_ino == target_inode
-        ):
-            injected = True
-            real_close(descriptor)
-            raise OSError(errno.EIO, "injected owned close uncertainty")
-        real_close(descriptor)
+    if fault in {"generation_close", "root_close"}:
+        probe_process_id = os.fork()
+        if probe_process_id == 0:
+            exit_code = 70
+            reused_descriptor = -1
+            try:
+                close_attempts = 0
 
-    with pytest.MonkeyPatch.context() as patch:
-        if fault == "unlink":
-            patch.setattr(os, "unlink", fail_unlink)
-        elif fault == "rmdir":
-            patch.setattr(os, "rmdir", fail_rmdir)
-        else:
-            patch.setattr(os, "close", fail_close)
-        with pytest.raises(harness.HarnessFailure) as cleanup:
-            harness._remove_owned_files(token)
-    assert injected
-    assert cleanup.value.code is harness.HarnessFailureCode.UNAVAILABLE
-    assert harness._TOKEN_REGISTRY.get(token._nonce) is registered
+                def fail_close(descriptor: int) -> None:
+                    nonlocal injected, close_attempts, reused_descriptor
+                    details = os.fstat(descriptor)
+                    if (
+                        not injected
+                        and details.st_dev
+                        == (
+                            registered.generation_device
+                            if fault == "generation_close"
+                            else registered.pytest_root_device
+                        )
+                        and details.st_ino == target_inode
+                    ):
+                        injected = True
+                        close_attempts += 1
+                        real_close(descriptor)
+                        reused_descriptor = os.open("/dev/null", os.O_RDONLY)
+                        if reused_descriptor != descriptor:
+                            raise AssertionError("numeric descriptor was not reused")
+                        raise OSError(errno.EIO, "injected owned close uncertainty")
+                    real_close(descriptor)
+
+                with pytest.MonkeyPatch.context() as patch:
+                    patch.setattr(os, "close", fail_close)
+                    with pytest.raises(harness.HarnessFailure) as cleanup:
+                        harness._remove_owned_files(token)
+                reused_descriptor_open = os.fstat(reused_descriptor).st_ino > 0
+                fork_calls = 0
+
+                def forbidden_fork() -> int:
+                    nonlocal fork_calls
+                    fork_calls += 1
+                    raise AssertionError("fork must not run after owned close uncertainty")
+
+                with pytest.MonkeyPatch.context() as patch:
+                    patch.setattr(os, "fork", forbidden_fork)
+                    with pytest.raises(harness.HarnessFailure) as guarded:
+                        harness.sqlite_result_code_fault_evidence(
+                            token,
+                            seam="readonly",
+                        )
+                if (
+                    injected
+                    and cleanup.value.code is harness.HarnessFailureCode.UNAVAILABLE
+                    and close_attempts == 1
+                    and reused_descriptor_open
+                    and harness._lookup_store_token_authority(token) == registered
+                    and guarded.value.code is harness.HarnessFailureCode.UNPROVEN
+                    and fork_calls == 0
+                ):
+                    exit_code = 0
+            except BaseException:
+                exit_code = 70
+            finally:
+                if reused_descriptor >= 0:
+                    with contextlib.suppress(OSError):
+                        os.close(reused_descriptor)
+            os._exit(exit_code)
+        _, probe_status = os.waitpid(probe_process_id, 0)
+        assert os.WIFEXITED(probe_status)
+        assert os.WEXITSTATUS(probe_status) == 0
+    else:
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(
+                os,
+                "unlink" if fault == "unlink" else "rmdir",
+                fail_unlink if fault == "unlink" else fail_rmdir,
+            )
+            with pytest.raises(harness.HarnessFailure) as cleanup:
+                harness._remove_owned_files(token)
+        assert injected
+        assert cleanup.value.code is harness.HarnessFailureCode.UNAVAILABLE
+    assert harness._lookup_store_token_authority(token) == registered
     harness._remove_owned_files(token)
-    assert token._nonce not in harness._TOKEN_REGISTRY
+    assert token._nonce not in harness._token_authority_snapshot()
     assert not token._generation_root.exists()
 
 
@@ -4609,6 +9907,210 @@ def test_fresh_process_competing_cas_writers_classify_update_then_conflict(
     assert harness.verify_store(token).history_count == 2
 
 
+def test_pipe_io_is_centralized_eintr_safe_and_uses_one_deadline() -> None:
+    source = Path(harness.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    raw_sites: dict[str, set[str]] = {"read": set(), "write": set()}
+
+    class RawPipeVisitor(ast.NodeVisitor):
+        current_function = ""
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            prior = self.current_function
+            self.current_function = node.name
+            self.generic_visit(node)
+            self.current_function = prior
+
+        def visit_Call(self, node: ast.Call) -> None:
+            if (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "os"
+                and node.func.attr in raw_sites
+            ):
+                raw_sites[node.func.attr].add(self.current_function)
+            self.generic_visit(node)
+
+    RawPipeVisitor().visit(tree)
+    assert raw_sites == {
+        "read": {
+            "_read_process_packet",
+            "_closed_file_manifest",
+            "_write_evidence_report_unbound",
+        },
+        "write": {"_write_process_packet", "_write_evidence_report_unbound"},
+    }
+
+    real_selector_factory = selectors.DefaultSelector
+
+    class InterruptingSelector:
+        def __init__(self) -> None:
+            self.delegate = real_selector_factory()
+            self.interrupted = False
+
+        def register(
+            self,
+            descriptor: int,
+            events: int,
+            data: object | None = None,
+        ) -> object:
+            return self.delegate.register(descriptor, events, data)
+
+        def select(self, timeout: float | None = None) -> object:
+            if not self.interrupted:
+                self.interrupted = True
+                raise InterruptedError
+            return self.delegate.select(timeout)
+
+        def close(self) -> None:
+            self.delegate.close()
+
+    read_descriptor, write_descriptor = os.pipe()
+    os.write(write_descriptor, b"done")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(selectors, "DefaultSelector", InterruptingSelector)
+        assert harness._read_process_packet("selector_eintr", read_descriptor, 4) == b"done"
+    os.close(read_descriptor)
+    os.close(write_descriptor)
+
+    read_descriptor, write_descriptor = os.pipe()
+    os.write(write_descriptor, b"ab")
+    observed_timeouts: list[float | None] = []
+    clock_values = iter((0.0, 1.0, 5.0, 10.0))
+
+    class IncompletePacketSelector:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def register(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+        def select(self, timeout: float | None = None) -> object:
+            self.calls += 1
+            observed_timeouts.append(timeout)
+            return ((object(), selectors.EVENT_READ),) if self.calls == 1 else ()
+
+        def close(self) -> None:
+            return None
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(selectors, "DefaultSelector", IncompletePacketSelector)
+        patch.setattr(time, "monotonic", lambda: next(clock_values))
+        assert harness._read_process_packet("fixed_deadline", read_descriptor, 4) == b"ab"
+    os.close(read_descriptor)
+    os.close(write_descriptor)
+    assert observed_timeouts == [9.0, 5.0]
+
+    read_descriptor, write_descriptor = os.pipe()
+    real_write = os.write
+    write_interrupted = False
+
+    def interrupted_partial_write(descriptor: int, payload: object) -> int:
+        nonlocal write_interrupted
+        if not write_interrupted:
+            write_interrupted = True
+            raise InterruptedError
+        return real_write(descriptor, memoryview(cast(Any, payload))[:2])
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(selectors, "DefaultSelector", InterruptingSelector)
+        patch.setattr(os, "write", interrupted_partial_write)
+        harness._write_process_packet("partial_write", write_descriptor, b"abcd")
+    assert write_interrupted
+    assert os.read(read_descriptor, 4) == b"abcd"
+    os.close(read_descriptor)
+    os.close(write_descriptor)
+
+    read_descriptor, write_descriptor = os.pipe()
+    pipe_buffer = os.fpathconf(write_descriptor, "PC_PIPE_BUF")
+    large_payload = bytes(index % 251 for index in range(pipe_buffer + 137))
+    writer_process_id = os.fork()
+    if writer_process_id == 0:
+        os.close(read_descriptor)
+        exit_code = 70
+        try:
+            harness._write_process_packet(
+                "large_real_pipe_roundtrip",
+                write_descriptor,
+                large_payload,
+            )
+            exit_code = 0
+        except BaseException:
+            exit_code = 70
+        finally:
+            with contextlib.suppress(OSError):
+                os.close(write_descriptor)
+        os._exit(exit_code)
+    os.close(write_descriptor)
+    observed_payload = harness._read_process_packet(
+        "large_real_pipe_roundtrip",
+        read_descriptor,
+        len(large_payload),
+    )
+    os.close(read_descriptor)
+    _, writer_status = os.waitpid(writer_process_id, 0)
+    assert observed_payload == large_payload
+    assert os.WIFEXITED(writer_status)
+    assert os.WEXITSTATUS(writer_status) == 0
+    with pytest.raises(ChildProcessError):
+        os.waitpid(writer_process_id, os.WNOHANG)
+
+    blocked_read, blocked_write = os.pipe()
+    status_read, status_write = os.pipe()
+    os.set_blocking(blocked_write, False)
+    while True:
+        try:
+            os.write(blocked_write, b"x" * pipe_buffer)
+        except BlockingIOError:
+            break
+    timeout_process_id = os.fork()
+    if timeout_process_id == 0:
+        os.close(blocked_read)
+        os.close(status_read)
+        packet = b"E"
+        clock_values = iter((0.0, 9.95, 10.0))
+        try:
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(
+                    time,
+                    "monotonic",
+                    lambda: next(clock_values, 10.0),
+                )
+                try:
+                    harness._write_process_packet(
+                        "real_pipe_backpressure",
+                        blocked_write,
+                        b"y" * (pipe_buffer + 1),
+                    )
+                except harness.HarnessFailure as error:
+                    if (
+                        error.code is harness.HarnessFailureCode.UNAVAILABLE
+                        and str(error) == "unavailable"
+                        and error.__cause__ is None
+                    ):
+                        packet = b"T"
+        except BaseException:
+            packet = b"E"
+        with contextlib.suppress(OSError):
+            os.write(status_write, packet)
+        with contextlib.suppress(OSError):
+            os.close(blocked_write)
+        with contextlib.suppress(OSError):
+            os.close(status_write)
+        os._exit(0 if packet == b"T" else 70)
+    os.close(status_write)
+    timeout_packet = os.read(status_read, 1)
+    os.close(status_read)
+    _, timeout_status = os.waitpid(timeout_process_id, 0)
+    os.close(blocked_write)
+    os.close(blocked_read)
+    assert timeout_packet == b"T"
+    assert os.WIFEXITED(timeout_status)
+    assert os.WEXITSTATUS(timeout_status) == 0
+    with pytest.raises(ChildProcessError):
+        os.waitpid(timeout_process_id, os.WNOHANG)
+
+
 def test_process_lifecycle_helpers_are_bounded_exact_and_fail_closed(
     tmp_path: Path,
 ) -> None:
@@ -4864,51 +10366,259 @@ def test_process_lifecycle_helpers_are_bounded_exact_and_fail_closed(
         os.waitpid(stalled_process_id, os.WNOHANG)
     assert len(os.listdir("/proc/self/fd")) == descriptor_count_before
 
-    reaped_process_id = os.fork()
-    if reaped_process_id == 0:
-        os._exit(0)
-    real_terminate = harness._terminate_and_reap_processes
-
-    def reap_then_report_false(process_ids: Sequence[int]) -> bool:
-        assert real_terminate(process_ids)
-        return False
-
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(
-            harness,
-            "_terminate_and_reap_processes",
-            reap_then_report_false,
-        )
-        with pytest.raises(harness.HarnessFailure) as uncertain_reap:
-            harness._finalize_process_resources((), (reaped_process_id,))
-    assert uncertain_reap.value.code is harness.HarnessFailureCode.UNAVAILABLE
-    with pytest.raises(ChildProcessError):
-        os.waitpid(reaped_process_id, os.WNOHANG)
-
-    descriptor_count_before = len(os.listdir("/proc/self/fd"))
-    read_descriptor, write_descriptor = os.pipe()
-    cleanup_process_id = os.fork()
-    if cleanup_process_id == 0:
-        while True:
-            signal.pause()
-    real_close_descriptors = harness._close_descriptors
-
-    def close_then_report_false(descriptors: Sequence[int]) -> bool:
-        assert real_close_descriptors(descriptors)
-        return False
-
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(harness, "_close_descriptors", close_then_report_false)
-        with pytest.raises(harness.HarnessFailure) as uncertain_descriptors:
-            harness._finalize_process_resources(
-                (read_descriptor, write_descriptor),
-                (cleanup_process_id,),
-            )
-    assert uncertain_descriptors.value.code is harness.HarnessFailureCode.UNAVAILABLE
-    with pytest.raises(ChildProcessError):
-        os.waitpid(cleanup_process_id, os.WNOHANG)
-    assert len(os.listdir("/proc/self/fd")) == descriptor_count_before
     assert tmp_path.is_dir()
+
+
+@pytest.mark.parametrize(
+    "helper_name",
+    ("finalize_process_resources", "wait_or_terminate_owned_process"),
+)
+def test_process_finalizers_use_the_exact_captured_cleanup_marker(
+    request: pytest.FixtureRequest,
+    helper_name: str,
+    tmp_path: Path,
+) -> None:
+    if _run_task064_exec_isolated(request, tmp_path):
+        return
+    fake_marker_calls = 0
+
+    def fake_marker() -> None:
+        nonlocal fake_marker_calls
+        fake_marker_calls += 1
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(harness, "_mark_process_cleanup_uncertain", fake_marker)
+        if helper_name == "finalize_process_resources":
+            patch.setattr(harness, "_close_descriptors", lambda _descriptors: False)
+            patch.setattr(harness, "_terminate_and_reap_processes", lambda _processes: True)
+            with pytest.raises(harness.HarnessFailure) as cleanup_failure:
+                harness._finalize_process_resources((), ())
+        else:
+            patch.setattr(
+                harness,
+                "_wait_for_owned_process",
+                lambda _process_id, *, timeout_seconds: None,
+            )
+            patch.setattr(harness, "_terminate_and_reap_processes", lambda _processes: False)
+            with pytest.raises(harness.HarnessFailure) as cleanup_failure:
+                harness._wait_or_terminate_owned_process(
+                    123_467,
+                    timeout_seconds=0.01,
+                )
+    assert cleanup_failure.value.code is harness.HarnessFailureCode.UNAVAILABLE
+    assert fake_marker_calls == 0
+    assert harness._has_process_cleanup_uncertainty()
+    assert harness._pytest_root_authority_uncertain()
+
+
+def test_shared_cleanup_uncertainty_rejects_surviving_child_before_io(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+) -> None:
+    probe_mode, dispatch_modes = _task064_child_dispatch_plan(
+        "shared_cleanup",
+        request.node.nodeid,
+        ("run",),
+    )
+    if probe_mode is None:
+        assert dispatch_modes == ("run",)
+        completed, _ = _run_task064_pytest_child(
+            tmp_path,
+            protocol="shared_cleanup",
+            issuer_node_id=request.node.nodeid,
+            target_node_id=request.node.nodeid,
+            mode="run",
+            pycache_label="task064-shared-cleanup-pycache",
+            timeout_seconds=180,
+        )
+        assert completed.returncode == 0, (
+            "isolated shared-cleanup probe failed\n"
+            f"stdout:\n{completed.stdout}\n"
+            f"stderr:\n{completed.stderr}"
+        )
+        return
+
+    assert probe_mode == "run"
+    assert dispatch_modes == ()
+    token = harness.bootstrap_store(tmp_path)
+    registration = harness._lookup_store_token_authority(token)
+    assert registration is not None
+    policy, creation = _creation(seed=7_465)
+    transition = _retain(creation, policy, reason="shared-cleanup-child-guard")
+    assert (
+        harness.create_stream(token, creation, policy).classification
+        is harness.StoreClassification.INSERTED
+    )
+    control_read, control_write = os.pipe()
+    result_read, result_write = os.pipe()
+    child_process_id = os.fork()
+    if child_process_id == 0:
+        os.close(control_write)
+        os.close(result_read)
+        packet = b"E"
+        try:
+            if os.read(control_read, 1) != b"C":
+                os._exit(71)
+            io_calls = 0
+
+            def forbidden_io(*_args: object, **_kwargs: object) -> Any:
+                nonlocal io_calls
+                io_calls += 1
+                raise AssertionError("cleanup poison must reject before filesystem or SQLite I/O")
+
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(harness, "_has_process_cleanup_uncertainty", lambda: False)
+                patch.setattr(Path, "lstat", forbidden_io)
+                patch.setattr(Path, "resolve", forbidden_io)
+                patch.setattr(os, "open", forbidden_io)
+                patch.setattr(sqlite3, "connect", forbidden_io)
+                session_rejected = not harness._pytest_root_session_owns(
+                    registration.pytest_registration,
+                    True,
+                )
+                with pytest.raises(harness.HarnessFailure) as token_rejected:
+                    harness._require_token(token)
+            if (
+                session_rejected
+                and token_rejected.value.code is harness.HarnessFailureCode.INVALID_TOKEN
+                and io_calls == 0
+            ):
+                packet = b"I"
+        except BaseException:
+            packet = b"E"
+        with contextlib.suppress(OSError):
+            os.write(result_write, packet)
+        os._exit(0 if packet == b"I" else 70)
+
+    os.close(control_read)
+    os.close(result_write)
+    child_reaped = False
+    control_open = True
+    result_open = True
+    try:
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(harness, "_close_descriptors", lambda _descriptors: False)
+            with pytest.raises(harness.HarnessFailure) as cleanup_failure:
+                harness._finalize_process_resources((), ())
+        assert cleanup_failure.value.code is harness.HarnessFailureCode.UNAVAILABLE
+        assert harness._has_process_cleanup_uncertainty()
+        assert not harness._pytest_root_session_owns(
+            registration.pytest_registration,
+            False,
+        )
+
+        fork_calls = 0
+
+        def forbidden_fork() -> int:
+            nonlocal fork_calls
+            fork_calls += 1
+            raise AssertionError("fork must not run after shared cleanup uncertainty")
+
+        calls: tuple[Callable[[], object], ...] = (
+            lambda: harness.sqlite_result_code_fault_evidence(token, seam="readonly"),
+            lambda: harness.fresh_process_writer_contention_evidence(
+                token,
+                operation="create",
+                natural_key=_natural_key(creation),
+                creation=creation,
+                policy=policy,
+            ),
+            lambda: harness.fresh_process_two_writer_evidence(
+                token,
+                operation="create",
+                creations=(creation, creation),
+                policy=policy,
+            ),
+            lambda: harness.fresh_process_kill_evidence(
+                token,
+                seam="before_transaction",
+                creation=creation,
+                policy=policy,
+                natural_key=_natural_key(creation),
+            ),
+            lambda: harness.true_during_commit_evidence(
+                token,
+                transition=transition,
+                natural_key=_natural_key(creation),
+            ),
+            lambda: harness.ioerr_write_evidence(
+                token,
+                transition=transition,
+                natural_key=_natural_key(creation),
+            ),
+            lambda: harness.max_page_count_evidence(
+                token,
+                transition=transition,
+                natural_key=_natural_key(creation),
+            ),
+            lambda: harness.wal_concurrency_evidence(
+                token,
+                transitions=(transition,),
+                natural_key=_natural_key(creation),
+            ),
+            lambda: harness.concurrent_write_backup_evidence(
+                token,
+                tmp_path,
+                transitions=(transition,) * harness.CONCURRENT_BACKUP_TRANSITIONS,
+                evidence_recorded_at_utc="2026-07-29T06:42:00.000000Z",
+            ),
+        )
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(harness, "_mark_process_cleanup_uncertain", lambda: None)
+            patch.setattr(harness, "_has_process_cleanup_uncertainty", lambda: False)
+            patch.setattr(harness, "_pytest_root_authority_uncertain", lambda: False)
+            patch.setattr(harness, "_has_fork_unsafe_connection_authority", lambda: False)
+            patch.setattr(harness, "_require_fork_safe_connection_state", lambda: None)
+            patch.setattr(os, "fork", forbidden_fork)
+            with pytest.raises(harness.HarnessFailure) as token_rejected:
+                harness.verify_store(token)
+            assert token_rejected.value.code is harness.HarnessFailureCode.INVALID_TOKEN
+            forged_receipt = object.__new__(harness._EvidenceReceipt)
+            forged_report = object.__new__(harness.EvidenceReport)
+            with pytest.raises(harness.HarnessFailure) as report_rejected:
+                harness.write_evidence_report(
+                    tmp_path,
+                    receipt=forged_receipt,
+                    report=forged_report,
+                )
+            assert report_rejected.value.code is harness.HarnessFailureCode.UNAVAILABLE
+            for invoke in calls:
+                with pytest.raises(harness.HarnessFailure) as fork_rejected:
+                    invoke()
+                assert fork_rejected.value.code is harness.HarnessFailureCode.UNPROVEN
+        assert len(calls) == 9
+        assert fork_calls == 0
+
+        os.write(control_write, b"C")
+        os.close(control_write)
+        control_open = False
+        result_selector = selectors.DefaultSelector()
+        result_selector.register(result_read, selectors.EVENT_READ)
+        try:
+            assert result_selector.select(timeout=10)
+            assert os.read(result_read, 1) == b"I"
+        finally:
+            result_selector.close()
+            os.close(result_read)
+            result_open = False
+        _, child_status = os.waitpid(child_process_id, 0)
+        child_reaped = True
+        assert os.WIFEXITED(child_status)
+        assert os.WEXITSTATUS(child_status) == 0
+        harness._remove_owned_files(token)
+        assert not token._generation_root.exists()
+    finally:
+        if control_open:
+            with contextlib.suppress(OSError):
+                os.close(control_write)
+        if result_open:
+            with contextlib.suppress(OSError):
+                os.close(result_read)
+        if not child_reaped:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(child_process_id, signal.SIGKILL)
+            with contextlib.suppress(ChildProcessError):
+                os.waitpid(child_process_id, 0)
 
 
 def test_every_forked_evidence_api_rejects_live_connection_state(
@@ -4922,6 +10632,21 @@ def test_every_forked_evidence_api_rejects_live_connection_state(
         harness.create_stream(token, creation, policy).classification
         is harness.StoreClassification.INSERTED
     )
+    fork_apis = (
+        harness.sqlite_result_code_fault_evidence,
+        harness.fresh_process_writer_contention_evidence,
+        harness.fresh_process_two_writer_evidence,
+        harness.fresh_process_kill_evidence,
+        harness.true_during_commit_evidence,
+        harness.ioerr_write_evidence,
+        harness.max_page_count_evidence,
+        harness.wal_concurrency_evidence,
+        harness.concurrent_write_backup_evidence,
+    )
+    assert len({id(api) for api in fork_apis}) == 9
+    for api in fork_apis:
+        assert not hasattr(api, "__wrapped__")
+        assert inspect.unwrap(api) is api
     before = harness.verify_store(token)
     connection, _ = harness._connect(token, writer=True)
     fork_calls = 0
@@ -4932,6 +10657,11 @@ def test_every_forked_evidence_api_rejects_live_connection_state(
         raise AssertionError("fork must not run with a live SQLite connection")
 
     monkeypatch.setattr(os, "fork", forbidden_fork)
+    monkeypatch.setattr(harness, "_mark_process_cleanup_uncertain", lambda: None)
+    monkeypatch.setattr(harness, "_has_process_cleanup_uncertainty", lambda: False)
+    monkeypatch.setattr(harness, "_pytest_root_authority_uncertain", lambda: False)
+    monkeypatch.setattr(harness, "_has_fork_unsafe_connection_authority", lambda: False)
+    monkeypatch.setattr(harness, "_require_fork_safe_connection_state", lambda: None)
     calls: tuple[Callable[[], object], ...] = (
         lambda: harness.sqlite_result_code_fault_evidence(token, seam="readonly"),
         lambda: harness.fresh_process_writer_contention_evidence(
@@ -4990,6 +10720,201 @@ def test_every_forked_evidence_api_rejects_live_connection_state(
         connection.close()
     assert fork_calls == 0
     assert harness.verify_store(token) == before
+
+
+@pytest.mark.parametrize(
+    "fault",
+    ("after_root_open", "after_generation_open", "after_file_open"),
+)
+def test_snapshot_acquisition_close_uncertainty_is_registered_before_first_open(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    fault: str,
+) -> None:
+    if _run_task064_exec_isolated(request, tmp_path):
+        return
+    token = harness.bootstrap_store(tmp_path)
+    probe_process_id = os.fork()
+    if probe_process_id == 0:
+        exit_code = 70
+        try:
+            module_open_calls = 0
+
+            def forbidden_module_open(*_args: object, **_kwargs: object) -> int:
+                nonlocal module_open_calls
+                module_open_calls += 1
+                raise AssertionError("captured open authority must ignore module mutation")
+
+            harness._arm_connection_authority_fault(fault)
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(os, "open", forbidden_module_open)
+                with pytest.raises(harness.HarnessFailure) as acquisition_failure:
+                    harness.verify_store(token)
+            fork_calls = 0
+
+            def forbidden_fork() -> int:
+                nonlocal fork_calls
+                fork_calls += 1
+                raise AssertionError("fork must not run after acquisition close uncertainty")
+
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(os, "fork", forbidden_fork)
+                with pytest.raises(harness.HarnessFailure) as guarded:
+                    harness.sqlite_result_code_fault_evidence(
+                        token,
+                        seam="readonly",
+                    )
+            if (
+                acquisition_failure.value.code is harness.HarnessFailureCode.UNAVAILABLE
+                and module_open_calls == 0
+                and guarded.value.code is harness.HarnessFailureCode.UNPROVEN
+                and fork_calls == 0
+            ):
+                exit_code = 0
+        except BaseException:
+            exit_code = 70
+        os._exit(exit_code)
+    _, probe_status = os.waitpid(probe_process_id, 0)
+    assert os.WIFEXITED(probe_status)
+    assert os.WEXITSTATUS(probe_status) == 0
+    assert harness._has_process_cleanup_uncertainty()
+    with pytest.raises(harness.HarnessFailure) as poisoned_token:
+        harness.verify_store(token)
+    assert poisoned_token.value.code is harness.HarnessFailureCode.INVALID_TOKEN
+    harness._remove_owned_files(token)
+    assert not token._generation_root.exists()
+
+
+@pytest.mark.parametrize("fault", ("sqlite_close", "file_close"))
+def test_close_uncertainty_is_irreversible_and_blocks_fork_before_execution(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    fault: str,
+) -> None:
+    if _run_task064_exec_isolated(request, tmp_path):
+        return
+    token = harness.bootstrap_store(tmp_path)
+    probe_process_id = os.fork()
+    if probe_process_id == 0:
+        exit_code = 70
+        try:
+            connection, _ = harness._connect(token, writer=True)
+            module_close_calls = 0
+
+            def forbidden_module_close(_descriptor: int) -> None:
+                nonlocal module_close_calls
+                module_close_calls += 1
+                raise AssertionError("captured close authority must ignore module mutation")
+
+            harness._arm_connection_authority_fault(fault)
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(os, "close", forbidden_module_close)
+                patch.setattr(
+                    harness,
+                    "_close_descriptors",
+                    lambda _descriptors: (_ for _ in ()).throw(
+                        AssertionError("module close helper must not be authoritative")
+                    ),
+                )
+                with pytest.raises(harness.HarnessFailure) as first_close:
+                    connection.close()
+                with pytest.raises(harness.HarnessFailure) as second_close:
+                    connection.close()
+            fork_calls = 0
+
+            def forbidden_fork() -> int:
+                nonlocal fork_calls
+                fork_calls += 1
+                raise AssertionError("fork must not run after close uncertainty")
+
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(os, "fork", forbidden_fork)
+                with pytest.raises(harness.HarnessFailure) as guarded:
+                    harness.sqlite_result_code_fault_evidence(
+                        token,
+                        seam="readonly",
+                    )
+            if (
+                first_close.value.code is harness.HarnessFailureCode.UNAVAILABLE
+                and second_close.value.code is harness.HarnessFailureCode.UNAVAILABLE
+                and harness._connection_authority_state(connection) == "CLOSE_UNCERTAIN"
+                and module_close_calls == 0
+                and guarded.value.code is harness.HarnessFailureCode.UNPROVEN
+                and fork_calls == 0
+            ):
+                exit_code = 0
+        except BaseException:
+            exit_code = 70
+        os._exit(exit_code)
+    _, probe_status = os.waitpid(probe_process_id, 0)
+    assert os.WIFEXITED(probe_status)
+    assert os.WEXITSTATUS(probe_status) == 0
+    assert harness._has_process_cleanup_uncertainty()
+    with pytest.raises(harness.HarnessFailure) as poisoned_token:
+        harness.verify_store(token)
+    assert poisoned_token.value.code is harness.HarnessFailureCode.INVALID_TOKEN
+    harness._remove_owned_files(token)
+    assert not token._generation_root.exists()
+
+
+def test_failed_registration_cleanup_uncertainty_is_latched_and_never_reused(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+) -> None:
+    if _run_task064_exec_isolated(request, tmp_path):
+        return
+    token = harness.bootstrap_store(tmp_path)
+    captured_connections: list[sqlite3.Connection] = []
+    real_connect = sqlite3.connect
+    sentinel = RuntimeError("synthetic registration rejection")
+
+    def tracked_connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        connection = cast(sqlite3.Connection, real_connect(*args, **kwargs))
+        captured_connections.append(connection)
+        return connection
+
+    def rejected_register(*_args: Any, **_kwargs: Any) -> None:
+        raise sentinel
+
+    harness._arm_connection_authority_fault("sqlite_close")
+    with (
+        pytest.MonkeyPatch.context() as patch,
+        pytest.raises(harness.HarnessFailure) as rejected,
+    ):
+        patch.setattr(sqlite3, "connect", tracked_connect)
+        patch.setattr(harness, "_register_live_connection", rejected_register)
+        harness._connect(token, writer=True)
+    assert rejected.value.code is harness.HarnessFailureCode.UNAVAILABLE
+    assert len(captured_connections) == 1
+    connection = captured_connections[0]
+    assert harness._connection_authority_state(connection) == "CLOSE_UNCERTAIN"
+    assert harness._has_process_cleanup_uncertainty()
+    assert harness._has_fork_unsafe_connection_authority()
+
+    exact_record = inspect.getclosurevars(harness._consume_connection_immutable_runtime).nonlocals[
+        "exact_runtime_record"
+    ]
+    records = cast(
+        dict[int, dict[str, object]],
+        inspect.getclosurevars(exact_record).nonlocals["connection_records"],
+    )
+    assert records[id(connection)]["state"] == "CLOSE_UNCERTAIN"
+    assert all(record["state"] != "LIVE" for record in records.values())
+    with pytest.raises(harness.HarnessFailure) as unavailable_runtime:
+        harness._consume_connection_immutable_runtime(
+            connection,
+            token._nonce,
+            True,
+        )
+    assert unavailable_runtime.value.code is harness.HarnessFailureCode.UNAVAILABLE
+    with pytest.raises(harness.HarnessFailure) as ambiguous_close:
+        connection.close()
+    assert ambiguous_close.value.code is harness.HarnessFailureCode.UNAVAILABLE
+    with pytest.raises(harness.HarnessFailure) as poisoned_token:
+        harness.verify_store(token)
+    assert poisoned_token.value.code is harness.HarnessFailureCode.INVALID_TOKEN
+    harness._remove_owned_files(token)
+    assert not token._generation_root.exists()
 
 
 def test_partial_multichild_fork_failures_are_bounded_and_unproven(
@@ -5182,12 +11107,23 @@ def test_query_row_bounds_at_limits_one_and_one_hundred(
         natural_key=natural_key,
         limit=1,
     )
-    hundred = harness.audit_history(
-        token,
-        stream_id=creation.record.stream_id,
-        natural_key=natural_key,
-        limit=100,
-    )
+    real_decode = harness._decode_canonical_history_record
+    initial_decode_calls: list[bytes] = []
+
+    def observe_initial_decode(record_bytes: bytes, **kwargs: Any) -> Any:
+        initial_decode_calls.append(record_bytes)
+        return real_decode(record_bytes, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(harness, "_decode_canonical_history_record", observe_initial_decode)
+        hundred = harness.audit_history(
+            token,
+            stream_id=creation.record.stream_id,
+            natural_key=natural_key,
+            limit=100,
+        )
+    assert initial_decode_calls == [entry.canonical_bytes for entry in entries[:100]]
+
     continuation = harness.audit_history(
         token,
         stream_id=creation.record.stream_id,
@@ -5199,6 +11135,32 @@ def test_query_row_bounds_at_limits_one_and_one_hundred(
             creation.history_root,
         ),
     )
+    continuation_decode_calls: list[bytes] = []
+
+    def observe_continuation_decode(record_bytes: bytes, **kwargs: Any) -> Any:
+        continuation_decode_calls.append(record_bytes)
+        return real_decode(record_bytes, **kwargs)
+
+    mature_anchor = entries[1]
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(harness, "_decode_canonical_history_record", observe_continuation_decode)
+        mature_continuation = harness.audit_history(
+            token,
+            stream_id=creation.record.stream_id,
+            natural_key=natural_key,
+            limit=100,
+            continuation=(
+                mature_anchor.record.successor_version,
+                mature_anchor.successor_envelope.envelope_digest,
+                mature_anchor.history_root,
+            ),
+        )
+    assert continuation_decode_calls == [
+        entries[1].canonical_bytes,
+        entries[0].canonical_bytes,
+        *(entry.canonical_bytes for entry in entries[2:102]),
+    ]
+    assert len(set(continuation_decode_calls)) == len(continuation_decode_calls)
     tail_entry = entries[-1]
     tail = harness.audit_history(
         token,
@@ -5217,6 +11179,8 @@ def test_query_row_bounds_at_limits_one_and_one_hundred(
     assert hundred.query_evidence.history_rows == 100
     assert continuation.entries == tuple(entries[:101])
     assert continuation.query_evidence.history_rows == 101
+    assert mature_continuation.entries == tuple(entries[1:102])
+    assert mature_continuation.query_evidence.history_rows == 101
     assert tail.entries == (tail_entry,)
     assert tail.query_evidence.history_rows == 1
     assert tail.classification is harness.StoreClassification.AT_TAIL
@@ -5240,7 +11204,25 @@ def test_query_row_bounds_at_limits_one_and_one_hundred(
             assert "ux_cpt_history_stream_version" in joined
     assert "ux_cpt_stream_uuid" in " ".join(plans["identity"])
     assert "ux_cpt_stream_natural_key" in " ".join(plans["identity"])
-    summary = harness.verify_store(token)
+    import gc as garbage_collector
+
+    real_validate_page = harness._validate_history_page_rows
+    live_snapshots_before_page: list[int] = []
+
+    def observe_live_page_snapshots(*args: Any, **kwargs: Any) -> Any:
+        garbage_collector.collect()
+        live_snapshots_before_page.append(
+            sum(
+                type(item) is harness._ValidatedHistoryRowSnapshot
+                for item in garbage_collector.get_objects()
+            )
+        )
+        return real_validate_page(*args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(harness, "_validate_history_page_rows", observe_live_page_snapshots)
+        summary = harness.verify_store(token)
+    assert live_snapshots_before_page == [0, 1]
     assert summary.stream_count == 1
     assert summary.history_count == 103
 
@@ -5678,8 +11660,44 @@ def test_concurrent_backup_ready_failure_reaps_exact_child(
 
 
 def test_finite_typical_workload_measurements_and_sanitized_report(
+    request: pytest.FixtureRequest,
     tmp_path: Path,
+    _active_task064_pytest_root: harness._PytestRootCapability,
 ) -> None:
+    isolated_close_probe_modes = (
+        "readback_verified_root_close_ambiguity",
+        "staging_close_ambiguity",
+        "readback_close_ambiguity",
+        "reentrant_root_revocation",
+    )
+    close_probe_mode, dispatch_modes = _task064_child_dispatch_plan(
+        "report_close",
+        request.node.nodeid,
+        isolated_close_probe_modes,
+    )
+    if close_probe_mode is None:
+        assert dispatch_modes == isolated_close_probe_modes
+        close_probe_results = _run_task064_pytest_children_concurrently(
+            tmp_path,
+            protocol="report_close",
+            issuer_node_id=request.node.nodeid,
+            target_node_id=request.node.nodeid,
+            modes=dispatch_modes,
+            pycache_label="task064-report-close-pycache",
+            timeout_seconds=840,
+        )
+        assert tuple(close_probe_results) == isolated_close_probe_modes
+        assert all(
+            completed.returncode == 0 and elapsed_seconds < 840
+            for completed, elapsed_seconds in close_probe_results.values()
+        )
+    else:
+        assert close_probe_mode in isolated_close_probe_modes
+        assert dispatch_modes == ()
+
+    if close_probe_mode == "reentrant_root_revocation":
+        tmp_path = _active_task064_pytest_root.roots[3]
+
     assert harness.WORKLOAD_MATRIX == (
         ("minimum", 1, 1, 1),
         ("typical", 3, 9, 10),
@@ -5733,7 +11751,11 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
     restore_manifest = backup_restore.restore_manifest
     summary = harness.collect_schema_identity_evidence(evidence_run, report_token)
     with harness.bootstrap_path_operation_scope(evidence_run):
-        _report_bootstrap_path_evidence(tmp_path, report_token)
+        _report_bootstrap_path_evidence(
+            tmp_path,
+            report_token,
+            _active_task064_pytest_root,
+        )
     bootstrap_path = harness.finalize_bootstrap_path_evidence(
         evidence_run,
         report_token,
@@ -5762,48 +11784,57 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
         report_token,
     )
     evidence_ledger = harness._validated_evidence_run(evidence_run)
-    atomicity_ordinal = harness.GENERATED_EVIDENCE_GATES.index("atomicity_classification")
-    harness.__dict__["_ATOMICITY_OPERATION_PRODUCER_SEQUENCE"] = ("bootstrap_store",)
-    harness.__dict__["_GATE_OPERATION_PRODUCER_SEQUENCES"] = {
-        "atomicity_classification": ("bootstrap_store",)
-    }
+
+    def receipt_is_consumed() -> bool:
+        return evidence_ledger.consumed
+
+    if close_probe_mode is None:
+        harness.__dict__["_ATOMICITY_OPERATION_PRODUCER_SEQUENCE"] = ("bootstrap_store",)
+        harness.__dict__["_GATE_OPERATION_PRODUCER_SEQUENCES"] = {
+            "atomicity_classification": ("bootstrap_store",)
+        }
     try:
         with harness.atomicity_operation_scope(evidence_run):
             _report_atomicity_evidence(tmp_path, fresh_process)
     finally:
-        harness.__dict__.pop("_ATOMICITY_OPERATION_PRODUCER_SEQUENCE")
-        harness.__dict__.pop("_GATE_OPERATION_PRODUCER_SEQUENCES")
-    atomicity_operations = evidence_ledger.operation_runs["atomicity_classification"]
-    historical_binding_substitution = list(atomicity_operations)
-    historical_binding_substitution[5] = replace(
-        historical_binding_substitution[5],
-        input_binding=atomicity_operations[8].input_binding,
-        input_digest=atomicity_operations[8].input_digest,
-    )
-    evidence_ledger.operation_runs["atomicity_classification"] = tuple(
-        historical_binding_substitution
-    )
-    with pytest.raises(harness.HarnessFailure) as historical_substitution:
-        harness.finalize_atomicity_evidence(evidence_run, report_token)
-    assert historical_substitution.value.code is harness.HarnessFailureCode.CORRUPT
-    assert atomicity_ordinal not in evidence_ledger.observations
-    evidence_ledger.operation_runs["atomicity_classification"] = atomicity_operations
-    for operation_index, substituted_tag in (
-        (5, "DUPLICATE:stream_rows=1:history_rows=5"),
-        (9, "CONFLICT:stream_rows=2:history_rows=6"),
-        (10, "CONFLICT:stream_rows=2:history_rows=6"),
-    ):
-        substituted_operations = list(atomicity_operations)
-        substituted_operations[operation_index] = replace(
-            substituted_operations[operation_index],
-            operation_tag=substituted_tag,
+        if close_probe_mode is None:
+            harness.__dict__.pop("_ATOMICITY_OPERATION_PRODUCER_SEQUENCE")
+            harness.__dict__.pop("_GATE_OPERATION_PRODUCER_SEQUENCES")
+    if close_probe_mode is None:
+        atomicity_ordinal = harness.GENERATED_EVIDENCE_GATES.index("atomicity_classification")
+        atomicity_operations = evidence_ledger.operation_runs["atomicity_classification"]
+        historical_binding_substitution = list(atomicity_operations)
+        historical_binding_substitution[5] = replace(
+            historical_binding_substitution[5],
+            input_binding=atomicity_operations[8].input_binding,
+            input_digest=atomicity_operations[8].input_digest,
         )
-        evidence_ledger.operation_runs["atomicity_classification"] = tuple(substituted_operations)
-        with pytest.raises(harness.HarnessFailure) as semantic_substitution:
+        evidence_ledger.operation_runs["atomicity_classification"] = tuple(
+            historical_binding_substitution
+        )
+        with pytest.raises(harness.HarnessFailure) as historical_substitution:
             harness.finalize_atomicity_evidence(evidence_run, report_token)
-        assert semantic_substitution.value.code is harness.HarnessFailureCode.CORRUPT
+        assert historical_substitution.value.code is harness.HarnessFailureCode.CORRUPT
         assert atomicity_ordinal not in evidence_ledger.observations
-    evidence_ledger.operation_runs["atomicity_classification"] = atomicity_operations
+        evidence_ledger.operation_runs["atomicity_classification"] = atomicity_operations
+        for operation_index, substituted_tag in (
+            (5, "DUPLICATE:stream_rows=1:history_rows=5"),
+            (9, "CONFLICT:stream_rows=2:history_rows=6"),
+            (10, "CONFLICT:stream_rows=2:history_rows=6"),
+        ):
+            substituted_operations = list(atomicity_operations)
+            substituted_operations[operation_index] = replace(
+                substituted_operations[operation_index],
+                operation_tag=substituted_tag,
+            )
+            evidence_ledger.operation_runs["atomicity_classification"] = tuple(
+                substituted_operations
+            )
+            with pytest.raises(harness.HarnessFailure) as semantic_substitution:
+                harness.finalize_atomicity_evidence(evidence_run, report_token)
+            assert semantic_substitution.value.code is harness.HarnessFailureCode.CORRUPT
+            assert atomicity_ordinal not in evidence_ledger.observations
+        evidence_ledger.operation_runs["atomicity_classification"] = atomicity_operations
     atomicity = harness.finalize_atomicity_evidence(
         evidence_run,
         report_token,
@@ -5824,71 +11855,72 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
             retained[0][0],
             tmp_path,
         )
-    bounded_operations = evidence_ledger.operation_runs["bounded_queries"]
-    missing_binding = bounded_operations[1].input_binding
-    assert isinstance(missing_binding, harness._QueryOperationBinding)
-    hostile_missing_expectation = _expectation(
-        first_policy,
-        retained[0][0],
-    )
-    hostile_missing_binding = harness._operation_input_binding(
-        "load_current",
-        {
-            "stream_id": missing_binding.stream_id,
-            "natural_key": missing_binding.natural_key,
-            "expectation": hostile_missing_expectation,
-        },
-    )
-    assert isinstance(hostile_missing_binding, harness._QueryOperationBinding)
-    missing_expectation_operations = list(bounded_operations)
-    missing_expectation_operations[1] = replace(
-        missing_expectation_operations[1],
-        input_binding=hostile_missing_binding,
-        input_digest=harness._evidence_payload_digest(hostile_missing_binding),
-    )
-    evidence_ledger.operation_runs["bounded_queries"] = tuple(missing_expectation_operations)
-    with pytest.raises(harness.HarnessFailure) as missing_expectation_substitution:
-        harness.finalize_bounded_query_evidence(
-            evidence_run,
-            report_token,
+    if close_probe_mode is None:
+        bounded_operations = evidence_ledger.operation_runs["bounded_queries"]
+        missing_binding = bounded_operations[1].input_binding
+        assert isinstance(missing_binding, harness._QueryOperationBinding)
+        hostile_missing_expectation = _expectation(
+            first_policy,
+            retained[0][0],
         )
-    assert missing_expectation_substitution.value.code is harness.HarnessFailureCode.CORRUPT
-    same_shape_binding = bounded_operations[2].input_binding
-    assert isinstance(same_shape_binding, harness._QueryOperationBinding)
-    wrong_stream_same_shape_binding = replace(
-        same_shape_binding,
-        stream_id=retained[1][0].record.stream_id,
-        natural_key=retained[1][1],
-    )
-    same_shape_operations = list(bounded_operations)
-    same_shape_operations[2] = replace(
-        same_shape_operations[2],
-        input_binding=wrong_stream_same_shape_binding,
-        input_digest=harness._evidence_payload_digest(
-            wrong_stream_same_shape_binding,
-        ),
-    )
-    evidence_ledger.operation_runs["bounded_queries"] = tuple(same_shape_operations)
-    with pytest.raises(harness.HarnessFailure) as same_shape_query_splice:
-        harness.finalize_bounded_query_evidence(
-            evidence_run,
-            report_token,
+        hostile_missing_binding = harness._operation_input_binding(
+            "load_current",
+            {
+                "stream_id": missing_binding.stream_id,
+                "natural_key": missing_binding.natural_key,
+                "expectation": hostile_missing_expectation,
+            },
         )
-    assert same_shape_query_splice.value.code is harness.HarnessFailureCode.CORRUPT
-    spliced_operations = list(bounded_operations)
-    spliced_operations[2] = replace(
-        spliced_operations[2],
-        input_binding=bounded_operations[3].input_binding,
-        input_digest=bounded_operations[3].input_digest,
-    )
-    evidence_ledger.operation_runs["bounded_queries"] = tuple(spliced_operations)
-    with pytest.raises(harness.HarnessFailure) as coherent_query_splice:
-        harness.finalize_bounded_query_evidence(
-            evidence_run,
-            report_token,
+        assert isinstance(hostile_missing_binding, harness._QueryOperationBinding)
+        missing_expectation_operations = list(bounded_operations)
+        missing_expectation_operations[1] = replace(
+            missing_expectation_operations[1],
+            input_binding=hostile_missing_binding,
+            input_digest=harness._evidence_payload_digest(hostile_missing_binding),
         )
-    assert coherent_query_splice.value.code is harness.HarnessFailureCode.CORRUPT
-    evidence_ledger.operation_runs["bounded_queries"] = bounded_operations
+        evidence_ledger.operation_runs["bounded_queries"] = tuple(missing_expectation_operations)
+        with pytest.raises(harness.HarnessFailure) as missing_expectation_substitution:
+            harness.finalize_bounded_query_evidence(
+                evidence_run,
+                report_token,
+            )
+        assert missing_expectation_substitution.value.code is harness.HarnessFailureCode.CORRUPT
+        same_shape_binding = bounded_operations[2].input_binding
+        assert isinstance(same_shape_binding, harness._QueryOperationBinding)
+        wrong_stream_same_shape_binding = replace(
+            same_shape_binding,
+            stream_id=retained[1][0].record.stream_id,
+            natural_key=retained[1][1],
+        )
+        same_shape_operations = list(bounded_operations)
+        same_shape_operations[2] = replace(
+            same_shape_operations[2],
+            input_binding=wrong_stream_same_shape_binding,
+            input_digest=harness._evidence_payload_digest(
+                wrong_stream_same_shape_binding,
+            ),
+        )
+        evidence_ledger.operation_runs["bounded_queries"] = tuple(same_shape_operations)
+        with pytest.raises(harness.HarnessFailure) as same_shape_query_splice:
+            harness.finalize_bounded_query_evidence(
+                evidence_run,
+                report_token,
+            )
+        assert same_shape_query_splice.value.code is harness.HarnessFailureCode.CORRUPT
+        spliced_operations = list(bounded_operations)
+        spliced_operations[2] = replace(
+            spliced_operations[2],
+            input_binding=bounded_operations[3].input_binding,
+            input_digest=bounded_operations[3].input_digest,
+        )
+        evidence_ledger.operation_runs["bounded_queries"] = tuple(spliced_operations)
+        with pytest.raises(harness.HarnessFailure) as coherent_query_splice:
+            harness.finalize_bounded_query_evidence(
+                evidence_run,
+                report_token,
+            )
+        assert coherent_query_splice.value.code is harness.HarnessFailureCode.CORRUPT
+        evidence_ledger.operation_runs["bounded_queries"] = bounded_operations
     bounded_queries = harness.finalize_bounded_query_evidence(
         evidence_run,
         report_token,
@@ -5901,20 +11933,21 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
         )
         for index in (2, 3)
     ) == ((2, 6, 6), (2, 6, 6))
-    shallow_queries = list(bounded_queries.queries)
-    for index in (2, 3):
-        name, classification, query = shallow_queries[index]
-        shallow_queries[index] = (
-            name,
-            classification,
-            replace(query, history_rows=2, decoded_rows=2),
-        )
-    with pytest.raises(harness.HarnessFailure) as shallow_conflicts:
-        harness._validate_bounded_query_report_evidence(
-            replace(bounded_queries, queries=tuple(shallow_queries)),
-            projection,
-        )
-    assert shallow_conflicts.value.code is harness.HarnessFailureCode.CORRUPT
+    if close_probe_mode is None:
+        shallow_queries = list(bounded_queries.queries)
+        for index in (2, 3):
+            name, classification, query = shallow_queries[index]
+            shallow_queries[index] = (
+                name,
+                classification,
+                replace(query, history_rows=2, decoded_rows=2),
+            )
+        with pytest.raises(harness.HarnessFailure) as shallow_conflicts:
+            harness._validate_bounded_query_report_evidence(
+                replace(bounded_queries, queries=tuple(shallow_queries)),
+                projection,
+            )
+        assert shallow_conflicts.value.code is harness.HarnessFailureCode.CORRUPT
     closed_mapping = harness.collect_closed_error_mapping_evidence(
         evidence_run,
         report_token,
@@ -5954,11 +11987,371 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
         recorded_at=report_manifest.evidence_recorded_at_utc,
         evidence=evidence,
     )
+    if close_probe_mode is None:
+        harness._arm_evidence_seal_transition_fault()
+        with pytest.raises(harness.HarnessFailure) as context_transition_failure:
+            harness.seal_generated_evidence_run(
+                evidence_run,
+                evidence=evidence,
+            )
+        assert context_transition_failure.value.code is harness.HarnessFailureCode.CORRUPT
+        assert evidence_ledger.recording
+        assert not evidence_ledger.consumed
+        assert evidence_ledger.receipt is None
+        assert harness._ACTIVE_EVIDENCE_RUN.get() is evidence_run
+        assert harness._validate_issued_evidence_run(evidence_run, ("RECORDING",))
+
+        real_evidence_digest = harness._evidence_payload_digest
+        aggregate_digest_calls = 0
+
+        def mismatch_second_aggregate_digest(value: object) -> str:
+            nonlocal aggregate_digest_calls
+            digest = real_evidence_digest(value)
+            if value is evidence:
+                aggregate_digest_calls += 1
+                if aggregate_digest_calls == 2:
+                    return "f" * 64 if digest != "f" * 64 else "0" * 64
+            return digest
+
+        with (
+            pytest.MonkeyPatch.context() as patch,
+            pytest.raises(harness.HarnessFailure) as second_pass_mismatch,
+        ):
+            patch.setattr(
+                harness,
+                "_evidence_payload_digest",
+                mismatch_second_aggregate_digest,
+            )
+            harness.seal_generated_evidence_run(
+                evidence_run,
+                evidence=evidence,
+            )
+        assert second_pass_mismatch.value.code is harness.HarnessFailureCode.CORRUPT
+        assert aggregate_digest_calls == 2
+        assert evidence_ledger.recording
+        assert not evidence_ledger.consumed
+        assert evidence_ledger.receipt is None
+        assert harness._ACTIVE_EVIDENCE_RUN.get() is evidence_run
+        assert harness._validate_issued_evidence_run(evidence_run, ("RECORDING",))
+
     evidence_receipt = harness.seal_generated_evidence_run(
         evidence_run,
         evidence=evidence,
     )
     report_path = tmp_path / "task064-evidence.json"
+    if close_probe_mode is not None:
+        inventory_before_close_probe = {path.name for path in tmp_path.iterdir()}
+        assert "task064-evidence.json" not in inventory_before_close_probe
+        assert not {
+            name
+            for name in inventory_before_close_probe
+            if name.startswith(".task064-evidence-") and name.endswith(".tmp")
+        }
+        real_report_close = os.close
+        root_identity = tmp_path.lstat()
+
+        def assert_no_close_probe_staging_file() -> None:
+            assert not tuple(tmp_path.glob(".task064-evidence-*.tmp"))
+
+        def assert_close_probe_inventory(*, report_expected: bool) -> None:
+            expected_inventory = set(inventory_before_close_probe)
+            if report_expected:
+                expected_inventory.add("task064-evidence.json")
+            assert {path.name for path in tmp_path.iterdir()} == expected_inventory
+
+        def assert_protected_fork_guards() -> None:
+            guard_creation = retained[0][0]
+            guard_natural_key = retained[0][1]
+            guard_transitions: list[ContinuousPublicTradeStreamStoredTransitionV1] = []
+            guard_prior = concurrent_prior
+            for guard_offset in range(harness.CONCURRENT_BACKUP_TRANSITIONS):
+                guard_transition = _retain(
+                    guard_prior,
+                    first_policy,
+                    reason=f"report-close-fork-guard-{guard_offset:02d}",
+                )
+                guard_transitions.append(guard_transition)
+                guard_prior = guard_transition
+            fork_calls = 0
+
+            def forbidden_fork() -> int:
+                nonlocal fork_calls
+                fork_calls += 1
+                raise AssertionError("fork must not run after report-close uncertainty")
+
+            guarded_calls: tuple[Callable[[], object], ...] = (
+                lambda: harness.sqlite_result_code_fault_evidence(
+                    report_token,
+                    seam="readonly",
+                ),
+                lambda: harness.fresh_process_writer_contention_evidence(
+                    report_token,
+                    operation="create",
+                    natural_key=_natural_key(guard_creation),
+                    creation=guard_creation,
+                    policy=first_policy,
+                ),
+                lambda: harness.fresh_process_two_writer_evidence(
+                    report_token,
+                    operation="create",
+                    creations=(guard_creation, guard_creation),
+                    policy=first_policy,
+                ),
+                lambda: harness.fresh_process_kill_evidence(
+                    report_token,
+                    seam="before_transaction",
+                    creation=guard_creation,
+                    policy=first_policy,
+                    natural_key=_natural_key(guard_creation),
+                ),
+                lambda: harness.true_during_commit_evidence(
+                    report_token,
+                    transition=guard_transitions[0],
+                    natural_key=guard_natural_key,
+                ),
+                lambda: harness.ioerr_write_evidence(
+                    report_token,
+                    transition=guard_transitions[0],
+                    natural_key=guard_natural_key,
+                ),
+                lambda: harness.max_page_count_evidence(
+                    report_token,
+                    transition=guard_transitions[0],
+                    natural_key=guard_natural_key,
+                ),
+                lambda: harness.wal_concurrency_evidence(
+                    report_token,
+                    transitions=tuple(guard_transitions),
+                    natural_key=guard_natural_key,
+                ),
+                lambda: harness.concurrent_write_backup_evidence(
+                    report_token,
+                    _active_task064_pytest_root.roots[3],
+                    transitions=tuple(guard_transitions),
+                    evidence_recorded_at_utc="2026-07-29T06:47:00.000000Z",
+                ),
+            )
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(harness, "_mark_process_cleanup_uncertain", lambda: None)
+                patch.setattr(harness, "_has_process_cleanup_uncertainty", lambda: False)
+                patch.setattr(harness, "_pytest_root_authority_uncertain", lambda: False)
+                patch.setattr(
+                    harness,
+                    "_has_fork_unsafe_connection_authority",
+                    lambda: False,
+                )
+                patch.setattr(harness, "_require_fork_safe_connection_state", lambda: None)
+                patch.setattr(os, "fork", forbidden_fork)
+                for invoke in guarded_calls:
+                    with pytest.raises(harness.HarnessFailure) as guarded:
+                        invoke()
+                    assert guarded.value.code is harness.HarnessFailureCode.UNPROVEN
+            assert len(guarded_calls) == 9
+            assert fork_calls == 0
+
+        def assert_terminal_close_probe(
+            *,
+            report_expected: bool,
+            close_failure: pytest.ExceptionInfo[harness.HarnessFailure],
+        ) -> None:
+            assert close_failure.value.code is harness.HarnessFailureCode.UNAVAILABLE
+            assert_no_close_probe_staging_file()
+            assert report_path.exists() is report_expected
+            if report_expected:
+                assert report_path.is_file()
+                assert stat_mode(report_path) == 0o600
+                assert report_path.stat().st_nlink == 1
+            assert_close_probe_inventory(report_expected=report_expected)
+            assert evidence_ledger.receipt is evidence_receipt
+            with pytest.raises(harness.HarnessFailure) as terminal_receipt:
+                harness.write_evidence_report(
+                    tmp_path,
+                    receipt=evidence_receipt,
+                    report=complete_report,
+                )
+            assert terminal_receipt.value.code is harness.HarnessFailureCode.UNAVAILABLE
+            assert_protected_fork_guards()
+            assert_close_probe_inventory(report_expected=report_expected)
+
+        if close_probe_mode == "staging_close_ambiguity":
+            ambiguous_stage_descriptor: int | None = None
+            ambiguous_stage_close_calls = 0
+
+            def close_stage_then_raise(descriptor: int) -> None:
+                nonlocal ambiguous_stage_close_calls
+                nonlocal ambiguous_stage_descriptor
+                if descriptor == ambiguous_stage_descriptor:
+                    raise AssertionError("owned staging descriptor must not be closed twice")
+                details = os.fstat(descriptor)
+                try:
+                    descriptor_target = Path(os.readlink(f"/proc/self/fd/{descriptor}")).name
+                except OSError:
+                    descriptor_target = ""
+                if (
+                    stat.S_ISREG(details.st_mode)
+                    and descriptor_target.startswith(".task064-evidence-")
+                    and descriptor_target.endswith(".tmp")
+                ):
+                    ambiguous_stage_descriptor = descriptor
+                    ambiguous_stage_close_calls += 1
+                    real_report_close(descriptor)
+                    raise OSError(errno.EIO, "injected post-close staging ambiguity")
+                real_report_close(descriptor)
+
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(os, "close", close_stage_then_raise)
+                with pytest.raises(harness.HarnessFailure) as ambiguous_close:
+                    harness.write_evidence_report(
+                        tmp_path,
+                        receipt=evidence_receipt,
+                        report=complete_report,
+                    )
+            assert ambiguous_stage_close_calls == 1
+            assert receipt_is_consumed()
+            assert harness._has_process_cleanup_uncertainty()
+            assert_terminal_close_probe(
+                report_expected=False,
+                close_failure=ambiguous_close,
+            )
+            return
+        elif close_probe_mode == "readback_close_ambiguity":
+            ambiguous_readback_close_calls = 0
+
+            def close_readback_then_raise(descriptor: int) -> None:
+                nonlocal ambiguous_readback_close_calls
+                details = os.fstat(descriptor)
+                try:
+                    descriptor_target = Path(os.readlink(f"/proc/self/fd/{descriptor}")).name
+                except OSError:
+                    descriptor_target = ""
+                if (
+                    stat.S_ISREG(details.st_mode)
+                    and descriptor_target == "task064-evidence.json"
+                    and ambiguous_readback_close_calls == 0
+                ):
+                    ambiguous_readback_close_calls += 1
+                    real_report_close(descriptor)
+                    raise OSError(errno.EIO, "injected post-close report readback ambiguity")
+                real_report_close(descriptor)
+
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(os, "close", close_readback_then_raise)
+                with pytest.raises(harness.HarnessFailure) as ambiguous_close:
+                    harness.write_evidence_report(
+                        tmp_path,
+                        receipt=evidence_receipt,
+                        report=complete_report,
+                    )
+            assert ambiguous_readback_close_calls == 1
+            assert receipt_is_consumed()
+            assert harness._has_process_cleanup_uncertainty()
+            assert_terminal_close_probe(
+                report_expected=True,
+                close_failure=ambiguous_close,
+            )
+            return
+        elif close_probe_mode == "reentrant_root_revocation":
+            reentrant_revocation_calls = 0
+            fake_transition_calls = 0
+
+            def close_after_root_revocation(descriptor: int) -> None:
+                nonlocal reentrant_revocation_calls
+                details = os.fstat(descriptor)
+                if (
+                    stat.S_ISDIR(details.st_mode)
+                    and details.st_dev == root_identity.st_dev
+                    and details.st_ino == root_identity.st_ino
+                    and report_path.exists()
+                    and reentrant_revocation_calls == 0
+                ):
+                    reentrant_revocation_calls += 1
+                    harness._revoke_fixture_root(
+                        _active_task064_pytest_root,
+                        tmp_path,
+                    )
+                real_report_close(descriptor)
+
+            def fake_transition(*_args: Any, **_kwargs: Any) -> bool:
+                nonlocal fake_transition_calls
+                fake_transition_calls += 1
+                return True
+
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(os, "close", close_after_root_revocation)
+                patch.setattr(
+                    harness,
+                    "_PreparedEvidenceRunConsumption",
+                    fake_transition,
+                    raising=False,
+                )
+                patch.setattr(
+                    harness,
+                    "_PreparedEvidenceReceiptConsumption",
+                    fake_transition,
+                    raising=False,
+                )
+                patch.setattr(
+                    harness,
+                    "_prepare_issued_evidence_receipt_consumption",
+                    fake_transition,
+                    raising=False,
+                )
+                with pytest.raises(harness.HarnessFailure) as ambiguous_close:
+                    harness.write_evidence_report(
+                        tmp_path,
+                        receipt=evidence_receipt,
+                        report=complete_report,
+                    )
+            assert reentrant_revocation_calls == 1
+            assert fake_transition_calls == 0
+            assert evidence_ledger.closed
+            assert not evidence_ledger.consumed
+            assert (
+                harness._lookup_revoked_pytest_root(tmp_path) is evidence_run._pytest_registration
+            )
+            with pytest.raises(harness.HarnessFailure) as closed_run:
+                harness._validated_evidence_run(evidence_run)
+            assert closed_run.value.code is harness.HarnessFailureCode.CORRUPT
+            assert_terminal_close_probe(
+                report_expected=True,
+                close_failure=ambiguous_close,
+            )
+            return
+        else:
+            assert close_probe_mode == "readback_verified_root_close_ambiguity"
+            ambiguous_root_close_calls = 0
+
+            def close_root_then_raise(descriptor: int) -> None:
+                nonlocal ambiguous_root_close_calls
+                details = os.fstat(descriptor)
+                if (
+                    stat.S_ISDIR(details.st_mode)
+                    and details.st_dev == root_identity.st_dev
+                    and details.st_ino == root_identity.st_ino
+                    and report_path.exists()
+                ):
+                    ambiguous_root_close_calls += 1
+                    real_report_close(descriptor)
+                    raise OSError(errno.EIO, "injected post-close root ambiguity")
+                real_report_close(descriptor)
+
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(os, "close", close_root_then_raise)
+                with pytest.raises(harness.HarnessFailure) as ambiguous_close:
+                    harness.write_evidence_report(
+                        tmp_path,
+                        receipt=evidence_receipt,
+                        report=complete_report,
+                    )
+            assert ambiguous_root_close_calls == 1
+            assert receipt_is_consumed()
+            assert harness._has_process_cleanup_uncertainty()
+            assert_terminal_close_probe(
+                report_expected=True,
+                close_failure=ambiguous_close,
+            )
+            return
+
     forged_receipt = replace(evidence_receipt)
     evidence_ledger.receipt = forged_receipt
     fake_validator_calls = 0
@@ -6000,6 +12393,43 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
     assert fake_issued_validator_calls == 0
     assert not report_path.exists()
     evidence_ledger.receipt = evidence_receipt
+    cyclic_report_value: list[object] = []
+    cyclic_report_value.append(cyclic_report_value)
+    hostile_report_value = _HostileMapping()
+    depth_65_report_value: object = "leaf"
+    for _ in range(65):
+        depth_65_report_value = [depth_65_report_value]
+    original_connection_profiles = summary.connection_profiles
+    for hostile_candidate in (
+        cyclic_report_value,
+        hostile_report_value,
+        depth_65_report_value,
+    ):
+        object.__setattr__(
+            summary,
+            "connection_profiles",
+            hostile_candidate,
+        )
+        try:
+            with pytest.raises(harness.HarnessFailure) as hostile_report:
+                harness.write_evidence_report(
+                    tmp_path,
+                    receipt=evidence_receipt,
+                    report=complete_report,
+                )
+            assert hostile_report.value.code is harness.HarnessFailureCode.CORRUPT
+        finally:
+            object.__setattr__(
+                summary,
+                "connection_profiles",
+                original_connection_profiles,
+            )
+        assert evidence_ledger.receipt is evidence_receipt
+        assert not evidence_ledger.consumed
+        assert not report_path.exists()
+        assert not tuple(tmp_path.glob(".task064-evidence-*.tmp"))
+    assert hostile_report_value.items_calls == 0
+
     with pytest.raises(harness.HarnessFailure) as wrong_report_type:
         harness.write_evidence_report(
             tmp_path,
@@ -6507,6 +12937,54 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
         report_path.unlink()
 
     real_report_close = os.close
+    real_report_open = os.open
+    same_size_mutated = False
+
+    def mutate_before_final_readback(
+        path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal same_size_mutated
+        if (
+            path == "task064-evidence.json"
+            and flags & os.O_ACCMODE == os.O_RDONLY
+            and dir_fd is not None
+            and not same_size_mutated
+        ):
+            mutation_descriptor = real_report_open(
+                path,
+                os.O_RDWR | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
+                dir_fd=dir_fd,
+            )
+            try:
+                original_byte = os.pread(mutation_descriptor, 1, 0)
+                assert len(original_byte) == 1
+                replacement = b"[" if original_byte != b"[" else b"{"
+                assert os.pwrite(mutation_descriptor, replacement, 0) == 1
+                os.fsync(mutation_descriptor)
+                same_size_mutated = True
+            finally:
+                real_report_close(mutation_descriptor)
+        return real_report_open(path, flags, mode, dir_fd=dir_fd)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(os, "open", mutate_before_final_readback)
+        with pytest.raises(harness.HarnessFailure) as mutated_readback:
+            harness.write_evidence_report(
+                tmp_path,
+                receipt=evidence_receipt,
+                report=complete_report,
+            )
+    assert mutated_readback.value.code is harness.HarnessFailureCode.UNAVAILABLE
+    assert same_size_mutated
+    assert not report_path.exists()
+    assert_no_report_staging_file()
+    assert evidence_ledger.receipt is evidence_receipt
+    assert not evidence_ledger.consumed
+
     root_identity = tmp_path.lstat()
     ledger_mutated_during_root_close = False
 
@@ -6524,18 +13002,61 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
             ledger_mutated_during_root_close = True
         real_report_close(descriptor)
 
-    fake_consume_calls = 0
+    fake_prepare_calls = 0
 
-    def fake_receipt_consumer(*_args: Any, **_kwargs: Any) -> None:
-        nonlocal fake_consume_calls
-        fake_consume_calls += 1
+    def fake_receipt_preparer(*_args: Any, **_kwargs: Any) -> None:
+        nonlocal fake_prepare_calls
+        fake_prepare_calls += 1
+
+    fake_serializer_calls = 0
+    observed_readback_descriptors: set[int] = set()
+    readback_calls = 0
+    readback_eof_observed = False
+    real_report_read = os.read
+    real_dynamic_serializer = json.dumps
+
+    def forbidden_dynamic_serializer(
+        document: object,
+        *args: Any,
+        **kwargs: Any,
+    ) -> str:
+        nonlocal fake_serializer_calls
+        if type(document) is dict and "report_version" in document:
+            fake_serializer_calls += 1
+            raise AssertionError("report writer must use its captured exact serializer")
+        return real_dynamic_serializer(document, *args, **kwargs)
+
+    def observe_report_readback_open(
+        path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        descriptor = real_report_open(path, flags, mode, dir_fd=dir_fd)
+        if path == "task064-evidence.json" and flags & os.O_ACCMODE == os.O_RDONLY:
+            observed_readback_descriptors.add(descriptor)
+        return descriptor
+
+    def observe_report_readback(descriptor: int, size: int) -> bytes:
+        nonlocal readback_calls
+        nonlocal readback_eof_observed
+        payload = real_report_read(descriptor, size)
+        if descriptor in observed_readback_descriptors:
+            readback_calls += 1
+            if size == 1 and payload == b"":
+                readback_eof_observed = True
+        return payload
 
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(os, "close", close_after_ledger_mutation)
+        patch.setattr(os, "open", observe_report_readback_open)
+        patch.setattr(os, "read", observe_report_readback)
+        patch.setattr(cast(Any, harness).json, "dumps", forbidden_dynamic_serializer)
         patch.setattr(
             harness,
-            "_consume_issued_evidence_receipt",
-            fake_receipt_consumer,
+            "_prepare_issued_evidence_receipt_consumption",
+            fake_receipt_preparer,
             raising=False,
         )
         report = harness.write_evidence_report(
@@ -6544,8 +13065,13 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
             report=complete_report,
         )
     assert ledger_mutated_during_root_close
-    assert fake_consume_calls == 0
-    assert not evidence_ledger.consumed
+    assert fake_prepare_calls == 0
+    assert fake_serializer_calls == 0
+    assert len(observed_readback_descriptors) == 1
+    assert readback_calls >= 2
+    assert readback_eof_observed
+    assert evidence_ledger.receipt is evidence_receipt
+    assert receipt_is_consumed()
     assert report == report_path
     assert stat_mode(report) == 0o600
     assert report.stat().st_nlink == 1
@@ -6555,6 +13081,7 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
     username = os.environ.get("USER")
     assert username is None or username not in report_text
     report_document = json.loads(report_text)
+    assert report.read_bytes() == harness.canonical_descriptor_bytes(report_document) + b"\n"
     assert report_document["measurements"]["query_rows"] == (
         workload.query_evidence.stream_rows + workload.query_evidence.history_rows
     )
