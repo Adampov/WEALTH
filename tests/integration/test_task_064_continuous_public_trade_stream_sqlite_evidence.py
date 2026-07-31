@@ -8719,6 +8719,386 @@ def test_live_connection_path_revalidation_is_lock_neutral(tmp_path: Path) -> No
     assert not harness._has_fork_unsafe_connection_authority()
 
 
+@pytest.mark.parametrize("name", ("store.sqlite3-wal", "store.sqlite3-shm"))
+def test_optional_live_snapshot_seals_reject_every_namespace_drift(
+    tmp_path: Path,
+    name: str,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    optional_path = token._generation_root / name
+    retained_path = tmp_path / f"{token._generation_root.name}-{name}-retained"
+    hardlink_path = tmp_path / f"{token._generation_root.name}-{name}-hardlink"
+    optional_path.unlink(missing_ok=True)
+    identity = harness._require_token(token)
+    snapshot = harness._open_operation_path_snapshot(identity)
+
+    def require_unavailable() -> None:
+        with pytest.raises(harness.HarnessFailure) as rejected:
+            harness._revalidate_operation_path_snapshot(identity, snapshot)
+        assert rejected.value.code is harness.HarnessFailureCode.UNAVAILABLE
+
+    try:
+        harness._revalidate_operation_path_snapshot(identity, snapshot)
+        descriptor = os.open(
+            optional_path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        os.close(descriptor)
+        harness._revalidate_operation_path_snapshot(identity, snapshot)
+
+        optional_path.chmod(0o400)
+        require_unavailable()
+        optional_path.chmod(0o600)
+        harness._revalidate_operation_path_snapshot(identity, snapshot)
+
+        os.link(optional_path, hardlink_path)
+        require_unavailable()
+        hardlink_path.unlink()
+        harness._revalidate_operation_path_snapshot(identity, snapshot)
+
+        optional_path.rename(retained_path)
+        require_unavailable()
+        descriptor = os.open(
+            optional_path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        os.close(descriptor)
+        require_unavailable()
+        optional_path.unlink()
+        optional_path.symlink_to(retained_path)
+        require_unavailable()
+        optional_path.unlink()
+        retained_path.rename(optional_path)
+        harness._revalidate_operation_path_snapshot(identity, snapshot)
+    finally:
+        hardlink_path.unlink(missing_ok=True)
+        if optional_path.is_symlink():
+            optional_path.unlink()
+        if retained_path.exists():
+            optional_path.unlink(missing_ok=True)
+            retained_path.rename(optional_path)
+        harness._close_operation_path_snapshot(snapshot)
+
+
+def test_live_snapshot_rejects_root_generation_and_main_replacement(
+    tmp_path: Path,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    identity = harness._require_token(token)
+    snapshot = harness._open_operation_path_snapshot(identity)
+    retained_root = tmp_path.with_name(f"{tmp_path.name}-retained-root")
+    generation_path = token._generation_root
+    retained_generation = generation_path.with_name(f"{generation_path.name}-retained")
+    database_path = token._database_path
+    retained_database = database_path.with_name(f"{database_path.name}-retained")
+
+    def require_unavailable() -> None:
+        with pytest.raises(harness.HarnessFailure) as rejected:
+            harness._revalidate_operation_path_snapshot(identity, snapshot)
+        assert rejected.value.code is harness.HarnessFailureCode.UNAVAILABLE
+
+    try:
+        tmp_path.rename(retained_root)
+        tmp_path.mkdir(mode=identity.pytest_root_mode)
+        require_unavailable()
+        tmp_path.rmdir()
+        retained_root.rename(tmp_path)
+        harness._revalidate_operation_path_snapshot(identity, snapshot)
+
+        generation_path.rename(retained_generation)
+        generation_path.symlink_to(retained_generation, target_is_directory=True)
+        require_unavailable()
+        generation_path.unlink()
+        retained_generation.rename(generation_path)
+        harness._revalidate_operation_path_snapshot(identity, snapshot)
+
+        database_path.rename(retained_database)
+        descriptor = os.open(
+            database_path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        os.close(descriptor)
+        require_unavailable()
+        database_path.unlink()
+        retained_database.rename(database_path)
+        harness._revalidate_operation_path_snapshot(identity, snapshot)
+    finally:
+        if database_path.exists() and retained_database.exists():
+            database_path.unlink()
+        if retained_database.exists():
+            retained_database.rename(database_path)
+        if generation_path.is_symlink():
+            generation_path.unlink()
+        if retained_generation.exists():
+            retained_generation.rename(generation_path)
+        if retained_root.exists():
+            if tmp_path.exists():
+                tmp_path.rmdir()
+            retained_root.rename(tmp_path)
+        harness._close_operation_path_snapshot(snapshot)
+
+
+def test_transaction_final_alias_walk_rejects_captured_ancestor_symlink(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+) -> None:
+    if _run_task064_exec_isolated(request, tmp_path):
+        return
+    token = harness.bootstrap_store(tmp_path)
+    connection, _ = harness._connect(token, writer=True)
+    ancestor = tmp_path.parent
+    retained_ancestor = ancestor.with_name(f"{ancestor.name}-task064-alias-retained-{os.getpid()}")
+    exact_record = inspect.getclosurevars(harness._consume_connection_immutable_runtime).nonlocals[
+        "exact_runtime_record"
+    ]
+    records = cast(
+        dict[int, dict[str, object]],
+        inspect.getclosurevars(exact_record).nonlocals["connection_records"],
+    )
+    alias_paths = cast(tuple[str, ...], records[id(connection)]["alias_paths"])
+    assert str(ancestor) in alias_paths
+    assert alias_paths.index(str(ancestor)) < len(alias_paths) - 3
+    assert not retained_ancestor.exists()
+    real_verify_schema_identity = harness._verify_schema_identity
+    real_pinned_check = harness._revalidate_connection_path
+    real_alias_check = harness._revalidate_connection_alias_free_path
+    schema_calls = 0
+    pinned_calls = 0
+    pinned_completed = 0
+    alias_calls = 0
+    alias_completed = 0
+
+    def mutate_ancestor_after_schema(
+        observed_connection: sqlite3.Connection,
+    ) -> str:
+        nonlocal schema_calls
+        schema_calls += 1
+        fingerprint = real_verify_schema_identity(observed_connection)
+        ancestor.rename(retained_ancestor)
+        ancestor.symlink_to(retained_ancestor, target_is_directory=True)
+        return fingerprint
+
+    def observed_pinned_check(
+        identity: harness._RegisteredIdentity,
+        observed_connection: sqlite3.Connection,
+    ) -> None:
+        nonlocal pinned_calls, pinned_completed
+        pinned_calls += 1
+        real_pinned_check(identity, observed_connection)
+        pinned_completed += 1
+
+    def observed_alias_check(
+        identity: harness._RegisteredIdentity,
+        observed_connection: sqlite3.Connection,
+    ) -> None:
+        nonlocal alias_calls, alias_completed
+        alias_calls += 1
+        real_alias_check(identity, observed_connection)
+        alias_completed += 1
+
+    try:
+        connection.execute("BEGIN IMMEDIATE").close()
+        with (
+            pytest.MonkeyPatch.context() as patch,
+            pytest.raises(harness.HarnessFailure) as rejected,
+        ):
+            patch.setattr(harness, "_verify_schema_identity", mutate_ancestor_after_schema)
+            patch.setattr(harness, "_revalidate_connection_path", observed_pinned_check)
+            patch.setattr(
+                harness,
+                "_revalidate_connection_alias_free_path",
+                observed_alias_check,
+            )
+            harness._verify_operation_snapshot(connection, token, writer=True)
+        assert rejected.value.code is harness.HarnessFailureCode.UNAVAILABLE
+        assert schema_calls == 1
+        assert (pinned_calls, pinned_completed) == (2, 2)
+        assert (alias_calls, alias_completed) == (1, 0)
+    finally:
+        if ancestor.is_symlink():
+            ancestor.unlink()
+        if retained_ancestor.exists():
+            retained_ancestor.rename(ancestor)
+        if connection.in_transaction:
+            harness._verify_operation_authority(connection, token)
+            connection.execute("ROLLBACK").close()
+        connection.close()
+
+
+@pytest.mark.parametrize(
+    "target",
+    ("generation_alias", "wal_inode_replacement"),
+)
+def test_real_final_precommit_authority_rolls_back_late_namespace_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    target: str,
+) -> None:
+    policy, creation = _creation(seed=79)
+    token = harness.bootstrap_store(tmp_path)
+    generation_path = token._generation_root
+    retained_generation = generation_path.with_name(f"{generation_path.name}-precommit-retained")
+    wal_path = generation_path / "store.sqlite3-wal"
+    retained_wal = tmp_path / f"{generation_path.name}-wal-precommit-retained"
+    real_snapshot_verifier = harness._verify_operation_snapshot
+    real_final_authority = harness._verify_operation_authority
+    real_execute = harness._MeteredConnection.execute
+    real_rollback = harness._rollback_best_effort
+    snapshot_completed = 0
+    target_seam_calls = 0
+    commit_calls = 0
+    rollback_sql_calls = 0
+    rollback_calls = 0
+    rollback_clean = False
+
+    def observed_snapshot_verifier(
+        connection: sqlite3.Connection,
+        token_value: harness.StoreToken,
+        *,
+        writer: bool,
+    ) -> str:
+        nonlocal snapshot_completed
+        fingerprint = real_snapshot_verifier(
+            connection,
+            token_value,
+            writer=writer,
+        )
+        snapshot_completed += 1
+        return fingerprint
+
+    def observed_execute(
+        connection: harness._MeteredConnection,
+        sql: str,
+        parameters: Any = (),
+        /,
+    ) -> sqlite3.Cursor:
+        nonlocal commit_calls, rollback_sql_calls
+        if sql == "COMMIT":
+            commit_calls += 1
+        elif sql == "ROLLBACK":
+            rollback_sql_calls += 1
+        return real_execute(connection, sql, parameters)
+
+    def observed_rollback(connection: sqlite3.Connection) -> None:
+        nonlocal rollback_calls, rollback_clean
+        rollback_calls += 1
+        real_rollback(connection)
+        rollback_clean = not connection.in_transaction
+
+    def replace_namespace_at_final_seam(seam: str) -> None:
+        nonlocal target_seam_calls
+        if seam != "between_creation_insert_and_create_commit":
+            return
+        target_seam_calls += 1
+        assert snapshot_completed == 1
+        if target == "generation_alias":
+            assert not retained_generation.exists()
+            generation_path.rename(retained_generation)
+            generation_path.symlink_to(retained_generation, target_is_directory=True)
+            return
+        assert target == "wal_inode_replacement"
+        assert not retained_wal.exists()
+        original_wal = wal_path.stat(follow_symlinks=False)
+        wal_path.rename(retained_wal)
+        descriptor = os.open(
+            wal_path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        os.close(descriptor)
+        replacement_wal = wal_path.stat(follow_symlinks=False)
+        assert (replacement_wal.st_dev, replacement_wal.st_ino) != (
+            original_wal.st_dev,
+            original_wal.st_ino,
+        )
+
+    try:
+        monkeypatch.setattr(
+            harness,
+            "_verify_operation_snapshot",
+            observed_snapshot_verifier,
+        )
+        monkeypatch.setattr(harness._MeteredConnection, "execute", observed_execute)
+        monkeypatch.setattr(harness, "_rollback_best_effort", observed_rollback)
+        with pytest.raises(harness.HarnessFailure) as rejected:
+            harness.create_stream(
+                token,
+                creation,
+                policy,
+                seam_hook=replace_namespace_at_final_seam,
+            )
+        assert rejected.value.code is harness.HarnessFailureCode.UNAVAILABLE
+        assert harness._verify_operation_authority is real_final_authority
+        assert snapshot_completed == 1
+        assert target_seam_calls == 1
+        assert commit_calls == 0
+        assert rollback_calls == 1
+        assert rollback_sql_calls == 1
+        assert rollback_clean
+    finally:
+        monkeypatch.undo()
+        if generation_path.is_symlink():
+            generation_path.unlink()
+        if retained_generation.exists():
+            retained_generation.rename(generation_path)
+        if retained_wal.exists():
+            wal_path.unlink(missing_ok=True)
+            retained_wal.rename(wal_path)
+    summary = harness.verify_store(token)
+    assert summary.stream_count == 0
+    assert summary.history_count == 0
+
+
+def test_transaction_verifier_ignores_mutated_detached_runtime_and_live_views(
+    tmp_path: Path,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    connection, profile = harness._connect(token, writer=True)
+    try:
+        connection.execute("BEGIN IMMEDIATE").close()
+        issued_view = harness._require_live_transaction_authority(
+            connection,
+            token,
+            True,
+        )
+        copied_view = replace(
+            issued_view,
+            registered=replace(issued_view.registered),
+        )
+        object.__setattr__(profile, "role", "forged")
+        object.__setattr__(profile, "sqlite_source_id", "forged")
+        object.__setattr__(profile, "compile_options", ("FORGED",))
+        object.__setattr__(
+            copied_view.registered,
+            "database_path",
+            Path("/forged/store.sqlite3"),
+        )
+        object.__setattr__(copied_view, "database_list_path", "/forged/store.sqlite3")
+
+        assert harness._verify_operation_snapshot(connection, token, writer=True)
+        fresh_view = harness._require_live_transaction_authority(
+            connection,
+            token,
+            True,
+        )
+        assert fresh_view is not issued_view
+        assert fresh_view is not copied_view
+        assert fresh_view.registered is not copied_view.registered
+        assert fresh_view.registered.database_path == token._database_path
+        assert fresh_view.database_list_path == str(token._database_path)
+        assert profile.role == "forged"
+        assert profile.sqlite_source_id == "forged"
+        assert copied_view.database_list_path == "/forged/store.sqlite3"
+        connection.execute("ROLLBACK").close()
+    finally:
+        if connection.in_transaction:
+            connection.execute("ROLLBACK").close()
+        connection.close()
+
+
 def test_pytest_root_registration_expires_and_rejects_wrong_process_or_node(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -10820,6 +11200,33 @@ def test_close_uncertainty_is_irreversible_and_blocks_fork_before_execution(
                     connection.close()
                 with pytest.raises(harness.HarnessFailure) as second_close:
                     connection.close()
+            post_close_observations = 0
+
+            def forbidden_post_close_observation(
+                *_args: object,
+                **_kwargs: object,
+            ) -> Any:
+                nonlocal post_close_observations
+                post_close_observations += 1
+                raise AssertionError(
+                    "close-uncertain state must reject before token, filesystem, or SQL"
+                )
+
+            with pytest.MonkeyPatch.context() as patch:
+                for name in (
+                    "_require_token",
+                    "_fetch_all",
+                    "_revalidate_connection_path",
+                    "_require_live_transaction_authority",
+                    "_revalidate_connection_alias_free_path",
+                ):
+                    patch.setattr(harness, name, forbidden_post_close_observation)
+                with pytest.raises(harness.HarnessFailure) as post_close_verify:
+                    harness._verify_operation_snapshot(
+                        connection,
+                        token,
+                        writer=True,
+                    )
             fork_calls = 0
 
             def forbidden_fork() -> int:
@@ -10837,6 +11244,8 @@ def test_close_uncertainty_is_irreversible_and_blocks_fork_before_execution(
             if (
                 first_close.value.code is harness.HarnessFailureCode.UNAVAILABLE
                 and second_close.value.code is harness.HarnessFailureCode.UNAVAILABLE
+                and post_close_verify.value.code is harness.HarnessFailureCode.UNAVAILABLE
+                and post_close_observations == 0
                 and harness._connection_authority_state(connection) == "CLOSE_UNCERTAIN"
                 and module_close_calls == 0
                 and guarded.value.code is harness.HarnessFailureCode.UNPROVEN

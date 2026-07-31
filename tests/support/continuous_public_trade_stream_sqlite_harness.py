@@ -906,6 +906,14 @@ class _ConnectionImmutableRuntimeEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class _LiveTransactionAuthorityView:
+    """Fresh non-authoritative view returned by one exact closure-owned live check."""
+
+    registered: _RegisteredIdentity
+    database_list_path: str
+
+
+@dataclass(frozen=True, slots=True)
 class ConnectionControlProfile:
     """Exact role-specific controls observed on one accepted connection."""
 
@@ -3781,7 +3789,7 @@ def _build_pytest_root_authority() -> tuple[
             "_bind_task064_harness_module",
             "41d05f3670974dedbcdb1b12e85b39bb2f1b306eb13686ba016caa07c2eeeb06",
             34,
-            "8b511581be81cc760077fbf27e5c359eb012bc0a91e57eeb567a1e323b1d892f",
+            "9008beec6288470e3b61f54362a9e0a31b874d9e9db347cdf517cc27c5719b28",
         ),
         (
             "tests/integration/test_task_064_continuous_public_trade_stream_sqlite_evidence.py",
@@ -3794,7 +3802,7 @@ def _build_pytest_root_authority() -> tuple[
             "_bind_task064_harness_module",
             "e4bba9b8f370dc1c66fcf977d36438dc870ade6792cd281e1f4ff5ed0fbfc330",
             34,
-            "99a6ee84c608499eeb00f11fb3164128e2ff0ce5ee0c5f2f44fd35f389613ff4",
+            "75090803300d52a3831bca0f221845035d1ee235d214827831beab838d079611",
         ),
     )
     real_getpid = os.getpid
@@ -8137,12 +8145,16 @@ def _build_connection_authority() -> tuple[
     Callable[[_OperationPathSnapshot], None],
     Callable[[sqlite3.Connection, _OperationPathSnapshot, bytes, bool], None],
     Callable[[sqlite3.Connection, _OperationPathSnapshot, bytes, bool], None],
+    Callable[[sqlite3.Connection, StoreToken], None],
     Callable[[sqlite3.Connection], None],
     Callable[[sqlite3.Connection], _ConnectionImmutableRuntimeEvidence],
     Callable[[sqlite3.Connection, bytes, bool], _ConnectionImmutableRuntimeEvidence],
+    Callable[[sqlite3.Connection, bool], bool],
+    Callable[[sqlite3.Connection, StoreToken, bool], _LiveTransactionAuthorityView],
     Callable[[sqlite3.Connection], None],
     Callable[[_OperationPathSnapshot], Path],
     Callable[[_RegisteredIdentity, _OperationPathSnapshot], None],
+    Callable[[_RegisteredIdentity, sqlite3.Connection], None],
     Callable[[_RegisteredIdentity, sqlite3.Connection], None],
     Callable[[_RegisteredIdentity, sqlite3.Connection, str, bool, int], int],
     Callable[[sqlite3.Connection], bool],
@@ -8160,9 +8172,25 @@ def _build_connection_authority() -> tuple[
     real_stat = os.stat
     real_listdir = os.listdir
     real_getpid = os.getpid
+    real_path_isabs = os.path.isabs
+    real_path_normpath = os.path.normpath
+    real_path_split = os.path.split
+    is_directory = stat.S_ISDIR
+    is_regular = stat.S_ISREG
+    exact_mode = stat.S_IMODE
     sqlite_close = sqlite3.Connection.close
     sqlite_connection_type = sqlite3.Connection
+    token_type = StoreToken
+    token_fields = _store_token_fields
+    token_lookup = _lookup_store_token_authority
+    registered_fields_for = _registered_identity_fields
+    identity_from_fields = _identity_from_fields
+    root_lookup = _lookup_active_pytest_root
+    root_session_owns = _pytest_root_session_owns
+    root_authority_uncertain = _pytest_root_authority_uncertain
+    process_cleanup_uncertain = _has_process_cleanup_uncertainty
     runtime_evidence_type = _ConnectionImmutableRuntimeEvidence
+    live_authority_view_type = _LiveTransactionAuthorityView
     runtime_sys = sys
     runtime_sqlite = sqlite3
     runtime_fetch_one = _fetch_one
@@ -8196,8 +8224,16 @@ def _build_connection_authority() -> tuple[
         if observed not in {signal.SIGKILL, signal.SIGSTOP}
     )
     owned_names = frozenset(_OWNED_DATABASE_FILENAMES)
+    optional_names = owned_names - {_DATABASE_BASENAME}
     acquisition_records: dict[int, dict[str, object]] = {}
     snapshot_records: dict[int, dict[str, object]] = {}
+    optional_seal_states: dict[
+        int,
+        tuple[
+            _OperationPathSnapshot,
+            tuple[tuple[str, tuple[int, int, int, int, int]], ...],
+        ],
+    ] = {}
     connection_records: dict[int, dict[str, object]] = {}
     closed_connections: WeakSet[sqlite3.Connection] = WeakSet()
     fork_unsafe_latched = False
@@ -8422,6 +8458,21 @@ def _build_connection_authority() -> tuple[
         snapshot = _OperationPathSnapshot(
             nonce=nonce_issuer("operation-path-snapshot"),
         )
+        optional_file_seals = tuple(
+            sorted(
+                (
+                    item[0],
+                    (item[2], item[3], item[4], item[5], item[6]),
+                )
+                for item in pinned_fields
+                if item[0] in optional_names
+            )
+        )
+        optional_seal_state = (snapshot, optional_file_seals)
+        if id(snapshot) in optional_seal_states:
+            fork_unsafe_latched = True
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        optional_seal_states[id(snapshot)] = optional_seal_state
         snapshot_records[id(snapshot)] = {
             "snapshot": snapshot,
             "snapshot_fields": snapshot_fields(snapshot),
@@ -8429,6 +8480,7 @@ def _build_connection_authority() -> tuple[
             "descriptors": descriptors,
             "roles": tuple(cast(list[tuple[str, str | None]], acquisition_record["roles"])),
             "pinned_fields": pinned_fields,
+            "optional_seal_state": optional_seal_state,
             "close_attempted": set(),
             "acquisition_record": acquisition_record,
             "state": "LIVE",
@@ -8478,6 +8530,13 @@ def _build_connection_authority() -> tuple[
             return
         if state != "LIVE":
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        optional_seal_state = record.get("optional_seal_state")
+        optional_seal_state_is_exact = bool(
+            type(optional_seal_state) is tuple
+            and len(optional_seal_state) == 2
+            and optional_seal_state[0] is snapshot
+            and optional_seal_states.get(id(snapshot)) is optional_seal_state
+        )
         record["state"] = "CLOSING"
         close_attempted = cast(set[int], record["close_attempted"])
         close_failed = False
@@ -8493,7 +8552,12 @@ def _build_connection_authority() -> tuple[
                     raise OSError(errno.EIO, "injected checked close uncertainty")
             except BaseException:
                 close_failed = True
-        if close_failed:
+        if close_failed or not optional_seal_state_is_exact:
+            record["state"] = "CLOSE_UNCERTAIN"
+            cast(dict[str, object], record["acquisition_record"])["state"] = "CLOSE_UNCERTAIN"
+            latch_uncertain()
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        if optional_seal_states.pop(id(snapshot), None) is not optional_seal_state:
             record["state"] = "CLOSE_UNCERTAIN"
             cast(dict[str, object], record["acquisition_record"])["state"] = "CLOSE_UNCERTAIN"
             latch_uncertain()
@@ -8531,6 +8595,13 @@ def _build_connection_authority() -> tuple[
             "nonce_identity": id(nonce),
             "writer": writer,
             "creator_pid": creator_pid,
+            "token_state": "UNBOUND",
+            "token": None,
+            "token_fields": None,
+            "identity_fields": None,
+            "alias_paths": None,
+            "database_list_path": None,
+            "authority_binding": None,
             "runtime_state": "UNBOUND",
             "runtime_evidence": None,
             "runtime_evidence_fields": None,
@@ -8538,6 +8609,142 @@ def _build_connection_authority() -> tuple[
             "runtime_seal": None,
             "state": "LIVE",
         }
+
+    def build_alias_paths(database_path: Path) -> tuple[str, ...]:
+        path = str(database_path)
+        if not real_path_isabs(path) or real_path_normpath(path) != path:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        reversed_paths: list[str] = []
+        current = path
+        while True:
+            reversed_paths.append(current)
+            parent, _ = real_path_split(current)
+            if parent == current:
+                break
+            if not parent or len(reversed_paths) > 256:
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            current = parent
+        paths = tuple(reversed(reversed_paths))
+        if not paths or paths[-1] != path:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        return paths
+
+    def authority_binding_fields(
+        connection: sqlite3.Connection,
+        record: dict[str, object],
+    ) -> tuple[object, ...]:
+        return (
+            id(connection),
+            connection,
+            id(record["snapshot"]),
+            record["snapshot"],
+            id(record["snapshot_record"]),
+            record["snapshot_record"],
+            id(record["token"]),
+            record["token"],
+            id(record["token_fields"]),
+            record["token_fields"],
+            id(record["identity_fields"]),
+            record["identity_fields"],
+            id(record["alias_paths"]),
+            record["alias_paths"],
+            id(record["database_list_path"]),
+            record["database_list_path"],
+            record["nonce_identity"],
+            record["nonce"],
+            record["writer"],
+            record["creator_pid"],
+        )
+
+    def bind_connection_token(
+        connection: sqlite3.Connection,
+        token: StoreToken,
+    ) -> None:
+        record = connection_records.get(id(connection))
+        snapshot_record = None if record is None else record.get("snapshot_record")
+        registered = token_lookup(token)
+        registered_fields = None if registered is None else registered_fields_for(registered)
+        current_token_fields = None if registered is None else token_fields(token)
+        descriptors = (
+            ()
+            if type(snapshot_record) is not dict
+            else cast(tuple[int, ...], snapshot_record.get("descriptors", ()))
+        )
+        if (
+            record is None
+            or record.get("connection") is not connection
+            or record.get("state") != "LIVE"
+            or record.get("creator_pid") != real_getpid()
+            or record.get("token_state") != "UNBOUND"
+            or any(
+                record.get(name) is not None
+                for name in (
+                    "token",
+                    "token_fields",
+                    "identity_fields",
+                    "alias_paths",
+                    "database_list_path",
+                    "authority_binding",
+                )
+            )
+            or type(token) is not token_type
+            or registered is None
+            or registered_fields is None
+            or current_token_fields is None
+            or type(token._nonce) is not bytes
+            or token._nonce is not record.get("nonce")
+            or id(token._nonce) != record.get("nonce_identity")
+            or type(snapshot_record) is not dict
+            or valid_snapshot(record.get("snapshot"), ("LIVE",)) is not snapshot_record
+            or registered_fields != snapshot_record.get("identity_fields")
+            or len(descriptors) < 2
+        ):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        alias_paths = build_alias_paths(registered.database_path)
+        if alias_paths[-3:] != (
+            str(registered.pytest_root),
+            str(registered.generation_root),
+            str(registered.database_path),
+        ):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        database_list_path = str(registered.database_path)
+        record["token"] = token
+        record["token_fields"] = current_token_fields
+        record["identity_fields"] = snapshot_record["identity_fields"]
+        record["alias_paths"] = alias_paths
+        record["database_list_path"] = database_list_path
+        record["authority_binding"] = authority_binding_fields(connection, record)
+        record["token_state"] = "BOUND"
+
+    def has_exact_authority_binding(
+        connection: sqlite3.Connection,
+        record: dict[str, object],
+    ) -> bool:
+        binding = record.get("authority_binding")
+        if (
+            record.get("token_state") != "BOUND"
+            or type(record.get("token")) is not token_type
+            or type(record.get("token_fields")) is not tuple
+            or type(record.get("identity_fields")) is not tuple
+            or type(record.get("alias_paths")) is not tuple
+            or type(record.get("database_list_path")) is not str
+            or type(binding) is not tuple
+            or len(binding) != 20
+        ):
+            return False
+        expected = authority_binding_fields(connection, record)
+        return bool(
+            binding == expected
+            and binding[1] is connection
+            and binding[3] is record["snapshot"]
+            and binding[5] is record["snapshot_record"]
+            and binding[7] is record["token"]
+            and binding[9] is record["token_fields"]
+            and binding[11] is record["identity_fields"]
+            and binding[13] is record["alias_paths"]
+            and binding[15] is record["database_list_path"]
+            and binding[17] is record["nonce"]
+        )
 
     def discard_failed_connection_open(
         connection: sqlite3.Connection,
@@ -8586,6 +8793,13 @@ def _build_connection_authority() -> tuple[
             "nonce_identity": id(nonce),
             "writer": writer,
             "creator_pid": creator_pid,
+            "token_state": "UNBOUND",
+            "token": None,
+            "token_fields": None,
+            "identity_fields": None,
+            "alias_paths": None,
+            "database_list_path": None,
+            "authority_binding": None,
             "runtime_state": "UNBOUND",
             "runtime_evidence": None,
             "runtime_evidence_fields": None,
@@ -8631,6 +8845,7 @@ def _build_connection_authority() -> tuple[
             or len(cast(bytes, record["nonce"])) != 32
             or record.get("nonce_identity") != id(record["nonce"])
             or type(record.get("writer")) is not bool
+            or not has_exact_authority_binding(connection, record)
             or record.get("runtime_state") not in runtime_states
             or valid_snapshot(snapshot, ("LIVE",)) is not record.get("snapshot_record")
         ):
@@ -8790,6 +9005,80 @@ def _build_connection_authority() -> tuple[
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
         return runtime_evidence_type(*runtime_evidence_fields(evidence))
 
+    def require_connection_transaction_state(
+        connection: sqlite3.Connection,
+        writer: bool,
+    ) -> bool:
+        record = exact_runtime_record(connection, ("SEALED",))
+        if type(writer) is not bool or writer is not record["writer"]:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        return connection.in_transaction is True
+
+    def require_live_transaction_authority(
+        connection: sqlite3.Connection,
+        token: StoreToken,
+        writer: bool,
+    ) -> _LiveTransactionAuthorityView:
+        record = connection_records.get(id(connection))
+        snapshot_record = None if record is None else record.get("snapshot_record")
+        if (
+            record is None
+            or record.get("connection") is not connection
+            or record.get("state") != "LIVE"
+            or record.get("creator_pid") != real_getpid()
+            or type(writer) is not bool
+            or writer is not record.get("writer")
+            or connection.in_transaction is not True
+            or type(snapshot_record) is not dict
+            or valid_snapshot(record.get("snapshot"), ("LIVE",)) is not snapshot_record
+        ):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        if (
+            process_cleanup_uncertain()
+            or root_authority_uncertain()
+            or type(token) is not token_type
+        ):
+            raise HarnessFailure(HarnessFailureCode.INVALID_TOKEN)
+        registered = token_lookup(token)
+        if registered is None:
+            raise HarnessFailure(HarnessFailureCode.INVALID_TOKEN)
+        active_root = registered.pytest_registration
+        registered_fields = registered_fields_for(registered)
+        if (
+            root_lookup(active_root.path_object) is not active_root
+            or active_root.resolved_path != registered.pytest_root
+            or active_root.device != registered.pytest_root_device
+            or active_root.inode != registered.pytest_root_inode
+            or active_root.uid != registered.pytest_root_uid
+            or active_root.mode != registered.pytest_root_mode
+            or not root_session_owns(active_root, True)
+            or token._pytest_root != registered.pytest_root
+            or token._generation_root != registered.generation_root
+            or token._database_path != registered.database_path
+            or token._device != registered.device
+            or token._inode != registered.inode
+            or token._uid != registered.uid
+            or token._mode != registered.mode
+            or token._link_count != registered.link_count
+        ):
+            raise HarnessFailure(HarnessFailureCode.INVALID_TOKEN)
+        if (
+            record["token"] is not token
+            or token_fields(token) != record["token_fields"]
+            or token._nonce is not record["nonce"]
+            or id(token._nonce) != record["nonce_identity"]
+            or registered_fields != record["identity_fields"]
+            or registered_fields != snapshot_record.get("identity_fields")
+            or not has_exact_authority_binding(connection, record)
+        ):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        exact_runtime_record(connection, ("SEALED",))
+        consume_connection_runtime(connection, token._nonce, writer)
+        return live_authority_view_type(
+            registered=identity_from_fields(record["identity_fields"]),
+            database_list_path=cast(str, record["database_list_path"]),
+        )
+
     def close_connection(
         connection: sqlite3.Connection,
     ) -> None:
@@ -8844,32 +9133,124 @@ def _build_connection_authority() -> tuple[
         snapshot: _OperationPathSnapshot,
     ) -> None:
         record = valid_snapshot(snapshot, ("LIVE",))
-        identity_fields = _registered_identity_fields(identity)
-        if record is None or identity_fields != record["identity_fields"]:
+        exact_identity_fields = registered_fields_for(identity)
+        acquisition_record = None if record is None else record.get("acquisition_record")
+        if (
+            record is None
+            or exact_identity_fields != record["identity_fields"]
+            or type(acquisition_record) is not dict
+            or acquisition_record.get("state") != "TRANSFERRED"
+            or acquisition_record.get("identity_fields") is not record["identity_fields"]
+            or tuple(cast(list[int], acquisition_record.get("descriptors", [])))
+            != record["descriptors"]
+            or tuple(
+                cast(
+                    list[tuple[str, str | None]],
+                    acquisition_record.get("roles", []),
+                )
+            )
+            != record["roles"]
+        ):
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
         descriptors = cast(tuple[int, ...], record["descriptors"])
+        roles = cast(tuple[tuple[str, str | None], ...], record["roles"])
         pinned_fields = cast(
             tuple[tuple[str, int, int, int, int, int, int], ...],
             record["pinned_fields"],
         )
+        optional_seal_state = record.get("optional_seal_state")
+        registered_optional_seal_state = optional_seal_states.get(id(snapshot))
+        if (
+            len(descriptors) < 2
+            or len(roles) != len(descriptors)
+            or roles[:2] != (("root", None), ("generation", None))
+            or roles[2:] != tuple(("file", item[0]) for item in pinned_fields)
+            or type(optional_seal_state) is not tuple
+            or len(optional_seal_state) != 2
+            or optional_seal_state[0] is not snapshot
+            or registered_optional_seal_state is not optional_seal_state
+        ):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        exact_optional_seal_state = cast(
+            tuple[
+                _OperationPathSnapshot,
+                tuple[tuple[str, tuple[int, int, int, int, int]], ...],
+            ],
+            optional_seal_state,
+        )
+        if type(exact_optional_seal_state[1]) is not tuple:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        optional_file_seal_items = exact_optional_seal_state[1]
+        optional_file_seals = dict(optional_file_seal_items)
+        if (
+            tuple(sorted(optional_file_seal_items)) != optional_file_seal_items
+            or len(optional_file_seals) != len(optional_file_seal_items)
+            or set(optional_file_seals) - optional_names
+            or any(
+                type(name) is not str
+                or type(seal) is not tuple
+                or len(seal) != 5
+                or any(type(value) is not int for value in seal)
+                for name, seal in optional_file_seal_items
+            )
+        ):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
         try:
+            root = real_fstat(descriptors[0])
             generation = real_fstat(descriptors[1])
             if (
-                generation.st_dev != identity_fields[8]
-                or generation.st_ino != identity_fields[9]
-                or generation.st_uid != identity_fields[10]
-                or stat.S_IMODE(generation.st_mode) != identity_fields[11]
-                or not stat.S_ISDIR(generation.st_mode)
+                root.st_dev != exact_identity_fields[4]
+                or root.st_ino != exact_identity_fields[5]
+                or root.st_uid != exact_identity_fields[6]
+                or exact_mode(root.st_mode) != exact_identity_fields[7]
+                or not is_directory(root.st_mode)
+                or generation.st_dev != exact_identity_fields[8]
+                or generation.st_ino != exact_identity_fields[9]
+                or generation.st_uid != exact_identity_fields[10]
+                or exact_mode(generation.st_mode) != exact_identity_fields[11]
+                or not is_directory(generation.st_mode)
             ):
                 raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-            names = tuple(sorted(real_listdir(descriptors[1])))
+            root_path = real_stat(exact_identity_fields[0], follow_symlinks=False)
+            generation_name = real_path_split(str(exact_identity_fields[2]))[1]
+            generation_entry = real_stat(
+                generation_name,
+                dir_fd=descriptors[0],
+                follow_symlinks=False,
+            )
+            if (
+                not generation_name
+                or root_path.st_dev != root.st_dev
+                or root_path.st_ino != root.st_ino
+                or root_path.st_uid != root.st_uid
+                or exact_mode(root_path.st_mode) != exact_mode(root.st_mode)
+                or not is_directory(root_path.st_mode)
+                or generation_entry.st_dev != generation.st_dev
+                or generation_entry.st_ino != generation.st_ino
+                or generation_entry.st_uid != generation.st_uid
+                or exact_mode(generation_entry.st_mode) != exact_mode(generation.st_mode)
+                or not is_directory(generation_entry.st_mode)
+            ):
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            observed_names = tuple(real_listdir(descriptors[1]))
+            if any(type(name) is not str for name in observed_names):
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            names = tuple(sorted(observed_names))
             if (
                 _DATABASE_BASENAME not in names
                 or set(names) - owned_names
                 or len(names) != len(set(names))
+                or set(optional_file_seals) - set(names)
             ):
                 raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
             prior = {item[0]: item for item in pinned_fields}
+            if (
+                len(prior) != len(pinned_fields)
+                or _DATABASE_BASENAME not in prior
+                or set(prior) - owned_names
+            ):
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            pending_optional_seals: dict[str, tuple[int, int, int, int, int]] = {}
             for name in names:
                 details = real_stat(
                     name,
@@ -8880,27 +9261,27 @@ def _build_connection_authority() -> tuple[
                 if expected is not None:
                     pinned_details = real_fstat(expected[1])
                     if (
-                        not stat.S_ISREG(pinned_details.st_mode)
+                        not is_regular(pinned_details.st_mode)
                         or pinned_details.st_dev != expected[2]
                         or pinned_details.st_ino != expected[3]
                         or pinned_details.st_uid != expected[4]
-                        or stat.S_IMODE(pinned_details.st_mode) != expected[5]
+                        or exact_mode(pinned_details.st_mode) != expected[5]
                         or pinned_details.st_nlink != expected[6]
                         or details.st_dev != pinned_details.st_dev
                         or details.st_ino != pinned_details.st_ino
                     ):
                         raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
                 if (
-                    not stat.S_ISREG(details.st_mode)
-                    or details.st_dev != identity_fields[12]
-                    or details.st_uid != identity_fields[14]
+                    not is_regular(details.st_mode)
+                    or details.st_dev != exact_identity_fields[12]
+                    or details.st_uid != exact_identity_fields[14]
                     or details.st_nlink != 1
-                    or stat.S_IMODE(details.st_mode) != 0o600
+                    or exact_mode(details.st_mode) != 0o600
                     or (
                         name == _DATABASE_BASENAME
                         and (
-                            details.st_ino != identity_fields[13]
-                            or details.st_dev != identity_fields[12]
+                            details.st_ino != exact_identity_fields[13]
+                            or details.st_dev != exact_identity_fields[12]
                         )
                     )
                     or (
@@ -8909,15 +9290,64 @@ def _build_connection_authority() -> tuple[
                             details.st_dev != expected[2]
                             or details.st_ino != expected[3]
                             or details.st_uid != expected[4]
-                            or stat.S_IMODE(details.st_mode) != expected[5]
+                            or exact_mode(details.st_mode) != expected[5]
                             or details.st_nlink != expected[6]
                         )
                     )
                 ):
                     raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                if name in optional_names:
+                    observed_seal = (
+                        details.st_dev,
+                        details.st_ino,
+                        details.st_uid,
+                        exact_mode(details.st_mode),
+                        details.st_nlink,
+                    )
+                    sealed = optional_file_seals.get(name)
+                    if sealed is None:
+                        pending_optional_seals[name] = observed_seal
+                    elif sealed != observed_seal:
+                        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            if pending_optional_seals:
+                second_names = tuple(real_listdir(descriptors[1]))
+                if (
+                    any(type(name) is not str for name in second_names)
+                    or tuple(sorted(second_names)) != names
+                ):
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                for name, candidate in pending_optional_seals.items():
+                    second_details = real_stat(
+                        name,
+                        dir_fd=descriptors[1],
+                        follow_symlinks=False,
+                    )
+                    if (
+                        not is_regular(second_details.st_mode)
+                        or (
+                            second_details.st_dev,
+                            second_details.st_ino,
+                            second_details.st_uid,
+                            exact_mode(second_details.st_mode),
+                            second_details.st_nlink,
+                        )
+                        != candidate
+                    ):
+                        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                if (
+                    optional_seal_states.get(id(snapshot)) is not optional_seal_state
+                    or record.get("optional_seal_state") is not optional_seal_state
+                ):
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                next_optional_file_seals = tuple(
+                    sorted((*optional_file_seals.items(), *pending_optional_seals.items()))
+                )
+                next_optional_seal_state = (snapshot, next_optional_file_seals)
+                optional_seal_states[id(snapshot)] = next_optional_seal_state
+                record["optional_seal_state"] = next_optional_seal_state
         except HarnessFailure:
             raise
-        except (OSError, RuntimeError, IndexError):
+        except (OSError, RuntimeError, IndexError, KeyError, TypeError):
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
 
     def revalidate_connection(
@@ -8925,9 +9355,75 @@ def _build_connection_authority() -> tuple[
         connection: sqlite3.Connection,
     ) -> None:
         record = connection_records.get(id(connection))
-        if record is None or record["connection"] is not connection or record["state"] != "LIVE":
+        if (
+            record is None
+            or record["connection"] is not connection
+            or record["state"] != "LIVE"
+            or record.get("creator_pid") != real_getpid()
+            or not has_exact_authority_binding(connection, record)
+            or registered_fields_for(identity) != record.get("identity_fields")
+        ):
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
         revalidate_snapshot(identity, cast(_OperationPathSnapshot, record["snapshot"]))
+
+    def revalidate_connection_alias_path(
+        identity: _RegisteredIdentity,
+        connection: sqlite3.Connection,
+    ) -> None:
+        record = connection_records.get(id(connection))
+        exact_identity_fields = registered_fields_for(identity)
+        paths = None if record is None else record.get("alias_paths")
+        if (
+            record is None
+            or record.get("connection") is not connection
+            or record.get("state") != "LIVE"
+            or record.get("creator_pid") != real_getpid()
+            or not has_exact_authority_binding(connection, record)
+            or exact_identity_fields != record.get("identity_fields")
+            or type(paths) is not tuple
+            or len(paths) < 3
+            or any(type(path) is not str for path in paths)
+            or paths[-3:]
+            != (
+                str(exact_identity_fields[0]),
+                str(exact_identity_fields[2]),
+                str(exact_identity_fields[3]),
+            )
+        ):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        try:
+            for index, path in enumerate(cast(tuple[str, ...], paths)):
+                details = real_stat(path, follow_symlinks=False)
+                if index < len(paths) - 1:
+                    if not is_directory(details.st_mode):
+                        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                elif (
+                    not is_regular(details.st_mode)
+                    or details.st_dev != exact_identity_fields[12]
+                    or details.st_ino != exact_identity_fields[13]
+                    or details.st_uid != exact_identity_fields[14]
+                    or exact_mode(details.st_mode) != exact_identity_fields[15]
+                    or details.st_nlink != exact_identity_fields[16]
+                ):
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                if index == len(paths) - 3 and (
+                    details.st_dev != exact_identity_fields[4]
+                    or details.st_ino != exact_identity_fields[5]
+                    or details.st_uid != exact_identity_fields[6]
+                    or exact_mode(details.st_mode) != exact_identity_fields[7]
+                ):
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                if index == len(paths) - 2 and (
+                    details.st_dev != exact_identity_fields[8]
+                    or details.st_ino != exact_identity_fields[9]
+                    or details.st_uid != exact_identity_fields[10]
+                    or exact_mode(details.st_mode) != exact_identity_fields[11]
+                ):
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        except HarnessFailure:
+            raise
+        except (OSError, RuntimeError, IndexError, TypeError):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
 
     def connection_file_size(
         identity: _RegisteredIdentity,
@@ -9024,13 +9520,17 @@ def _build_connection_authority() -> tuple[
         close_snapshot,
         register_connection,
         discard_failed_connection_open,
+        bind_connection_token,
         capture_connection_runtime,
         seal_connection_runtime,
         consume_connection_runtime,
+        require_connection_transaction_state,
+        require_live_transaction_authority,
         close_connection,
         snapshot_database_path,
         revalidate_snapshot,
         revalidate_connection,
+        revalidate_connection_alias_path,
         connection_file_size,
         connection_has_snapshot,
         connection_binding,
@@ -9048,13 +9548,17 @@ def _build_connection_authority() -> tuple[
     _close_operation_path_snapshot,
     _register_live_connection,
     _discard_failed_connection_open,
+    _bind_live_connection_token,
     _capture_connection_immutable_runtime,
     _seal_connection_immutable_runtime,
     _consume_connection_immutable_runtime,
+    _require_connection_transaction_state,
+    _require_live_transaction_authority,
     _close_live_connection,
     _snapshot_database_path,
     _revalidate_operation_path_snapshot,
     _revalidate_connection_path,
+    _revalidate_connection_alias_free_path,
     _connection_operation_file_size,
     _connection_has_path_snapshot,
     _connection_authority_binding,
@@ -9629,6 +10133,7 @@ def _connect(
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
         raise
     try:
+        _bind_live_connection_token(connection, token)
         connection.row_factory = sqlite3.Row
         observed_dbconfig, defensive_available, defensive_enabled = _apply_connection_controls(
             connection
@@ -9654,7 +10159,7 @@ def _connect(
         if len(database_list) != 1 or database_list[0]["name"] != "main":
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
         observed_path = _resolve_existing(
-            Path(cast(str, database_list[0]["file"])),
+            Path(database_list[0]["file"]),
             code=HarnessFailureCode.UNAVAILABLE,
         )
         if observed_path != _resolve_existing(
@@ -10293,22 +10798,31 @@ def _verify_operation_snapshot(
 ) -> str:
     """Repeat every operation-critical identity/control check coherently."""
 
-    registered = _verify_operation_authority(connection, token)
+    transactional = _require_connection_transaction_state(connection, writer)
+    if transactional:
+        live_authority = _require_live_transaction_authority(
+            connection,
+            token,
+            writer,
+        )
+        registered = live_authority.registered
+        _revalidate_connection_path(registered, connection)
+    else:
+        live_authority = None
+        registered = _verify_operation_authority(connection, token)
     database_list = _fetch_all(connection, "PRAGMA database_list")
     if (
         len(database_list) != 1
         or database_list[0]["name"] != "main"
-        or _resolve_existing(
-            Path(cast(str, database_list[0]["file"])),
-            code=HarnessFailureCode.UNAVAILABLE,
-        )
-        != _resolve_existing(
-            registered.database_path,
-            code=HarnessFailureCode.UNAVAILABLE,
-        )
+        or type(database_list[0]["file"]) is not str
+        or not database_list[0]["file"]
     ):
         raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-    if connection.in_transaction is True:
+    if transactional:
+        if live_authority is None:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        if database_list[0]["file"] != live_authority.database_list_path:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
         runtime_evidence = _consume_connection_immutable_runtime(
             connection,
             token._nonce,
@@ -10320,6 +10834,14 @@ def _verify_operation_snapshot(
         source_id = runtime_evidence.sqlite_source_id
         compile_options = runtime_evidence.compile_options
     else:
+        if _resolve_existing(
+            Path(database_list[0]["file"]),
+            code=HarnessFailureCode.UNAVAILABLE,
+        ) != _resolve_existing(
+            registered.database_path,
+            code=HarnessFailureCode.UNAVAILABLE,
+        ):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
         source_id = cast(str, _fetch_one(connection, "SELECT sqlite_source_id()")[0])
         compile_options = tuple(
             sorted(cast(str, row[0]) for row in _fetch_all(connection, "PRAGMA compile_options"))
@@ -10390,7 +10912,18 @@ def _verify_operation_snapshot(
     ):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     fingerprint = _verify_schema_identity(connection)
-    _verify_operation_authority(connection, token)
+    if transactional:
+        final_authority = _require_live_transaction_authority(
+            connection,
+            token,
+            writer,
+        )
+        if final_authority.registered != registered:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        _revalidate_connection_path(final_authority.registered, connection)
+        _revalidate_connection_alias_free_path(final_authority.registered, connection)
+    else:
+        _verify_operation_authority(connection, token)
     return fingerprint
 
 

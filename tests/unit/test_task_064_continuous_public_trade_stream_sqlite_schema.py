@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import inspect
 import json
@@ -799,6 +800,510 @@ def test_transaction_reuses_exact_connection_local_immutable_runtime_once(
         if connection.in_transaction:
             connection.execute("ROLLBACK").close()
         connection.close()
+
+
+def test_transaction_authority_uses_exact_reduced_check_counts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    counts = {"full": 0, "cheap": 0, "pinned": 0, "alias": 0}
+    events: list[str] = []
+    real_require_token = harness._require_token
+    real_live_authority = harness._require_live_transaction_authority
+    real_revalidate_connection = harness._revalidate_connection_path
+    real_alias_walk = harness._revalidate_connection_alias_free_path
+
+    def counted_require_token(token_value: harness.StoreToken) -> harness._RegisteredIdentity:
+        counts["full"] += 1
+        events.append("full")
+        return real_require_token(token_value)
+
+    def counted_live_authority(
+        observed_connection: sqlite3.Connection,
+        token_value: harness.StoreToken,
+        writer: bool,
+    ) -> harness._LiveTransactionAuthorityView:
+        counts["cheap"] += 1
+        events.append("cheap")
+        return real_live_authority(observed_connection, token_value, writer)
+
+    def counted_revalidate_connection(
+        identity: harness._RegisteredIdentity,
+        observed_connection: sqlite3.Connection,
+    ) -> None:
+        counts["pinned"] += 1
+        events.append("pinned")
+        real_revalidate_connection(identity, observed_connection)
+
+    def counted_alias_walk(
+        identity: harness._RegisteredIdentity,
+        observed_connection: sqlite3.Connection,
+    ) -> None:
+        counts["alias"] += 1
+        events.append("alias")
+        real_alias_walk(identity, observed_connection)
+
+    monkeypatch.setattr(harness, "_require_token", counted_require_token)
+    monkeypatch.setattr(
+        harness,
+        "_require_live_transaction_authority",
+        counted_live_authority,
+    )
+    monkeypatch.setattr(
+        harness,
+        "_revalidate_connection_path",
+        counted_revalidate_connection,
+    )
+    monkeypatch.setattr(
+        harness,
+        "_revalidate_connection_alias_free_path",
+        counted_alias_walk,
+    )
+
+    connection, _ = harness._connect(token, writer=True)
+    try:
+        assert counts == {"full": 2, "cheap": 0, "pinned": 0, "alias": 0}
+        events.clear()
+        connection.execute("BEGIN IMMEDIATE").close()
+        assert harness._verify_operation_snapshot(connection, token, writer=True)
+        assert counts == {"full": 2, "cheap": 2, "pinned": 2, "alias": 1}
+        assert events == ["cheap", "pinned", "cheap", "pinned", "alias"]
+
+        harness._verify_operation_authority(connection, token)
+        assert counts == {"full": 3, "cheap": 2, "pinned": 3, "alias": 1}
+        assert events[-2:] == ["full", "pinned"]
+        terminal_events = tuple(events)
+        connection.execute("COMMIT").close()
+        assert tuple(events) == terminal_events
+
+        for name in counts:
+            counts[name] = 0
+        events.clear()
+        assert harness._verify_operation_snapshot(connection, token, writer=True)
+        assert counts == {"full": 2, "cheap": 0, "pinned": 2, "alias": 0}
+        assert events == ["full", "pinned", "full", "pinned"]
+    finally:
+        if connection.in_transaction:
+            connection.execute("ROLLBACK").close()
+        connection.close()
+
+
+def test_verify_store_uses_exact_reduced_authority_counts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    counts = {"full": 0, "cheap": 0, "alias": 0}
+    real_require_token = harness._require_token
+    real_live_authority = harness._require_live_transaction_authority
+    real_alias_walk = harness._revalidate_connection_alias_free_path
+
+    def counted_require_token(token_value: harness.StoreToken) -> harness._RegisteredIdentity:
+        counts["full"] += 1
+        return real_require_token(token_value)
+
+    def counted_live_authority(
+        observed_connection: sqlite3.Connection,
+        token_value: harness.StoreToken,
+        writer: bool,
+    ) -> harness._LiveTransactionAuthorityView:
+        counts["cheap"] += 1
+        return real_live_authority(observed_connection, token_value, writer)
+
+    def counted_alias_walk(
+        identity: harness._RegisteredIdentity,
+        observed_connection: sqlite3.Connection,
+    ) -> None:
+        counts["alias"] += 1
+        real_alias_walk(identity, observed_connection)
+
+    monkeypatch.setattr(harness, "_require_token", counted_require_token)
+    monkeypatch.setattr(
+        harness,
+        "_require_live_transaction_authority",
+        counted_live_authority,
+    )
+    monkeypatch.setattr(
+        harness,
+        "_revalidate_connection_alias_free_path",
+        counted_alias_walk,
+    )
+    summary = harness.verify_store(token)
+    assert summary.stream_count == 0
+    assert counts == {"full": 8, "cheap": 4, "alias": 2}
+
+
+def test_transaction_authority_captures_filesystem_and_token_dependencies(
+    tmp_path: Path,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    connection, _ = harness._connect(token, writer=True)
+    forbidden_calls = 0
+
+    def forbidden(*_args: object, **_kwargs: object) -> Any:
+        nonlocal forbidden_calls
+        forbidden_calls += 1
+        raise AssertionError("transaction verification used a rebound dependency")
+
+    try:
+        connection.execute("BEGIN IMMEDIATE").close()
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(harness, "_require_token", forbidden)
+            patch.setattr(harness, "_identity_for", forbidden)
+            patch.setattr(harness, "_walk_without_aliases", forbidden)
+            patch.setattr(Path, "resolve", forbidden)
+            patch.setattr(os, "open", forbidden)
+            patch.setattr(os, "stat", forbidden)
+            patch.setattr(os, "fstat", forbidden)
+            patch.setattr(os, "listdir", forbidden)
+            assert harness._verify_operation_snapshot(connection, token, writer=True)
+        assert forbidden_calls == 0
+        connection.execute("ROLLBACK").close()
+    finally:
+        if connection.in_transaction:
+            connection.execute("ROLLBACK").close()
+        connection.close()
+
+
+def test_transaction_database_list_must_match_the_sealed_connection_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    connection, _ = harness._connect(token, writer=True)
+    real_fetch_all = harness._fetch_all
+
+    def forged_database_list(
+        observed_connection: sqlite3.Connection,
+        sql: str,
+        parameters: Sequence[object] = (),
+    ) -> list[sqlite3.Row]:
+        if sql == "PRAGMA database_list":
+            return cast(
+                list[sqlite3.Row],
+                [{"name": "main", "file": "/forged/store.sqlite3"}],
+            )
+        return real_fetch_all(observed_connection, sql, parameters)
+
+    try:
+        connection.execute("BEGIN IMMEDIATE").close()
+        monkeypatch.setattr(harness, "_fetch_all", forged_database_list)
+        with pytest.raises(harness.HarnessFailure) as rejected:
+            harness._verify_operation_snapshot(connection, token, writer=True)
+        assert rejected.value.code is harness.HarnessFailureCode.UNAVAILABLE
+    finally:
+        if connection.in_transaction:
+            connection.execute("ROLLBACK").close()
+        connection.close()
+
+
+def test_transaction_namespace_drift_is_rejected_at_both_authority_seams(
+    tmp_path: Path,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    connection, _ = harness._connect(token, writer=True)
+    unexpected_path = token._generation_root / "unexpected-authority-entry"
+    real_fetch_all = harness._fetch_all
+    sql_calls = 0
+
+    def counted_fetch_all(
+        observed_connection: sqlite3.Connection,
+        sql: str,
+        parameters: Sequence[object] = (),
+    ) -> list[sqlite3.Row]:
+        nonlocal sql_calls
+        sql_calls += 1
+        return real_fetch_all(observed_connection, sql, parameters)
+
+    def create_unexpected_entry() -> None:
+        descriptor = os.open(
+            unexpected_path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        os.close(descriptor)
+
+    try:
+        connection.execute("BEGIN IMMEDIATE").close()
+        create_unexpected_entry()
+        with (
+            pytest.MonkeyPatch.context() as patch,
+            pytest.raises(harness.HarnessFailure) as start_rejected,
+        ):
+            patch.setattr(harness, "_fetch_all", counted_fetch_all)
+            harness._verify_operation_snapshot(connection, token, writer=True)
+        assert start_rejected.value.code is harness.HarnessFailureCode.UNAVAILABLE
+        assert sql_calls == 0
+        unexpected_path.unlink()
+
+        real_verify_schema_identity = harness._verify_schema_identity
+        schema_calls = 0
+
+        def drift_after_schema(observed_connection: sqlite3.Connection) -> str:
+            nonlocal schema_calls
+            schema_calls += 1
+            fingerprint = real_verify_schema_identity(observed_connection)
+            create_unexpected_entry()
+            return fingerprint
+
+        with (
+            pytest.MonkeyPatch.context() as patch,
+            pytest.raises(harness.HarnessFailure) as end_rejected,
+        ):
+            patch.setattr(harness, "_verify_schema_identity", drift_after_schema)
+            harness._verify_operation_snapshot(connection, token, writer=True)
+        assert end_rejected.value.code is harness.HarnessFailureCode.UNAVAILABLE
+        assert schema_calls == 1
+    finally:
+        unexpected_path.unlink(missing_ok=True)
+        if connection.in_transaction:
+            connection.execute("ROLLBACK").close()
+        connection.close()
+
+
+def test_optional_file_seals_are_private_immutable_one_shot_bindings(
+    tmp_path: Path,
+) -> None:
+    token = harness.bootstrap_store(tmp_path)
+    optional_path = token._generation_root / "store.sqlite3-wal"
+    optional_path.unlink(missing_ok=True)
+    identity = harness._require_token(token)
+    snapshot = harness._open_operation_path_snapshot(identity)
+    closure = inspect.getclosurevars(harness._revalidate_operation_path_snapshot).nonlocals
+    valid_snapshot = cast(Callable[..., object], closure["valid_snapshot"])
+    snapshot_records = cast(
+        dict[int, dict[str, object]],
+        inspect.getclosurevars(valid_snapshot).nonlocals["snapshot_records"],
+    )
+    optional_seal_states = cast(dict[int, object], closure["optional_seal_states"])
+    record = snapshot_records[id(snapshot)]
+    original_state = record["optional_seal_state"]
+    try:
+        original_seals = cast(
+            tuple[tuple[str, tuple[int, int, int, int, int]], ...],
+            cast(tuple[object, ...], original_state)[1],
+        )
+        copied_state = (snapshot, tuple(list(original_seals)))
+        record["optional_seal_state"] = copied_state
+        try:
+            with pytest.raises(harness.HarnessFailure) as reconstructed:
+                harness._revalidate_operation_path_snapshot(identity, snapshot)
+            assert reconstructed.value.code is harness.HarnessFailureCode.UNAVAILABLE
+        finally:
+            record["optional_seal_state"] = original_state
+
+        record.pop("optional_seal_state")
+        try:
+            with pytest.raises(harness.HarnessFailure) as deleted:
+                harness._revalidate_operation_path_snapshot(identity, snapshot)
+            assert deleted.value.code is harness.HarnessFailureCode.UNAVAILABLE
+        finally:
+            record["optional_seal_state"] = original_state
+
+        descriptor = os.open(
+            optional_path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        os.close(descriptor)
+        harness._revalidate_operation_path_snapshot(identity, snapshot)
+        sealed_state = record["optional_seal_state"]
+        assert sealed_state is optional_seal_states[id(snapshot)]
+        assert sealed_state is not original_state
+
+        record["optional_seal_state"] = original_state
+        try:
+            with pytest.raises(harness.HarnessFailure) as rolled_back:
+                harness._revalidate_operation_path_snapshot(identity, snapshot)
+            assert rolled_back.value.code is harness.HarnessFailureCode.UNAVAILABLE
+        finally:
+            record["optional_seal_state"] = sealed_state
+    finally:
+        harness._close_operation_path_snapshot(snapshot)
+        optional_path.unlink(missing_ok=True)
+
+
+def test_live_transaction_authority_rejects_hostile_token_and_connection_binding(
+    tmp_path: Path,
+    _active_task064_pytest_root: harness._PytestRootCapability,
+) -> None:
+    first_token = harness.bootstrap_store(tmp_path)
+    second_token = harness.bootstrap_store(_active_task064_pytest_root.roots[0])
+    first, _ = harness._connect(first_token, writer=True)
+    second, _ = harness._connect(second_token, writer=True)
+    records = _connection_runtime_records()
+    first_record = records[id(first)]
+    second_record = records[id(second)]
+
+    def require_code(
+        code: harness.HarnessFailureCode,
+        action: Callable[[], object],
+    ) -> None:
+        with pytest.raises(harness.HarnessFailure) as rejected:
+            action()
+        assert rejected.value.code is code
+
+    try:
+        first.execute("BEGIN IMMEDIATE").close()
+        second.execute("BEGIN IMMEDIATE").close()
+
+        first_view = harness._require_live_transaction_authority(
+            first,
+            first_token,
+            True,
+        )
+        second_view = harness._require_live_transaction_authority(
+            first,
+            first_token,
+            True,
+        )
+        assert first_view == second_view
+        assert first_view is not second_view
+        assert first_view.registered is not second_view.registered
+
+        clone = harness.StoreToken(
+            _nonce=first_token._nonce,
+            _pytest_root=first_token._pytest_root,
+            _generation_root=first_token._generation_root,
+            _database_path=first_token._database_path,
+            _device=first_token._device,
+            _inode=first_token._inode,
+            _uid=first_token._uid,
+            _mode=first_token._mode,
+            _link_count=first_token._link_count,
+        )
+        for _ in range(2):
+            require_code(
+                harness.HarnessFailureCode.INVALID_TOKEN,
+                lambda: harness._require_live_transaction_authority(first, clone, True),
+            )
+        assert harness._require_live_transaction_authority(first, first_token, True)
+
+        original_mode = first_token._mode
+        object.__setattr__(first_token, "_mode", original_mode ^ 1)
+        try:
+            require_code(
+                harness.HarnessFailureCode.INVALID_TOKEN,
+                lambda: harness._require_live_transaction_authority(
+                    first,
+                    first_token,
+                    True,
+                ),
+            )
+        finally:
+            object.__setattr__(first_token, "_mode", original_mode)
+        assert harness._require_live_transaction_authority(first, first_token, True)
+
+        require_code(
+            harness.HarnessFailureCode.INVALID_TOKEN,
+            lambda: contextvars.Context().run(
+                harness._require_live_transaction_authority,
+                first,
+                first_token,
+                True,
+            ),
+        )
+        require_code(
+            harness.HarnessFailureCode.UNAVAILABLE,
+            lambda: harness._require_live_transaction_authority(
+                first,
+                first_token,
+                False,
+            ),
+        )
+        require_code(
+            harness.HarnessFailureCode.UNAVAILABLE,
+            lambda: harness._require_live_transaction_authority(
+                first,
+                second_token,
+                True,
+            ),
+        )
+
+        swapped_fields = ("snapshot", "snapshot_record")
+        first_values = tuple(first_record[name] for name in swapped_fields)
+        second_values = tuple(second_record[name] for name in swapped_fields)
+        for name, value in zip(swapped_fields, second_values, strict=True):
+            first_record[name] = value
+        try:
+            require_code(
+                harness.HarnessFailureCode.UNAVAILABLE,
+                lambda: harness._require_live_transaction_authority(
+                    first,
+                    first_token,
+                    True,
+                ),
+            )
+        finally:
+            for name, value in zip(swapped_fields, first_values, strict=True):
+                first_record[name] = value
+
+        nonce_fields = ("nonce", "nonce_identity")
+        first_values = tuple(first_record[name] for name in nonce_fields)
+        second_values = tuple(second_record[name] for name in nonce_fields)
+        for name, value in zip(nonce_fields, second_values, strict=True):
+            first_record[name] = value
+        try:
+            require_code(
+                harness.HarnessFailureCode.UNAVAILABLE,
+                lambda: harness._require_live_transaction_authority(
+                    first,
+                    first_token,
+                    True,
+                ),
+            )
+        finally:
+            for name, value in zip(nonce_fields, first_values, strict=True):
+                first_record[name] = value
+
+        creator_pid = first_record["creator_pid"]
+        first_record["creator_pid"] = os.getpid() + 1
+        try:
+            require_code(
+                harness.HarnessFailureCode.UNAVAILABLE,
+                lambda: harness._require_live_transaction_authority(
+                    first,
+                    first_token,
+                    True,
+                ),
+            )
+        finally:
+            first_record["creator_pid"] = creator_pid
+
+        read_descriptor, write_descriptor = os.pipe()
+        child_pid = os.fork()
+        if child_pid == 0:
+            os.close(read_descriptor)
+            payload = b"E"
+            try:
+                child_os: Any = harness.__dict__["os"]
+                child_os.getpid = lambda: os.getppid()
+                harness._require_live_transaction_authority(first, first_token, True)
+            except harness.HarnessFailure as error:
+                if error.code is harness.HarnessFailureCode.UNAVAILABLE:
+                    payload = b"P"
+            except BaseException:
+                payload = b"E"
+            with contextlib.suppress(OSError):
+                os.write(write_descriptor, payload)
+            os._exit(0 if payload == b"P" else 70)
+        os.close(write_descriptor)
+        try:
+            assert os.read(read_descriptor, 1) == b"P"
+        finally:
+            os.close(read_descriptor)
+        _, child_status = os.waitpid(child_pid, 0)
+        assert os.WIFEXITED(child_status)
+        assert os.WEXITSTATUS(child_status) == 0
+        assert harness._require_live_transaction_authority(first, first_token, True)
+    finally:
+        if first.in_transaction:
+            first.execute("ROLLBACK").close()
+        if second.in_transaction:
+            second.execute("ROLLBACK").close()
+        first.close()
+        second.close()
 
 
 def test_connection_runtime_binding_rejects_hostile_lifecycle_and_cross_binding(
