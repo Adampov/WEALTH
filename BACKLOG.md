@@ -12,17 +12,41 @@ promoted through review.
 - **Phase:** 2 — Reliable Market Data Platform
 - **Risk tier:** RISK 1 — DEVELOPMENT
 - **Status:** READY
-- **Contract generation:** 3 — `FROZEN`. Generation 1, normalized SHA-256
+- **Contract generation:** 5 | STATUS=FROZEN | SHA256=ba258296d4ffde716dc6ec02bbf606ca3f08cb48258dfca8061ca597f9e649e2
+- **Contract normalization:** This item is not executable until every independent contract review
+  is `PASS` and the generation line records `STATUS=FROZEN` plus its recomputed normalized SHA-256.
+  The normalized digest input is the UTF-8 TASK-064 section from its first level-three heading
+  whose heading text begins `TASK-064` through the byte before the next level-three heading. Convert
+  CRLF and CR to LF; require exactly one generation line matching ASCII
+  `^- \*\*Contract generation:\*\* 5 \| STATUS=(DRAFT|FROZEN) \| SHA256=(PENDING|[0-9a-f]{64})$`;
+  replace only its two captured mutable values with the literal tokens `<STATUS>` and `<SHA256>`;
+  remove trailing ASCII space and tab from every line; remove leading and trailing blank lines; and
+  append exactly one LF byte. Every other byte of this section, including this algorithm and the
+  complete generation history, remains in the digest preimage.
+- **Generation history:** Generation 4, normalized SHA-256
+  `b079966273ef43d726ecc7aa64693189e7234a94397e965e334fe215eac60aa4`, frozen at
+  documentation commit `1324b618ada5f84efd41ba632eb7ab2ab74d8ab8`, is `SUPERSEDED`
+  before implementation. Independent compatibility and security review found that it omitted the
+  exact immutable `schema_descriptor.json` and `schema_fingerprint.txt` identities and depended on
+  under-specified compact-worker, prefetch, sandbox, cgroup, and benchmark protocols that were not
+  available in the accepted environment. Every generation-4 implementation lease was revoked
+  without a result commit; no generation-4 implementation write is an integration source.
+  Generation 3, normalized SHA-256
+  `86e3650608f2f1c96a9aa272b2b9cd597bc3d5ac188a39937afb974536d11ccb`, remains the
+  functional base at exact candidate `9ff70a8aa34e5bf154679957c913bb21e93a3d5e`: all 2,298
+  tests passed, but the full suite required 1,587.74 seconds and the isolated report node required
+  780.69 seconds, exceeding the unchanged 900-second job and 720-second test-execution ceilings.
+  Generation 5 starts only from that generation-3 candidate. Disposable report and shard-split
+  prototypes are non-integrable measurement evidence until independently rebound to this exact
+  generation-5 contract. Generation 1, normalized SHA-256
   `2ba9d4d70bde04c5225649d1c3e4f70e86b5085c46a370ffcfbe716887bef836`, was
-  `SUPERSEDED` before any writable activation because its SQL `INTEGER` projection constraint
+  `SUPERSEDED` before writable activation because its SQL `INTEGER` projection constraint
   contradicted accepted ADR-0031. Generation 2, normalized SHA-256
   `5c48f313870bc729b3e8fcc66777df086c3bd9cde4e3818703aed285ad3570dc`, was
-  `SUPERSEDED` during writable activation, before any result commit, after independent review
-  proved that a plain `Path` cannot authenticate pytest provenance and the standard-library
-  SQLite binding cannot provide descriptor-pinned main/WAL/SHM opens. Generation-1 and
-  generation-2 research, implementation, test, and review outputs are evidence only: they may
-  inform generation 3 but cannot be integrated or counted as generation-3 acceptance evidence
-  unless revalidated and rebound to generation 3.
+  `SUPERSEDED` during writable activation, before any result commit, after review proved that a
+  plain `Path` cannot authenticate pytest provenance and the standard-library SQLite binding
+  cannot descriptor-pin SQLite main/WAL/SHM opens. Earlier outputs are evidence only and cannot
+  count as generation-5 acceptance unless revalidated and rebound to generation 5.
 - **Human approval:** NOT REQUIRED for the bounded test-only implementation, verification, review,
   and draft publication. Exact owner approval naming the pull request and current head commit
   remains required before merge.
@@ -47,17 +71,27 @@ promoted through review.
   The generated evidence assumes a controlled pytest process and cooperating same-UID processes;
   hostile same-UID replacement, target-host isolation, and descriptor-capable VFS evidence are
   explicitly outside this test-only task and remain production blockers. Coordinate documentation
-  and governance without importing the harness from production source.
-- **Files:** `docs/decisions/0032-continuous-public-trade-stream-sqlite-schema-evidence-harness.md`,
-  `docs/decisions/README.md`, `tests/fixtures/continuous_public_trade_stream_store/v1/schema.sql`,
-  `tests/fixtures/continuous_public_trade_stream_store/v1/schema_descriptor.json`,
-  `tests/fixtures/continuous_public_trade_stream_store/v1/schema_fingerprint.txt`,
-  `tests/support/__init__.py`,
+  and governance without importing the harness from production source. Generation 5 preserves all
+  generation-3 schema, transaction, fault, query, backup, copy, authority, and publication
+  semantics. It adds one optional bounded report-validation prime that avoids repeating unchanged
+  live-store validation in the normal parent, and replaces the single monolithic CI test step with
+  five independent ordinary-pytest jobs: one exact report job and four deterministic remainder
+  shards. It adds no in-process test worker, scheduler, retry, or production surface.
+- **Files:** Generation-5 changes are restricted to `BACKLOG.md`,
+  `docs/decisions/0032-continuous-public-trade-stream-sqlite-schema-evidence-harness.md`,
+  `.github/workflows/ci.yml`, `tests/conftest.py`, `tests/ci_shard_runner.py`,
   `tests/support/continuous_public_trade_stream_sqlite_harness.py`,
-  `tests/unit/test_task_064_continuous_public_trade_stream_sqlite_schema.py`,
-  `tests/integration/test_task_064_continuous_public_trade_stream_sqlite_evidence.py`,
-  `README.md`, `docs/contracts/MARKET_DATA.md`, `docs/ROADMAP.md`, `PROJECT_STATE.json`,
-  `BACKLOG.md`, `RISK_REGISTER.md`, and `tests/unit/test_project_state.py`.
+  `tests/integration/test_task_064_continuous_public_trade_stream_sqlite_evidence.py`, and the
+  narrow generation/digest, report-prime, shard-split, and workflow assertions in
+  `tests/unit/test_project_state.py`. The exact version-one fixtures
+  `schema.sql`, `schema_descriptor.json`, and `schema_fingerprint.txt`, every production file,
+  `pyproject.toml`, `uv.lock`, and every other file remain byte-identical to generation 3.
+  Their exact raw SHA-256 values are respectively
+  `1263b831a3e73bfc730beef6df7df48fce0e3654aa806672650de9f40b8a3e37`,
+  `bb33dc9cb549be484c5dc7855abace6d851682e50883e51919a9169cdaae431a`, and
+  `8a2508de6e018c67e9b18393cb0a5517cef3bea5df785bf432299a49a2a12ef8`; the fingerprint
+  file's exact single LF-terminated value is
+  `sha256:0410c1f08390a411c73427b3d07c542f3d1828def7c6adebab51cd57375355b3`.
 - **Constraints:** Test-only generated data and evidence. No `src/` adapter, repository port
   change, production fake, runtime import or composition, operator path or data, pre-existing or
   non-harness-owned database, network/provider/account access, domain/runtime wall-clock sampling
@@ -65,7 +99,11 @@ promoted through review.
   request-budget use, retry/recovery action, repair, routing or cutover, semantic history/source
   deletion or compaction, credential, permission, notification, dependency or lockfile change,
   deployment, operational capacity, durability, recovery/readiness, operating-mode, Phase 2
-  completion, or risk-closure claim. Every operated database must have been created by the same
+  completion, or risk-closure claim. `pytest-xdist`, `execnet`, and every other in-process or
+  threaded worker plugin are prohibited: the raw-fork TASK-064 evidence remains inside ordinary,
+  single-process pytest parents, and concurrency exists only between separate GitHub-hosted jobs.
+  No shard may retry, restart, batch, or silently omit a selected node. Every operated database
+  must have been created by the same
   test bootstrap beneath an actively registered pytest temporary root from one of the two exact
   allowed TASK-064 test modules. A plain path grants no authority: the harness requires a
   fixture-scoped process-local registration bound to the exact pytest node, path object, PID,
@@ -79,7 +117,13 @@ promoted through review.
   monotonic timing, an injected or externally recorded evidence timestamp, and cleanup of
   pytest-owned temporary artifacts are allowed only for the declared evidence. Production code
   must never import the harness; test support may import only standard-library modules and the
-  frozen pure TASK-061/062 types and validators. No extension loading, `ATTACH`, `writable_schema`,
+  frozen pure TASK-061/062 types and validators. The generation-5 CI runner, its inert-by-default
+  `tests/conftest.py` observation hooks, and the exact report-proof fixture-finalizer observation
+  are the sole exception: they may use the already locked pytest API only to collect IDs and
+  observe outcomes/proof scalars, never to select, deselect, reorder, schedule, retry, or change
+  pytest configuration/selection/outcomes, and never to add a thread, child, or network action. No
+  extension loading, `ATTACH`,
+  `writable_schema`,
   caller-supplied SQL, UDF or collation dependency, shared cache, or caller-controlled URI-option
   injection. Operation opens may use only a correctly encoded, harness-internally constructed
   `file:` URI for the descriptor-pinned generation and already validated database with the sole
@@ -106,7 +150,9 @@ promoted through review.
 
   Schema, descriptor, fingerprint, and report-contract fixtures are text only: no `.db`, `.sqlite`,
   `.sqlite3`, `-wal`, `-shm`, or generated record fixture may be committed. Preserve TASK-037 denial
-  and Stage 3.
+  and Stage 3. Every one of the existing 2,298 pytest node IDs, names, parameter IDs, assertions,
+  and default plain-`uv run pytest` behavior remains present; generation 5 adds no collected node,
+  skip, xfail, xpass, deselection, or weakened timeout.
 - **Research boundary:** Read-only official SQLite documentation, vulnerability, release, source-ID,
   and application-ID registry research may be cited as review evidence. The harness and generated
   tests perform no network or provider I/O.
@@ -214,6 +260,413 @@ Acceptance gates:
     permissions, SQLite source ID, sync/locking behavior, checkpoint/WAL bounds, capacity and
     latency envelope, backup destination, retention/disposal, RPO/RTO, restore cadence, monitoring,
     stop thresholds, and operational evidence all pass without expanding this task.
+15. Generation 5 adds exactly one optional test-only API:
+    `prime_evidence_report_validation(pytest_root: Path, *, receipt: _EvidenceReceipt,
+    report: EvidenceReport) -> None`. An explicit prime performs the complete generation-3
+    receipt, root, report-shape, report-value, canonical-byte, live-source, gate, backup-manifest,
+    and cleanup validation. It creates no stage or final file, consumes or terminalizes nothing,
+    grants no publication capability, returns exactly `None`, and leaves the receipt sealed.
+    Priming is never implicit. When no cache entry exists, `write_evidence_report` follows the
+    complete unchanged generation-3 path and can publish successfully; it must not silently prime.
+16. The prime may retain exactly one typed, closure-owned, nonserializable entry for one exact
+    receipt, with at most one active publication attempt and an absolute lifetime of exactly
+    `120_000_000_000` monotonic nanoseconds. The entry binds by
+    exact object identity the original pytest-root `Path`, active registration, evidence run,
+    ledger, receipt, receipt-owned evidence, and source report; exact PID, thread ID, pytest node,
+    and active root-session context; generation 5 and this digest; schema fingerprint; receipt
+    evidence digest; source fingerprints; canonical report bytes, length, and SHA-256; and the
+    report-core digest
+    `_evidence_payload_digest(("TASK064-REPORT-CORE-V1", fields, evidence_digest))`, where `fields`
+    is the exact tuple of the 40 non-evidence `EvidenceReport` values in dataclass declaration
+    order; and the live-validation digest
+    `_evidence_payload_digest(("TASK064-REPORT-LIVE-VALIDATION-V1", observations))`, where
+    `observations` is the four ordinal-ordered tuples
+    `(ordinal, verification_summary, tails, current_projection_or_none)` and only ordinal zero
+    carries the freshly loaded current projection. No object ID, serialized value, caller value,
+    path string, or child can create, select, inherit, or revive an entry.
+
+    The live epoch domain is `TASK064-REPORT-LIVE-EPOCH-V1`. Its exact role order is `bootstrap`,
+    `backup_source`, `backup`, `restore`, `concurrent_source`, `concurrent_backup`,
+    `generation_source`, `generation_destination`, with exact token-identity alias vector
+    `[0,1,0,2,1,0,0,3]` and exactly four distinct token objects. Its canonical preimage is
+    `json.dumps(payload, allow_nan=False, ensure_ascii=True, sort_keys=True,
+    separators=(",", ":")).encode("ascii")`, with no terminal LF. `payload` has exact keys
+    `domain`, `roles`, and `entries`; `roles` is the eight `[role, ordinal]` pairs above; and
+    `entries` is four objects in ordinal order. Each entry has exact keys `ordinal`,
+    `generation_id`, `registration`, `summary_sha256`, `tails_sha256`, and `files`.
+    `summary_sha256` and `tails_sha256` are the lowercase results of
+    `_evidence_payload_digest` over the freshly verified `VerificationSummary` and exact ordered
+    tail tuple. `registration` has exact arrays `pytest_root=[device,inode,uid,mode,process_id,
+    node_id]`, `generation=[device,inode,uid,mode]`, and
+    `database=[device,inode,uid,mode,link_count]`. Token, registration, pytest-root,
+    generation-root, and database-path object identities remain outside the digest and must also
+    match the retained entry exactly.
+
+    Every entry's `files` has exactly three objects in fixed order `store.sqlite3`,
+    `store.sqlite3-wal`, `store.sqlite3-shm`. Each has exact keys `name`, `present`, `device`,
+    `inode`, `uid`, `mode`, `link_count`, `size`, `mtime_ns`, `ctime_ns`, and `sha256`. An absent
+    file sets `present=false` and every later field to JSON `null`. A present file sets
+    `present=true`, records exact nonnegative integer metadata, requires a regular same-UID
+    descriptor and path to agree, mode `0o600`, one link, and records
+    `sha256:` plus 64 lowercase hex over the complete raw bytes. Reads use 65,536-byte blocks;
+    `store.sqlite3` is bounded by 16 MiB and WAL/SHM by 2 MiB each. A generation contains no entry
+    outside those three names.
+
+    Prime captures one descriptor-validated file snapshot for each unique token, performs the
+    complete live validation exactly once to obtain and validate the four summaries and tails, and
+    captures the file snapshots again. The pre/post identity, presence, metadata, size, and raw
+    digest vectors must be identical; every present descriptor has stable before/after metadata,
+    a bounded complete read, and an explicit trailing EOF read. A cached writer reopens and rechecks every registration and
+    complete file snapshot at writer entry and immediately before link; equal immutable raw file
+    bytes preserve the primed summary/tail observation without a second SQLite validation.
+    Type, report, schema, alias, registration, generation-ID, summary, tail, or canonical-value
+    disagreement maps to sanitized `CORRUPT`. Open/read/stat/close failure, unexpected inventory,
+    descriptor/path disagreement, filesystem drift, or cleanup uncertainty maps to sanitized
+    `UNAVAILABLE`; no raw exception or path escapes.
+
+    The sole states are `EMPTY -> VALIDATING -> READY -> PUBLISHING`. The builder captures the
+    exact original `time.monotonic_ns` callable. Every clock result must be an exact nonnegative
+    built-in integer at least the prior accepted result; exception, invalid value, or regression
+    clears and fails `UNAVAILABLE`. Prime is legal only from `EMPTY`, installs
+    `VALIDATING` before any validation, and on every validation failure clears all references and
+    restores `EMPTY` while preserving the underlying sanitized failure code. Only after the equal
+    post snapshot succeeds does it call the captured clock, require an exact nonnegative built-in
+    integer, set `issued_ns` to that value, checked-add `120_000_000_000`, and enter `READY`.
+    An entry is live exactly while a fresh captured-clock value is strictly less than
+    `expires_ns`; equality is expired. Expiry clears the entry and makes that call fail
+    `CORRUPT` without consuming the receipt; only a later explicit prime may create a new entry. A duplicate exact prime
+    while `READY` fails `CORRUPT` without refreshing or changing the entry. A call supplying a
+    different root, run, ledger, receipt, evidence, report, PID, thread, node, or context fails
+    `CORRUPT` without selecting, altering, or falling back around an otherwise valid `READY`
+    entry. Drift observed through the exact owner objects, consumption, source/root mutation, or
+    deadline failure clears and fails closed. `os.register_at_fork(after_in_child=...)` clears only
+    the inherited child copy; it cannot affect or revive the parent's entry.
+
+    Reentrant prime or writer entry during `VALIDATING` or `PUBLISHING` latches process cleanup
+    uncertainty, clears every retained reference, and makes both inner and outer operations fail
+    `UNAVAILABLE`. A matching writer changes `READY -> PUBLISHING` before its first receipt
+    checkpoint. The existing receipt checkpoints remain exactly C0 writer entry, C1 after semantic
+    validation/canonical serialization, C2 publisher entry, and C3 after stage
+    write/fsync/stat/close immediately before link; no fifth checkpoint is added. A proven clean
+    rollback with no remaining publication may return `PUBLISHING -> READY` only when every bound
+    object, digest, source fingerprint, root/generation/schema binding, original absolute deadline,
+    and complete live epoch still matches and cleanup is certain; rollback never refreshes the
+    deadline. Before-link failure and link-then-fail qualify only when the exact owned staged inode
+    is absent from both names and the directory is synced. Collision qualifies only when that
+    owned staged inode is absent from both names and the pre-existing foreign final entry is proven
+    byte-for-byte and identity-unchanged. Success, any failure after readback begins, ambiguous
+    cleanup, any remaining publication, terminal receipt state, or root teardown clears every
+    retained reference and returns to `EMPTY`.
+
+    Two private proof-only functions expose no authority:
+    `_observe_task064_report_validation_for_test() -> tuple[str, bool, int | None, int | None]`
+    returns only state, entry-presence, issued nanoseconds, and expiry nanoseconds, and
+    `_force_task064_report_validation_expiry_for_test() -> None` may only shorten the exact owner's
+    `READY` deadline to the current captured-clock value; it can never extend, restore, or select
+    an entry. The report node has inert-by-default proof options
+    `--task064-report-proof-mode`, `--task064-report-proof-nonce=<64 lowercase hex>`, and
+    `--task064-report-proof-observation=<absolute private path>`. All three or none are required;
+    the only modes are `primed-full`, `unprimed-success`, `expired-entry`, and `ready-teardown`,
+    and an active mode is legal only when that exact report node is the sole selected node.
+    `primed-full` follows the complete normal test and primed success; `unprimed-success` branches
+    immediately after the sealed receipt to the unchanged successful unprimed writer;
+    `expired-entry` primes once, forces equality expiry, proves writer rejection and `EMPTY`; and
+    `ready-teardown` primes once and returns with `READY`. The exact node records a closure-owned
+    pending scalar proof but never writes the observation. The authenticated fixture finalizer
+    requires that pending record, captures its asserted state, always invokes the captured cache
+    teardown before root-scope exit, evidence-root revocation, context reset, or child-provenance
+    completion, clears references first, proves `EMPTY`, and only then exclusively publishes the
+    nonce/PID-bound proof observation. It latches cleanup uncertainty and emits no PASS observation
+    on any callback, state, publication, or close failure. Thus a zero-exit, validated
+    `ready-teardown` observation proves finalizer cleanup. These modes add no pytest node or
+    parameter ID. Because separately
+    generated evidence has intentionally unique generation identities, cross-process report
+    digests need not match. Instead, each route proves against its own exact input report: the
+    primed route caches precisely the captured pure serializer result and publishes those bytes
+    unchanged, while the unprimed route freshly invokes that same captured serializer and
+    publishes its returned bytes unchanged. Both prove identical one-shot publication semantics.
+17. The frozen full-node manifest is exactly 2,298 unique, nonempty ASCII node IDs. Collection
+    rejects non-`str`, NUL, CR, LF, surrogate, duplicate, unknown, or empty values, sorts by raw
+    ASCII bytes, and serializes with Python `json.dumps` insertion order `domain`, then `nodes`,
+    `ensure_ascii=True`, `separators=(",", ":")`, no key sorting, and no terminal LF:
+    `{"domain":"TASK064-NODE-MANIFEST-V1","nodes":[...sorted node IDs...]}`. The result is exactly
+    296,078 bytes with SHA-256
+    `96a15ecb6af6469f6da82bace28350163b99d48b8226d867830f7aec5816b483`.
+    The exact report node
+    `tests/integration/test_task_064_continuous_public_trade_stream_sqlite_evidence.py::test_finite_typical_workload_measurements_and_sanitized_report`
+    occurs once and is removed once into the dedicated `report` shard. Every remaining node is
+    assigned exactly to `remainder-i`, for `i` in `0..3`, by
+    `int.from_bytes(SHA256(nodeid.encode("ascii")).digest()[:8], "big", signed=False) % 4`.
+    Membership is hashed but execution retains original pytest collection order. The five
+    nonempty shards are pairwise disjoint and their exact union is the full manifest.
+
+    Each shard canonicalizes as ASCII JSON with insertion order `domain`,
+    `full_manifest_sha256`, `shard_id`, `nodes`, compact separators, sorted nodes, and no terminal
+    LF:
+    `{"domain":"TASK064-NODE-SHARD-V1","full_manifest_sha256":"96a15ecb6af6469f6da82bace28350163b99d48b8226d867830f7aec5816b483","shard_id":...,"nodes":[...]}`.
+    The frozen identities are:
+
+    | shard | nodes | bytes | SHA-256 | selector bytes including NUL |
+    |---|---:|---:|---|---:|
+    | `report` | 1 | 302 | `f0530be0d219c64bbd1b9eb4df635dd138a345e8685172d188d02e177e488a3e` | 146 |
+    | `remainder-0` | 600 | 76,664 | `9946638e834ffa44c0cd1e511c348b1f8226fc078ef79eb9e4100e770de80044` | 75,290 |
+    | `remainder-1` | 563 | 72,767 | `e6814eb76767d9462ed9bfa82c85d8e7daebd7265027883290ca88842365dfd0` | 71,471 |
+    | `remainder-2` | 588 | 75,756 | `8d86911d7a7cfc4f32022d68be1eaa3d6b459d5a968a462deea188df2369ed5b` | 74,394 |
+    | `remainder-3` | 546 | 71,332 | `69e69516345c674cadf552202b80c392f8297b74b46328278b098b462e25b4ca` | 70,049 |
+
+    Every selector vector is passed as a Python argv array, never shell text, `eval`, `xargs`, or
+    response interpolation. Each node is at most 308 encoded bytes; each frozen vector is at most
+    131,072 bytes including NUL. Every argument and environment `name=value` is ASCII or
+    filesystem-encoded without NUL and is at most 131,072 bytes including its terminal NUL.
+    Before each `execve`, the runner computes
+    `sum(len(os.fsencode(arg))+1) + sum(len(os.fsencode(name))+1+len(os.fsencode(value))+1)
+    + (argc+envc+2)*struct.calcsize("P") + 32_768`; it requires exact built-in integer
+    `os.sysconf("SC_ARG_MAX")`, a positive value, and projection at most that value. Any encoding,
+    per-string, selector-vector, or total-projection failure rejects before launching pytest.
+18. `uv run python tests/ci_shard_runner.py --shard <shard-id>` is the sole shard command; the only
+    other runner modes are `--report-proof <mode>` for the three acceptance-only report probes and
+    `--aggregate-static` for the final workflow job. The workflow sets
+    `TASK064_CANDIDATE_SHA` to `${{ github.event.pull_request.head.sha || github.sha }}`. Every
+    commit or tree identity must be exactly 40 lowercase hexadecimal characters and resolve to the
+    stated Git object. The tested checkout commit must equal both `HEAD` and `GITHUB_SHA`. On
+    `pull_request`, `HEAD` has exactly two parents, `HEAD^2` equals `TASK064_CANDIDATE_SHA`, and
+    that candidate is proven an ancestor of `HEAD`. On `push` and `workflow_dispatch`,
+    `TASK064_CANDIDATE_SHA`, `GITHUB_SHA`, and `HEAD` are equal. Any missing object, shallow-history
+    uncertainty, extra parent, malformed identity, mismatch, or failed ancestry proof fails before
+    collection. The result binds both tested-checkout commit/tree and candidate commit/tree.
+
+    Before collection the runner also proves a clean checkout; Python `3.13.14`; pytest `9.1.1`;
+    exact `.python-version` bytes `3.13\n` and raw SHA-256
+    `02e735b3dfe1c32833eb550b7ff8ffa17f5f2bc3fa1e7bae61a8f5a3883ce398`; and unchanged
+    `uv.lock` raw SHA-256
+    `86f4e40b898d8585b32f50c5db5a87d73766c6b364480e596b07768c7320f733`.
+    Presence of inherited `PYTEST_ADDOPTS`, `PYTEST_PLUGINS`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD`,
+    `PYTHONPATH`, or `PYTHONHOME` rejects before either child. The observer rejects configured
+    `addopts` unless its exact ordered value is
+    `("--strict-config","--strict-markers","--import-mode=importlib")`, and separately validates
+    the frozen invocation argv. `external_plugins` is exactly the sorted ASCII list
+    `[["hypothesis","6.157.1","pytest11","hypothesispytest",
+    "_hypothesis_pytestplugin"]]`; any other external distribution or entry point rejects. The
+    exact `worker_indicator_count` counts present `config.workerinput`,
+    `PYTEST_XDIST_WORKER`, `PYTEST_XDIST_WORKER_COUNT`, `PYTEST_XDIST_TESTRUNUID`, and each loaded
+    xdist/execnet plugin or module indicator, and must be zero. The runner argv contains no
+    worker, scheduler, rerun, timeout-plugin, coverage-worker, or plugin-injection option beyond
+    built-in `-p no:cacheprovider` and the exact repository observer/proof options. Observer checkpoints
+    require zero worker indicators and no surviving non-main thread. An unknown plugin,
+    distribution/version/entry-point mismatch, injected option, or worker/scheduler residue fails.
+
+    In `--shard` mode the runner first launches exactly
+    `[sys.executable,"-m","pytest","--collect-only","-q","-p","no:cacheprovider",
+    "--basetemp=<collect-basetemp>","--task064-ci-phase=collect",
+    "--task064-ci-nonce=<nonce>","--task064-ci-observation=<collect-result>"]`, with each displayed
+    `name=value` represented as one argv element. It recomputes the complete manifest and all five
+    partitions, then launches exactly one execution child with the same prefix minus
+    `--collect-only`, with phase `execute`, fresh nonce/result/basetemp, exact
+    `--task064-ci-shard-id=<shard-id>`, and the one shard's node IDs appended in original collection
+    order. The `report` execution alone inserts before its node ID
+    the exact proof mode `primed-full`, fresh proof nonce, and proof-observation path options;
+    remainder executions insert none. In `--report-proof` mode the runner launches one execution
+    child for the exact report node with one of the three acceptance-only modes plus fresh proof
+    nonce/path, CI shard ID `report-proof-<mode>`, and the same cache/observer controls; it does not
+    count that invocation as a shard.
+    Every argv and `SC_ARG_MAX` projection uses the final augmented vector. It never uses shell
+    text, a response file, assignment
+    file, retry, restart, or second batch. `TMPDIR`, `TEMP`, and `TMP` name one fresh mode-`0o700`
+    private root below resolved `RUNNER_TEMP`; outside GitHub the runner creates that root below
+    `tempfile.gettempdir()`. `HYPOTHESIS_STORAGE_DIRECTORY`, `PYTHONPYCACHEPREFIX`, and
+    `COVERAGE_FILE` name private children; bytecode writing is disabled. Both children receive no
+    `GITHUB_OUTPUT`, `GITHUB_ENV`, `GITHUB_PATH`, or `GITHUB_STEP_SUMMARY`, and those command files
+    remain unchanged while a child runs. Each child starts a fresh process group. Timeout or
+    residue triggers bounded `SIGTERM`, then `SIGKILL`, complete reap, and failure if any member
+    survives. Standard output/error are each bounded to 2 MiB and removed after validation.
+
+    `tests/conftest.py` accepts exactly the core observer options
+    `--task064-ci-phase={collect,execute}`, `--task064-ci-nonce=<64 lowercase hex>`, and
+    `--task064-ci-observation=<absolute private path>`. All three or none are required; collect mode
+    forbids a shard option, while execute mode requires exactly one
+    `--task064-ci-shard-id` in the closed set `report`, `remainder-0` through `remainder-3`,
+    `report-proof-unprimed-success`, `report-proof-expired-entry`, or
+    `report-proof-ready-teardown`. Absence is completely inert, including plain pytest and nested
+    TASK-064 children, and any partial, duplicated, malformed, inconsistent mode/shard, or
+    foreign-parent path fails before collection. The observer uses only
+    `pytest_addoption`, `pytest_collection_finish`, `pytest_deselected`, `pytest_collectreport`,
+    `pytest_runtest_logstart`, `pytest_runtest_logreport`, `pytest_runtest_logfinish`,
+    `pytest_keyboard_interrupt`, `pytest_internalerror`, and try-last `pytest_sessionfinish`. It
+    records but never selects, deselects, reorders, marks, schedules, retries, launches, changes
+    fixtures/outcomes, or mutates the environment.
+
+    Every private observer JSON uses the stated key insertion order, Python `json.dumps` with
+    `ensure_ascii=True`, `separators=(",", ":")`, no key sorting, and no terminal LF. It permits
+    no optional/extra/duplicate key, BOM, CR/LF, non-ASCII string, non-finite value, bool-as-int, or
+    decode/re-encode difference. The collection packet's exact order is `domain`, `nonce`,
+    `observer_pid`, `observer_parent_pid`, `pytest_exitstatus`, `collect_failed_count`,
+    `collect_skipped_count`, `deselected_nodes`, `interrupted_count`, `internal_error_count`,
+    `external_plugins`, `worker_indicator_count`, `surviving_non_main_thread_count`, `nodes`;
+    domain is `TASK064-CI-COLLECTION-OBSERVATION-V1`. The execution packet adds after the two PIDs
+    exact `shard_id`, then uses `pytest_exitstatus`, the same collect/deselect/interrupt/internal,
+    plugin/worker/thread fields, `unknown_report_count`, `assigned_nodes`, `collected_nodes`,
+    `started_nodes`, `finished_nodes`, `reports`; its domain is
+    `TASK064-CI-EXECUTION-OBSERVATION-V1`. Each report is exactly
+    `[nodeid,when,outcome,wasxfail]`, with `when` in `setup|call|teardown`, `outcome` in
+    `passed|failed|skipped`, and exact bool `wasxfail`, in hook order. Collection packets are at
+    most 400,000 bytes and execution packets at most 1,500,000 bytes.
+
+    The result path must not exist. The observer opens it relative to its validated private parent
+    with `O_CREAT|O_EXCL|O_WRONLY|O_NOFOLLOW|O_CLOEXEC`, mode `0o600`, performs bounded complete
+    write, file `fsync`, proven close, parent `fsync`, and no later mutation. The runner reopens
+    no-follow, requires regular same-UID mode-`0o600` one-link identity, expected nonce/PID/parent
+    PID, bounded size, exact canonical bytes, then unlinks and syncs. A missing, stale, partial,
+    replaced, malformed, or post-exit-inconsistent packet fails.
+
+    Proof mode uses the same private-parent, fresh nonce, exclusive no-follow mode-`0o600`
+    write/fsync/close/parent-fsync, runner readback, unlink, and cleanup protocol. Its child-written
+    packet uses the same compact ASCII/no-LF/no-extra-key canonical rule, has domain
+    `TASK064-REPORT-PROOF-OBSERVATION-V1`, maximum 4,096 bytes, with
+    exact order `domain`, `nonce`, `observer_pid`, `observer_parent_pid`, `mode`, `node_id`,
+    `contract_generation`, `contract_sha256`, `publication_status`, `output_bytes`,
+    `output_sha256`, `cache_state_at_assertion`, `cache_state_after_teardown`,
+    `cache_teardown_completed`, `receipt_consumed`, `final_file_present`, `stage_residue_count`,
+    `status`. It is emitted only by the authenticated fixture finalizer after matching the pending
+    exact-node record, running cache teardown, and proving `EMPTY`. `primed-full` and
+    `unprimed-success` require `PUBLISHED`, positive output length, lowercase SHA-256, asserted
+    `EMPTY`, consumed receipt, final file present, and no stage residue. `expired-entry` requires
+    `NONE`, null output fields, asserted `EMPTY`, unconsumed receipt, no final file, and no stage
+    residue. `ready-teardown` requires `NONE`, null outputs, asserted `READY`, unconsumed receipt,
+    no final file, and no stage residue. Every mode requires post-teardown `EMPTY`, exact true
+    `cache_teardown_completed`, and `PASS`. Missing pending state or an observation written before
+    cache teardown is a failure.
+
+    A passing shard emits canonical `TASK064-CI-SHARD-RESULT-V1` JSON with exact top-level order:
+    `domain`, `shard_id`, `contract_generation`, `contract_sha256`, `event_name`,
+    `candidate_relation`, `candidate_commit_sha`, `candidate_tree_sha`,
+    `tested_checkout_commit_sha`, `tested_checkout_tree_sha`, `tested_checkout_parent_count`,
+    `tested_checkout_second_parent_sha`, `python_version`, `pytest_version`,
+    `python_version_file_sha256`, `uv_lock_sha256`, `full_manifest_count`,
+    `full_manifest_bytes`, `full_manifest_sha256`, `partition_status`, `shard_manifest_count`,
+    `shard_manifest_bytes`, `shard_manifest_sha256`, `selector_bytes_including_nul`,
+    `report_output_bytes`, `report_output_sha256`, `counts`, `sequence_sha256`, `anomalies`,
+    `collection_exit_code`, `test_exit_code`, `collection_elapsed_ns`, `test_elapsed_ns`,
+    `pre_clean`, `post_clean`, `cleanup_status`, `survivor_count`, `status`. It uses the same
+    compact canonical rule, is at most 8,192 bytes, and has SHA-256 over those exact bytes.
+    `candidate_relation` is `SECOND_PARENT` or `SELF`; the second-parent field is candidate SHA for
+    the former and JSON `null` for the latter. `partition_status`, `cleanup_status`, and `status`
+    are `PASS`. The `report` execution alone supplies proof mode `primed-full`; its output
+    length/SHA derive only from the validated proof observation. Remainder executions receive no
+    proof option and both result fields are JSON `null`.
+
+    `counts` has exact order `assigned`, `collected`, `started`, `finished`, `setup_passed`,
+    `call_passed`, `teardown_passed`, each equal to the shard count. `sequence_sha256` has exact
+    order `assigned`, `collected`, `started`, `finished`; each hashes compact insertion-order
+    `{"domain":"TASK064-NODE-SEQUENCE-V1","nodes":[...ordered IDs...]}` with no LF, and all four
+    hashes are equal. `anomalies` has exact order `unknown`, `duplicate`, `failed`, `error`,
+    `skipped`, `xfailed`, `xpassed`, `deselected`, `interrupted`, `unaccounted`, all zero.
+    Ordinary call failure is `failed`; setup/teardown/collection/internal failure is `error`;
+    `wasxfail` plus skipped/passed is `xfailed`/`xpassed`; ordinary skip is `skipped`; invalid or
+    unassigned identity/enum is `unknown`; repeated identity/start/finish/phase is `duplicate`; and
+    any missing, extra, mismatched phase/sequence/exit/packet is `unaccounted`. Both child exits are
+    zero, collection is at most 60,000,000,000 ns, execution at most 720,000,000,000 ns, checkout
+    is clean before and after, and survivor count is zero.
+
+    On GitHub the parent first requires each of `GITHUB_OUTPUT`, `GITHUB_ENV`, `GITHUB_PATH`, and
+    `GITHUB_STEP_SUMMARY` to be an absolute path beneath resolved `RUNNER_TEMP`, and opens it
+    no-follow/CLOEXEC. Each is a regular same-UID one-link file with no group/world write. The
+    parent retains the exact descriptor, requires `GITHUB_OUTPUT` initially zero bytes, and before
+    and after every child compares path and descriptor device/inode/UID/mode/link count,
+    size/mtime/ctime nanoseconds, and a bounded complete raw SHA-256 snapshot. Any change or
+    descriptor/path disagreement fails; CLOEXEC and child-environment scrubbing are not treated as
+    the proof by themselves.
+
+    Only after all validation and cleanup does a GitHub shard append exactly two single-line ASCII
+    outputs through the retained `GITHUB_OUTPUT` descriptor:
+    `task064_packet_b64=<standard padded base64 of canonical packet>\n` and
+    `task064_packet_sha256=<64 lowercase hex>\n`. It file-syncs, exact-readbacks the complete two
+    lines, revalidates descriptor/path identity, and proven-closes. It never writes the other three
+    command files. Outside GitHub it emits only those two lines to otherwise-clean stdout. Failure
+    emits no PASS packet/output and exits nonzero.
+
+    After zero child exit and complete reap, the runner wraps the validated observation as canonical
+    `TASK064-REPORT-PROOF-RESULT-V1`, at most 4,096 bytes, with exact order `domain`, `mode`,
+    `contract_generation`, `contract_sha256`, `candidate_commit_sha`, `candidate_tree_sha`,
+    `tested_checkout_commit_sha`, `tested_checkout_tree_sha`, `node_id`,
+    `observation_sha256`, `publication_status`, `output_bytes`, `output_sha256`,
+    `cache_state_at_assertion`, `cache_state_after_teardown`, `cache_teardown_completed`,
+    `receipt_consumed`, `final_file_present`, `stage_residue_count`, `test_exit_code`,
+    `test_elapsed_ns`, `cleanup_status`, `survivor_count`, `status`. It reproduces the exact child
+    facts, binds the inner canonical digest, and requires zero exit, at most 720,000,000,000 ns,
+    cleanup/status `PASS`, and zero survivors. Every proof child is subject to the same Git,
+    environment, plugin, thread/process, private-temp, bounded-output, command-file snapshot,
+    timeout, and cleanup controls as a shard child. A passing `--report-proof` invocation emits
+    exactly `task064_report_proof_b64=<standard padded base64>\n` and
+    `task064_report_proof_sha256=<64 lowercase hex>\n` to otherwise-clean stdout; failure emits no
+    PASS result.
+19. `.github/workflows/ci.yml` retains checkout, locked installation, lock verification,
+    formatting, lint, strict typing, dependency audit, and foundation health in a non-test
+    `quality_gates` job. It defines exactly five statically named shard jobs—`report`,
+    `remainder_0`, `remainder_1`, `remainder_2`, and `remainder_3`—rather than a dynamic matrix.
+    Every job uses `actions/checkout` with `fetch-depth: 0` and `persist-credentials: false`, the
+    same immutable checkout and locked dependencies on a fresh Ubuntu host. Each shard hard-codes
+    its one matching argument and exposes only the two exact runner outputs. There is no job or step
+    `continue-on-error`, conditional shard omission, masked exit (`|| true` or equivalent), output
+    default, retry, artifact splice, or conditional PASS publication.
+
+    A final job ID `quality`, display name exactly `Quality and security`, uses `if: always()` and
+    explicitly needs `quality_gates`, `report`, `remainder_0`, `remainder_1`, `remainder_2`, and
+    `remainder_3`. It first requires all six `needs.*.result` values to be exactly `success`. For
+    each named shard it requires both outputs nonempty; caps encoded base64 at 10,924 ASCII
+    characters; rejects whitespace, nonalphabet, or invalid padding; strictly decodes at most
+    8,192 bytes; requires `base64.b64encode(decoded)` byte-equal to the supplied text; verifies the
+    output digest; strictly decodes and byte-for-byte re-encodes the canonical packet; and validates
+    the complete schema.
+
+    `--aggregate-static` consumes exactly these fixed workflow-environment names:
+    `TASK064_AGG_QUALITY_GATES_RESULT`, `TASK064_AGG_REPORT_RESULT`,
+    `TASK064_AGG_REMAINDER_0_RESULT`, `TASK064_AGG_REMAINDER_1_RESULT`,
+    `TASK064_AGG_REMAINDER_2_RESULT`, `TASK064_AGG_REMAINDER_3_RESULT`,
+    `TASK064_AGG_REPORT_PACKET_B64`, `TASK064_AGG_REPORT_PACKET_SHA256`,
+    `TASK064_AGG_REMAINDER_0_PACKET_B64`, `TASK064_AGG_REMAINDER_0_PACKET_SHA256`,
+    `TASK064_AGG_REMAINDER_1_PACKET_B64`, `TASK064_AGG_REMAINDER_1_PACKET_SHA256`,
+    `TASK064_AGG_REMAINDER_2_PACKET_B64`, `TASK064_AGG_REMAINDER_2_PACKET_SHA256`,
+    `TASK064_AGG_REMAINDER_3_PACKET_B64`, and
+    `TASK064_AGG_REMAINDER_3_PACKET_SHA256`. The workflow assigns every expression as a
+    fixed `env:` value, never shell interpolation; the runner rejects any missing/empty value,
+    default, or other `TASK064_AGG_` name. Its hard-coded job mapping
+    is `report -> (report,1,302,f0530be0d219c64bbd1b9eb4df635dd138a345e8685172d188d02e177e488a3e,146)`,
+    `remainder_0 -> (remainder-0,600,76664,9946638e834ffa44c0cd1e511c348b1f8226fc078ef79eb9e4100e770de80044,75290)`,
+    `remainder_1 -> (remainder-1,563,72767,e6814eb76767d9462ed9bfa82c85d8e7daebd7265027883290ca88842365dfd0,71471)`,
+    `remainder_2 -> (remainder-2,588,75756,8d86911d7a7cfc4f32022d68be1eaa3d6b459d5a968a462deea188df2369ed5b,74394)`,
+    and
+    `remainder_3 -> (remainder-3,546,71332,69e69516345c674cadf552202b80c392f8297b74b46328278b098b462e25b4ca,70049)`.
+
+    Across packets the aggregator requires identical contract, event, candidate commit/tree,
+    checkout commit/tree, Python/pytest/version-file/lock/full-manifest identities; packet candidate
+    equals workflow `TASK064_CANDIDATE_SHA`; checkout equals `GITHUB_SHA`; and relation is
+    `SECOND_PARENT` for pull requests or `SELF` otherwise. It requires five distinct expected
+    shard IDs; each exact count, sequence, anomaly, exit, time, clean-checkout, and cleanup
+    invariant; sums assigned, collected, started, finished, setup, call, and teardown passes each
+    to exactly 2,298; and requires exactly one report output. Only then may `quality` pass. It is
+    the stable required status while the five shard jobs remain visible. No green workflow grants
+    merge, deployment, production, or live-trading authority.
+
+    Before acceptance, the exact generation-5 candidate must pass one unchanged full serial
+    `uv run pytest` correctness-parity run and two fresh Linux/ext4 executions of every shard with
+    no discarded attempt. The serial run is explicitly exempt from the shard performance ceiling
+    and has a 2,100-second correctness-only deadline. Every shard execution is at most 720 seconds
+    and every complete CI shard job at most 900 seconds. The exact candidate also passes one fresh
+    Linux/ext4 `unprimed-success`, `expired-entry`, and `ready-teardown` proof invocation, each at
+    most 720 seconds with no discarded attempt. The primed and unprimed results each bind their own
+    exact input report's serializer output length/SHA and prove unchanged publication of those
+    bytes; unique generated identities prevent a false cross-process digest-equality requirement.
+
+    The existing report node and those option branches prove prime is file-free and non-consuming;
+    one successful explicit prime per primed invocation; duplicate-prime rejection without
+    refresh; four unique live observations and alias vector `[0,1,0,2,1,0,0,3]`; stale, forced
+    equality-expired, fork/thread/context, copy, source/core/raw/epoch, receipt, success, rollback,
+    collision, post-link, cleanup-uncertainty, and root-finalizer teardown transitions; unchanged
+    successful unprimed publication; and exact same-serializer bytes on both routes. No new test node,
+    hidden parameter ID, or weakened 30-second authenticated child-handshake deadline is allowed.
+    Independent Engineering, Security/Risk, and QA reviews bind this exact contract digest,
+    candidate commit/tree, source and fixture identities, full/shard manifests, serial evidence,
+    both five-job shard-split attempts, all three proof results, and final CI run.
 
 ## Blocked, Awaiting Owner-Supplied Restricted Inputs
 

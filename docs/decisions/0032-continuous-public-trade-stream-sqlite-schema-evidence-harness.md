@@ -4,6 +4,11 @@
 - **Date:** 2026-07-29
 - **Decision owners:** Project owner, Engineering Department, Security Department, Risk
   Department, Data Department, and Audit and Assurance Department
+- **Generation-5 amendment:** `DRAFT`; normalized TASK-064 contract SHA-256 `PENDING`.
+  Generation 4, normalized SHA-256
+  `b079966273ef43d726ecc7aa64693189e7234a94397e965e334fe215eac60aa4`, is
+  superseded before implementation; generation 5 starts only from the functionally passing
+  generation-3 candidate `9ff70a8aa34e5bf154679957c913bb21e93a3d5e`.
 
 ## Task Contract
 
@@ -29,8 +34,38 @@ This decision governs only:
 - a test-only facade that revalidates and returns the exact frozen TASK-062 command, query,
   receipt, page, view, outcome, and retry-disposition models.
 
-The controlling TASK-064 contract is generation 3 with normalized SHA-256
-`86e3650608f2f1c96a9aa272b2b9cd597bc3d5ac188a39937afb974536d11ccb`.
+The controlling TASK-064 contract is generation 5. It becomes executable only when its BACKLOG
+generation line is `STATUS=FROZEN`, records the exact normalized SHA-256, and all three independent
+contract reviews pass. Until then, generation 3 with normalized SHA-256
+`86e3650608f2f1c96a9aa272b2b9cd597bc3d5ac188a39937afb974536d11ccb` remains historical
+functional evidence, not current write authority.
+
+### Generation-5 amendment
+
+Generation 5 preserves every generation-3 schema, fixture, database, query, transaction, fault,
+backup, copy, authority, receipt, publication, and test semantic. The exact unchanged raw fixture
+SHA-256 values are:
+
+- `schema.sql`:
+  `1263b831a3e73bfc730beef6df7df48fce0e3654aa806672650de9f40b8a3e37`;
+- `schema_descriptor.json`:
+  `bb33dc9cb549be484c5dc7855abace6d851682e50883e51919a9169cdaae431a`; and
+- `schema_fingerprint.txt`:
+  `8a2508de6e018c67e9b18393cb0a5517cef3bea5df785bf432299a49a2a12ef8`, containing exactly
+  `sha256:0410c1f08390a411c73427b3d07c542f3d1828def7c6adebab51cd57375355b3`
+  followed by one LF.
+
+The amendment makes only two bounded changes:
+
+1. the normal parent may explicitly prime one receipt-local report-validation entry before calling
+   the unchanged successful writer; and
+2. CI runs the frozen 2,298-node suite as five separate ordinary-pytest jobs instead of one
+   monolithic job.
+
+Neither change adds production code, runtime authority, a database path, a dependency, a lockfile
+change, xdist, execnet, an in-process test worker, a retry, or a new pytest node. Generation-4
+compact workers, prefetch, sandbox, cgroup, benchmark protocols, and implementation branches are
+not carried forward.
 
 ### Out of Scope
 
@@ -605,6 +640,170 @@ parent capability. Tamper, splice, shallow-query, seal-transition, second-digest
 report regressions, and the successful publication path remain in the normal parent and are not
 repeated by the close children.
 
+### Generation-5 bounded report prime
+
+The optional API is exactly:
+
+```python
+def prime_evidence_report_validation(
+    pytest_root: Path,
+    *,
+    receipt: _EvidenceReceipt,
+    report: EvidenceReport,
+) -> None:
+    ...
+```
+
+Prime performs the complete generation-3 receipt, root, semantic report, canonical-byte,
+live-source, gate, backup-manifest, source-fingerprint, and cleanup validation. It writes no file,
+consumes nothing, returns no token or authority, and returns exactly `None`. It is never implicit.
+An unprimed `write_evidence_report` retains the complete generation-3 successful path.
+
+One typed closure-local entry may remain for one exact receipt, at most one active attempt, and an
+absolute 120-monotonic-second lifetime. It binds the exact root path object and registration; run,
+ledger, receipt, receipt evidence, and source report objects; PID, thread, node, and active context;
+generation/digest/schema/source identities;
+receipt-evidence and report-core digests; complete canonical report bytes/length/digest; and the
+complete live epoch. `TASK064-REPORT-CORE-V1` covers the 40 non-evidence report fields in dataclass
+declaration order followed by the receipt evidence digest through the existing bounded canonical
+evidence normalizer. `TASK064-REPORT-LIVE-VALIDATION-V1` separately binds the four
+ordinal-ordered fresh summaries/tails and the ordinal-zero current projection.
+
+`TASK064-REPORT-LIVE-EPOCH-V1` uses exact role order `bootstrap`, `backup_source`, `backup`,
+`restore`, `concurrent_source`, `concurrent_backup`, `generation_source`,
+`generation_destination` and exact token-identity alias vector `[0,1,0,2,1,0,0,3]`. Exactly four
+unique token objects bind their registrations, generation IDs, summaries, tails, and complete
+descriptor-validated closed-file manifests. The canonical payload is compact sorted-key ASCII JSON
+with no LF and exact keys `domain`, `roles`, `entries`. Each ordinal entry binds exact scalar
+pytest-root, generation, and database registration identity; summary and tail
+`_evidence_payload_digest` values; and fixed-order `store.sqlite3`, WAL, and SHM observations.
+Absent files use `present=false` plus null metadata. Present files bind descriptor/path agreement,
+device, inode, UID, mode `0o600`, one link, size, mtime/ctime nanoseconds, and complete raw SHA-256.
+The main file is bounded at 16 MiB and WAL/SHM at 2 MiB, read in 65,536-byte blocks; no other
+generation entry is accepted. Every present descriptor proves stable before/after metadata,
+complete bounded read, and trailing EOF.
+
+Prime snapshots the four file sets, performs live SQLite validation exactly once to obtain the
+summaries/tails, snapshots again, and requires exact pre/post equality. A cached writer checks all
+registration and file identities at entry and immediately before link. Token, registration, root,
+generation, and database path object identities remain outside the digest and must match exactly.
+Semantic/type/alias/value disagreement is `CORRUPT`; OS, descriptor, inventory, drift, or cleanup
+failure is sanitized `UNAVAILABLE`.
+
+The only states are `EMPTY`, `VALIDATING`, `READY`, and `PUBLISHING`. Prime is legal only from
+`EMPTY`; it installs `VALIDATING` first and clears on failure. After successful post-validation it
+captures the sealed `time.monotonic_ns`, issues one exact nonnegative nanosecond timestamp, and
+checked-adds `120_000_000_000`. An entry is live only while observed time is strictly below expiry;
+every later clock value must be an exact nonnegative built-in integer no lower than the prior
+accepted value. Clock failure/regression is `UNAVAILABLE`; equality expiry clears and rejects
+`CORRUPT` without receipt consumption. Duplicate exact prime rejects without refresh. An unrelated
+object/thread/node/context rejects without selecting or changing the owner's valid entry; owner
+object/source/receipt drift clears. The fork-child hook clears only the inherited child copy.
+Reentrant prime/write in `VALIDATING` or `PUBLISHING` latches cleanup uncertainty, clears, and makes
+both calls fail.
+
+A matching writer enters `PUBLISHING` before C0. Existing receipt checkpoints C0 through C3 remain
+unchanged and there is no fifth checkpoint. Clean rollback may retain `READY` only with no remaining
+publication, certain cleanup, every binding and live epoch unchanged, and the original unrefreshed
+deadline. Link-then-fail requires the owned inode absent from both names; collision additionally
+requires the foreign final inode and bytes unchanged. Success, any failure after readback begins,
+remaining publication, terminal receipt, ambiguous cleanup, or root teardown clears.
+
+The same report node has no new parameter ID. Inert all-or-none mode, 64-hex nonce, and private
+observation-path CLI options select only `primed-full`, `unprimed-success`, `expired-entry`, or
+`ready-teardown` proof flow.
+`_observe_task064_report_validation_for_test` exposes only state/presence/issue/expiry scalars and
+`_force_task064_report_validation_expiry_for_test` can only shorten the exact owner's deadline.
+The test body retains only a pending scalar record. The authenticated fixture finalizer captures
+the asserted state, clears the entry before root-scope exit/revocation, proves `EMPTY`, and only
+then exclusively publishes canonical `TASK064-REPORT-PROOF-OBSERVATION-V1` bound to nonce and
+child/runner PIDs. The runner validates it after zero exit/reap and wraps it in
+`TASK064-REPORT-PROOF-RESULT-V1`; the report shard's output identity derives only from its
+`primed-full` observation. Separate bounded proof results bind
+unprimed success, equality expiry, and READY teardown. Separately generated reports intentionally
+carry unique generation identities, so their digests are not compared. Each route instead proves
+that its own exact input report is serialized by the same captured pure serializer and that those
+exact returned bytes are published unchanged.
+
+### Generation-5 native CI split
+
+Every job independently collects and validates the exact sorted canonical ASCII JSON full manifest:
+
+```text
+domain: TASK064-NODE-MANIFEST-V1
+count: 2298
+bytes: 296078
+sha256: 96a15ecb6af6469f6da82bace28350163b99d48b8226d867830f7aec5816b483
+```
+
+The exact report node is forced into `report`. Every other node uses the unsigned big-endian first
+eight bytes of SHA-256 over its ASCII node ID modulo four and enters `remainder-0` through
+`remainder-3`, while its original collection order is preserved for execution. Shard manifests use
+domain `TASK064-NODE-SHARD-V1` and bind the full digest, shard ID, and sorted node IDs:
+
+| Shard | Nodes | Canonical bytes | SHA-256 |
+|---|---:|---:|---|
+| `report` | 1 | 302 | `f0530be0d219c64bbd1b9eb4df635dd138a345e8685172d188d02e177e488a3e` |
+| `remainder-0` | 600 | 76,664 | `9946638e834ffa44c0cd1e511c348b1f8226fc078ef79eb9e4100e770de80044` |
+| `remainder-1` | 563 | 72,767 | `e6814eb76767d9462ed9bfa82c85d8e7daebd7265027883290ca88842365dfd0` |
+| `remainder-2` | 588 | 75,756 | `8d86911d7a7cfc4f32022d68be1eaa3d6b459d5a968a462deea188df2369ed5b` |
+| `remainder-3` | 546 | 71,332 | `69e69516345c674cadf552202b80c392f8297b74b46328278b098b462e25b4ca` |
+
+The runner accepts only lowercase 40-hex Git identities. Tested `HEAD` equals `GITHUB_SHA`.
+Pull-request checkout has exactly two parents and exact second parent
+`TASK064_CANDIDATE_SHA`; push/manual checkout is the candidate itself. Candidate ancestry and both
+candidate/checkout tree objects are proven with complete fetched history before collection.
+
+Inherited pytest option/plugin/autoload variables and Python import-path overrides are rejected.
+Repository `addopts` must equal the frozen ordered
+`--strict-config`, `--strict-markers`, `--import-mode=importlib` tuple. The sole exact external
+plugin inventory is
+`[["hypothesis","6.157.1","pytest11","hypothesispytest","_hypothesis_pytestplugin"]]`.
+The worker-indicator count covers pytest worker input, the three named xdist environment signals,
+and every loaded xdist/execnet plugin/module indicator and must be zero. Scheduler/retry/plugin
+injection and thread/process residue are rejected mechanically. Each child has one private
+temp/cache tree, no GitHub command-file environment, bounded stdout/stderr, a new process group,
+and bounded terminate/kill/reap cleanup.
+
+The observer requires exact phase, 64-hex nonce, and private-result CLI options plus an
+execution-only closed shard/proof identity, or is wholly inert. It uses only collection,
+deselection, collect-report, runtest start/report/finish,
+interrupt/internal-error, and final session hooks. Compact canonical ASCII packets bind
+nonce/PIDs, plugin/worker state, collection errors, assigned/collected/started/finished ordered
+IDs, and every setup/call/teardown outcome. Result creation is exclusive mode `0o600` below a
+mode-`0o700` private parent, synced and exact-readback validated. It never selects, orders, marks,
+schedules, retries, launches, or changes an outcome.
+
+Each selected vector is an argv array below the frozen 131,072-byte ceiling, never shell text.
+The exact final argv/environment projection includes every NUL and pointer plus a fixed 32,768-byte
+reserve and must fit positive `SC_ARG_MAX`; each string is independently within the Linux
+131,072-byte including-NUL ceiling. Acceptance requires exact assigned/collected/started/finished
+sequence equality, one passing setup/call/teardown per node, all 2,298 nodes across the split, zero
+unknown/duplicate/fail/error/skip/xfail/xpass/deselect/interrupt/unaccounted outcomes, collection
+within 60 seconds, test execution within 720 seconds, and no process residue.
+
+GitHub Actions retains every non-test quality/security gate and uses five statically named fresh
+Ubuntu jobs—one per exact shard—with ordinary pytest. Checkout fetches complete history and does
+not persist credentials. Each named job runs one collect-only process and one test-executing pytest
+parent, then exposes only standard-base64 canonical `TASK064-CI-SHARD-RESULT-V1` plus its digest.
+No matrix, artifact splice, conditional omission, masked failure, output default, retry, or
+`continue-on-error` is accepted.
+
+One final stable `Quality and security` aggregator explicitly needs the non-test gates plus all five
+named jobs. It requires every result `success`, decodes and fully validates every exact packet,
+hard-binds the five expected shard identities, proves shared Git/contract/runtime/manifest
+identities, five distinct shards, exact sums of 2,298 for every phase, zero anomalies, and complete
+cleanup. Base64 input is capped before strict decoding and must reproduce exactly on re-encoding.
+The aggregator receives the six results and ten packet/digest values only through the frozen
+`TASK064_AGG_*` environment names, never shell interpolation or defaults.
+
+Before children, each GitHub command file is descriptor/path validated below `RUNNER_TEMP` and
+bound by identity, mode, size, mtime/ctime, and raw digest; `GITHUB_OUTPUT` is initially empty.
+Every child must leave those snapshots unchanged. Only a fully passing parent appends the two exact
+output lines through its retained no-follow/CLOEXEC descriptor, syncs, and exact-readbacks them;
+the other command files are never written. The shard jobs remain visible. No workflow success
+grants merge, deployment, production, or trading authority.
+
 ## Security and Authority Boundary
 
 All records are synthetic. No test may open a pre-existing or non-harness-owned database. The
@@ -648,6 +847,8 @@ Positive:
 - Tail/history ownership, corruption classification, row bounds, crash seams, backup, restore, and
   same-format copy have deterministic generated-data proofs.
 - Golden schema evidence cannot self-bless during ordinary tests.
+- Unchanged report semantics avoid one repeated live-store validation, and the full test suite fits
+  the bounded CI window without putting raw-fork tests inside threaded workers.
 
 Costs and residuals:
 
@@ -661,15 +862,20 @@ Costs and residuals:
   latency, backup-destination, retention, monitoring, or recovery behavior.
 - The compiled but unreachable FTS surface remains a production blocker pending a separately
   governed current runtime.
+- The frozen node manifest and hash partition must be reviewed whenever collection changes; static
+  shard-split jobs are visible in addition to the stable final required status.
 
 ## Verification and Completion Gate
 
 TASK-064 remains the current task until the exact immutable candidate:
 
-1. passes formatting, lint, strict typing, complete tests, lockfile verification, dependency audit,
-   health slice, and final-diff inspection;
-2. has independent Engineering, Security/Risk, and QA approvals bound to the same generation-3
-   digest, candidate head SHA, and CI evidence;
+1. passes formatting, lint, strict typing, one unchanged full serial correctness-parity run with a
+   2,100-second deadline, two complete five-job shard-split attempts, the three exact report-proof
+   modes, lockfile verification, dependency audit, health slice, and final-diff inspection with all
+   2,298 nodes accounted for and each shard/proof execution at most 720 seconds;
+2. has independent Engineering, Security/Risk, and QA approvals bound to the same generation-5
+   digest, candidate head/tree, full/shard manifests, serial evidence, both five-job shard-split
+   attempts, report-proof results, and final CI evidence;
 3. is published as a draft pull request with all in-scope evidence `PASS`;
 4. receives exact owner merge authorization naming that pull request and its current head SHA;
 5. merges without changing the authorized head; and
@@ -680,10 +886,11 @@ remains blocked and authorization remains denied.
 
 ## Rollback
 
-Rollback is a revert of the exact TASK-064 candidate. It removes only the committed text schema,
-descriptor, fingerprint, harness, tests, and documentation. Pytest cleanup removes only exact
-harness-owned generated artifacts. Rollback never opens, repairs, migrates, routes, truncates, or
-deletes an operator database and changes no production runtime.
+Rollback is a revert of the exact generation-5 candidate. It removes only the bounded report-prime
+changes, inert observer, CI runner/workflow changes, tests, and contract amendment, restoring the
+functionally passing generation-3 implementation. Pytest cleanup removes only exact harness-owned
+generated artifacts. Rollback never opens, repairs, migrates, routes, truncates, or deletes an
+operator database and changes no production runtime.
 
 ## Review Triggers
 
@@ -697,6 +904,8 @@ Review or supersede this decision before changing:
   extension reachability, or error-code mapping;
 - bootstrap root, filename, URI, ownership, permissions, alias handling, or cleanup;
 - transaction statements, seam definitions, bounded-read arithmetic, query plans, backup/restore,
-  copy, workload matrix, thresholds, report fields, or dispositions; or
+  copy, workload matrix, thresholds, report fields, dispositions, prime lifetime/bindings/state,
+  node-manifest serialization/digest, partition function, shard identity, outcome accounting,
+  timeout, process cleanup, or workflow job graph; or
 - any production import, adapter, runtime, operator path/data, migration, retention, deployment,
   durability, capacity, RPO/RTO, readiness, or trading capability.
