@@ -3815,7 +3815,7 @@ def _build_pytest_root_authority() -> tuple[
             "_bind_task064_harness_module",
             "e4bba9b8f370dc1c66fcf977d36438dc870ade6792cd281e1f4ff5ed0fbfc330",
             34,
-            "0a7c2da8395f69a6fb087b636f359bc5953b01e5d5ad169e6419b788b6bb4738",
+            "5bbd60cc735fe486754802b0558776b4f5437de520e30a373aba33c9bc39955f",
         ),
     )
     real_getpid = os.getpid
@@ -9804,6 +9804,7 @@ def _build_evidence_receipt_authority(
             type(receipt) is not _EvidenceReceipt
             or type(evidence) is not GeneratedEvidenceAggregate
             or type(require_exact_evidence) is not bool
+            or (require_exact_evidence and receipt.evidence is not evidence)
         ):
             return False
         record = issued.get(id(receipt.run))
@@ -9837,6 +9838,9 @@ def _build_evidence_receipt_authority(
             or len(cast(tuple[object, ...], record["gate_snapshots"])) != len(receipt.gates)
         ):
             return False
+        # The fresh aggregate digest above traverses all twelve ordered payload objects. The
+        # loop retains their exact receipt/snapshot identities and stored digests; the sealed
+        # observation validator supplies the one remaining live per-gate proof.
         for ordinal, (gate, snapshot) in enumerate(
             zip(
                 receipt.gates,
@@ -9846,10 +9850,6 @@ def _build_evidence_receipt_authority(
         ):
             exact_gate, gate_name, payload, payload_digest = snapshot
             observation = cast(tuple[_EvidenceObservation, ...], record["observations"])[ordinal]
-            try:
-                current_digest = _evidence_payload_digest(gate.payload)
-            except HarnessFailure:
-                return False
             if (
                 type(gate) is not _GateEvidenceReceipt
                 or gate is not exact_gate
@@ -9857,15 +9857,11 @@ def _build_evidence_receipt_authority(
                 or gate.gate != GENERATED_EVIDENCE_GATES[ordinal]
                 or gate.payload is not payload
                 or gate.payload_digest != payload_digest
-                or current_digest != payload_digest
                 or not validate_gate_observation(observation, receipt.run, ordinal)
                 or ledger.observations.get(ordinal) is not observation
             ):
                 return False
-        return not require_exact_evidence or (
-            receipt.evidence is evidence
-            and receipt.evidence_digest == _evidence_payload_digest(evidence)
-        )
+        return True
 
     def prepare_consumption(
         receipt: _EvidenceReceipt,
@@ -9993,20 +9989,16 @@ def _validate_evidence_receipt_unbound(
     ):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     if require_exact_evidence:
-        if receipt.evidence is not evidence or receipt.evidence_digest != _evidence_payload_digest(
-            evidence
-        ):
+        if receipt.evidence is not evidence:
             raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        # The issued validator has just recomputed the complete aggregate digest. Keep the
+        # independent ordered name/object mapping check without duplicating content hashing.
         for receipt_gate, (name, payload) in zip(
             receipt.gates,
             gate_payloads,
             strict=True,
         ):
-            if (
-                receipt_gate.gate != name
-                or receipt_gate.payload is not payload
-                or receipt_gate.payload_digest != _evidence_payload_digest(payload)
-            ):
+            if receipt_gate.gate != name or receipt_gate.payload is not payload:
                 raise HarnessFailure(HarnessFailureCode.CORRUPT)
     return ledger
 

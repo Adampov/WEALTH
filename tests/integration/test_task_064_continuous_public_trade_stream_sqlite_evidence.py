@@ -3475,6 +3475,71 @@ def test_report_close_orchestration_keeps_full_positive_evidence_and_parent_nega
         for node in ast.walk(pass_fds)
     )
 
+    harness_source = Path(harness.__file__).read_text(encoding="utf-8")
+    harness_tree = ast.parse(harness_source)
+    receipt_authority = next(
+        node
+        for node in harness_tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_build_evidence_receipt_authority"
+    )
+    issued_receipt_validator = next(
+        node
+        for node in receipt_authority.body
+        if isinstance(node, ast.FunctionDef) and node.name == "validate"
+    )
+    issued_validator_source = ast.get_source_segment(
+        harness_source,
+        issued_receipt_validator,
+    )
+    assert issued_validator_source is not None
+    assert issued_validator_source.count("_evidence_payload_digest(") == 1
+    for retained_guard in (
+        "receipt.evidence is not evidence",
+        "gate is not exact_gate",
+        "gate.payload is not payload",
+        "gate.payload_digest != payload_digest",
+        "validate_gate_observation(observation, receipt.run, ordinal)",
+        "ledger.observations.get(ordinal) is not observation",
+    ):
+        assert retained_guard in issued_validator_source
+
+    unbound_receipt_validator = next(
+        node
+        for node in harness_tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_validate_evidence_receipt_unbound"
+    )
+    unbound_validator_source = ast.get_source_segment(
+        harness_source,
+        unbound_receipt_validator,
+    )
+    assert unbound_validator_source is not None
+    assert "_evidence_payload_digest(" not in unbound_validator_source
+    for retained_exact_mapping in (
+        "receipt.evidence is not evidence",
+        "receipt_gate.gate != name",
+        "receipt_gate.payload is not payload",
+    ):
+        assert retained_exact_mapping in unbound_validator_source
+
+    gate_payload_helper = next(
+        node
+        for node in harness_tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_generated_gate_payloads"
+    )
+    gate_payload_return = next(
+        node for node in gate_payload_helper.body if isinstance(node, ast.Return)
+    )
+    assert isinstance(gate_payload_return.value, ast.Tuple)
+    observed_gate_mapping = tuple(
+        (
+            cast(ast.Constant, item.elts[0]).value,
+            cast(ast.Attribute, item.elts[1]).attr,
+        )
+        for item in gate_payload_return.value.elts
+        if isinstance(item, ast.Tuple) and len(item.elts) == 2
+    )
+    assert observed_gate_mapping == tuple((gate, gate) for gate in harness.GENERATED_EVIDENCE_GATES)
+
 
 def test_fresh_subprocess_pycache_prefix_excludes_valid_stale_pytest_rewrite_pyc(
     monkeypatch: pytest.MonkeyPatch,
@@ -11709,9 +11774,9 @@ def test_pipe_io_is_centralized_eintr_safe_and_uses_one_deadline() -> None:
         "read": {
             "_read_process_packet",
             "_closed_file_manifest",
-            "_write_evidence_report_unbound",
+            "_publish_evidence_report_bytes_unbound",
         },
-        "write": {"_write_process_packet", "_write_evidence_report_unbound"},
+        "write": {"_write_process_packet", "_publish_evidence_report_bytes_unbound"},
     }
 
     real_selector_factory = selectors.DefaultSelector
@@ -14691,6 +14756,123 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
         assert not report_path.exists()
         assert not tuple(tmp_path.glob(".task064-evidence-*.tmp"))
     assert hostile_report_value.items_calls == 0
+
+    reordered_connection_profiles = tuple(reversed(original_connection_profiles))
+    assert reordered_connection_profiles != original_connection_profiles
+    exact_gate_payloads = tuple(
+        getattr(evidence, gate) for gate in harness.GENERATED_EVIDENCE_GATES
+    )
+    assert len({id(payload) for payload in exact_gate_payloads}) == len(
+        harness.GENERATED_EVIDENCE_GATES
+    )
+    private_validate_receipt = cast(
+        Callable[..., object],
+        inspect.getclosurevars(harness.write_evidence_report).nonlocals["validate_receipt"],
+    )
+    live_evidence_digest = harness._evidence_payload_digest
+    for require_exact_evidence in (False, True):
+        aggregate_digest_calls = 0
+        gate_payload_digest_calls = 0
+
+        def count_receipt_validation_digests(value: object) -> str:
+            nonlocal aggregate_digest_calls
+            nonlocal gate_payload_digest_calls
+            if value is evidence:
+                aggregate_digest_calls += 1
+            if any(value is payload for payload in exact_gate_payloads):
+                gate_payload_digest_calls += 1
+            return live_evidence_digest(value)
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(
+                harness,
+                "_evidence_payload_digest",
+                count_receipt_validation_digests,
+            )
+            assert (
+                private_validate_receipt(
+                    tmp_path,
+                    evidence_receipt,
+                    evidence,
+                    require_exact_evidence,
+                )
+                is evidence_ledger
+            )
+        assert aggregate_digest_calls == 1
+        assert gate_payload_digest_calls == len(harness.GENERATED_EVIDENCE_GATES)
+
+    copied_evidence = replace(evidence)
+    copied_evidence_digest_calls = 0
+
+    def count_copied_evidence_digests(value: object) -> str:
+        nonlocal copied_evidence_digest_calls
+        copied_evidence_digest_calls += 1
+        return live_evidence_digest(value)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            harness,
+            "_evidence_payload_digest",
+            count_copied_evidence_digests,
+        )
+        with pytest.raises(harness.HarnessFailure) as copied_exact_evidence:
+            private_validate_receipt(
+                tmp_path,
+                evidence_receipt,
+                copied_evidence,
+                True,
+            )
+    assert copied_exact_evidence.value.code is harness.HarnessFailureCode.CORRUPT
+    assert copied_evidence_digest_calls == 0
+
+    for mutation_checkpoint in range(1, 5):
+        aggregate_checkpoint_calls = 0
+        checkpoint_mutated = False
+
+        def mutate_before_receipt_checkpoint(
+            value: object,
+            *,
+            _mutation_checkpoint: int = mutation_checkpoint,
+        ) -> str:
+            nonlocal aggregate_checkpoint_calls
+            nonlocal checkpoint_mutated
+            if value is evidence:
+                aggregate_checkpoint_calls += 1
+                if aggregate_checkpoint_calls == _mutation_checkpoint:
+                    object.__setattr__(
+                        summary,
+                        "connection_profiles",
+                        reordered_connection_profiles,
+                    )
+                    checkpoint_mutated = True
+            return live_evidence_digest(value)
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(
+                harness,
+                "_evidence_payload_digest",
+                mutate_before_receipt_checkpoint,
+            )
+            try:
+                with pytest.raises(harness.HarnessFailure) as checkpoint_mutation:
+                    harness.write_evidence_report(
+                        tmp_path,
+                        receipt=evidence_receipt,
+                        report=complete_report,
+                    )
+            finally:
+                object.__setattr__(
+                    summary,
+                    "connection_profiles",
+                    original_connection_profiles,
+                )
+        assert checkpoint_mutated
+        assert aggregate_checkpoint_calls == mutation_checkpoint
+        assert checkpoint_mutation.value.code is harness.HarnessFailureCode.CORRUPT
+        assert not report_path.exists()
+        assert not tuple(tmp_path.glob(".task064-evidence-*.tmp"))
+    assert evidence_ledger.receipt is evidence_receipt
+    assert not evidence_ledger.consumed
 
     with pytest.raises(harness.HarnessFailure) as wrong_report_type:
         harness.write_evidence_report(
