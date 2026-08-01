@@ -7,6 +7,7 @@ import contextlib
 import contextvars
 import dis
 import errno
+import fcntl
 import hashlib
 import importlib.util
 import inspect
@@ -16,6 +17,7 @@ import os
 import secrets
 import selectors
 import signal
+import socket
 import sqlite3
 import stat
 import subprocess
@@ -28,7 +30,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import CodeType, FunctionType
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Never, cast
 from uuid import UUID
 
 import pytest
@@ -187,6 +189,8 @@ def _run_task064_pytest_child(
         pytest_root,
         label=pycache_label,
     )
+    if protocol == "report_close":
+        raise AssertionError("report-close children require the authenticated authority launcher")
     provenance = harness._issue_task064_child_provenance(
         pytest_root,
         protocol,
@@ -209,7 +213,14 @@ def _run_task064_pytest_child(
             ),
             cwd=Path(__file__).resolve().parents[2],
             env=environment,
-            pass_fds=(provenance.descriptor,),
+            pass_fds=tuple(
+                descriptor
+                for descriptor in (
+                    provenance.descriptor,
+                    provenance.artifact_descriptor,
+                )
+                if descriptor >= 0
+            ),
             capture_output=True,
             text=True,
             timeout=timeout_seconds,
@@ -296,6 +307,7 @@ def _build_active_task064_pytest_root_fixture() -> Callable[..., object]:
     authenticate_child_provenance = harness._authenticate_task064_child_provenance
     activate_child_provenance = harness._activate_task064_child_provenance
     claim_post_return_child_provenance = harness._claim_task064_post_return_child_provenance
+    child_ticket_is_report_close = harness._task064_child_ticket_is_report_close
     claim_child_dispatch_provenance = harness._claim_task064_child_dispatch_provenance
     finish_child_provenance = harness._finish_task064_child_provenance
     cancel_child_provenance = harness._cancel_task064_child_provenance
@@ -368,6 +380,12 @@ def _build_active_task064_pytest_root_fixture() -> Callable[..., object]:
             is claim_post_return_child_provenance
             and getattr_value(
                 harness_module,
+                "_task064_child_ticket_is_report_close",
+                None,
+            )
+            is child_ticket_is_report_close
+            and getattr_value(
+                harness_module,
                 "_claim_task064_child_dispatch_provenance",
                 None,
             )
@@ -409,6 +427,7 @@ def _build_active_task064_pytest_root_fixture() -> Callable[..., object]:
         permit = None
         try:
             activate_child_provenance(ticket, node_id, tmp_path)
+            publication_only = child_ticket_is_report_close(ticket, node_id)
             replay_mode = claim_post_return_child_provenance(ticket, node_id)
             replay_fixture = unwrap_fixture(sealed_exported_fixture)
             if (
@@ -416,7 +435,11 @@ def _build_active_task064_pytest_root_fixture() -> Callable[..., object]:
                 or replay_fixture is not sealed_raw_fixture
             ):
                 raise runtime_error_type("invalid TASK064 pytest fixture callable")
-            permit = begin_registration(node_id, tmp_path)
+            permit = begin_registration(
+                node_id,
+                tmp_path,
+                publication_only,
+            )
             fixture_roots = (
                 temp_path_mktemp(tmp_path_factory, "task064-secondary-0"),
                 temp_path_mktemp(tmp_path_factory, "task064-secondary-1"),
@@ -494,6 +517,704 @@ _active_task064_pytest_root = _build_active_task064_pytest_root_fixture()
 del _build_active_task064_pytest_root_fixture
 
 
+def _assert_task064_report_provenance_packet_boundaries(
+    provenance: harness._Task064ChildProvenance,
+    *,
+    target_node_id: str,
+    sibling_artifact_descriptor: int,
+    pycache_prefix: Path,
+) -> None:
+    original_packet_raw = os.pread(provenance.descriptor, 8_192, 0)
+    original_packet = cast(dict[str, object], json.loads(original_packet_raw))
+    assert not any(key.startswith("authority_") for key in original_packet)
+    original_artifact = os.pread(
+        provenance.artifact_descriptor,
+        cast(int, original_packet["artifact_length"]) + 1,
+        0,
+    )
+    assert len(original_artifact) == original_packet["artifact_length"]
+    marker_identity = provenance.marker_path.lstat()
+    artifact_identity = os.fstat(provenance.artifact_descriptor)
+    assert harness._probe_task064_parent_attestation_binding(
+        provenance,
+        hashlib.sha256(original_packet_raw).hexdigest(),
+    )
+
+    def canonical_packet(packet: dict[str, object]) -> bytes:
+        return json.dumps(
+            packet,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+
+    def rewrite_marker(raw: bytes) -> None:
+        os.ftruncate(provenance.descriptor, 0)
+        assert os.pwrite(provenance.descriptor, raw, 0) == len(raw)
+        os.fsync(provenance.descriptor)
+
+    def reject(packet: dict[str, object]) -> None:
+        hostile_raw = canonical_packet(packet)
+        hostile_digest = hashlib.sha256(hostile_raw).hexdigest()
+        assert not harness._probe_task064_parent_attestation_binding(
+            provenance,
+            hostile_digest,
+        )
+        rewrite_marker(hostile_raw)
+        envelope = cast(dict[str, object], json.loads(provenance.envelope))
+        envelope["packet_sha256"] = hostile_digest
+        hostile_envelope = json.dumps(
+            envelope,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        # This probe is deliberately non-authorizing: it proves the closed broker
+        # remains bound to the original packet digest without arming or spawning.
+        assert json.loads(hostile_envelope)["packet_sha256"] == hostile_digest
+        assert provenance.marker_path.exists()
+        assert provenance.marker_path.lstat().st_ino == marker_identity.st_ino
+
+    scalar_mutations: tuple[tuple[str, object], ...] = (
+        ("artifact_descriptor", provenance.descriptor),
+        ("artifact_descriptor", sibling_artifact_descriptor),
+        ("artifact_device", cast(int, original_packet["artifact_device"]) + 1),
+        ("artifact_inode", cast(int, original_packet["artifact_inode"]) + 1),
+        ("artifact_uid", cast(int, original_packet["artifact_uid"]) + 1),
+        ("artifact_mode", 0o400),
+        ("artifact_nlink", 1),
+        ("artifact_length", original_packet["artifact_length"] + 1),
+        ("artifact_sha256", "0" * 64),
+        ("artifact_nonce", original_packet["nonce"]),
+        ("artifact_deadline_ns", time.monotonic_ns() - 1),
+        ("artifact_deadline_ns", time.monotonic_ns() + 901_000_000_000),
+        ("contract_generation", cast(int, original_packet["contract_generation"]) + 1),
+        ("contract_digest", "0" * 64),
+        ("schema_fingerprint", "sha256:" + "0" * 64),
+        ("parent_pid", os.getpid() + 1),
+        ("issuer_node_id", f"{target_node_id}::wrong-issuer"),
+        ("target_node_id", f"{target_node_id}::wrong-target"),
+        ("mode", "task064-wrong-mode"),
+        ("publication_nonce", original_packet["nonce"]),
+        (
+            "publication_run_digest",
+            "0" * 64,
+        ),
+        ("publication_root_inode", cast(int, original_packet["publication_root_inode"]) + 1),
+        ("publication_inode", cast(int, original_packet["publication_inode"]) + 1),
+        ("publication_nlink", 0),
+        ("publication_process_id", os.getpid() + 1),
+        ("publication_thread_id", 0),
+        ("publication_node_id", f"{target_node_id}::wrong-publication-node"),
+        ("publication_context_digest", "0" * 64),
+        ("publication_expires_ns", time.monotonic_ns() - 1),
+    )
+    try:
+        for key, hostile_value in scalar_mutations:
+            packet = cast(dict[str, object], json.loads(original_packet_raw))
+            packet[key] = hostile_value
+            reject(packet)
+        packet = cast(dict[str, object], json.loads(original_packet_raw))
+        source_fingerprints = cast(list[list[str]], packet["source_fingerprints"])
+        source_fingerprints[0][1] = "0" * 64
+        reject(packet)
+
+        read_write_alias = os.open(
+            f"/proc/self/fd/{provenance.artifact_descriptor}",
+            os.O_RDWR | getattr(os, "O_CLOEXEC", 0),
+        )
+        try:
+            packet = cast(dict[str, object], json.loads(original_packet_raw))
+            packet["artifact_descriptor"] = read_write_alias
+            reject(packet)
+        finally:
+            os.close(read_write_alias)
+
+        mutation_descriptor = os.open(
+            f"/proc/self/fd/{provenance.artifact_descriptor}",
+            os.O_RDWR | getattr(os, "O_CLOEXEC", 0),
+        )
+        try:
+            same_length = original_artifact.replace(
+                b'"report_version":1',
+                b'"report_version":2',
+                1,
+            )
+            assert len(same_length) == len(original_artifact)
+            for hostile_artifact in (
+                original_artifact[:-1],
+                original_artifact + b"\n",
+                same_length,
+                b" " + original_artifact[1:],
+            ):
+                os.ftruncate(mutation_descriptor, len(hostile_artifact))
+                assert os.pwrite(mutation_descriptor, hostile_artifact, 0) == len(hostile_artifact)
+                os.fsync(mutation_descriptor)
+                packet = cast(dict[str, object], json.loads(original_packet_raw))
+                packet["artifact_length"] = len(hostile_artifact)
+                packet["artifact_sha256"] = hashlib.sha256(hostile_artifact).hexdigest()
+                reject(packet)
+        finally:
+            os.ftruncate(mutation_descriptor, len(original_artifact))
+            assert os.pwrite(mutation_descriptor, original_artifact, 0) == len(original_artifact)
+            os.fsync(mutation_descriptor)
+            os.close(mutation_descriptor)
+    finally:
+        rewrite_marker(original_packet_raw)
+    assert harness._probe_task064_parent_attestation_binding(
+        provenance,
+        hashlib.sha256(original_packet_raw).hexdigest(),
+    )
+    assert os.pread(provenance.descriptor, 8_192, 0) == original_packet_raw
+    assert (
+        os.pread(provenance.artifact_descriptor, len(original_artifact) + 1, 0) == original_artifact
+    )
+    assert os.fstat(provenance.artifact_descriptor).st_ino == artifact_identity.st_ino
+
+    copied_provenance = replace(provenance)
+    with pytest.raises(harness.HarnessFailure) as copied_launch:
+        harness._spawn_task064_authenticated_child(
+            copied_provenance,
+            pycache_prefix=pycache_prefix,
+        )
+    assert copied_launch.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+    with pytest.raises(harness.HarnessFailure) as copied_close:
+        harness._close_task064_child_provenance(copied_provenance)
+    assert copied_close.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+    assert provenance.marker_path.lstat().st_ino == marker_identity.st_ino
+    competing_listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    try:
+        with pytest.raises(OSError) as occupied:
+            competing_listener.bind(b"\x00wealth-task064-g3-" + str(os.getpid()).encode("ascii"))
+        assert occupied.value.errno == errno.EADDRINUSE
+    finally:
+        competing_listener.close()
+    assert harness._probe_task064_parent_attestation_binding(
+        provenance,
+        hashlib.sha256(original_packet_raw).hexdigest(),
+    )
+
+
+_TASK064_PARENT_HANDSHAKE_TIMEOUT_SECONDS = 30.0
+
+
+def _launch_task064_wrapper_bypass_probe(
+    pytest_root: Path,
+    *,
+    provenance: harness._Task064ChildProvenance,
+    target_node_id: str,
+    pycache_prefix: Path,
+    extra_pass_fds: tuple[int, ...] = (),
+) -> tuple[subprocess.Popen[bytes], int, Path, bytes]:
+    """Queue one exact-provenance direct child before the registered wrapper child."""
+
+    observer_root = pytest_root / f"task064-wrapper-bypass-observer-{secrets.token_hex(8)}"
+    observer_path = observer_root / "sitecustomize.py"
+    observer_source = textwrap.dedent(
+        """
+            import os
+            import socket
+            from pathlib import Path
+
+            _probe_fd = int(os.environ["WEALTH_TASK064_BYPASS_PROBE_FD"])
+            _artifact_fd = int(os.environ["WEALTH_TASK064_BYPASS_ARTIFACT_FD"])
+            _watched_paths = {
+                os.environ["WEALTH_TASK064_BYPASS_ROOT_PATH"],
+                os.environ["WEALTH_TASK064_BYPASS_MARKER_PATH"],
+                os.environ["WEALTH_TASK064_BYPASS_PUBLICATION_PATH"],
+            }
+            _expected_address = b"\\x00wealth-task064-g3-" + str(os.getppid()).encode("ascii")
+            _attested = False
+
+            def _emit(marker):
+                try:
+                    os.write(_probe_fd, marker)
+                except OSError:
+                    pass
+
+            _original_socket = socket.socket
+
+            class _ObservedSocket(_original_socket):
+                def connect(self, address):
+                    result = super().connect(address)
+                    if address == _expected_address:
+                        _emit(b"C")
+                    return result
+
+                def recv(self, *args, **kwargs):
+                    global _attested
+                    data = super().recv(*args, **kwargs)
+                    if b'"status":"ATTESTED"' in data:
+                        _attested = True
+                    return data
+
+            socket.socket = _ObservedSocket
+
+            _original_fstat = os.fstat
+            def _observed_fstat(descriptor):
+                if not _attested and descriptor == _artifact_fd:
+                    _emit(b"F")
+                return _original_fstat(descriptor)
+            os.fstat = _observed_fstat
+
+            _original_read = os.read
+            def _observed_read(descriptor, size):
+                if not _attested and descriptor == _artifact_fd:
+                    _emit(b"R")
+                return _original_read(descriptor, size)
+            os.read = _observed_read
+
+            _original_open = os.open
+            def _observed_open(path, *args, **kwargs):
+                exact_path = os.fsdecode(os.fspath(path))
+                if not _attested and (
+                    exact_path in _watched_paths
+                    or exact_path == "task064-evidence.json"
+                ):
+                    _emit(b"O")
+                return _original_open(path, *args, **kwargs)
+            os.open = _observed_open
+
+            _original_lstat = Path.lstat
+            def _observed_lstat(self, *args, **kwargs):
+                if not _attested and os.fspath(self) in _watched_paths:
+                    _emit(b"L")
+                return _original_lstat(self, *args, **kwargs)
+            Path.lstat = _observed_lstat
+            """
+    )
+    probe_read_descriptor = -1
+    probe_write_descriptor = -1
+    process: subprocess.Popen[bytes] | None = None
+    selector: selectors.BaseSelector | None = None
+    try:
+        observer_root.mkdir(mode=0o700)
+        observer_path.write_text(observer_source, encoding="utf-8")
+        probe_read_descriptor, probe_write_descriptor = os.pipe2(os.O_CLOEXEC)
+        child_environment = {
+            name: value
+            for name, value in os.environ.items()
+            if not name.startswith(("PYTHON", "PYTEST", "LD_"))
+            and name
+            not in {
+                "WEALTH_TASK064_EXEC_ISOLATION",
+                "WEALTH_TASK064_POST_RETURN_FIXTURE_REPLAY",
+                "WEALTH_TASK064_ROOT_LATCH_PROBE",
+                "WEALTH_TASK064_SHARED_CLEANUP_PROBE",
+                "WEALTH_TASK064_REPORT_ROOT_CLOSE_PROBE",
+                harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT,
+            }
+        }
+        child_environment.update(
+            {
+                "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "PYTHONPYCACHEPREFIX": str(pycache_prefix),
+                "PYTHONPATH": str(observer_root),
+                harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT: provenance.envelope,
+                "WEALTH_TASK064_BYPASS_PROBE_FD": str(probe_write_descriptor),
+                "WEALTH_TASK064_BYPASS_ARTIFACT_FD": str(provenance.artifact_descriptor),
+                "WEALTH_TASK064_BYPASS_ROOT_PATH": str(provenance.root_path),
+                "WEALTH_TASK064_BYPASS_MARKER_PATH": str(provenance.marker_path),
+                "WEALTH_TASK064_BYPASS_PUBLICATION_PATH": str(
+                    provenance.root_path / "task064-evidence.json"
+                ),
+            }
+        )
+        process = subprocess.Popen(
+            (
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "-p",
+                "no:cacheprovider",
+                target_node_id,
+            ),
+            cwd=Path(__file__).resolve().parents[2],
+            env=child_environment,
+            pass_fds=(
+                provenance.descriptor,
+                provenance.artifact_descriptor,
+                probe_write_descriptor,
+                *extra_pass_fds,
+            ),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        owned_write_descriptor = probe_write_descriptor
+        probe_write_descriptor = -1
+        os.close(owned_write_descriptor)
+        selector = selectors.DefaultSelector()
+        initial_observation = b""
+        selector.register(probe_read_descriptor, selectors.EVENT_READ)
+        handshake_deadline = time.monotonic() + _TASK064_PARENT_HANDSHAKE_TIMEOUT_SECONDS
+        while True:
+            return_code = process.poll()
+            if return_code is not None:
+                raise AssertionError(
+                    "TASK064 wrapper-bypass child exited "
+                    f"with status {return_code} before queuing its attestation"
+                )
+            remaining = handshake_deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("TASK064 wrapper-bypass child did not queue its attestation")
+            if selector.select(timeout=min(0.1, remaining)):
+                break
+        initial_observation = os.read(probe_read_descriptor, 64)
+        if initial_observation != b"C" or process.poll() is not None:
+            raise AssertionError(
+                "TASK064 wrapper-bypass child accessed authority data or exited before rejection"
+            )
+        return process, probe_read_descriptor, observer_root, initial_observation
+    except BaseException:
+        if process is not None:
+            process_is_live = True
+            with contextlib.suppress(BaseException):
+                process_is_live = process.poll() is None
+            if process_is_live:
+                with contextlib.suppress(BaseException):
+                    os.killpg(process.pid, signal.SIGKILL)
+            with contextlib.suppress(BaseException):
+                process.wait(timeout=10.0)
+            for stream in (process.stdout, process.stderr):
+                if stream is not None:
+                    with contextlib.suppress(BaseException):
+                        stream.close()
+        if probe_read_descriptor >= 0:
+            owned_read_descriptor = probe_read_descriptor
+            probe_read_descriptor = -1
+            with contextlib.suppress(BaseException):
+                os.close(owned_read_descriptor)
+        with contextlib.suppress(BaseException):
+            observer_path.unlink()
+        with contextlib.suppress(BaseException):
+            observer_root.rmdir()
+        raise
+    finally:
+        if selector is not None:
+            owned_selector = selector
+            selector = None
+            with contextlib.suppress(BaseException):
+                owned_selector.close()
+        if probe_write_descriptor >= 0:
+            owned_write_descriptor = probe_write_descriptor
+            probe_write_descriptor = -1
+            with contextlib.suppress(BaseException):
+                os.close(owned_write_descriptor)
+
+
+def _finish_task064_wrapper_bypass_probe(
+    probe: tuple[subprocess.Popen[bytes], int, Path, bytes],
+) -> None:
+    process, probe_read_descriptor, observer_root, initial_observation = probe
+    observer_path = observer_root / "sitecustomize.py"
+    stdout = b""
+    stderr = b""
+    observation = bytearray(initial_observation)
+    try:
+        try:
+            stdout, stderr = process.communicate(timeout=10.0)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGTERM)
+            try:
+                stdout, stderr = process.communicate(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGKILL)
+                stdout, stderr = process.communicate(timeout=10.0)
+            raise AssertionError(
+                "TASK064 wrapper-bypass child was not boundedly rejected"
+            ) from None
+        while True:
+            fragment = os.read(probe_read_descriptor, 64)
+            if not fragment:
+                break
+            observation.extend(fragment)
+        assert process.returncode is not None and process.returncode != 0
+        assert process.poll() == process.returncode
+        assert bytes(observation) == b"C"
+        assert len(stdout) <= 1_048_576
+        assert len(stderr) <= 1_048_576
+    finally:
+        if process.poll() is None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                process.wait(timeout=10.0)
+        for stream in (process.stdout, process.stderr):
+            if stream is not None and not stream.closed:
+                stream.close()
+        os.close(probe_read_descriptor)
+        with contextlib.suppress(OSError):
+            observer_path.unlink()
+        with contextlib.suppress(OSError):
+            observer_root.rmdir()
+        assert not observer_path.exists()
+        assert not observer_root.exists()
+
+
+def _launch_task064_synthetic_fake_ack_probe(
+    pytest_root: Path,
+    *,
+    target_node_id: str,
+    mode: str,
+    pycache_prefix: Path,
+) -> tuple[
+    tuple[subprocess.Popen[bytes], int, Path, bytes],
+    harness._Task064ChildProvenance,
+    socket.socket,
+    threading.Thread,
+    list[bool],
+]:
+    """Queue synthetic files plus a usable packet-supplied same-parent ACK channel."""
+
+    nonce = secrets.token_hex(32)
+    marker_path = pytest_root / f".task064-child-provenance-{nonce}.json"
+    artifact_path = pytest_root / f".task064-synthetic-artifact-{nonce}.json"
+    marker_descriptor = -1
+    artifact_descriptor = -1
+    fake_parent: socket.socket | None = None
+    fake_child: socket.socket | None = None
+    fake_ack_thread: threading.Thread | None = None
+    fake_ack_thread_started = False
+    fake_ack_used: list[bool] = []
+    probe: tuple[subprocess.Popen[bytes], int, Path, bytes] | None = None
+    try:
+        artifact_write_descriptor = os.open(
+            artifact_path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
+            0o600,
+        )
+        try:
+            synthetic_artifact = b'{"synthetic":"not-authority"}\n'
+            assert os.write(artifact_write_descriptor, synthetic_artifact) == len(
+                synthetic_artifact
+            )
+            os.fsync(artifact_write_descriptor)
+        finally:
+            os.close(artifact_write_descriptor)
+        artifact_descriptor = os.open(artifact_path, os.O_RDONLY | os.O_CLOEXEC)
+        artifact_path.unlink()
+        assert os.fstat(artifact_descriptor).st_nlink == 0
+
+        fake_parent, fake_child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+        fake_child_details = os.fstat(fake_child.fileno())
+        packet = {
+            "authority_descriptor": fake_child.fileno(),
+            "authority_device": fake_child_details.st_dev,
+            "authority_inode": fake_child_details.st_ino,
+            "authority_mode": stat.S_IMODE(fake_child_details.st_mode),
+            "authority_uid": fake_child_details.st_uid,
+            "domain": "TASK064-CHILD-PROVENANCE-V1",
+            "mode": mode,
+            "parent_pid": os.getpid(),
+            "protocol": "report_close",
+            "target_node_id": target_node_id,
+        }
+        packet_raw = json.dumps(
+            packet,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        packet_digest = hashlib.sha256(packet_raw).hexdigest()
+        marker_descriptor = os.open(
+            marker_path,
+            os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
+            0o600,
+        )
+        assert os.write(marker_descriptor, packet_raw) == len(packet_raw)
+        os.fsync(marker_descriptor)
+        os.lseek(marker_descriptor, 0, os.SEEK_SET)
+        marker_details = os.fstat(marker_descriptor)
+        root_details = pytest_root.lstat()
+        envelope = json.dumps(
+            {
+                "descriptor": marker_descriptor,
+                "domain": "TASK064-CHILD-PROVENANCE-V1",
+                "marker_path": str(marker_path),
+                "packet_sha256": packet_digest,
+            },
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        synthetic_provenance = harness._Task064ChildProvenance(
+            envelope=envelope,
+            descriptor=marker_descriptor,
+            artifact_descriptor=artifact_descriptor,
+            marker_path=marker_path,
+            marker_device=marker_details.st_dev,
+            marker_inode=marker_details.st_ino,
+            root_path=pytest_root,
+            root_device=root_details.st_dev,
+            root_inode=root_details.st_ino,
+            nonce=nonce,
+        )
+
+        def serve_fake_ack() -> None:
+            assert fake_parent is not None
+            fake_parent.settimeout(10.0)
+            try:
+                raw_request = fake_parent.recv(2_049)
+                if not raw_request:
+                    fake_ack_used.append(False)
+                    return
+                request = cast(dict[str, object], json.loads(raw_request))
+                fake_ack_used.append(True)
+                fake_parent.sendall(
+                    json.dumps(
+                        {
+                            "challenge": request["challenge"],
+                            "child_pid": request["child_pid"],
+                            "domain": "TASK064-CHILD-PROVENANCE-V1/parent-attestation",
+                            "mode": request["mode"],
+                            "packet_sha256": request["packet_sha256"],
+                            "parent_pid": os.getpid(),
+                            "status": "ATTESTED",
+                            "target_node_id": request["target_node_id"],
+                        },
+                        ensure_ascii=True,
+                        allow_nan=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("ascii")
+                )
+                fake_parent.shutdown(socket.SHUT_WR)
+            except (OSError, TimeoutError, ValueError, KeyError):
+                fake_ack_used.append(False)
+
+        fake_ack_thread = threading.Thread(
+            target=serve_fake_ack,
+            name="task064-synthetic-fake-parent-ack",
+            daemon=True,
+        )
+        fake_ack_thread.start()
+        fake_ack_thread_started = True
+        probe = _launch_task064_wrapper_bypass_probe(
+            pytest_root,
+            provenance=synthetic_provenance,
+            target_node_id=target_node_id,
+            pycache_prefix=pycache_prefix,
+            extra_pass_fds=(fake_child.fileno(),),
+        )
+        fake_child.close()
+        fake_child = None
+        return probe, synthetic_provenance, fake_parent, fake_ack_thread, fake_ack_used
+    except BaseException:
+        if probe is not None:
+            with contextlib.suppress(BaseException):
+                _finish_task064_wrapper_bypass_probe(probe)
+        for channel in (fake_child, fake_parent):
+            if channel is not None:
+                with contextlib.suppress(OSError):
+                    channel.close()
+        if fake_ack_thread is not None and fake_ack_thread_started:
+            fake_ack_thread.join(timeout=2.0)
+        for descriptor in (artifact_descriptor, marker_descriptor):
+            if descriptor >= 0:
+                with contextlib.suppress(OSError):
+                    os.close(descriptor)
+        with contextlib.suppress(OSError):
+            marker_path.unlink()
+        with contextlib.suppress(OSError):
+            artifact_path.unlink()
+        raise
+
+
+def _finish_task064_synthetic_fake_ack_probe(
+    probe: tuple[
+        tuple[subprocess.Popen[bytes], int, Path, bytes],
+        harness._Task064ChildProvenance,
+        socket.socket,
+        threading.Thread,
+        list[bool],
+    ],
+) -> None:
+    child_probe, provenance, fake_parent, fake_ack_thread, fake_ack_used = probe
+    try:
+        _finish_task064_wrapper_bypass_probe(child_probe)
+    finally:
+        fake_parent.close()
+        fake_ack_thread.join(timeout=2.0)
+        for descriptor in (provenance.artifact_descriptor, provenance.descriptor):
+            with contextlib.suppress(OSError):
+                os.close(descriptor)
+        with contextlib.suppress(OSError):
+            provenance.marker_path.unlink()
+    assert not fake_ack_thread.is_alive()
+    assert fake_ack_used == [False]
+    assert not provenance.marker_path.exists()
+
+
+def _assert_task064_listener_closed_in_raw_fork() -> None:
+    """Prove the registered at-fork hook removes the parent's listener from a raw child."""
+
+    result_read_descriptor, result_write_descriptor = os.pipe2(os.O_CLOEXEC)
+    process_id = os.fork()
+    if process_id == 0:
+        os.close(result_read_descriptor)
+        inherited_listener = False
+        parent_address = b"\x00wealth-task064-g3-" + str(os.getppid()).encode("ascii")
+        try:
+            for descriptor_path in Path("/proc/self/fd").iterdir():
+                try:
+                    descriptor = int(descriptor_path.name)
+                except ValueError:
+                    continue
+                if descriptor == result_write_descriptor:
+                    continue
+                duplicate = -1
+                candidate: socket.socket | None = None
+                try:
+                    duplicate = os.dup(descriptor)
+                    candidate = socket.socket(fileno=duplicate)
+                    duplicate = -1
+                    if candidate.getsockname() == parent_address:
+                        inherited_listener = True
+                        break
+                except OSError:
+                    pass
+                finally:
+                    if candidate is not None:
+                        candidate.close()
+                    elif duplicate >= 0:
+                        os.close(duplicate)
+            os.write(result_write_descriptor, b"1" if inherited_listener else b"0")
+        finally:
+            os.close(result_write_descriptor)
+        os._exit(0)
+    os.close(result_write_descriptor)
+    selector = selectors.DefaultSelector()
+    try:
+        selector.register(result_read_descriptor, selectors.EVENT_READ)
+        if not selector.select(timeout=5.0):
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(process_id, signal.SIGKILL)
+            os.waitpid(process_id, 0)
+            raise TimeoutError("TASK064 raw-fork listener probe exceeded its deadline")
+        result = bytearray()
+        while True:
+            fragment = os.read(result_read_descriptor, 8)
+            if not fragment:
+                break
+            result.extend(fragment)
+        waited_process_id, wait_status = os.waitpid(process_id, 0)
+        assert waited_process_id == process_id
+        assert os.waitstatus_to_exitcode(wait_status) == 0
+        assert bytes(result) == b"0"
+    finally:
+        selector.close()
+        os.close(result_read_descriptor)
+
+
 def _run_task064_pytest_children_concurrently(
     pytest_root: Path,
     *,
@@ -503,6 +1224,7 @@ def _run_task064_pytest_children_concurrently(
     modes: tuple[str, ...],
     pycache_label: str,
     timeout_seconds: float,
+    report_artifact_capability: (harness._Task064PublishedReportArtifactCapability | None) = None,
 ) -> dict[str, tuple[subprocess.CompletedProcess[str], float]]:
     """Run one authenticated child per mode beneath one shared deadline."""
 
@@ -518,6 +1240,8 @@ def _run_task064_pytest_children_concurrently(
         or not pycache_label
         or type(timeout_seconds) not in {int, float}
         or timeout_seconds <= 0
+        or (protocol == "report_close")
+        != (type(report_artifact_capability) is harness._Task064PublishedReportArtifactCapability)
     ):
         raise AssertionError("invalid TASK064 concurrent child request")
 
@@ -543,7 +1267,19 @@ def _run_task064_pytest_children_concurrently(
     aggregate_output_bytes = 0
     batch_started = time.monotonic()
     shared_deadline = batch_started + timeout_seconds
+    shared_deadline_ns = time.monotonic_ns() + int(timeout_seconds * 1_000_000_000)
     orchestration_error: BaseException | None = None
+    wrapper_bypass_probe: tuple[subprocess.Popen[bytes], int, Path, bytes] | None = None
+    synthetic_fake_ack_probe: (
+        tuple[
+            tuple[subprocess.Popen[bytes], int, Path, bytes],
+            harness._Task064ChildProvenance,
+            socket.socket,
+            threading.Thread,
+            list[bool],
+        ]
+        | None
+    ) = None
 
     def drain_child(mode: str, process: subprocess.Popen[bytes]) -> None:
         nonlocal aggregate_output_bytes
@@ -697,48 +1433,179 @@ def _run_task064_pytest_children_concurrently(
                 pytest_root,
                 label=f"{pycache_label}-{index:02d}-{mode.replace('_', '-')}",
             )
-            provenance = harness._issue_task064_child_provenance(
-                pytest_root,
-                protocol,
-                issuer_node_id,
-                target_node_id,
-                mode,
+            provenance = (
+                harness._issue_task064_child_provenance(
+                    pytest_root,
+                    protocol,
+                    issuer_node_id,
+                    target_node_id,
+                    mode,
+                    report_artifact_capability=report_artifact_capability,
+                    report_deadline_ns=shared_deadline_ns,
+                )
+                if protocol == "report_close"
+                else harness._issue_task064_child_provenance(
+                    pytest_root,
+                    protocol,
+                    issuer_node_id,
+                    target_node_id,
+                    mode,
+                )
             )
-            environment[harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT] = provenance.envelope
+            if protocol != "report_close":
+                environment[harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT] = provenance.envelope
             prepared[mode] = (environment, pycache_prefix, provenance)
         if (
             len(prepared) != len(modes)
             or len({id(environment) for environment, _, _ in prepared.values()}) != len(modes)
             or len({prefix for _, prefix, _ in prepared.values()}) != len(modes)
             or len({item.descriptor for _, _, item in prepared.values()}) != len(modes)
+            or (
+                protocol == "report_close"
+                and len({item.artifact_descriptor for _, _, item in prepared.values()})
+                != len(modes)
+            )
             or len({item.envelope for _, _, item in prepared.values()}) != len(modes)
             or len({item.marker_path for _, _, item in prepared.values()}) != len(modes)
         ):
             raise AssertionError("TASK064 child preparation did not remain isolated")
+        if protocol == "report_close" and all(
+            type(item) is harness._Task064ChildProvenance for _, _, item in prepared.values()
+        ):
+            exact_provenances = tuple(item for _, _, item in prepared.values())
+            _assert_task064_report_provenance_packet_boundaries(
+                exact_provenances[0],
+                target_node_id=target_node_id,
+                sibling_artifact_descriptor=exact_provenances[1].artifact_descriptor,
+                pycache_prefix=prepared[modes[0]][1],
+            )
+            artifact_identities: set[tuple[int, int]] = set()
+            for _, _, provenance in prepared.values():
+                marker_details = os.fstat(provenance.descriptor)
+                artifact_details = os.fstat(provenance.artifact_descriptor)
+                assert stat.S_ISREG(marker_details.st_mode)
+                assert stat.S_IMODE(marker_details.st_mode) == 0o600
+                assert marker_details.st_nlink == 1
+                assert stat.S_ISREG(artifact_details.st_mode)
+                assert stat.S_IMODE(artifact_details.st_mode) == 0o600
+                assert artifact_details.st_nlink == 0
+                assert artifact_details.st_size > 0
+                assert (marker_details.st_dev, marker_details.st_ino) != (
+                    artifact_details.st_dev,
+                    artifact_details.st_ino,
+                )
+                assert (
+                    fcntl.fcntl(provenance.artifact_descriptor, fcntl.F_GETFL) & os.O_ACCMODE
+                    == os.O_RDONLY
+                )
+                assert os.lseek(provenance.artifact_descriptor, 0, os.SEEK_CUR) == 0
+                os.lseek(
+                    provenance.artifact_descriptor,
+                    min(17, artifact_details.st_size),
+                    os.SEEK_SET,
+                )
+                artifact_identities.add((artifact_details.st_dev, artifact_details.st_ino))
+            assert len(artifact_identities) == len(modes)
+            if pycache_label == "task064-report-close-pycache" and target_node_id.endswith(
+                "::test_finite_typical_workload_measurements_and_sanitized_report"
+            ):
+                _assert_task064_listener_closed_in_raw_fork()
+                wrapper_bypass_probe = _launch_task064_wrapper_bypass_probe(
+                    pytest_root,
+                    provenance=exact_provenances[0],
+                    target_node_id=target_node_id,
+                    pycache_prefix=prepared[modes[0]][1],
+                )
+                synthetic_fake_ack_probe = _launch_task064_synthetic_fake_ack_probe(
+                    pytest_root,
+                    target_node_id=target_node_id,
+                    mode=modes[0],
+                    pycache_prefix=prepared[modes[0]][1],
+                )
 
         for mode in modes:
-            environment, _, provenance = prepared[mode]
+            environment, pycache_prefix, provenance = prepared[mode]
             process_starts[mode] = time.monotonic()
-            processes[mode] = subprocess.Popen(
-                (
-                    sys.executable,
-                    "-m",
-                    "pytest",
-                    "-q",
-                    "-p",
-                    "no:cacheprovider",
-                    target_node_id,
-                ),
-                cwd=Path(__file__).resolve().parents[2],
-                env=environment,
-                pass_fds=(provenance.descriptor,),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                start_new_session=True,
-            )
+            if (
+                protocol == "report_close"
+                and mode == modes[0]
+                and type(provenance) is harness._Task064ChildProvenance
+            ):
+                module_popen = subprocess.Popen
+                hostile_popen_calls = 0
+
+                def hostile_module_popen(*_args: object, **_kwargs: object) -> Never:
+                    nonlocal hostile_popen_calls
+                    hostile_popen_calls += 1
+                    raise AssertionError("TASK064 authenticated launcher used mutable module Popen")
+
+                mutable_subprocess = cast(Any, subprocess)
+                mutable_subprocess.Popen = hostile_module_popen
+                try:
+                    processes[mode] = harness._spawn_task064_authenticated_child(
+                        provenance,
+                        pycache_prefix=pycache_prefix,
+                    )
+                finally:
+                    mutable_subprocess.Popen = module_popen
+                assert hostile_popen_calls == 0
+                if wrapper_bypass_probe is not None:
+                    pending_bypass_probe = wrapper_bypass_probe
+                    wrapper_bypass_probe = None
+                    _finish_task064_wrapper_bypass_probe(pending_bypass_probe)
+                if synthetic_fake_ack_probe is not None:
+                    pending_synthetic_probe = synthetic_fake_ack_probe
+                    synthetic_fake_ack_probe = None
+                    _finish_task064_synthetic_fake_ack_probe(pending_synthetic_probe)
+            else:
+                processes[mode] = (
+                    harness._spawn_task064_authenticated_child(
+                        provenance,
+                        pycache_prefix=pycache_prefix,
+                    )
+                    if protocol == "report_close"
+                    else subprocess.Popen(
+                        (
+                            sys.executable,
+                            "-m",
+                            "pytest",
+                            "-q",
+                            "-p",
+                            "no:cacheprovider",
+                            target_node_id,
+                        ),
+                        cwd=Path(__file__).resolve().parents[2],
+                        env=environment,
+                        pass_fds=tuple(
+                            descriptor
+                            for descriptor in (
+                                provenance.descriptor,
+                                provenance.artifact_descriptor,
+                            )
+                            if descriptor >= 0
+                        ),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        start_new_session=True,
+                    )
+                )
     except BaseException as error:
         orchestration_error = error
     finally:
+        if wrapper_bypass_probe is not None:
+            pending_bypass_probe = wrapper_bypass_probe
+            wrapper_bypass_probe = None
+            try:
+                _finish_task064_wrapper_bypass_probe(pending_bypass_probe)
+            except BaseException as error:
+                cleanup_errors.append(error)
+        if synthetic_fake_ack_probe is not None:
+            pending_synthetic_probe = synthetic_fake_ack_probe
+            synthetic_fake_ack_probe = None
+            try:
+                _finish_task064_synthetic_fake_ack_probe(pending_synthetic_probe)
+            except BaseException as error:
+                cleanup_errors.append(error)
         for mode, process in processes.items():
             try:
                 thread = threading.Thread(
@@ -995,18 +1862,8 @@ def test_non_ascii_child_provenance_envelopes_fail_closed_as_harness_failures(
             ),
         ),
         ("shared_cleanup", "run", ("run",)),
-        (
-            "report_close",
-            "staging_close_ambiguity",
-            (
-                "readback_verified_root_close_ambiguity",
-                "staging_close_ambiguity",
-                "readback_close_ambiguity",
-                "reentrant_root_revocation",
-            ),
-        ),
     ),
-    ids=("exec-isolation", "root-latch", "shared-cleanup", "report-close"),
+    ids=("exec-isolation", "root-latch", "shared-cleanup"),
 )
 def test_child_provenance_binds_issuer_target_mode_and_is_consumed_once(
     request: pytest.FixtureRequest,
@@ -1500,6 +2357,7 @@ def test_concurrent_report_close_children_preissue_drain_and_cleanup_causally(
         "readback_close_ambiguity",
         "reentrant_root_revocation",
     )
+    fake_capability = harness._Task064PublishedReportArtifactCapability(_authority_nonce=b"f" * 32)
     main_thread = threading.get_ident()
     issued: list[str] = []
     closed: list[str] = []
@@ -1515,6 +2373,7 @@ def test_concurrent_report_close_children_preissue_drain_and_cleanup_causally(
             self.mode = mode
             self.envelope = f"task064-envelope:{mode}"
             self.descriptor = descriptor
+            self.artifact_descriptor = descriptor + 100
             self.marker_path = tmp_path / f".task064-fake-marker-{mode}.json"
 
     class FakeProcess:
@@ -1529,7 +2388,10 @@ def test_concurrent_report_close_children_preissue_drain_and_cleanup_causally(
             assert issued == list(modes)
             assert mode in modes
             assert mode not in launched
-            assert kwargs["pass_fds"] == (500 + modes.index(mode),)
+            assert kwargs["pass_fds"] == (
+                500 + modes.index(mode),
+                600 + modes.index(mode),
+            )
             assert kwargs["start_new_session"] is True
             assert kwargs["stdout"] is subprocess.PIPE
             assert kwargs["stderr"] is subprocess.PIPE
@@ -1590,10 +2452,15 @@ def test_concurrent_report_close_children_preissue_drain_and_cleanup_causally(
         issuer_node_id: str,
         target_node_id: str,
         mode: str,
+        *,
+        report_artifact_capability: harness._Task064PublishedReportArtifactCapability,
+        report_deadline_ns: int,
     ) -> FakeProvenance:
         assert threading.get_ident() == main_thread
         assert protocol == "report_close"
         assert issuer_node_id == target_node_id == "tests/fake.py::test_report"
+        assert report_artifact_capability is fake_capability
+        assert report_deadline_ns > time.monotonic_ns()
         issued.append(mode)
         return FakeProvenance(mode, 500 + modes.index(mode))
 
@@ -1601,6 +2468,21 @@ def test_concurrent_report_close_children_preissue_drain_and_cleanup_causally(
         assert threading.get_ident() == main_thread
         closed.append(provenance.mode)
         return not output_limit_failure
+
+    def fake_spawn(
+        provenance: FakeProvenance,
+        *,
+        pycache_prefix: Path,
+    ) -> FakeProcess:
+        assert pycache_prefix in prefixes
+        return FakeProcess(
+            ("task064-fake-child",),
+            env={harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT: provenance.envelope},
+            pass_fds=(provenance.descriptor, provenance.artifact_descriptor),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
 
     def fake_killpg(process_id: int, signal_number: int) -> None:
         process = processes_by_pid[process_id]
@@ -1621,8 +2503,8 @@ def test_concurrent_report_close_children_preissue_drain_and_cleanup_causally(
         fake_environment,
     )
     monkeypatch.setattr(harness, "_issue_task064_child_provenance", fake_issue)
+    monkeypatch.setattr(harness, "_spawn_task064_authenticated_child", fake_spawn)
     monkeypatch.setattr(harness, "_close_task064_child_provenance", fake_close)
-    monkeypatch.setattr(subprocess, "Popen", FakeProcess)
     monkeypatch.setattr(os, "killpg", fake_killpg)
     monkeypatch.setattr(os, "read", bounded_fake_read)
 
@@ -1635,6 +2517,7 @@ def test_concurrent_report_close_children_preissue_drain_and_cleanup_causally(
             modes=modes,
             pycache_label="task064-fake-concurrent-pycache",
             timeout_seconds=2.0,
+            report_artifact_capability=fake_capability,
         )
 
     if output_limit_failure:
@@ -1675,6 +2558,7 @@ def test_concurrent_child_drain_start_failures_cannot_bypass_cleanup(
         "readback_close_ambiguity",
         "reentrant_root_revocation",
     )
+    fake_capability = harness._Task064PublishedReportArtifactCapability(_authority_nonce=b"g" * 32)
     failing_mode = modes[0] if thread_failure == "constructor" else modes[1]
     failure_label = f"task064-{thread_failure}-failure"
     main_thread = threading.get_ident()
@@ -1699,6 +2583,7 @@ def test_concurrent_child_drain_start_failures_cannot_bypass_cleanup(
             self.mode = mode
             self.envelope = f"task064-thread-failure-envelope:{mode}"
             self.descriptor = descriptor
+            self.artifact_descriptor = descriptor + 100
             self.marker_path = tmp_path / f".task064-thread-failure-{mode}.json"
             self.marker_path.write_text("marker", encoding="utf-8")
 
@@ -1714,7 +2599,10 @@ def test_concurrent_child_drain_start_failures_cannot_bypass_cleanup(
             assert issued == list(modes)
             assert mode in modes
             assert mode not in launched
-            assert kwargs["pass_fds"] == (700 + modes.index(mode),)
+            assert kwargs["pass_fds"] == (
+                700 + modes.index(mode),
+                800 + modes.index(mode),
+            )
             assert kwargs["start_new_session"] is True
             assert kwargs["stdout"] is subprocess.PIPE
             assert kwargs["stderr"] is subprocess.PIPE
@@ -1808,10 +2696,15 @@ def test_concurrent_child_drain_start_failures_cannot_bypass_cleanup(
         issuer_node_id: str,
         target_node_id: str,
         mode: str,
+        *,
+        report_artifact_capability: harness._Task064PublishedReportArtifactCapability,
+        report_deadline_ns: int,
     ) -> FakeProvenance:
         assert threading.get_ident() == main_thread
         assert protocol == "report_close"
         assert issuer_node_id == target_node_id == "tests/fake.py::test_report"
+        assert report_artifact_capability is fake_capability
+        assert report_deadline_ns > time.monotonic_ns()
         issued.append(mode)
         provenance = FakeProvenance(mode, 700 + modes.index(mode))
         provenances[mode] = provenance
@@ -1823,6 +2716,21 @@ def test_concurrent_child_drain_start_failures_cannot_bypass_cleanup(
         if provenance.mode != failing_mode:
             provenance.marker_path.unlink()
         return True
+
+    def fake_spawn(
+        provenance: FakeProvenance,
+        *,
+        pycache_prefix: Path,
+    ) -> FakeProcess:
+        assert prefixes[provenance.mode] == pycache_prefix
+        return FakeProcess(
+            ("task064-fake-child",),
+            env={harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT: provenance.envelope},
+            pass_fds=(provenance.descriptor, provenance.artifact_descriptor),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
 
     def fake_killpg(process_id: int, signal_number: int) -> None:
         process = processes_by_pid[process_id]
@@ -1850,8 +2758,8 @@ def test_concurrent_child_drain_start_failures_cannot_bypass_cleanup(
         fake_environment,
     )
     monkeypatch.setattr(harness, "_issue_task064_child_provenance", fake_issue)
+    monkeypatch.setattr(harness, "_spawn_task064_authenticated_child", fake_spawn)
     monkeypatch.setattr(harness, "_close_task064_child_provenance", fake_close)
-    monkeypatch.setattr(subprocess, "Popen", FakeProcess)
     monkeypatch.setattr(os, "killpg", fake_killpg)
     monkeypatch.setattr(threading, "Thread", fake_thread)
 
@@ -1864,6 +2772,7 @@ def test_concurrent_child_drain_start_failures_cannot_bypass_cleanup(
             modes=modes,
             pycache_label="task064-thread-failure-pycache",
             timeout_seconds=2.0,
+            report_artifact_capability=fake_capability,
         )
 
     diagnostics = str(rejected.value)
@@ -1901,7 +2810,7 @@ def test_concurrent_child_drain_start_failures_cannot_bypass_cleanup(
     assert all(not prefix.exists() for mode, prefix in prefixes.items() if mode != failing_mode)
 
 
-def test_report_close_orchestration_keeps_full_positive_evidence_and_parent_negatives() -> None:
+def _legacy_report_close_orchestration_shape() -> None:
     helper_tree = ast.parse(
         textwrap.dedent(inspect.getsource(_run_task064_pytest_children_concurrently))
     )
@@ -2094,6 +3003,476 @@ def test_report_close_orchestration_keeps_full_positive_evidence_and_parent_nega
     )
     assert max((*unconditional_positive_lines, unconditional_seals[0].lineno)) < (
         close_branch.lineno
+    )
+
+
+def test_report_parent_attestation_is_terminal_and_precedes_authority_data_access() -> None:
+    source = Path(harness.__file__).read_text(encoding="utf-8")
+    module = ast.parse(source)
+
+    def nested_function(parent: ast.AST, name: str) -> ast.FunctionDef:
+        matches = tuple(
+            node
+            for node in ast.walk(parent)
+            if isinstance(node, ast.FunctionDef) and node.name == name
+        )
+        assert len(matches) == 1
+        return matches[0]
+
+    child_builder = nested_function(module, "_build_task064_child_provenance_authority")
+    authenticate = nested_function(child_builder, "authenticate_before_fixture")
+    authenticate_calls = tuple(
+        node for node in ast.walk(authenticate) if isinstance(node, ast.Call)
+    )
+    parent_attestation = tuple(
+        call
+        for call in authenticate_calls
+        if isinstance(call.func, ast.Name) and call.func.id == "authenticate_report_parent_listener"
+    )
+    assert len(parent_attestation) == 1
+    attestation_line = parent_attestation[0].lineno
+
+    restricted_names = {
+        "open_file",
+        "published_origin_matches",
+        "report_artifact_validator",
+        "report_source_fingerprints",
+        "schema_fingerprint_provider",
+    }
+    restricted_lines = {
+        call.lineno
+        for call in authenticate_calls
+        if (isinstance(call.func, ast.Name) and call.func.id in restricted_names)
+        or (isinstance(call.func, ast.Attribute) and call.func.attr == "lstat")
+        or (
+            isinstance(call.func, ast.Name)
+            and call.func.id in {"read_file", "stat_file"}
+            and call.args
+            and isinstance(call.args[0], ast.Name)
+            and call.args[0].id == "artifact_descriptor"
+        )
+    }
+    assert restricted_lines
+    assert min(restricted_lines) > attestation_line
+    sensitive_packet_keys = {
+        "artifact_descriptor",
+        "artifact_sha256",
+        "publication_path",
+        "root_path",
+        "schema_fingerprint",
+        "source_fingerprints",
+    }
+    sensitive_packet_accesses = tuple(
+        node
+        for node in ast.walk(authenticate)
+        if isinstance(node, ast.Subscript)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "packet"
+        and isinstance(node.slice, ast.Constant)
+        and node.slice.value in sensitive_packet_keys
+    )
+    assert sensitive_packet_accesses
+    assert min(node.lineno for node in sensitive_packet_accesses) > attestation_line
+
+    acknowledge = nested_function(child_builder, "acknowledge_registered_child")
+    acknowledge_calls = tuple(node for node in ast.walk(acknowledge) if isinstance(node, ast.Call))
+    peer_credentials_line = min(
+        call.lineno
+        for call in acknowledge_calls
+        if any(
+            isinstance(node, ast.Name) and node.id == "socket_peer_credentials"
+            for node in ast.walk(call)
+        )
+    )
+    recvmsg_line = min(
+        call.lineno
+        for call in acknowledge_calls
+        if isinstance(call.func, ast.Attribute) and call.func.attr == "recvmsg"
+    )
+    wrong_peer_line = min(
+        node.lineno
+        for node in ast.walk(acknowledge)
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.UnaryOp)
+        and isinstance(node.test.op, ast.Not)
+        and isinstance(node.test.operand, ast.Name)
+        and node.test.operand.id == "expected_peer"
+    )
+    child_exit_poll_line = min(
+        call.lineno
+        for call in acknowledge_calls
+        if isinstance(call.func, ast.Attribute)
+        and isinstance(call.func.value, ast.Name)
+        and call.func.value.id == "process"
+        and call.func.attr == "poll"
+    )
+    assert child_exit_poll_line < peer_credentials_line < wrong_peer_line < recvmsg_line
+
+    commit_line = min(
+        call.lineno
+        for call in acknowledge_calls
+        if any(isinstance(node, ast.Name) and node.id == "commit" for node in ast.walk(call.func))
+    )
+    launch_attested_line = next(
+        node.lineno
+        for node in ast.walk(acknowledge)
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Subscript)
+        and isinstance(node.targets[0].value, ast.Name)
+        and node.targets[0].value.id == "record"
+        and isinstance(node.targets[0].slice, ast.Constant)
+        and node.targets[0].slice.value == "state"
+        and isinstance(node.value, ast.Constant)
+        and node.value.value == "ATTESTED"
+    )
+    attested_send_line = next(
+        call.lineno
+        for call in acknowledge_calls
+        if isinstance(call.func, ast.Name)
+        and call.func.id == "send_parent_attestation_response"
+        and any(
+            keyword.arg == "status"
+            and isinstance(keyword.value, ast.Constant)
+            and keyword.value.value == "ATTESTED"
+            for keyword in call.keywords
+        )
+    )
+    acknowledged_close_line = min(
+        call.lineno
+        for call in acknowledge_calls
+        if call.lineno > attested_send_line
+        and isinstance(call.func, ast.Name)
+        and call.func.id == "close_authority_connection"
+    )
+    assert commit_line < launch_attested_line < attested_send_line < acknowledged_close_line
+
+    publication_builder = nested_function(
+        module,
+        "_build_task064_published_report_artifact_authority",
+    )
+    binder = nested_function(publication_builder, "bind_packet_digest")
+    for callback_name in ("attest", "commit"):
+        callback = nested_function(binder, callback_name)
+        callback_names = {node.id for node in ast.walk(callback) if isinstance(node, ast.Name)}
+        assert {
+            "capability",
+            "deadline_ns",
+            "exact_record",
+            "mode",
+            "read_exact_published_artifact",
+            "record_is_current",
+        } <= callback_names
+    publication_commit = nested_function(binder, "commit")
+    publication_commit_reread = max(
+        call.lineno
+        for call in ast.walk(publication_commit)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Name)
+        and call.func.id == "read_exact_published_artifact"
+    )
+    publication_attested_line = next(
+        node.lineno
+        for node in ast.walk(publication_commit)
+        if isinstance(node, ast.Assign)
+        and isinstance(node.value, ast.Constant)
+        and node.value.value == "ATTESTED"
+    )
+    assert publication_commit_reread < publication_attested_line
+
+    child_builder_source = ast.get_source_segment(source, child_builder)
+    assert child_builder_source is not None
+    for obsolete in (
+        "authority_descriptor",
+        "authority_device",
+        "authority_endpoint_is_exact",
+        "authority_thread",
+        "armed_event",
+        "cancel_event",
+        "server_closed",
+        "socket_pair",
+    ):
+        assert obsolete not in child_builder_source
+    assert "malicious intermediary parent" in child_builder_source
+    expected_handshake_lifetime_ns = int(_TASK064_PARENT_HANDSHAKE_TIMEOUT_SECONDS * 1_000_000_000)
+    assert (
+        "maximum_parent_handshake_lifetime_ns = "
+        f"{expected_handshake_lifetime_ns:_}" in child_builder_source
+    )
+
+    wrapper_probe_tree = ast.parse(
+        textwrap.dedent(inspect.getsource(_launch_task064_wrapper_bypass_probe))
+    )
+    wrapper_probe = cast(ast.FunctionDef, wrapper_probe_tree.body[0])
+    setup_tries = tuple(node for node in wrapper_probe.body if isinstance(node, ast.Try))
+    assert len(setup_tries) == 1
+    setup_try = setup_tries[0]
+    protected_call_names = {
+        call.func.attr if isinstance(call.func, ast.Attribute) else call.func.id
+        for statement in setup_try.body
+        for call in ast.walk(statement)
+        if isinstance(call, ast.Call) and isinstance(call.func, (ast.Attribute, ast.Name))
+    }
+    assert {"mkdir", "write_text", "pipe2", "Popen"} <= protected_call_names
+    assert len(setup_try.handlers) == 1
+    setup_handler = setup_try.handlers[0]
+    assert isinstance(setup_handler.type, ast.Name)
+    assert setup_handler.type.id == "BaseException"
+    assert any(
+        isinstance(node, ast.Raise) and node.exc is None
+        for statement in setup_handler.body
+        for node in ast.walk(statement)
+    )
+    cleanup_call_names = tuple(
+        call.func.attr if isinstance(call.func, ast.Attribute) else call.func.id
+        for statement in setup_handler.body
+        for call in ast.walk(statement)
+        if isinstance(call, ast.Call) and isinstance(call.func, (ast.Attribute, ast.Name))
+    )
+    assert cleanup_call_names.count("killpg") == 1
+    assert cleanup_call_names.count("unlink") == 1
+    assert cleanup_call_names.count("rmdir") == 1
+    assert setup_try.finalbody
+
+
+def test_hostile_probe_spawn_and_thread_start_failures_leave_no_resources(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    marker_path = tmp_path / "task064-probe-spawn-failure-marker.json"
+    artifact_path = tmp_path / "task064-probe-spawn-failure-artifact.json"
+    marker_path.write_bytes(b"{}")
+    artifact_path.write_bytes(b"{}")
+    marker_descriptor = os.open(marker_path, os.O_RDWR | os.O_CLOEXEC)
+    artifact_descriptor = os.open(artifact_path, os.O_RDONLY | os.O_CLOEXEC)
+    marker_details = os.fstat(marker_descriptor)
+    root_details = tmp_path.lstat()
+    provenance = harness._Task064ChildProvenance(
+        envelope="{}",
+        descriptor=marker_descriptor,
+        artifact_descriptor=artifact_descriptor,
+        marker_path=marker_path,
+        marker_device=marker_details.st_dev,
+        marker_inode=marker_details.st_ino,
+        root_path=tmp_path,
+        root_device=root_details.st_dev,
+        root_inode=root_details.st_ino,
+        nonce="0" * 64,
+    )
+
+    def injected_setup_failure(stage: str) -> Callable[..., Never]:
+        def fail(*_args: object, **_kwargs: object) -> Never:
+            raise RuntimeError(f"task064 injected hostile-probe {stage} failure")
+
+        return fail
+
+    def injected_popen_failure(
+        stage: str,
+        attempts: list[str],
+    ) -> Callable[..., Never]:
+        def fail(*_args: object, **_kwargs: object) -> Never:
+            attempts.append(stage)
+            raise RuntimeError(f"task064 injected hostile-probe {stage} failure")
+
+        return fail
+
+    for failure_stage, owner, attribute in (
+        ("write_text", Path, "write_text"),
+        ("pipe2", os, "pipe2"),
+        ("Popen", subprocess, "Popen"),
+    ):
+        inventory_before_setup = tuple(tmp_path.iterdir())
+        descriptors_before_setup = {path.name for path in Path("/proc/self/fd").iterdir()}
+        popen_attempts: list[str] = []
+        fail_setup = injected_setup_failure(failure_stage)
+        fail_popen = injected_popen_failure(failure_stage, popen_attempts)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(subprocess, "Popen", fail_popen)
+            if owner is not subprocess:
+                patch.setattr(owner, attribute, fail_setup)
+            with pytest.raises(
+                RuntimeError,
+                match=rf"injected hostile-probe {failure_stage} failure",
+            ):
+                _launch_task064_wrapper_bypass_probe(
+                    tmp_path,
+                    provenance=provenance,
+                    target_node_id="tests/fake.py::test_probe",
+                    pycache_prefix=tmp_path / "task064-probe-setup-failure-pycache",
+                )
+        assert popen_attempts == (["Popen"] if failure_stage == "Popen" else [])
+        assert tuple(tmp_path.iterdir()) == inventory_before_setup
+        assert {path.name for path in Path("/proc/self/fd").iterdir()} == descriptors_before_setup
+        assert not tuple(tmp_path.glob("task064-wrapper-bypass-observer-*"))
+
+    os.close(artifact_descriptor)
+    os.close(marker_descriptor)
+    inventory_before_thread = tuple(tmp_path.iterdir())
+    descriptors_before_thread = {path.name for path in Path("/proc/self/fd").iterdir()}
+
+    def fail_thread_start(_thread: threading.Thread) -> Never:
+        raise RuntimeError("task064 injected fake-ACK thread start failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(threading.Thread, "start", fail_thread_start)
+        with pytest.raises(RuntimeError, match="injected fake-ACK thread start failure"):
+            _launch_task064_synthetic_fake_ack_probe(
+                tmp_path,
+                target_node_id="tests/fake.py::test_probe",
+                mode="staging_close_ambiguity",
+                pycache_prefix=tmp_path / "task064-probe-thread-failure-pycache",
+            )
+    assert tuple(tmp_path.iterdir()) == inventory_before_thread
+    assert {path.name for path in Path("/proc/self/fd").iterdir()} == descriptors_before_thread
+    assert not tuple(tmp_path.glob("task064-wrapper-bypass-observer-*"))
+    assert not tuple(tmp_path.glob(".task064-synthetic-artifact-*"))
+    assert not tuple(tmp_path.glob(".task064-child-provenance-*.json"))
+
+
+def test_report_close_orchestration_keeps_full_positive_evidence_and_parent_negatives() -> None:
+    report_tree = ast.parse(
+        textwrap.dedent(
+            inspect.getsource(test_finite_typical_workload_measurements_and_sanitized_report)
+        )
+    )
+    report = cast(ast.FunctionDef, report_tree.body[0])
+    early_child_branch = next(
+        node
+        for node in report.body
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.Compare)
+        and isinstance(node.test.left, ast.Name)
+        and node.test.left.id == "close_probe_mode"
+        and isinstance(node.test.ops[0], ast.IsNot)
+    )
+    child_branch_calls = tuple(
+        node
+        for statement in early_child_branch.body
+        for node in ast.walk(statement)
+        if isinstance(node, ast.Call)
+    )
+    assert any(
+        isinstance(call.func, ast.Name) and call.func.id == "_run_authenticated_report_close_probe"
+        for call in child_branch_calls
+    )
+    assert any(
+        isinstance(node, ast.Return)
+        for statement in early_child_branch.body
+        for node in ast.walk(statement)
+    )
+    early_return_line = max(
+        node.lineno
+        for statement in early_child_branch.body
+        for node in ast.walk(statement)
+        if isinstance(node, ast.Return)
+    )
+    report_calls = tuple(node for node in ast.walk(report) if isinstance(node, ast.Call))
+    evidence_begin = next(
+        call
+        for call in report_calls
+        if isinstance(call.func, ast.Attribute) and call.func.attr == "begin_generated_evidence_run"
+    )
+    fanout = next(
+        call
+        for call in report_calls
+        if isinstance(call.func, ast.Name)
+        and call.func.id == "_run_task064_pytest_children_concurrently"
+    )
+    public_write_lines = tuple(
+        call.lineno
+        for call in report_calls
+        if isinstance(call.func, ast.Attribute) and call.func.attr == "write_evidence_report"
+    )
+    artifact_claim = next(
+        call
+        for call in report_calls
+        if isinstance(call.func, ast.Attribute)
+        and call.func.attr == "_claim_task064_published_report_artifact"
+    )
+    assert early_return_line < evidence_begin.lineno
+    assert public_write_lines and min(public_write_lines) < artifact_claim.lineno < fanout.lineno
+    assert any(
+        keyword.arg == "report_artifact_capability"
+        and isinstance(keyword.value, ast.Name)
+        and keyword.value.id == "published_report_artifact"
+        for keyword in fanout.keywords
+    )
+
+    positive_calls = {
+        "collect_backup_restore_evidence",
+        "collect_schema_identity_evidence",
+        "finalize_bootstrap_path_evidence",
+        "collect_runtime_connection_controls_evidence",
+        "collect_projection_roundtrip_evidence",
+        "finalize_schema_corruption_evidence",
+        "finalize_fresh_process_evidence",
+        "finalize_atomicity_evidence",
+        "finalize_bounded_query_evidence",
+        "collect_closed_error_mapping_evidence",
+        "collect_generation_copy_evidence",
+        "collect_workload_threshold_evidence",
+        "seal_generated_evidence_run",
+    }
+    for positive_name in positive_calls:
+        matches = tuple(
+            call
+            for call in report_calls
+            if isinstance(call.func, ast.Attribute) and call.func.attr == positive_name
+        )
+        assert matches and max(call.lineno for call in matches) < fanout.lineno
+
+    child_tree = ast.parse(
+        textwrap.dedent(inspect.getsource(_run_authenticated_report_close_probe))
+    )
+    forbidden_child_symbols = {
+        "_EvidenceLedger",
+        "_EvidenceRun",
+        "StoreToken",
+        "_EvidenceReceipt",
+        "GeneratedEvidenceAggregate",
+        "begin_generated_evidence_run",
+        "bootstrap_store",
+        *positive_calls,
+    }
+    assert not {
+        node.attr
+        for node in ast.walk(child_tree)
+        if isinstance(node, ast.Attribute) and node.attr in forbidden_child_symbols
+    }
+    assert not {
+        node.id
+        for node in ast.walk(child_tree)
+        if isinstance(node, ast.Name) and node.id in forbidden_child_symbols
+    }
+
+    orchestration_tree = ast.parse(
+        textwrap.dedent(inspect.getsource(_run_task064_pytest_children_concurrently))
+    )
+    orchestration_calls = tuple(
+        node for node in ast.walk(orchestration_tree) if isinstance(node, ast.Call)
+    )
+    report_issue = next(
+        call
+        for call in orchestration_calls
+        if isinstance(call.func, ast.Attribute)
+        and call.func.attr == "_issue_task064_child_provenance"
+        and any(keyword.arg == "report_artifact_capability" for keyword in call.keywords)
+    )
+    assert {keyword.arg for keyword in report_issue.keywords} >= {
+        "report_artifact_capability",
+        "report_deadline_ns",
+    }
+    pass_fds = next(
+        keyword.value
+        for call in orchestration_calls
+        if isinstance(call.func, ast.Attribute) and call.func.attr == "Popen"
+        for keyword in call.keywords
+        if keyword.arg == "pass_fds"
+    )
+    assert any(
+        isinstance(node, ast.Attribute) and node.attr == "artifact_descriptor"
+        for node in ast.walk(pass_fds)
     )
 
 
@@ -6660,7 +8039,13 @@ def test_direct_run_constructor_cannot_mint_evidence_authority(tmp_path: Path) -
         "_validate_issued_evidence_receipt",
         "_consume_issued_evidence_receipt",
         "_write_evidence_report_unbound",
+        "_publish_evidence_report_bytes_unbound",
         "_build_evidence_report_writer",
+        "_build_task064_published_report_artifact_authority",
+        "_register_task064_published_report_artifact",
+        "_resolve_task064_published_report_artifact",
+        "_validate_task064_report_publication_permit",
+        "_prepare_task064_report_publication_permit_consumption",
         "_build_private_gate_receipt_authority",
         "_build_rejection_evidence_authority",
         "_build_evidence_receipt_authority",
@@ -6686,6 +8071,7 @@ def test_direct_run_constructor_cannot_mint_evidence_authority(tmp_path: Path) -
     ):
         assert not hasattr(harness, removed_issuer)
     run = harness.begin_generated_evidence_run(tmp_path)
+    assert type(run._pytest_registration.evidence_ledger) is harness._EvidenceLedger
     ledger = run._pytest_registration.evidence_ledger
     forged = replace(run)
     ledger.run = forged
@@ -6721,6 +8107,7 @@ def test_evidence_run_begin_is_failure_atomic_and_poisoned_on_uncertain_rollback
         return
     registration = harness._lookup_active_pytest_root(tmp_path)
     assert registration is not None
+    assert type(registration.evidence_ledger) is harness._EvidenceLedger
     ledger = registration.evidence_ledger
     ledger_collections = (
         ledger.observations,
@@ -6824,9 +8211,9 @@ def test_pytest_fixture_authority_has_exactly_two_stdlib_only_issuers() -> None:
             "tests.integration.test_task_064_continuous_public_trade_stream_sqlite_evidence",
             "_active_task064_pytest_root",
             "tests/integration/test_task_064_continuous_public_trade_stream_sqlite_evidence.py",
-            "f80cf4107910768e202a7f9b02df75d70c9c2c279129a4f99b9cb7f32895c47a",
-            410,
-            494,
+            "0a6b6e9109472cd92cc231ce31440744d8963390cba2e4688aea373ec21ac28d",
+            430,
+            514,
             "_bind_task064_harness_module",
             "e4bba9b8f370dc1c66fcf977d36438dc870ade6792cd281e1f4ff5ed0fbfc330",
             34,
@@ -9465,7 +10852,13 @@ def test_root_revocation_flush_and_callback_failures_are_fail_closed(
             os.close(ready_read)
 
         authority_run = harness.begin_generated_evidence_run(poison_root)
-        assert authority_run._pytest_registration.evidence_ledger.run is authority_run
+        assert (
+            cast(
+                harness._EvidenceLedger,
+                authority_run._pytest_registration.evidence_ledger,
+            ).run
+            is authority_run
+        )
         harness._arm_pytest_root_authority_fault(probe_mode)
         if probe_mode in {"poison_mmap_probe", "poison_pipe_probe"}:
             assert harness._pytest_root_authority_uncertain()
@@ -12068,6 +13461,790 @@ def test_concurrent_backup_ready_failure_reaps_exact_child(
     } == generation_names
 
 
+def _assert_published_report_capability_boundaries(
+    *,
+    capability: harness._Task064PublishedReportArtifactCapability,
+    report_path: Path,
+    node_id: str,
+    pytest_root: Path,
+    root_capability: harness._PytestRootCapability,
+) -> None:
+    claim_closure = inspect.getclosurevars(
+        harness._claim_task064_published_report_artifact
+    ).nonlocals
+    paths = cast(dict[int, dict[str, object]], claim_closure["paths"])
+    record = paths[id(report_path)]
+    assert record["path"] is report_path
+    assert record["capability"] is capability
+    assert record["state"] == "CLAIMED"
+    assert record["issued_modes"] == set()
+    mode = "staging_close_ambiguity"
+    ack_original_raw = report_path.read_bytes()
+
+    issue_closure = inspect.getclosurevars(harness._issue_task064_child_provenance).nonlocals
+    resolve_publication = cast(Any, issue_closure["resolve_published_report_artifact"])
+    synthetic_child_pid = os.getpid() + 1_000_000
+
+    def armed_ack_session(
+        label: str,
+    ) -> tuple[
+        Callable[[str, int, int], bool],
+        Callable[[], None],
+        str,
+        int,
+    ]:
+        packet_digest = hashlib.sha256(f"task064-ack-{label}".encode("ascii")).hexdigest()
+        _, _, bind_packet_digest = resolve_publication(
+            capability,
+            pytest_root=pytest_root,
+            issuer_node_id=node_id,
+            target_node_id=node_id,
+            mode=mode,
+            deadline_ns=time.monotonic_ns() + 60_000_000_000,
+        )
+        arm, attest, commit, cancel = cast(
+            tuple[
+                Callable[[int], bool],
+                Callable[[str, int, int], bool],
+                Callable[[str, int, int], bool],
+                Callable[[], None],
+            ],
+            bind_packet_digest(packet_digest),
+        )
+        handshake_deadline_ns = time.monotonic_ns() + 10_000_000_000
+        assert arm(synthetic_child_pid)
+        assert attest(packet_digest, synthetic_child_pid, handshake_deadline_ns)
+        return commit, cancel, packet_digest, handshake_deadline_ns
+
+    def restore_after_rejected_ack(cancel: Callable[[], None]) -> None:
+        cancel()
+        issued_modes = cast(set[object], record["issued_modes"])
+        assert issued_modes == {mode}
+        issued_modes.clear()
+        record["state"] = "CLAIMED"
+        assert record["issued_modes"] == set()
+
+    commit, cancel, packet_digest, handshake_deadline_ns = armed_ack_session("stale-context")
+    assert not contextvars.Context().run(
+        commit,
+        packet_digest,
+        synthetic_child_pid,
+        handshake_deadline_ns,
+    )
+    restore_after_rejected_ack(cancel)
+
+    commit, cancel, packet_digest, handshake_deadline_ns = armed_ack_session("stale-capability")
+    original_capability = record["capability"]
+    record["capability"] = replace(capability)
+    try:
+        assert not commit(packet_digest, synthetic_child_pid, handshake_deadline_ns)
+    finally:
+        record["capability"] = original_capability
+    restore_after_rejected_ack(cancel)
+
+    commit, cancel, packet_digest, handshake_deadline_ns = armed_ack_session("stale-root")
+    original_root_identity = record["root_identity"]
+    record["root_identity"] = object()
+    try:
+        assert not commit(packet_digest, synthetic_child_pid, handshake_deadline_ns)
+    finally:
+        record["root_identity"] = original_root_identity
+    restore_after_rejected_ack(cancel)
+
+    commit, cancel, packet_digest, handshake_deadline_ns = armed_ack_session("stale-artifact")
+    original_prefix = report_path.read_bytes()[:1]
+    replacement_prefix = b"[" if original_prefix != b"[" else b"{"
+    mutation_descriptor = os.open(
+        report_path,
+        os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+    )
+    try:
+        assert os.pwrite(mutation_descriptor, replacement_prefix, 0) == 1
+        os.fsync(mutation_descriptor)
+        assert not commit(packet_digest, synthetic_child_pid, handshake_deadline_ns)
+    finally:
+        assert os.pwrite(mutation_descriptor, original_prefix, 0) == 1
+        os.fsync(mutation_descriptor)
+        os.close(mutation_descriptor)
+    restore_after_rejected_ack(cancel)
+    commit, cancel, packet_digest, _ = armed_ack_session("expired-deadline")
+    assert not commit(
+        packet_digest,
+        synthetic_child_pid,
+        time.monotonic_ns() - 1,
+    )
+    restore_after_rejected_ack(cancel)
+
+    commit, cancel, packet_digest, handshake_deadline_ns = armed_ack_session("wrong-pid")
+    assert not commit(
+        packet_digest,
+        synthetic_child_pid + 1,
+        handshake_deadline_ns,
+    )
+    restore_after_rejected_ack(cancel)
+    assert report_path.read_bytes() == ack_original_raw
+    assert record["state"] == "CLAIMED"
+    assert record["issued_modes"] == set()
+    inventory_before = tuple(pytest_root.iterdir())
+    deadline_ns = time.monotonic_ns() + 60_000_000_000
+
+    def reject(
+        authority: object = capability,
+        *,
+        root: Path = pytest_root,
+        issuer: str = node_id,
+        target: str = node_id,
+        requested_mode: str = mode,
+        deadline: int = deadline_ns,
+        expected_record_state: str = "CLAIMED",
+    ) -> None:
+        provenance: harness._Task064ChildProvenance | None = None
+        try:
+            provenance = harness._issue_task064_child_provenance(
+                root,
+                "report_close",
+                issuer,
+                target,
+                requested_mode,
+                report_artifact_capability=cast(Any, authority),
+                report_deadline_ns=deadline,
+            )
+        except harness.HarnessFailure as error:
+            assert error.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+        else:
+            raise AssertionError("hostile report capability minted provenance")
+        finally:
+            if provenance is not None:
+                harness._close_task064_child_provenance(provenance)
+        assert tuple(pytest_root.iterdir()) == inventory_before
+        assert record["state"] == expected_record_state
+        assert record["issued_modes"] == set()
+
+    reject(report_path.read_bytes())
+    reject(replace(capability))
+    reject(replace(capability, _authority_nonce=b"x" * 32))
+    alternate_root = next(root for root in root_capability.roots if root is not pytest_root)
+    reject(root=alternate_root)
+    reject(issuer=f"{node_id}::wrong-issuer")
+    reject(target=f"{node_id}::wrong-target")
+    reject(requested_mode="task064-wrong-mode")
+    reject(deadline=time.monotonic_ns() - 1)
+    reject(deadline=time.monotonic_ns() + 901_000_000_000)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv(harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT, "environment-only-forgery")
+        reject()
+
+    for isolated_context in (contextvars.Context(), contextvars.copy_context()):
+        isolated_context.run(reject)
+    thread_errors: list[BaseException] = []
+
+    def reject_in_thread() -> None:
+        try:
+            reject()
+        except BaseException as error:
+            thread_errors.append(error)
+
+    hostile_thread = threading.Thread(target=reject_in_thread)
+    hostile_thread.start()
+    hostile_thread.join(timeout=10)
+    assert not hostile_thread.is_alive()
+    assert thread_errors == []
+
+    result_read, result_write = os.pipe()
+    child_pid = os.fork()
+    if child_pid == 0:
+        os.close(result_read)
+        result = b"F"
+        try:
+            try:
+                harness._issue_task064_child_provenance(
+                    pytest_root,
+                    "report_close",
+                    node_id,
+                    node_id,
+                    mode,
+                    report_artifact_capability=capability,
+                    report_deadline_ns=deadline_ns,
+                )
+            except harness.HarnessFailure as error:
+                if error.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT:
+                    result = b"P"
+        finally:
+            with contextlib.suppress(OSError):
+                os.write(result_write, result)
+            with contextlib.suppress(OSError):
+                os.close(result_write)
+            os._exit(0)
+    os.close(result_write)
+    result_selector = selectors.DefaultSelector()
+    result_selector.register(result_read, selectors.EVENT_READ)
+    child_reaped = False
+    child_status: int | None = None
+    try:
+        assert result_selector.select(timeout=10)
+        assert os.read(result_read, 1) == b"P"
+        reap_deadline = time.monotonic() + 10
+        while True:
+            waited_pid, observed_status = os.waitpid(child_pid, os.WNOHANG)
+            if waited_pid == child_pid:
+                child_status = observed_status
+                child_reaped = True
+                break
+            assert time.monotonic() < reap_deadline
+            time.sleep(0.01)
+    finally:
+        result_selector.close()
+        os.close(result_read)
+        if not child_reaped:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(child_pid, signal.SIGKILL)
+            with contextlib.suppress(ChildProcessError):
+                os.waitpid(child_pid, 0)
+    assert child_status is not None
+    assert os.WIFEXITED(child_status)
+    assert os.WEXITSTATUS(child_status) == 0
+
+    original_raw = report_path.read_bytes()
+    replacement = b"[" if original_raw[:1] != b"[" else b"{"
+    mutation_descriptor = os.open(
+        report_path,
+        os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+    )
+    try:
+        assert os.pwrite(mutation_descriptor, replacement, 0) == 1
+        os.fsync(mutation_descriptor)
+        reject()
+        assert os.pwrite(mutation_descriptor, original_raw[:1], 0) == 1
+        os.fsync(mutation_descriptor)
+    finally:
+        os.close(mutation_descriptor)
+    assert report_path.read_bytes() == original_raw
+
+    for field, hostile_value in (
+        ("owner_process_id", os.getpid() + 1),
+        ("owner_thread_id", threading.get_ident() + 1),
+        ("state", "PREPARED"),
+        ("raw", bytes(bytearray(cast(bytes, record["raw"])))),
+        ("expires_ns", time.monotonic_ns() - 1),
+        ("aggregate", object()),
+        ("report", object()),
+        ("run", object()),
+    ):
+        original_value = record[field]
+        record[field] = hostile_value
+        try:
+            reject(
+                expected_record_state=(cast(str, hostile_value) if field == "state" else "CLAIMED")
+            )
+        finally:
+            record[field] = original_value
+    assert record["state"] == "CLAIMED"
+    assert record["issued_modes"] == set()
+
+
+def _run_authenticated_report_close_probe(
+    *,
+    mode: str,
+    node_id: str,
+    pytest_root: Path,
+    root_capability: harness._PytestRootCapability,
+) -> None:
+    publication_root = (
+        root_capability.roots[3] if mode == "reentrant_root_revocation" else pytest_root
+    )
+    for fixture_root in root_capability.roots:
+        active_root = harness._lookup_active_pytest_root(fixture_root)
+        assert active_root is not None
+        assert type(active_root.evidence_ledger) is harness._ReportPublicationRootState
+    artifact, permit = harness._claim_task064_report_close_publication(
+        node_id,
+        publication_root,
+    )
+    claim_closure = inspect.getclosurevars(
+        harness._claim_task064_report_close_publication
+    ).nonlocals
+    permit_records = cast(
+        dict[int, dict[str, object]],
+        claim_closure["report_permit_records"],
+    )
+    terminal_permit_records = cast(
+        dict[int, tuple[object, int, str]],
+        claim_closure["terminal_report_permit_records"],
+    )
+    probe_permit = cast(Callable[..., bool], claim_closure["report_permit_is_valid"])
+    permit_record = permit_records[id(permit)]
+    assert permit_record["permit"] is permit
+    assert permit_record["state"] == "ACTIVE"
+    assert id(permit) not in terminal_permit_records
+    report_path = publication_root / "task064-evidence.json"
+    inventory_before = {path.name for path in publication_root.iterdir()}
+    assert "task064-evidence.json" not in inventory_before
+    assert not tuple(publication_root.glob(".task064-evidence-*.tmp"))
+    root_identity = publication_root.lstat()
+
+    def reject_before_publication_io(
+        hostile_permit: harness._Task064ReportPublicationPermit,
+        hostile_root: Path,
+        hostile_artifact: bytes,
+    ) -> None:
+        calls = {"open": 0, "write": 0, "link": 0}
+        real_open = os.open
+        real_write = os.write
+        real_link = os.link
+
+        def observed_open(*args: Any, **kwargs: Any) -> int:
+            calls["open"] += 1
+            return real_open(*args, **kwargs)
+
+        def observed_write(*args: Any, **kwargs: Any) -> int:
+            calls["write"] += 1
+            return real_write(*args, **kwargs)
+
+        def observed_link(*args: Any, **kwargs: Any) -> None:
+            calls["link"] += 1
+            real_link(*args, **kwargs)
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(os, "open", observed_open)
+            patch.setattr(os, "write", observed_write)
+            patch.setattr(os, "link", observed_link)
+            with pytest.raises(harness.HarnessFailure) as rejected:
+                harness._publish_task064_report_close_probe(
+                    hostile_root,
+                    permit=hostile_permit,
+                    artifact=hostile_artifact,
+                )
+        assert rejected.value.code in {
+            harness.HarnessFailureCode.CORRUPT,
+            harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT,
+        }
+        assert calls == {"open": 0, "write": 0, "link": 0}
+        assert permit_records[id(permit)] is permit_record
+        assert permit_record["state"] == "ACTIVE"
+
+    copied_permit = replace(permit)
+    reject_before_publication_io(copied_permit, publication_root, artifact)
+    reject_before_publication_io(
+        replace(permit, _authority_nonce=b"p" * 32),
+        publication_root,
+        artifact,
+    )
+    reject_before_publication_io(
+        copied_permit,
+        Path(str(publication_root)),
+        artifact,
+    )
+    reject_before_publication_io(
+        copied_permit,
+        publication_root,
+        bytes(bytearray(artifact)),
+    )
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv(harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT, "late-forgery")
+        reject_before_publication_io(copied_permit, publication_root, artifact)
+
+    def probe_exact_permit(hostile_root: Path, hostile_artifact: bytes) -> None:
+        assert not probe_permit(
+            permit,
+            hostile_root,
+            hostile_artifact,
+            terminalize_invalid=False,
+        )
+        assert permit_records[id(permit)] is permit_record
+        assert permit_record["state"] == "ACTIVE"
+
+    probe_exact_permit(Path(str(publication_root)), artifact)
+    probe_exact_permit(publication_root, bytes(bytearray(artifact)))
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv(harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT, "late-forgery")
+        probe_exact_permit(publication_root, artifact)
+    for isolated_context in (contextvars.Context(), contextvars.copy_context()):
+        isolated_context.run(probe_exact_permit, publication_root, artifact)
+
+    thread_errors: list[BaseException] = []
+
+    def reject_exact_permit_in_thread() -> None:
+        try:
+            reject_before_publication_io(permit, publication_root, artifact)
+        except BaseException as error:
+            thread_errors.append(error)
+
+    hostile_thread = threading.Thread(target=reject_exact_permit_in_thread)
+    hostile_thread.start()
+    hostile_thread.join(timeout=10)
+    assert not hostile_thread.is_alive()
+    assert thread_errors == []
+    assert permit_record["state"] == "ACTIVE"
+
+    real_close = os.close
+    injected_calls = 0
+
+    def close_with_fault(descriptor: int) -> None:
+        nonlocal injected_calls
+        details = os.fstat(descriptor)
+        try:
+            descriptor_name = Path(os.readlink(f"/proc/self/fd/{descriptor}")).name
+        except OSError:
+            descriptor_name = ""
+        is_stage = (
+            stat.S_ISREG(details.st_mode)
+            and descriptor_name.startswith(".task064-evidence-")
+            and descriptor_name.endswith(".tmp")
+        )
+        is_readback = stat.S_ISREG(details.st_mode) and descriptor_name == "task064-evidence.json"
+        is_root = (
+            stat.S_ISDIR(details.st_mode)
+            and details.st_dev == root_identity.st_dev
+            and details.st_ino == root_identity.st_ino
+            and report_path.exists()
+        )
+        should_fail = bool(
+            injected_calls == 0
+            and (
+                (mode == "staging_close_ambiguity" and is_stage)
+                or (mode == "readback_close_ambiguity" and is_readback)
+                or (mode == "readback_verified_root_close_ambiguity" and is_root)
+            )
+        )
+        should_revoke = bool(
+            injected_calls == 0 and mode == "reentrant_root_revocation" and is_root
+        )
+        if should_revoke:
+            injected_calls += 1
+            harness._revoke_fixture_root(root_capability, publication_root)
+        if should_fail or should_revoke:
+            assert permit_records[id(permit)] is permit_record
+            assert permit_record["state"] == "PREPARED"
+        real_close(descriptor)
+        if should_fail:
+            injected_calls += 1
+            raise OSError(errno.EIO, "injected checked report-close ambiguity")
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(os, "close", close_with_fault)
+        with pytest.raises(harness.HarnessFailure) as rejected:
+            harness._publish_task064_report_close_probe(
+                publication_root,
+                permit=permit,
+                artifact=artifact,
+            )
+    assert rejected.value.code is harness.HarnessFailureCode.UNAVAILABLE
+    assert injected_calls == 1
+    assert id(permit) not in permit_records
+    assert terminal_permit_records[id(permit)] == (
+        permit,
+        os.getpid(),
+        "TERMINALIZED",
+    )
+    report_expected = mode != "staging_close_ambiguity"
+    assert report_path.exists() is report_expected
+    assert not tuple(publication_root.glob(".task064-evidence-*.tmp"))
+    expected_inventory = set(inventory_before)
+    if report_expected:
+        expected_inventory.add("task064-evidence.json")
+        assert report_path.read_bytes() == artifact
+        assert stat_mode(report_path) == 0o600
+        assert report_path.stat().st_nlink == 1
+    assert {path.name for path in publication_root.iterdir()} == expected_inventory
+    assert harness._has_process_cleanup_uncertainty()
+
+    replay_open_calls = 0
+    real_open = os.open
+
+    def observe_replay_open(*args: Any, **kwargs: Any) -> int:
+        nonlocal replay_open_calls
+        replay_open_calls += 1
+        return real_open(*args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(os, "open", observe_replay_open)
+        with pytest.raises(harness.HarnessFailure) as replayed:
+            harness._publish_task064_report_close_probe(
+                publication_root,
+                permit=permit,
+                artifact=artifact,
+            )
+    assert replayed.value.code is harness.HarnessFailureCode.UNAVAILABLE
+    assert replay_open_calls == 0
+    assert {path.name for path in publication_root.iterdir()} == expected_inventory
+
+    fork_calls = 0
+
+    def forbidden_fork() -> int:
+        nonlocal fork_calls
+        fork_calls += 1
+        raise AssertionError("fork must not run after report publication uncertainty")
+
+    dummy = cast(Any, object())
+    guarded_calls: tuple[Callable[[], object], ...] = (
+        lambda: harness.sqlite_result_code_fault_evidence(dummy, seam="readonly"),
+        lambda: harness.fresh_process_writer_contention_evidence(
+            dummy,
+            operation="create",
+            natural_key=b"",
+            creation=dummy,
+            policy=dummy,
+        ),
+        lambda: harness.fresh_process_two_writer_evidence(
+            dummy,
+            operation="create",
+            creations=cast(Any, ()),
+            policy=dummy,
+        ),
+        lambda: harness.fresh_process_kill_evidence(
+            dummy,
+            seam="before_transaction",
+            creation=dummy,
+            policy=dummy,
+            natural_key=b"",
+        ),
+        lambda: harness.true_during_commit_evidence(
+            dummy,
+            transition=dummy,
+            natural_key=b"",
+        ),
+        lambda: harness.ioerr_write_evidence(
+            dummy,
+            transition=dummy,
+            natural_key=b"",
+        ),
+        lambda: harness.max_page_count_evidence(
+            dummy,
+            transition=dummy,
+            natural_key=b"",
+        ),
+        lambda: harness.wal_concurrency_evidence(
+            dummy,
+            transitions=cast(Any, ()),
+            natural_key=b"",
+        ),
+        lambda: harness.concurrent_write_backup_evidence(
+            dummy,
+            publication_root,
+            transitions=cast(Any, ()),
+            evidence_recorded_at_utc="invalid",
+        ),
+    )
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(os, "fork", forbidden_fork)
+        for invoke in guarded_calls:
+            with pytest.raises(harness.HarnessFailure) as guarded:
+                invoke()
+            assert guarded.value.code is harness.HarnessFailureCode.UNPROVEN
+    assert len(guarded_calls) == 9
+    assert fork_calls == 0
+
+
+def _minimal_canonical_report_artifact() -> bytes:
+    recorded_at = "2026-07-29T06:45:00.000000Z"
+
+    def digest(label: str) -> str:
+        return f"sha256:{hashlib.sha256(label.encode('ascii')).hexdigest()}"
+
+    document: dict[str, object] = {
+        "report_version": 1,
+        "task": {
+            "task_id": harness.TASK_ID,
+            "contract_generation": harness.TASK_CONTRACT_GENERATION,
+            "contract_digest": harness.TASK_CONTRACT_DIGEST,
+        },
+        "schema": {
+            "schema_fingerprint": harness.load_schema_fingerprint(),
+            "application_id": harness.APPLICATION_ID,
+            "user_version": harness.USER_VERSION,
+            "schema_generation": harness.SCHEMA_GENERATION,
+            "page_size": harness.PAGE_SIZE,
+            "storage_marker": harness.STORAGE_MARKER.decode("ascii"),
+        },
+        "runtime": {
+            "python_version": harness.ACCEPTED_PYTHON_VERSION,
+            "sqlite_version": harness.ACCEPTED_SQLITE_VERSION,
+            "sqlite_source_id": harness.ACCEPTED_SQLITE_SOURCE_ID,
+            "threadsafety": harness.ACCEPTED_THREADSAFETY,
+            "compile_options": list(harness.ACCEPTED_COMPILE_OPTIONS),
+            "connection_profiles": [
+                {
+                    "role": profile.role,
+                    "dbconfig": [list(item) for item in profile.dbconfig],
+                    "defensive_available": profile.defensive_available,
+                    "defensive_enabled": profile.defensive_enabled,
+                    "limits": [list(item) for item in profile.limits],
+                    "pragmas": [list(item) for item in profile.pragmas],
+                }
+                for profile in harness.ACCEPTED_CONNECTION_PROFILES
+            ],
+        },
+        "environment_class": "generated-linux-pytest",
+        "evidence_recorded_at_utc": recorded_at,
+        "workload_contract": {
+            "seed": harness.WORKLOAD_SEED,
+            "runs": harness.WORKLOAD_RUNS,
+            "record_size_matrix": [list(item) for item in harness.RECORD_SIZE_MATRIX],
+            "workload_matrix": [list(item) for item in harness.WORKLOAD_MATRIX],
+            "thresholds": {
+                "maximum_operation_latency_ns": harness.MAX_OPERATION_LATENCY_NS,
+                "maximum_database_bytes": harness.MAX_TEST_DATABASE_BYTES,
+                "maximum_wal_bytes": harness.MAX_TEST_WAL_BYTES,
+                "maximum_traced_memory_bytes": harness.MAX_TEST_TRACED_MEMORY_BYTES,
+                "maximum_open_cursors": harness.MAX_TEST_OPEN_CURSORS,
+                "maximum_page_count": harness.MAX_PAGE_COUNT,
+                "wal_autocheckpoint_pages": harness.WAL_AUTOCHECKPOINT_PAGES,
+            },
+        },
+        "measurements": {
+            "stream_rows": 0,
+            "history_rows": 0,
+            "query_rows": 0,
+            "database_bytes": 1,
+            "wal_bytes": 0,
+            "page_count": 1,
+            "freelist_count": 0,
+            "maximum_open_cursors": 1,
+            "peak_traced_memory_bytes": 0,
+            "latency_samples_ns": [0 for _ in range(harness.WORKLOAD_RUNS)],
+        },
+        "backup_manifest": {
+            "source_generation_id": digest("task064-source-generation"),
+            "destination_generation_id": digest("task064-destination-generation"),
+            "schema_fingerprint": harness.load_schema_fingerprint(),
+            "sqlite_source_id": harness.ACCEPTED_SQLITE_SOURCE_ID,
+            "page_size": harness.PAGE_SIZE,
+            "source_page_count": 1,
+            "destination_page_count": 1,
+            "checkpoint_outcome": [0, 0, 0],
+            "finalization_outcome": "TRUNCATE_CHECKPOINT_CLOSED_STANDALONE_MAIN",
+            "evidence_recorded_at_utc": recorded_at,
+            "source_streams": 0,
+            "source_history_rows": 0,
+            "destination_streams": 0,
+            "destination_history_rows": 0,
+            "files": [["store.sqlite3", 1, digest("task064-main-file")]],
+            "per_stream_tails": [],
+        },
+        "gates": [
+            *[
+                {
+                    "name": name,
+                    "disposition": harness.EvidenceDisposition.PASS.value,
+                    "reason": None,
+                }
+                for name in harness.GENERATED_EVIDENCE_GATES
+            ],
+            *[
+                {
+                    "name": name,
+                    "disposition": harness.EvidenceDisposition.NOT_APPLICABLE.value,
+                    "reason": harness.TARGET_NOT_APPLICABLE_REASON,
+                }
+                for name in harness.TARGET_NOT_APPLICABLE_GATES
+            ],
+        ],
+    }
+    return harness.canonical_descriptor_bytes(document) + b"\n"
+
+
+def test_report_artifact_validator_rejects_noncanonical_and_semantic_mutations() -> None:
+    public_writer_closure = inspect.getclosurevars(harness.write_evidence_report).nonlocals
+    close_writer_closure = inspect.getclosurevars(
+        harness._publish_task064_report_close_probe
+    ).nonlocals
+    assert (
+        public_writer_closure["publisher_implementation"]
+        is close_writer_closure["publisher_implementation"]
+    )
+    assert callable(public_writer_closure["writer_implementation"])
+    assert callable(public_writer_closure["validate_receipt"])
+    assert callable(close_writer_closure["validate_report_permit"])
+    assert callable(close_writer_closure["prepare_report_permit_consumption"])
+    claim_closure = inspect.getclosurevars(
+        harness._claim_task064_report_close_publication
+    ).nonlocals
+    validator = cast(Callable[[bytes], None], claim_closure["report_artifact_validator"])
+    artifact = _minimal_canonical_report_artifact()
+    validator(artifact)
+    document = cast(dict[str, object], json.loads(artifact))
+
+    reordered_document = {
+        "task": document["task"],
+        "report_version": document["report_version"],
+        **{key: value for key, value in document.items() if key not in {"task", "report_version"}},
+    }
+    reordered_gate_document = json.loads(artifact)
+    first_gate = reordered_gate_document["gates"][0]
+    reordered_gate_document["gates"][0] = {
+        "disposition": first_gate["disposition"],
+        "name": first_gate["name"],
+        "reason": first_gate["reason"],
+    }
+    boolean_schema_document = json.loads(artifact)
+    boolean_schema_document["schema"]["application_id"] = True
+    bare_digest_document = json.loads(artifact)
+    bare_digest_document["backup_manifest"]["source_generation_id"] = "0" * 64
+    wrong_finalization_document = json.loads(artifact)
+    wrong_finalization_document["backup_manifest"]["finalization_outcome"] = (
+        "TRUNCATE_CHECKPOINT_CLOSED_COMPLETE_FILE_SET"
+    )
+    oversized_file_document = json.loads(artifact)
+    oversized_file_document["backup_manifest"]["files"][0][1] = harness.MAX_TEST_DATABASE_BYTES + 1
+    same_length_report_version = artifact.replace(b'"report_version":1', b'"report_version":2', 1)
+    duplicate_top_level_key = artifact.replace(
+        b'{"report_version":1,',
+        b'{"report_version":1,"report_version":1,',
+        1,
+    )
+    hostile_artifacts = (
+        artifact[:-1],
+        artifact + b"\n",
+        artifact + b" ",
+        same_length_report_version,
+        duplicate_top_level_key,
+        harness.canonical_descriptor_bytes(reordered_document) + b"\n",
+        harness.canonical_descriptor_bytes(reordered_gate_document) + b"\n",
+        harness.canonical_descriptor_bytes(boolean_schema_document) + b"\n",
+        harness.canonical_descriptor_bytes(bare_digest_document) + b"\n",
+        harness.canonical_descriptor_bytes(wrong_finalization_document) + b"\n",
+        harness.canonical_descriptor_bytes(oversized_file_document) + b"\n",
+    )
+    for hostile_artifact in hostile_artifacts:
+        with pytest.raises(harness.HarnessFailure) as rejected:
+            validator(hostile_artifact)
+        assert rejected.value.code is harness.HarnessFailureCode.CORRUPT
+
+
+def test_synthetic_pass_shaped_bytes_cannot_mint_report_close_authority(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+) -> None:
+    artifact = _minimal_canonical_report_artifact()
+    forged_capability = harness._Task064PublishedReportArtifactCapability(
+        _authority_nonce=b"synthetic-report-capability-seal"[:32]
+    )
+    assert len(forged_capability._authority_nonce) == 32
+    inventory_before = tuple(tmp_path.iterdir())
+    deadline_ns = time.monotonic_ns() + 60_000_000_000
+    hostile_authorities: tuple[object, ...] = (
+        artifact,
+        forged_capability,
+        replace(forged_capability),
+    )
+    for hostile_authority in hostile_authorities:
+        with pytest.raises(harness.HarnessFailure) as rejected:
+            harness._issue_task064_child_provenance(
+                tmp_path,
+                "report_close",
+                request.node.nodeid,
+                request.node.nodeid,
+                "staging_close_ambiguity",
+                report_artifact_capability=cast(Any, hostile_authority),
+                report_deadline_ns=deadline_ns,
+            )
+        assert rejected.value.code is harness.HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+        assert tuple(tmp_path.iterdir()) == inventory_before
+        assert not tuple(tmp_path.glob(".task064-child-provenance-*.json"))
+        assert not tuple(tmp_path.glob(".task064-report-artifact-*.json"))
+
+
 def test_finite_typical_workload_measurements_and_sanitized_report(
     request: pytest.FixtureRequest,
     tmp_path: Path,
@@ -12084,28 +14261,17 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
         request.node.nodeid,
         isolated_close_probe_modes,
     )
-    if close_probe_mode is None:
-        assert dispatch_modes == isolated_close_probe_modes
-        close_probe_results = _run_task064_pytest_children_concurrently(
-            tmp_path,
-            protocol="report_close",
-            issuer_node_id=request.node.nodeid,
-            target_node_id=request.node.nodeid,
-            modes=dispatch_modes,
-            pycache_label="task064-report-close-pycache",
-            timeout_seconds=840,
-        )
-        assert tuple(close_probe_results) == isolated_close_probe_modes
-        assert all(
-            completed.returncode == 0 and elapsed_seconds < 840
-            for completed, elapsed_seconds in close_probe_results.values()
-        )
-    else:
+    if close_probe_mode is not None:
         assert close_probe_mode in isolated_close_probe_modes
         assert dispatch_modes == ()
-
-    if close_probe_mode == "reentrant_root_revocation":
-        tmp_path = _active_task064_pytest_root.roots[3]
+        _run_authenticated_report_close_probe(
+            mode=close_probe_mode,
+            node_id=request.node.nodeid,
+            pytest_root=tmp_path,
+            root_capability=_active_task064_pytest_root,
+        )
+        return
+    assert dispatch_modes == isolated_close_probe_modes
 
     assert harness.WORKLOAD_MATRIX == (
         ("minimum", 1, 1, 1),
@@ -12448,319 +14614,6 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
         evidence=evidence,
     )
     report_path = tmp_path / "task064-evidence.json"
-    if close_probe_mode is not None:
-        inventory_before_close_probe = {path.name for path in tmp_path.iterdir()}
-        assert "task064-evidence.json" not in inventory_before_close_probe
-        assert not {
-            name
-            for name in inventory_before_close_probe
-            if name.startswith(".task064-evidence-") and name.endswith(".tmp")
-        }
-        real_report_close = os.close
-        root_identity = tmp_path.lstat()
-
-        def assert_no_close_probe_staging_file() -> None:
-            assert not tuple(tmp_path.glob(".task064-evidence-*.tmp"))
-
-        def assert_close_probe_inventory(*, report_expected: bool) -> None:
-            expected_inventory = set(inventory_before_close_probe)
-            if report_expected:
-                expected_inventory.add("task064-evidence.json")
-            assert {path.name for path in tmp_path.iterdir()} == expected_inventory
-
-        def assert_protected_fork_guards() -> None:
-            guard_creation = retained[0][0]
-            guard_natural_key = retained[0][1]
-            guard_transitions: list[ContinuousPublicTradeStreamStoredTransitionV1] = []
-            guard_prior = concurrent_prior
-            for guard_offset in range(harness.CONCURRENT_BACKUP_TRANSITIONS):
-                guard_transition = _retain(
-                    guard_prior,
-                    first_policy,
-                    reason=f"report-close-fork-guard-{guard_offset:02d}",
-                )
-                guard_transitions.append(guard_transition)
-                guard_prior = guard_transition
-            fork_calls = 0
-
-            def forbidden_fork() -> int:
-                nonlocal fork_calls
-                fork_calls += 1
-                raise AssertionError("fork must not run after report-close uncertainty")
-
-            guarded_calls: tuple[Callable[[], object], ...] = (
-                lambda: harness.sqlite_result_code_fault_evidence(
-                    report_token,
-                    seam="readonly",
-                ),
-                lambda: harness.fresh_process_writer_contention_evidence(
-                    report_token,
-                    operation="create",
-                    natural_key=_natural_key(guard_creation),
-                    creation=guard_creation,
-                    policy=first_policy,
-                ),
-                lambda: harness.fresh_process_two_writer_evidence(
-                    report_token,
-                    operation="create",
-                    creations=(guard_creation, guard_creation),
-                    policy=first_policy,
-                ),
-                lambda: harness.fresh_process_kill_evidence(
-                    report_token,
-                    seam="before_transaction",
-                    creation=guard_creation,
-                    policy=first_policy,
-                    natural_key=_natural_key(guard_creation),
-                ),
-                lambda: harness.true_during_commit_evidence(
-                    report_token,
-                    transition=guard_transitions[0],
-                    natural_key=guard_natural_key,
-                ),
-                lambda: harness.ioerr_write_evidence(
-                    report_token,
-                    transition=guard_transitions[0],
-                    natural_key=guard_natural_key,
-                ),
-                lambda: harness.max_page_count_evidence(
-                    report_token,
-                    transition=guard_transitions[0],
-                    natural_key=guard_natural_key,
-                ),
-                lambda: harness.wal_concurrency_evidence(
-                    report_token,
-                    transitions=tuple(guard_transitions),
-                    natural_key=guard_natural_key,
-                ),
-                lambda: harness.concurrent_write_backup_evidence(
-                    report_token,
-                    _active_task064_pytest_root.roots[3],
-                    transitions=tuple(guard_transitions),
-                    evidence_recorded_at_utc="2026-07-29T06:47:00.000000Z",
-                ),
-            )
-            with pytest.MonkeyPatch.context() as patch:
-                patch.setattr(harness, "_mark_process_cleanup_uncertain", lambda: None)
-                patch.setattr(harness, "_has_process_cleanup_uncertainty", lambda: False)
-                patch.setattr(harness, "_pytest_root_authority_uncertain", lambda: False)
-                patch.setattr(
-                    harness,
-                    "_has_fork_unsafe_connection_authority",
-                    lambda: False,
-                )
-                patch.setattr(harness, "_require_fork_safe_connection_state", lambda: None)
-                patch.setattr(os, "fork", forbidden_fork)
-                for invoke in guarded_calls:
-                    with pytest.raises(harness.HarnessFailure) as guarded:
-                        invoke()
-                    assert guarded.value.code is harness.HarnessFailureCode.UNPROVEN
-            assert len(guarded_calls) == 9
-            assert fork_calls == 0
-
-        def assert_terminal_close_probe(
-            *,
-            report_expected: bool,
-            close_failure: pytest.ExceptionInfo[harness.HarnessFailure],
-        ) -> None:
-            assert close_failure.value.code is harness.HarnessFailureCode.UNAVAILABLE
-            assert_no_close_probe_staging_file()
-            assert report_path.exists() is report_expected
-            if report_expected:
-                assert report_path.is_file()
-                assert stat_mode(report_path) == 0o600
-                assert report_path.stat().st_nlink == 1
-            assert_close_probe_inventory(report_expected=report_expected)
-            assert evidence_ledger.receipt is evidence_receipt
-            with pytest.raises(harness.HarnessFailure) as terminal_receipt:
-                harness.write_evidence_report(
-                    tmp_path,
-                    receipt=evidence_receipt,
-                    report=complete_report,
-                )
-            assert terminal_receipt.value.code is harness.HarnessFailureCode.UNAVAILABLE
-            assert_protected_fork_guards()
-            assert_close_probe_inventory(report_expected=report_expected)
-
-        if close_probe_mode == "staging_close_ambiguity":
-            ambiguous_stage_descriptor: int | None = None
-            ambiguous_stage_close_calls = 0
-
-            def close_stage_then_raise(descriptor: int) -> None:
-                nonlocal ambiguous_stage_close_calls
-                nonlocal ambiguous_stage_descriptor
-                if descriptor == ambiguous_stage_descriptor:
-                    raise AssertionError("owned staging descriptor must not be closed twice")
-                details = os.fstat(descriptor)
-                try:
-                    descriptor_target = Path(os.readlink(f"/proc/self/fd/{descriptor}")).name
-                except OSError:
-                    descriptor_target = ""
-                if (
-                    stat.S_ISREG(details.st_mode)
-                    and descriptor_target.startswith(".task064-evidence-")
-                    and descriptor_target.endswith(".tmp")
-                ):
-                    ambiguous_stage_descriptor = descriptor
-                    ambiguous_stage_close_calls += 1
-                    real_report_close(descriptor)
-                    raise OSError(errno.EIO, "injected post-close staging ambiguity")
-                real_report_close(descriptor)
-
-            with pytest.MonkeyPatch.context() as patch:
-                patch.setattr(os, "close", close_stage_then_raise)
-                with pytest.raises(harness.HarnessFailure) as ambiguous_close:
-                    harness.write_evidence_report(
-                        tmp_path,
-                        receipt=evidence_receipt,
-                        report=complete_report,
-                    )
-            assert ambiguous_stage_close_calls == 1
-            assert receipt_is_consumed()
-            assert harness._has_process_cleanup_uncertainty()
-            assert_terminal_close_probe(
-                report_expected=False,
-                close_failure=ambiguous_close,
-            )
-            return
-        elif close_probe_mode == "readback_close_ambiguity":
-            ambiguous_readback_close_calls = 0
-
-            def close_readback_then_raise(descriptor: int) -> None:
-                nonlocal ambiguous_readback_close_calls
-                details = os.fstat(descriptor)
-                try:
-                    descriptor_target = Path(os.readlink(f"/proc/self/fd/{descriptor}")).name
-                except OSError:
-                    descriptor_target = ""
-                if (
-                    stat.S_ISREG(details.st_mode)
-                    and descriptor_target == "task064-evidence.json"
-                    and ambiguous_readback_close_calls == 0
-                ):
-                    ambiguous_readback_close_calls += 1
-                    real_report_close(descriptor)
-                    raise OSError(errno.EIO, "injected post-close report readback ambiguity")
-                real_report_close(descriptor)
-
-            with pytest.MonkeyPatch.context() as patch:
-                patch.setattr(os, "close", close_readback_then_raise)
-                with pytest.raises(harness.HarnessFailure) as ambiguous_close:
-                    harness.write_evidence_report(
-                        tmp_path,
-                        receipt=evidence_receipt,
-                        report=complete_report,
-                    )
-            assert ambiguous_readback_close_calls == 1
-            assert receipt_is_consumed()
-            assert harness._has_process_cleanup_uncertainty()
-            assert_terminal_close_probe(
-                report_expected=True,
-                close_failure=ambiguous_close,
-            )
-            return
-        elif close_probe_mode == "reentrant_root_revocation":
-            reentrant_revocation_calls = 0
-            fake_transition_calls = 0
-
-            def close_after_root_revocation(descriptor: int) -> None:
-                nonlocal reentrant_revocation_calls
-                details = os.fstat(descriptor)
-                if (
-                    stat.S_ISDIR(details.st_mode)
-                    and details.st_dev == root_identity.st_dev
-                    and details.st_ino == root_identity.st_ino
-                    and report_path.exists()
-                    and reentrant_revocation_calls == 0
-                ):
-                    reentrant_revocation_calls += 1
-                    harness._revoke_fixture_root(
-                        _active_task064_pytest_root,
-                        tmp_path,
-                    )
-                real_report_close(descriptor)
-
-            def fake_transition(*_args: Any, **_kwargs: Any) -> bool:
-                nonlocal fake_transition_calls
-                fake_transition_calls += 1
-                return True
-
-            with pytest.MonkeyPatch.context() as patch:
-                patch.setattr(os, "close", close_after_root_revocation)
-                patch.setattr(
-                    harness,
-                    "_PreparedEvidenceRunConsumption",
-                    fake_transition,
-                    raising=False,
-                )
-                patch.setattr(
-                    harness,
-                    "_PreparedEvidenceReceiptConsumption",
-                    fake_transition,
-                    raising=False,
-                )
-                patch.setattr(
-                    harness,
-                    "_prepare_issued_evidence_receipt_consumption",
-                    fake_transition,
-                    raising=False,
-                )
-                with pytest.raises(harness.HarnessFailure) as ambiguous_close:
-                    harness.write_evidence_report(
-                        tmp_path,
-                        receipt=evidence_receipt,
-                        report=complete_report,
-                    )
-            assert reentrant_revocation_calls == 1
-            assert fake_transition_calls == 0
-            assert evidence_ledger.closed
-            assert not evidence_ledger.consumed
-            assert (
-                harness._lookup_revoked_pytest_root(tmp_path) is evidence_run._pytest_registration
-            )
-            with pytest.raises(harness.HarnessFailure) as closed_run:
-                harness._validated_evidence_run(evidence_run)
-            assert closed_run.value.code is harness.HarnessFailureCode.CORRUPT
-            assert_terminal_close_probe(
-                report_expected=True,
-                close_failure=ambiguous_close,
-            )
-            return
-        else:
-            assert close_probe_mode == "readback_verified_root_close_ambiguity"
-            ambiguous_root_close_calls = 0
-
-            def close_root_then_raise(descriptor: int) -> None:
-                nonlocal ambiguous_root_close_calls
-                details = os.fstat(descriptor)
-                if (
-                    stat.S_ISDIR(details.st_mode)
-                    and details.st_dev == root_identity.st_dev
-                    and details.st_ino == root_identity.st_ino
-                    and report_path.exists()
-                ):
-                    ambiguous_root_close_calls += 1
-                    real_report_close(descriptor)
-                    raise OSError(errno.EIO, "injected post-close root ambiguity")
-                real_report_close(descriptor)
-
-            with pytest.MonkeyPatch.context() as patch:
-                patch.setattr(os, "close", close_root_then_raise)
-                with pytest.raises(harness.HarnessFailure) as ambiguous_close:
-                    harness.write_evidence_report(
-                        tmp_path,
-                        receipt=evidence_receipt,
-                        report=complete_report,
-                    )
-            assert ambiguous_root_close_calls == 1
-            assert receipt_is_consumed()
-            assert harness._has_process_cleanup_uncertainty()
-            assert_terminal_close_probe(
-                report_expected=True,
-                close_failure=ambiguous_close,
-            )
-            return
-
     forged_receipt = replace(evidence_receipt)
     evidence_ledger.receipt = forged_receipt
     fake_validator_calls = 0
@@ -13530,6 +15383,31 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
         "files": [list(item) for item in report_manifest.files],
         "per_stream_tails": [list(item) for item in report_manifest.per_stream_tails],
     }
+    canonical_report_artifact = report.read_bytes()
+    published_report_artifact = harness._claim_task064_published_report_artifact(report)
+    _assert_published_report_capability_boundaries(
+        capability=published_report_artifact,
+        report_path=report,
+        node_id=request.node.nodeid,
+        pytest_root=tmp_path,
+        root_capability=_active_task064_pytest_root,
+    )
+    close_probe_results = _run_task064_pytest_children_concurrently(
+        tmp_path,
+        protocol="report_close",
+        issuer_node_id=request.node.nodeid,
+        target_node_id=request.node.nodeid,
+        modes=dispatch_modes,
+        pycache_label="task064-report-close-pycache",
+        timeout_seconds=840,
+        report_artifact_capability=published_report_artifact,
+    )
+    assert tuple(close_probe_results) == isolated_close_probe_modes
+    assert all(
+        completed.returncode == 0 and elapsed_seconds < 840
+        for completed, elapsed_seconds in close_probe_results.values()
+    )
+    assert report.read_bytes() == canonical_report_artifact
     with pytest.raises(harness.HarnessFailure) as consumed_receipt:
         harness.write_evidence_report(
             tmp_path,

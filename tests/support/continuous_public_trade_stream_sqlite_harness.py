@@ -6,8 +6,10 @@ options from a caller, and is intentionally not importable from production sourc
 
 from __future__ import annotations
 
+import atexit
 import ctypes
 import errno
+import fcntl
 import hashlib
 import inspect
 import json
@@ -19,10 +21,13 @@ import secrets
 import select
 import selectors
 import signal
+import socket
 import sqlite3
 import stat
 import struct
+import subprocess
 import sys
+import threading
 import time
 import tracemalloc
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -33,6 +38,7 @@ from datetime import UTC, datetime
 from enum import Enum, StrEnum
 from functools import partial, wraps
 from pathlib import Path
+from threading import get_ident
 from types import CodeType, MappingProxyType
 from typing import Any, Final, Never, ParamSpec, TypeVar, cast
 from uuid import UUID
@@ -811,6 +817,13 @@ class _EvidenceLedger:
     closed: bool = False
 
 
+@dataclass(slots=True)
+class _ReportPublicationRootState:
+    """Ledger-free root state for authenticated report-publication children."""
+
+    nonce: bytes
+
+
 @dataclass(frozen=True, slots=True)
 class _ActivePytestRoot:
     """Fixture-scoped authority for one repository-controlled pytest root."""
@@ -824,7 +837,7 @@ class _ActivePytestRoot:
     process_id: int
     node_id: str
     nonce: bytes
-    evidence_ledger: _EvidenceLedger
+    evidence_ledger: _EvidenceLedger | _ReportPublicationRootState
 
 
 @dataclass(frozen=True, slots=True)
@@ -3751,7 +3764,7 @@ def _resolve_existing(path: Path, *, code: HarnessFailureCode) -> Path:
 
 def _build_pytest_root_authority() -> tuple[
     Callable[[], None],
-    Callable[[str, Path], _PytestRootRegistrationPermit],
+    Callable[..., _PytestRootRegistrationPermit],
     Callable[[_PytestRootRegistrationPermit], None],
     Callable[
         [_PytestRootRegistrationPermit, tuple[Path, ...]],
@@ -3796,13 +3809,13 @@ def _build_pytest_root_authority() -> tuple[
             "tests.integration.test_task_064_continuous_public_trade_stream_sqlite_evidence",
             "_active_task064_pytest_root",
             "tests/integration/test_task_064_continuous_public_trade_stream_sqlite_evidence.py",
-            "f80cf4107910768e202a7f9b02df75d70c9c2c279129a4f99b9cb7f32895c47a",
-            410,
-            494,
+            "0a6b6e9109472cd92cc231ce31440744d8963390cba2e4688aea373ec21ac28d",
+            430,
+            514,
             "_bind_task064_harness_module",
             "e4bba9b8f370dc1c66fcf977d36438dc870ade6792cd281e1f4ff5ed0fbfc330",
             34,
-            "75090803300d52a3831bca0f221845035d1ee235d214827831beab838d079611",
+            "0a7c2da8395f69a6fb087b636f359bc5953b01e5d5ad169e6419b788b6bb4738",
         ),
     )
     real_getpid = os.getpid
@@ -3868,6 +3881,8 @@ def _build_pytest_root_authority() -> tuple[
     pipe_close = os.close
     select_wait = select.select
     nonce_issuer = _issue_authority_nonce
+    evidence_ledger_type = _EvidenceLedger
+    publication_root_state_type = _ReportPublicationRootState
     active_evidence_run = _ACTIVE_EVIDENCE_RUN
     process_cleanup_uncertain = _has_process_cleanup_uncertainty
     active: dict[int, dict[str, object]] = {}
@@ -4672,6 +4687,8 @@ def _build_pytest_root_authority() -> tuple[
 
     def identity_fields(identity: _ActivePytestRoot) -> tuple[object, ...]:
         ledger = identity.evidence_ledger
+        if type(ledger) not in {evidence_ledger_type, publication_root_state_type}:
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
         return (
             id(identity.path_object),
             str(identity.path_object),
@@ -4790,27 +4807,31 @@ def _build_pytest_root_authority() -> tuple[
             active.pop(key)
         revoked[key] = record
 
-        ledger = cast(_EvidenceLedger, record["ledger"])
-        issued_run = ledger.run
-        if issued_run is not None:
+        ledger = record["ledger"]
+        if type(ledger) is evidence_ledger_type:
+            evidence_ledger = ledger
+            issued_run = evidence_ledger.run
+            if issued_run is not None:
+                try:
+                    if run_closer is None or run_closed is None:
+                        raise RuntimeError("checked evidence-run close uncertainty")
+                    close_result = (
+                        False if consume_fault("evidence_run_close") else run_closer(issued_run)
+                    )
+                    if not close_result or not run_closed(issued_run):
+                        raise RuntimeError("evidence-run authority did not reach CLOSED")
+                except BaseException as error:
+                    errors.append(error)
             try:
-                if run_closer is None or run_closed is None:
-                    raise RuntimeError("checked evidence-run close uncertainty")
-                close_result = (
-                    False if consume_fault("evidence_run_close") else run_closer(issued_run)
-                )
-                if not close_result or not run_closed(issued_run):
-                    raise RuntimeError("evidence-run authority did not reach CLOSED")
+                evidence_ledger.closed = True
+                evidence_ledger.recording = False
+                evidence_ledger.observations.clear()
+                evidence_ledger.operation_runs.clear()
+                evidence_ledger.rejection_runs.clear()
             except BaseException as error:
                 errors.append(error)
-        try:
-            ledger.closed = True
-            ledger.recording = False
-            ledger.observations.clear()
-            ledger.operation_runs.clear()
-            ledger.rejection_runs.clear()
-        except BaseException as error:
-            errors.append(error)
+        elif type(ledger) is not publication_root_state_type:
+            errors.append(RuntimeError("invalid pytest-root ledger state"))
         try:
             issued_active_run = active_evidence_run.get()
             if issued_active_run is not None and issued_active_run._pytest_registration is identity:
@@ -4850,6 +4871,7 @@ def _build_pytest_root_authority() -> tuple[
         *,
         node_id: str,
         owner_process_id: int,
+        publication_only: bool,
     ) -> tuple[_ActivePytestRoot, dict[str, object]]:
         if uncertainty_latched():
             raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
@@ -4879,12 +4901,20 @@ def _build_pytest_root_authority() -> tuple[
                 revocation_flag = None
                 raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
             root_nonce = nonce_issuer("pytest-root")
-            ledger_nonce = nonce_issuer("evidence-ledger")
-            ledger = _EvidenceLedger(
-                nonce=ledger_nonce,
-                observations={},
-                operation_runs={},
-                rejection_runs={},
+            if type(publication_only) is not bool:
+                raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+            ledger_nonce = nonce_issuer(
+                "report-publication-root" if publication_only else "evidence-ledger"
+            )
+            ledger: _EvidenceLedger | _ReportPublicationRootState = (
+                publication_root_state_type(nonce=ledger_nonce)
+                if publication_only
+                else evidence_ledger_type(
+                    nonce=ledger_nonce,
+                    observations={},
+                    operation_runs={},
+                    rejection_runs={},
+                )
             )
             identity = _ActivePytestRoot(
                 path_object=pytest_root,
@@ -4934,6 +4964,7 @@ def _build_pytest_root_authority() -> tuple[
     def begin_registration(
         node_id: str,
         pytest_root: Path,
+        publication_only: bool = False,
     ) -> _PytestRootRegistrationPermit:
         """Authorize one exact fixture call before it creates auxiliary roots."""
 
@@ -4952,6 +4983,7 @@ def _build_pytest_root_authority() -> tuple[
             or not (node_id == node_prefix or node_id.startswith(f"{node_prefix}::"))
             or not isinstance(pytest_root, path_type)
             or not pytest_root.is_absolute()
+            or type(publication_only) is not bool
             or id(pytest_root) in all_roots
             or active_node_lifecycle is not None
         ):
@@ -4975,6 +5007,7 @@ def _build_pytest_root_authority() -> tuple[
                 "root_observation": root_observation,
                 "owner_process_id": owner_process_id,
                 "owner_uid": real_getuid(),
+                "publication_only": publication_only,
                 "state": "PERMIT_ISSUED",
             }
             return permit
@@ -5135,6 +5168,7 @@ def _build_pytest_root_authority() -> tuple[
                         root,
                         node_id=cast(str, permit_record["node_id"]),
                         owner_process_id=owner_process_id,
+                        publication_only=cast(bool, permit_record["publication_only"]),
                     )
                     key = id(root)
                     inode_identity = (identity.device, identity.inode)
@@ -5365,6 +5399,7 @@ _TASK064_LEGACY_CHILD_MODE_ENVIRONMENTS = (
 class _Task064ChildProvenance:
     envelope: str
     descriptor: int
+    artifact_descriptor: int
     marker_path: Path
     marker_device: int
     marker_inode: int
@@ -5381,15 +5416,46 @@ class _Task064ChildProvenanceTicket:
     _authority_nonce: bytes
 
 
+@dataclass(frozen=True, slots=True)
+class _Task064ReportPublicationPermit:
+    """Opaque child-local authority for one exact authenticated report publication."""
+
+    _authority_nonce: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class _Task064PublishedReportArtifactCapability:
+    """Opaque parent authority for one receipt-backed published report artifact."""
+
+    _authority_nonce: bytes
+
+
 def _build_task064_child_provenance_authority() -> tuple[
-    Callable[[Path, str, str, str, str], _Task064ChildProvenance],
+    Callable[..., _Task064ChildProvenance],
+    Callable[..., subprocess.Popen[bytes]],
+    Callable[[_Task064ChildProvenance, str], bool],
     Callable[[str], _Task064ChildProvenanceTicket | None],
     Callable[[_Task064ChildProvenanceTicket | None, str, Path], None],
+    Callable[[_Task064ChildProvenanceTicket | None, str], bool],
     Callable[[_Task064ChildProvenanceTicket | None, str], bool],
     Callable[[str, str, tuple[str, ...]], str | None],
     Callable[[_Task064ChildProvenanceTicket | None, str], None],
     Callable[[_Task064ChildProvenanceTicket | None, str], None],
     Callable[[_Task064ChildProvenance], bool],
+    Callable[
+        [
+            Callable[[bytes], None],
+            Callable[[], tuple[tuple[str, str], ...]],
+            Callable[..., tuple[bytes, Mapping[str, object], Callable[..., object]]],
+        ],
+        None,
+    ],
+    Callable[[str, Path], tuple[bytes, _Task064ReportPublicationPermit]],
+    Callable[[_Task064ReportPublicationPermit, Path, bytes], bool],
+    Callable[
+        [_Task064ReportPublicationPermit],
+        tuple[Callable[[], bool], Callable[[], bool], Callable[[], bool]],
+    ],
 ]:
     """Issue one-shot, inherited-FD provenance for internal pytest children."""
 
@@ -5397,6 +5463,8 @@ def _build_task064_child_provenance_authority() -> tuple[
     legacy_environments = _TASK064_LEGACY_CHILD_MODE_ENVIRONMENTS
     provenance_type = _Task064ChildProvenance
     ticket_type = _Task064ChildProvenanceTicket
+    report_permit_type = _Task064ReportPublicationPermit
+    published_artifact_capability_type = _Task064PublishedReportArtifactCapability
     failure_type = HarnessFailure
     invalid_code = HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
     validate_root = _validate_bootstrap_root
@@ -5409,6 +5477,7 @@ def _build_task064_child_provenance_authority() -> tuple[
     int_type = int
     str_type = str
     dict_type = dict
+    list_type = list
     set_type = set
     tuple_type = tuple
     bytes_type = bytes
@@ -5425,10 +5494,13 @@ def _build_task064_child_provenance_authority() -> tuple[
     value_error = ValueError
     unicode_error = UnicodeError
     file_not_found_error = FileNotFoundError
+    process_lookup_error = ProcessLookupError
     environment = os.environ
     current_pid = os.getpid
     parent_pid = os.getppid
+    current_thread_id = get_ident
     current_uid = os.getuid
+    descriptor_is_inheritable = os.get_inheritable
     open_file = os.open
     close_file = os.close
     read_file = os.read
@@ -5442,9 +5514,14 @@ def _build_task064_child_provenance_authority() -> tuple[
     close_on_exec = getattr(os, "O_CLOEXEC", 0)
     directory_only = getattr(os, "O_DIRECTORY", 0)
     read_only = os.O_RDONLY
+    write_only = os.O_WRONLY
     read_write = os.O_RDWR
     create_exclusive = os.O_CREAT | os.O_EXCL
     seek_start = os.SEEK_SET
+    descriptor_flags = fcntl.fcntl
+    get_file_status_flags = fcntl.F_GETFL
+    access_mode_mask = os.O_ACCMODE
+    monotonic_ns = time.monotonic_ns
     stat_is_regular = stat.S_ISREG
     stat_is_directory = stat.S_ISDIR
     stat_is_link = stat.S_ISLNK
@@ -5455,8 +5532,35 @@ def _build_task064_child_provenance_authority() -> tuple[
     issue_nonce = secrets.token_hex
     issue_ticket_nonce = secrets.token_bytes
     object_identity = id
+    task_contract_generation = TASK_CONTRACT_GENERATION
+    task_contract_digest = TASK_CONTRACT_DIGEST
+    schema_fingerprint_provider = load_schema_fingerprint
     context_var_type = ContextVar
     context_token_type = Token
+    socket_constructor = socket.socket
+    socket_family = socket.AF_UNIX
+    socket_sequence_packet = socket.SOCK_SEQPACKET
+    socket_level = socket.SOL_SOCKET
+    socket_pass_credentials = socket.SO_PASSCRED
+    socket_peer_credentials = socket.SO_PEERCRED
+    socket_accepting = socket.SO_ACCEPTCONN
+    socket_type_option = socket.SO_TYPE
+    socket_credentials_message = socket.SCM_CREDENTIALS
+    socket_timeout_error = socket.timeout
+    credentials_size = struct.calcsize("3i")
+    credentials_space = socket.CMSG_SPACE(credentials_size)
+    unpack_credentials = struct.unpack
+    lock_type = threading.Lock
+    popen_constructor = subprocess.Popen
+    subprocess_pipe = subprocess.PIPE
+    timeout_expired_type = subprocess.TimeoutExpired
+    kill_process_group = os.killpg
+    terminate_signal = signal.SIGTERM
+    kill_signal = signal.SIGKILL
+    register_at_fork = os.register_at_fork
+    register_at_exit = atexit.register
+    python_executable = sys.executable
+    repository_root = Path(__file__).resolve().parents[2]
     protocol_policy = (
         (
             "exec_isolation",
@@ -5507,9 +5611,16 @@ def _build_task064_child_provenance_authority() -> tuple[
     )
     consumed_nonces: set[str] = set()
     ticket_records: dict[int, dict[str, object]] = {}
+    provenance_records: dict[int, dict[str, object]] = {}
+    launch_records: dict[int, dict[str, object]] = {}
     terminal_ticket_records: dict[
         int,
         tuple[_Task064ChildProvenanceTicket, int, str, str],
+    ] = {}
+    report_permit_records: dict[int, dict[str, object]] = {}
+    terminal_report_permit_records: dict[
+        int,
+        tuple[_Task064ReportPublicationPermit, int, str],
     ] = {}
     active_body_ticket: ContextVar[_Task064ChildProvenanceTicket | None] = context_var_type(
         "task064_child_provenance_ticket",
@@ -5520,7 +5631,54 @@ def _build_task064_child_provenance_authority() -> tuple[
     maximum_consumed_nonces = 1_024
     maximum_active_tickets = 64
     maximum_terminal_tickets = 64
+    maximum_report_artifact_bytes = 4 * 1024 * 1024
+    maximum_report_permits = 64
+    maximum_report_child_lifetime_ns = 900_000_000_000
+    maximum_parent_handshake_lifetime_ns = 30_000_000_000
     domain = "TASK064-CHILD-PROVENANCE-V1"
+    artifact_metadata_keys = (
+        "artifact_descriptor",
+        "artifact_device",
+        "artifact_inode",
+        "artifact_uid",
+        "artifact_mode",
+        "artifact_nlink",
+        "artifact_length",
+        "artifact_sha256",
+        "artifact_nonce",
+        "artifact_deadline_ns",
+        "contract_generation",
+        "contract_digest",
+        "schema_fingerprint",
+        "source_fingerprints",
+    )
+    publication_metadata_keys = (
+        "publication_nonce",
+        "publication_run_digest",
+        "publication_aggregate_digest",
+        "publication_report_object_digest",
+        "publication_root_path",
+        "publication_root_device",
+        "publication_root_inode",
+        "publication_root_uid",
+        "publication_root_mode",
+        "publication_path",
+        "publication_device",
+        "publication_inode",
+        "publication_uid",
+        "publication_mode",
+        "publication_nlink",
+        "publication_process_id",
+        "publication_thread_id",
+        "publication_node_id",
+        "publication_context_digest",
+        "publication_expires_ns",
+    )
+    report_artifact_validator: Callable[[bytes], None] | None = None
+    report_source_fingerprints: Callable[[], tuple[tuple[str, str], ...]] | None = None
+    resolve_published_report_artifact: (
+        Callable[..., tuple[bytes, Mapping[str, object], Callable[..., object]]] | None
+    ) = None
     post_return_issuer_node_id = (
         "tests/integration/"
         "test_task_064_continuous_public_trade_stream_sqlite_evidence.py::"
@@ -5560,6 +5718,89 @@ def _build_task064_child_provenance_authority() -> tuple[
             and all_values(character in "0123456789abcdef" for character in exact_value)
         )
 
+    listener_owner_pid = current_pid()
+    listener_address_prefix = b"\x00wealth-task064-g3-"
+    # Threat boundary: kernel parent credentials plus the exact wrapper registry are
+    # authoritative here. A malicious intermediary parent, or arbitrary same-process
+    # closure/descriptor introspection, is outside the controlled-pytest threat model.
+
+    def listener_address(process_id: int) -> bytes:
+        if type_of(process_id) is not int_type or process_id <= 1:
+            invalid()
+        address = listener_address_prefix + str_type(process_id).encode("ascii")
+        if length_of(address) > 96:
+            invalid()
+        return address
+
+    authority_listener = socket_constructor(socket_family, socket_sequence_packet)
+    authority_listener_address = listener_address(listener_owner_pid)
+    try:
+        authority_listener.setsockopt(socket_level, socket_pass_credentials, 1)
+        authority_listener.bind(authority_listener_address)
+        authority_listener.listen(maximum_active_tickets)
+        authority_listener.settimeout(0.1)
+        listener_descriptor = authority_listener.fileno()
+        listener_details = stat_file(listener_descriptor)
+        if (
+            listener_descriptor <= 2
+            or descriptor_is_inheritable(listener_descriptor)
+            or not stat.S_ISSOCK(listener_details.st_mode)
+            or listener_details.st_uid != current_uid()
+            or authority_listener.getsockname() != authority_listener_address
+            or authority_listener.getsockopt(socket_level, socket_accepting) != 1
+            or authority_listener.getsockopt(socket_level, socket_type_option)
+            != socket_sequence_packet
+        ):
+            invalid()
+        listener_fields = (
+            listener_descriptor,
+            listener_details.st_dev,
+            listener_details.st_ino,
+            listener_details.st_uid,
+            stat_mode(listener_details.st_mode),
+        )
+    except base_exception_type:
+        with suppress_errors(base_exception_type):
+            authority_listener.close()
+        raise
+
+    def close_in_forked_child() -> None:
+        if current_pid() != listener_owner_pid:
+            with suppress_errors(base_exception_type):
+                authority_listener.close()
+
+    def close_listener_at_exit() -> None:
+        if current_pid() == listener_owner_pid:
+            with suppress_errors(base_exception_type):
+                authority_listener.close()
+
+    register_at_fork(after_in_child=close_in_forked_child)
+    register_at_exit(close_listener_at_exit)
+
+    def listener_is_exact() -> bool:
+        try:
+            descriptor = authority_listener.fileno()
+            details = stat_file(descriptor)
+            return bool_type(
+                current_pid() == listener_owner_pid
+                and (
+                    descriptor,
+                    details.st_dev,
+                    details.st_ino,
+                    details.st_uid,
+                    stat_mode(details.st_mode),
+                )
+                == listener_fields
+                and not descriptor_is_inheritable(descriptor)
+                and stat.S_ISSOCK(details.st_mode)
+                and authority_listener.getsockname() == authority_listener_address
+                and authority_listener.getsockopt(socket_level, socket_accepting) == 1
+                and authority_listener.getsockopt(socket_level, socket_type_option)
+                == socket_sequence_packet
+            )
+        except (os_error, value_error):
+            return False
+
     def validate_protocol_values(
         protocol: str,
         target_node_id: str,
@@ -5592,18 +5833,404 @@ def _build_task064_child_provenance_authority() -> tuple[
         for ambient_environment in legacy_environments:
             environment.pop(ambient_environment, None)
 
+    def published_origin_matches(
+        binding: Mapping[str, object],
+        artifact: bytes,
+    ) -> bool:
+        if (
+            not isinstance_value(binding, Mapping)
+            or type_of(artifact) is not bytes_type
+            or set_type(binding) != set_type(publication_metadata_keys)
+        ):
+            return False
+        root_descriptor = -1
+        descriptor = -1
+        try:
+            root_path = path_type(cast(str, binding["publication_root_path"]))
+            publication_path = path_type(cast(str, binding["publication_path"]))
+            if publication_path != root_path / "task064-evidence.json":
+                return False
+            root_descriptor = open_file(
+                str_type(root_path),
+                read_only | directory_only | no_follow | close_on_exec,
+            )
+            root_details = stat_file(root_descriptor)
+            descriptor = open_file(
+                "task064-evidence.json",
+                read_only | no_follow | close_on_exec,
+                dir_fd=root_descriptor,
+            )
+            details = stat_file(descriptor)
+            path_details = publication_path.lstat()
+            if (
+                descriptor_flags(descriptor, get_file_status_flags) & access_mode_mask != read_only
+                or not stat_is_directory(root_details.st_mode)
+                or (
+                    root_details.st_dev,
+                    root_details.st_ino,
+                    root_details.st_uid,
+                    stat_mode(root_details.st_mode),
+                )
+                != (
+                    binding["publication_root_device"],
+                    binding["publication_root_inode"],
+                    binding["publication_root_uid"],
+                    binding["publication_root_mode"],
+                )
+                or stat_is_link(path_details.st_mode)
+                or not stat_is_regular(details.st_mode)
+                or not stat_is_regular(path_details.st_mode)
+                or (
+                    details.st_dev,
+                    details.st_ino,
+                    details.st_uid,
+                    stat_mode(details.st_mode),
+                    details.st_nlink,
+                    details.st_size,
+                )
+                != (
+                    binding["publication_device"],
+                    binding["publication_inode"],
+                    binding["publication_uid"],
+                    binding["publication_mode"],
+                    binding["publication_nlink"],
+                    length_of(artifact),
+                )
+                or (
+                    path_details.st_dev,
+                    path_details.st_ino,
+                    path_details.st_uid,
+                    stat_mode(path_details.st_mode),
+                    path_details.st_nlink,
+                    path_details.st_size,
+                )
+                != (
+                    details.st_dev,
+                    details.st_ino,
+                    details.st_uid,
+                    stat_mode(details.st_mode),
+                    details.st_nlink,
+                    details.st_size,
+                )
+            ):
+                return False
+            seek_file(descriptor, 0, seek_start)
+            observed = bytearray()
+            while length_of(observed) <= length_of(artifact):
+                fragment = read_file(
+                    descriptor,
+                    minimum_value(
+                        65_536,
+                        length_of(artifact) + 1 - length_of(observed),
+                    ),
+                )
+                if type_of(fragment) is not bytes_type:
+                    return False
+                if not fragment:
+                    break
+                observed.extend(fragment)
+            exact = bytes(observed)
+            return bool_type(
+                exact == artifact
+                and length_of(exact) == length_of(artifact)
+                and digest_constructor(exact).hexdigest()
+                == digest_constructor(artifact).hexdigest()
+            )
+        except (os_error, type_error, value_error):
+            return False
+        finally:
+            close_ok = True
+            for pending_descriptor in (descriptor, root_descriptor):
+                if pending_descriptor >= 0:
+                    try:
+                        close_file(pending_descriptor)
+                    except os_error:
+                        close_ok = False
+            if not close_ok:
+                mark_authority_uncertain()
+
+    def close_authority_connection(connection: socket.socket) -> bool:
+        try:
+            connection.close()
+        except os_error:
+            mark_authority_uncertain()
+            return False
+        return True
+
+    def send_parent_attestation_response(
+        connection: socket.socket,
+        request: Mapping[str, object],
+        *,
+        status: str,
+    ) -> bool:
+        try:
+            connection.sendall(
+                canonical_json(
+                    {
+                        "challenge": request["challenge"],
+                        "child_pid": request["child_pid"],
+                        "domain": f"{domain}/parent-attestation",
+                        "mode": request["mode"],
+                        "packet_sha256": request["packet_sha256"],
+                        "parent_pid": listener_owner_pid,
+                        "status": status,
+                        "target_node_id": request["target_node_id"],
+                    }
+                ).encode("ascii")
+            )
+        except (os_error, type_error, value_error):
+            return False
+        return True
+
+    def acknowledge_registered_child(
+        record: dict[str, object],
+        process: subprocess.Popen[bytes],
+    ) -> bool:
+        state_lock_value = record.get("state_lock")
+        attester = record.get("attest")
+        commit = record.get("commit")
+        deadline = record.get("deadline_ns")
+        if (
+            current_pid() != listener_owner_pid
+            or not listener_is_exact()
+            or not isinstance_value(state_lock_value, lock_type)
+            or not callable(attester)
+            or not callable(commit)
+            or type_of(deadline) is not int_type
+            or type_of(process.pid) is not int_type
+            or process.pid <= 1
+        ):
+            return False
+        state_lock = cast(AbstractContextManager[None], state_lock_value)
+        deadline_ns = cast(int, deadline)
+        handshake_deadline_ns = minimum_value(
+            deadline_ns,
+            monotonic_ns() + maximum_parent_handshake_lifetime_ns,
+        )
+        attempts = 0
+        while attempts < 64 and monotonic_ns() < handshake_deadline_ns:
+            connection: socket.socket | None = None
+            expected_peer = False
+            try:
+                if not listener_is_exact():
+                    return False
+                authority_listener.settimeout(
+                    minimum_value(
+                        0.1,
+                        max(
+                            0.001,
+                            (handshake_deadline_ns - monotonic_ns()) / 1_000_000_000,
+                        ),
+                    )
+                )
+                try:
+                    connection, _ = authority_listener.accept()
+                except socket_timeout_error:
+                    if process.poll() is not None:
+                        return False
+                    continue
+                attempts += 1
+                peer_raw = connection.getsockopt(
+                    socket_level,
+                    socket_peer_credentials,
+                    credentials_size,
+                )
+                peer_credentials = cast(
+                    tuple[int, int, int],
+                    unpack_credentials("3i", peer_raw),
+                )
+                peer_pid, peer_uid, _ = peer_credentials
+                expected_peer = peer_pid == process.pid and peer_uid == current_uid()
+                if not expected_peer:
+                    continue
+                connection.setsockopt(socket_level, socket_pass_credentials, 1)
+                connection.settimeout(
+                    minimum_value(
+                        1.0,
+                        max(
+                            0.001,
+                            (handshake_deadline_ns - monotonic_ns()) / 1_000_000_000,
+                        ),
+                    )
+                )
+                connection_details = stat_file(connection.fileno())
+                raw_request, ancillary, message_flags, _ = connection.recvmsg(
+                    maximum_envelope_bytes + 1,
+                    credentials_space,
+                )
+                message_credentials: tuple[int, int, int] | None = None
+                for level, message_type, raw_credentials in ancillary:
+                    if (
+                        level == socket_level
+                        and message_type == socket_credentials_message
+                        and length_of(raw_credentials) >= credentials_size
+                    ):
+                        message_credentials = cast(
+                            tuple[int, int, int],
+                            unpack_credentials("3i", raw_credentials[:credentials_size]),
+                        )
+                        break
+                try:
+                    request_text = raw_request.decode("ascii")
+                    request = canonical_load(request_text)
+                except (unicode_error, value_error, type_error):
+                    request = None
+                    request_text = ""
+                request_is_canonical = bool_type(
+                    type_of(request) is dict_type
+                    and set_type(request)
+                    == {
+                        "challenge",
+                        "child_pid",
+                        "domain",
+                        "mode",
+                        "packet_sha256",
+                        "parent_pid",
+                        "target_node_id",
+                    }
+                    and canonical_json(request) == request_text
+                    and request["domain"] == f"{domain}/parent-attestation"
+                    and valid_hex(request["challenge"], 64)
+                    and valid_hex(request["packet_sha256"], 64)
+                    and type_of(request["child_pid"]) is int_type
+                    and request["child_pid"] == peer_pid
+                    and request["parent_pid"] == listener_owner_pid
+                    and type_of(request["mode"]) is str_type
+                    and type_of(request["target_node_id"]) is str_type
+                    and message_flags == 0
+                    and message_credentials == peer_credentials
+                    and peer_uid == current_uid()
+                    and not descriptor_is_inheritable(connection.fileno())
+                    and stat.S_ISSOCK(connection_details.st_mode)
+                    and connection_details.st_uid == current_uid()
+                    and connection.getsockname() == authority_listener_address
+                    and connection.getsockopt(socket_level, socket_type_option)
+                    == socket_sequence_packet
+                )
+                request_is_registered = bool_type(
+                    request_is_canonical
+                    and cast(Mapping[str, object], request)["packet_sha256"]
+                    == record.get("packet_digest")
+                    and cast(Mapping[str, object], request)["target_node_id"]
+                    == record.get("target_node_id")
+                    and cast(Mapping[str, object], request)["mode"] == record.get("mode")
+                )
+                with state_lock:
+                    if (
+                        not request_is_registered
+                        or record.get("state") != "SPAWNED"
+                        or record.get("child_process_id") != process.pid
+                        or record.get("process") is not process
+                        or record.get("parent_process_id") != listener_owner_pid
+                        or record.get("owner_thread_id") != current_thread_id()
+                        or cast(int, record["deadline_ns"]) <= monotonic_ns()
+                        or process.poll() is not None
+                        or not listener_is_exact()
+                        or handshake_deadline_ns <= monotonic_ns()
+                        or not cast(Callable[[str, int, int], bool], attester)(
+                            cast(str, cast(Mapping[str, object], request)["packet_sha256"]),
+                            process.pid,
+                            handshake_deadline_ns,
+                        )
+                    ):
+                        if request_is_canonical:
+                            send_parent_attestation_response(
+                                connection,
+                                cast(Mapping[str, object], request),
+                                status="REJECTED",
+                            )
+                        record["state"] = "REJECTED"
+                        return False
+                    if handshake_deadline_ns <= monotonic_ns():
+                        send_parent_attestation_response(
+                            connection,
+                            cast(Mapping[str, object], request),
+                            status="REJECTED",
+                        )
+                        record["state"] = "REJECTED"
+                        return False
+                    if not cast(Callable[[str, int, int], bool], commit)(
+                        cast(str, cast(Mapping[str, object], request)["packet_sha256"]),
+                        process.pid,
+                        handshake_deadline_ns,
+                    ):
+                        send_parent_attestation_response(
+                            connection,
+                            cast(Mapping[str, object], request),
+                            status="REJECTED",
+                        )
+                        record["transport_error"] = "ACK_COMMIT_FAILED"
+                        mark_authority_uncertain()
+                        return False
+                    record["state"] = "ATTESTED"
+                    if not send_parent_attestation_response(
+                        connection,
+                        cast(Mapping[str, object], request),
+                        status="ATTESTED",
+                    ):
+                        record["transport_error"] = "ACK_SEND_FAILED"
+                        mark_authority_uncertain()
+                        return False
+                    if not close_authority_connection(connection):
+                        connection = None
+                        record["transport_error"] = "ACK_CLOSE_FAILED"
+                        return False
+                    connection = None
+                    return True
+            except (os_error, socket_timeout_error, unicode_error, type_error, value_error):
+                if expected_peer:
+                    return False
+            finally:
+                if (
+                    connection is not None
+                    and not close_authority_connection(connection)
+                    and expected_peer
+                ):
+                    record["transport_error"] = "CONNECTION_CLOSE_FAILED"
+        return False
+
     def issue(
         pytest_root: Path,
         protocol: str,
         issuer_node_id: str,
         target_node_id: str,
         mode: str,
+        *,
+        report_artifact_capability: _Task064PublishedReportArtifactCapability | None = None,
+        report_deadline_ns: int | None = None,
     ) -> _Task064ChildProvenance:
+        if (
+            current_pid() != listener_owner_pid
+            or not listener_is_exact()
+            or length_of(provenance_records) >= maximum_active_tickets
+            or length_of(launch_records) >= maximum_active_tickets
+        ):
+            invalid()
         legacy_environment, _, _ = validate_protocol_values(
             protocol,
             target_node_id,
             mode,
         )
+        report_protocol = protocol == "report_close"
+        if report_protocol:
+            if (
+                report_artifact_validator is None
+                or report_source_fingerprints is None
+                or resolve_published_report_artifact is None
+                or type_of(report_artifact_capability) is not published_artifact_capability_type
+                or type_of(report_deadline_ns) is not int_type
+            ):
+                invalid()
+            exact_report_deadline_ns = cast(int, report_deadline_ns)
+            if (
+                not 0
+                < exact_report_deadline_ns - monotonic_ns()
+                <= (maximum_report_child_lifetime_ns)
+            ):
+                invalid()
+        else:
+            if report_artifact_capability is not None or report_deadline_ns is not None:
+                invalid()
         if environment.get(envelope_environment) is not None or any_values(
             environment.get(name) is not None for name in legacy_environments
         ):
@@ -5635,6 +6262,51 @@ def _build_task064_child_provenance_authority() -> tuple[
             or stat_mode(root_details.st_mode) != 0o700
         ):
             invalid()
+        if report_protocol:
+            assert resolve_published_report_artifact is not None
+            (
+                exact_report_artifact,
+                publication_binding,
+                raw_bind_packet_authority,
+            ) = resolve_published_report_artifact(
+                report_artifact_capability,
+                pytest_root=pytest_root,
+                issuer_node_id=issuer_node_id,
+                target_node_id=target_node_id,
+                mode=mode,
+                deadline_ns=report_deadline_ns,
+            )
+            if (
+                type_of(exact_report_artifact) is not bytes_type
+                or not 0 < length_of(exact_report_artifact) <= maximum_report_artifact_bytes
+                or not isinstance_value(publication_binding, Mapping)
+                or set_type(publication_binding) != set_type(publication_metadata_keys)
+                or not callable(raw_bind_packet_authority)
+            ):
+                invalid()
+            bind_packet_authority = cast(
+                Callable[
+                    [str],
+                    tuple[
+                        Callable[[int], bool],
+                        Callable[[str, int, int], bool],
+                        Callable[[str, int, int], bool],
+                        Callable[[], None],
+                    ],
+                ],
+                raw_bind_packet_authority,
+            )
+            assert report_artifact_validator is not None
+            assert report_source_fingerprints is not None
+            report_artifact_validator(exact_report_artifact)
+            source_fingerprints: tuple[tuple[str, str], ...] | None = report_source_fingerprints()
+        else:
+            exact_report_artifact = b""
+            bind_packet_authority = None
+            publication_binding = MappingProxyType(
+                {name: None for name in publication_metadata_keys}
+            )
+            source_fingerprints = None
         nonce = issue_nonce(32)
         if not valid_hex(nonce, 64):
             invalid()
@@ -5642,7 +6314,13 @@ def _build_task064_child_provenance_authority() -> tuple[
         marker_path = pytest_root / marker_name
         root_descriptor = -1
         marker_descriptor = -1
+        artifact_write_descriptor = -1
+        artifact_descriptor = -1
+        cancel_authority: Callable[[], None] | None = None
+        artifact_name: str | None = None
+        artifact_unlinked = False
         issued = False
+        provenance: _Task064ChildProvenance | None = None
         try:
             root_descriptor = open_file(
                 str_type(resolved_root),
@@ -5657,6 +6335,107 @@ def _build_task064_child_provenance_authority() -> tuple[
                 or stat_mode(opened_root.st_mode) != 0o700
             ):
                 invalid()
+            artifact_packet: dict[str, object]
+            if report_protocol:
+                artifact_nonce = issue_nonce(32)
+                if not valid_hex(artifact_nonce, 64):
+                    invalid()
+                artifact_name = f".task064-report-artifact-{artifact_nonce}.json"
+                artifact_write_descriptor = open_file(
+                    artifact_name,
+                    write_only | create_exclusive | no_follow | close_on_exec,
+                    0o600,
+                    dir_fd=root_descriptor,
+                )
+                chmod_file(artifact_write_descriptor, 0o600)
+                artifact_offset = 0
+                while artifact_offset < length_of(exact_report_artifact):
+                    written = write_file(
+                        artifact_write_descriptor,
+                        exact_report_artifact[artifact_offset:],
+                    )
+                    if type_of(written) is not int_type or written <= 0:
+                        invalid()
+                    artifact_offset += written
+                sync_file(artifact_write_descriptor)
+                written_artifact_details = stat_file(artifact_write_descriptor)
+                if (
+                    not stat_is_regular(written_artifact_details.st_mode)
+                    or written_artifact_details.st_dev != root_details.st_dev
+                    or written_artifact_details.st_uid != current_uid()
+                    or written_artifact_details.st_nlink != 1
+                    or stat_mode(written_artifact_details.st_mode) != 0o600
+                    or written_artifact_details.st_size != length_of(exact_report_artifact)
+                ):
+                    invalid()
+                descriptor_to_close = artifact_write_descriptor
+                artifact_write_descriptor = -1
+                try:
+                    close_file(descriptor_to_close)
+                except os_error:
+                    mark_authority_uncertain()
+                    invalid()
+                artifact_descriptor = open_file(
+                    artifact_name,
+                    read_only | no_follow | close_on_exec,
+                    dir_fd=root_descriptor,
+                )
+                artifact_details = stat_file(artifact_descriptor)
+                if (
+                    descriptor_flags(artifact_descriptor, get_file_status_flags) & access_mode_mask
+                    != read_only
+                    or artifact_details.st_dev != written_artifact_details.st_dev
+                    or artifact_details.st_ino != written_artifact_details.st_ino
+                    or artifact_details.st_uid != written_artifact_details.st_uid
+                    or artifact_details.st_mode != written_artifact_details.st_mode
+                    or artifact_details.st_size != written_artifact_details.st_size
+                    or artifact_details.st_nlink != 1
+                ):
+                    invalid()
+                unlink_file(artifact_name, dir_fd=root_descriptor)
+                artifact_unlinked = True
+                artifact_details = stat_file(artifact_descriptor)
+                if artifact_details.st_nlink != 0:
+                    invalid()
+                artifact_packet = {
+                    "artifact_descriptor": artifact_descriptor,
+                    "artifact_device": artifact_details.st_dev,
+                    "artifact_inode": artifact_details.st_ino,
+                    "artifact_uid": artifact_details.st_uid,
+                    "artifact_mode": stat_mode(artifact_details.st_mode),
+                    "artifact_nlink": artifact_details.st_nlink,
+                    "artifact_length": length_of(exact_report_artifact),
+                    "artifact_sha256": digest_constructor(exact_report_artifact).hexdigest(),
+                    "artifact_nonce": artifact_nonce,
+                    "artifact_deadline_ns": report_deadline_ns,
+                    "contract_generation": task_contract_generation,
+                    "contract_digest": task_contract_digest,
+                    "schema_fingerprint": schema_fingerprint_provider(),
+                    "source_fingerprints": (
+                        [list_type(item) for item in source_fingerprints]
+                        if source_fingerprints is not None
+                        else None
+                    ),
+                    **publication_binding,
+                }
+            else:
+                artifact_packet = {
+                    "artifact_descriptor": None,
+                    "artifact_device": None,
+                    "artifact_inode": None,
+                    "artifact_uid": None,
+                    "artifact_mode": None,
+                    "artifact_nlink": None,
+                    "artifact_length": None,
+                    "artifact_sha256": None,
+                    "artifact_nonce": None,
+                    "artifact_deadline_ns": None,
+                    "contract_generation": None,
+                    "contract_digest": None,
+                    "schema_fingerprint": None,
+                    "source_fingerprints": None,
+                    **publication_binding,
+                }
             marker_descriptor = open_file(
                 marker_name,
                 read_write | create_exclusive | no_follow | close_on_exec,
@@ -5691,6 +6470,7 @@ def _build_task064_child_provenance_authority() -> tuple[
                 "marker_inode": marker_details.st_ino,
                 "marker_uid": marker_details.st_uid,
                 "marker_mode": stat_mode(marker_details.st_mode),
+                **artifact_packet,
             }
             packet_text = canonical_json(packet)
             packet_bytes = packet_text.encode("ascii")
@@ -5705,6 +6485,32 @@ def _build_task064_child_provenance_authority() -> tuple[
             sync_file(marker_descriptor)
             seek_file(marker_descriptor, 0, seek_start)
             packet_digest = digest_constructor(packet_bytes).hexdigest()
+            launch_record: dict[str, object] | None = None
+            if report_protocol:
+                if bind_packet_authority is None or not listener_is_exact():
+                    invalid()
+                (
+                    arm_authority,
+                    attest_authority,
+                    commit_authority,
+                    cancel_authority,
+                ) = bind_packet_authority(packet_digest)
+                state_lock = lock_type()
+                launch_record = {
+                    "arm": arm_authority,
+                    "attest": attest_authority,
+                    "commit": commit_authority,
+                    "cancel": cancel_authority,
+                    "state_lock": state_lock,
+                    "deadline_ns": cast(int, report_deadline_ns),
+                    "parent_process_id": current_pid(),
+                    "owner_thread_id": current_thread_id(),
+                    "target_node_id": target_node_id,
+                    "mode": mode,
+                    "packet_digest": packet_digest,
+                    "child_process_id": None,
+                    "state": "ISSUED",
+                }
             envelope = canonical_json(
                 {
                     "domain": domain,
@@ -5718,6 +6524,7 @@ def _build_task064_child_provenance_authority() -> tuple[
             provenance = provenance_type(
                 envelope=envelope,
                 descriptor=marker_descriptor,
+                artifact_descriptor=artifact_descriptor,
                 marker_path=marker_path,
                 marker_device=marker_details.st_dev,
                 marker_inode=marker_details.st_ino,
@@ -5726,6 +6533,41 @@ def _build_task064_child_provenance_authority() -> tuple[
                 root_inode=root_details.st_ino,
                 nonce=nonce,
             )
+            provenance_record = {
+                "provenance": provenance,
+                "provenance_fields": provenance_fields(provenance),
+                "owner_process_id": current_pid(),
+                "owner_thread_id": current_thread_id(),
+                "protocol": protocol,
+                "state": "ISSUED",
+            }
+            if object_identity(provenance) in provenance_records:
+                invalid()
+            provenance_records[object_identity(provenance)] = provenance_record
+            if launch_record is not None:
+                launch_record["provenance"] = provenance
+                launch_record["provenance_fields"] = (
+                    provenance.envelope,
+                    provenance.descriptor,
+                    provenance.artifact_descriptor,
+                    object_identity(provenance.marker_path),
+                    provenance.marker_device,
+                    provenance.marker_inode,
+                    object_identity(provenance.root_path),
+                    provenance.root_device,
+                    provenance.root_inode,
+                    provenance.nonce,
+                )
+                if object_identity(provenance) in launch_records:
+                    invalid()
+                launch_records[object_identity(provenance)] = launch_record
+            descriptor_to_close = root_descriptor
+            root_descriptor = -1
+            try:
+                close_file(descriptor_to_close)
+            except os_error:
+                mark_authority_uncertain()
+                invalid()
             issued = True
             return provenance
         except failure_type:
@@ -5733,21 +6575,365 @@ def _build_task064_child_provenance_authority() -> tuple[
         except (os_error, unicode_error, value_error):
             invalid()
         finally:
+            if not issued and provenance is not None:
+                launch_records.pop(object_identity(provenance), None)
+                provenance_records.pop(object_identity(provenance), None)
+            if not issued and cancel_authority is not None:
+                with suppress_errors(base_exception_type):
+                    cancel_authority()
+            if not issued and artifact_descriptor >= 0:
+                try:
+                    close_file(artifact_descriptor)
+                except os_error:
+                    mark_authority_uncertain()
+            if artifact_write_descriptor >= 0:
+                descriptor_to_close = artifact_write_descriptor
+                artifact_write_descriptor = -1
+                try:
+                    close_file(descriptor_to_close)
+                except os_error:
+                    mark_authority_uncertain()
+            if not artifact_unlinked and artifact_name is not None and root_descriptor >= 0:
+                try:
+                    unlink_file(artifact_name, dir_fd=root_descriptor)
+                except file_not_found_error:
+                    pass
+                except os_error:
+                    mark_authority_uncertain()
             if not issued and marker_descriptor >= 0:
-                with suppress_errors(os_error):
+                try:
                     close_file(marker_descriptor)
-                with suppress_errors(os_error):
+                except os_error:
+                    mark_authority_uncertain()
+                try:
                     marker_path.unlink()
+                except file_not_found_error:
+                    pass
+                except os_error:
+                    mark_authority_uncertain()
             if root_descriptor >= 0:
                 try:
                     close_file(root_descriptor)
                 except os_error:
+                    mark_authority_uncertain()
                     if marker_descriptor >= 0:
                         with suppress_errors(os_error):
                             close_file(marker_descriptor)
                     with suppress_errors(os_error):
                         marker_path.unlink()
                     invalid()
+
+    def provenance_fields(provenance: _Task064ChildProvenance) -> tuple[object, ...]:
+        return (
+            provenance.envelope,
+            provenance.descriptor,
+            provenance.artifact_descriptor,
+            object_identity(provenance.marker_path),
+            provenance.marker_device,
+            provenance.marker_inode,
+            object_identity(provenance.root_path),
+            provenance.root_device,
+            provenance.root_inode,
+            provenance.nonce,
+        )
+
+    def exact_launch_record(
+        provenance: _Task064ChildProvenance,
+    ) -> dict[str, object] | None:
+        if type_of(provenance) is not provenance_type:
+            return None
+        record = launch_records.get(object_identity(provenance))
+        if (
+            record is None
+            or record.get("provenance") is not provenance
+            or record.get("provenance_fields") != provenance_fields(provenance)
+        ):
+            return None
+        return record
+
+    def spawn_authenticated_child(
+        provenance: _Task064ChildProvenance,
+        *,
+        pycache_prefix: Path,
+    ) -> subprocess.Popen[bytes]:
+        record = exact_launch_record(provenance)
+        if (
+            record is None
+            or record.get("state") != "ISSUED"
+            or type_of(record.get("deadline_ns")) is not int_type
+            or cast(int, record["deadline_ns"]) <= monotonic_ns()
+            or current_pid() != listener_owner_pid
+            or record.get("parent_process_id") != listener_owner_pid
+            or record.get("owner_thread_id") != current_thread_id()
+            or not listener_is_exact()
+            or not isinstance_value(pycache_prefix, path_type)
+            or not pycache_prefix.is_absolute()
+            or pycache_prefix.parent != provenance.root_path
+            or not pycache_prefix.name.startswith("task064-")
+            or "/" in pycache_prefix.name
+            or "\\" in pycache_prefix.name
+            or pycache_prefix.exists()
+            or not reserved_environment_is_absent()
+        ):
+            invalid()
+        state_lock_value = record.get("state_lock")
+        arm = record.get("arm")
+        cancel = record.get("cancel")
+        if (
+            not isinstance_value(state_lock_value, lock_type)
+            or not callable(arm)
+            or not callable(cancel)
+        ):
+            invalid()
+        state_lock = cast(AbstractContextManager[None], state_lock_value)
+        child_environment = {
+            name: value
+            for name, value in environment.items()
+            if not name.startswith(("PYTHON", "PYTEST", "LD_"))
+            and name not in legacy_environments
+            and name != envelope_environment
+        }
+        child_environment["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+        child_environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        child_environment["PYTHONPYCACHEPREFIX"] = str_type(pycache_prefix)
+        child_environment[envelope_environment] = provenance.envelope
+        process: subprocess.Popen[bytes] | None = None
+        cleanup_failed = False
+        with state_lock:
+            if (
+                record.get("state") != "ISSUED"
+                or cast(int, record["deadline_ns"]) <= monotonic_ns()
+                or not listener_is_exact()
+            ):
+                invalid()
+            record["state"] = "SPAWNING"
+        try:
+            process = popen_constructor(
+                (
+                    python_executable,
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "-p",
+                    "no:cacheprovider",
+                    cast(str, record["target_node_id"]),
+                ),
+                cwd=repository_root,
+                env=child_environment,
+                pass_fds=(
+                    provenance.descriptor,
+                    provenance.artifact_descriptor,
+                ),
+                stdout=subprocess_pipe,
+                stderr=subprocess_pipe,
+                start_new_session=True,
+            )
+            if type_of(process.pid) is not int_type or process.pid <= 1:
+                invalid()
+            with state_lock:
+                if (
+                    record.get("state") != "SPAWNING"
+                    or cast(int, record["deadline_ns"]) <= monotonic_ns()
+                    or not listener_is_exact()
+                ):
+                    invalid()
+                record["child_process_id"] = process.pid
+                if not cast(Callable[[int], bool], arm)(process.pid):
+                    invalid()
+                if (
+                    record.get("state") != "SPAWNING"
+                    or cast(int, record["deadline_ns"]) <= monotonic_ns()
+                    or not listener_is_exact()
+                ):
+                    invalid()
+                record["process"] = process
+                record["state"] = "SPAWNED"
+            if not acknowledge_registered_child(record, process):
+                invalid()
+            return process
+        except base_exception_type:
+            committed_failure = False
+            with state_lock:
+                if record.get("state") == "ATTESTED":
+                    committed_failure = True
+                    record.setdefault("transport_error", "POST_COMMIT_LAUNCH_FAILURE")
+                else:
+                    record["state"] = "CANCELLED"
+            with suppress_errors(base_exception_type):
+                cast(Callable[[], None], cancel)()
+            if process is not None:
+                try:
+                    try:
+                        kill_process_group(process.pid, terminate_signal)
+                    except process_lookup_error:
+                        pass
+                    except base_exception_type:
+                        cleanup_failed = True
+                    try:
+                        process.wait(timeout=2.0)
+                    except timeout_expired_type:
+                        try:
+                            kill_process_group(process.pid, kill_signal)
+                        except process_lookup_error:
+                            pass
+                        except base_exception_type:
+                            cleanup_failed = True
+                        process.wait(timeout=10.0)
+                    else:
+                        try:
+                            kill_process_group(process.pid, kill_signal)
+                        except process_lookup_error:
+                            pass
+                        except base_exception_type:
+                            cleanup_failed = True
+                except base_exception_type:
+                    cleanup_failed = True
+                for stream in (process.stdout, process.stderr):
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except base_exception_type:
+                            cleanup_failed = True
+            if committed_failure or cleanup_failed:
+                mark_authority_uncertain()
+            raise
+
+    def probe_parent_attestation_binding(
+        provenance: _Task064ChildProvenance,
+        observed_packet_digest: str,
+    ) -> bool:
+        record = exact_launch_record(provenance)
+        if record is None:
+            return False
+        state_lock_value = record.get("state_lock")
+        if not isinstance_value(state_lock_value, lock_type):
+            return False
+        state_lock = cast(AbstractContextManager[None], state_lock_value)
+        with state_lock:
+            return bool_type(
+                record.get("state") == "ISSUED"
+                and type_of(record.get("deadline_ns")) is int_type
+                and cast(int, record["deadline_ns"]) > monotonic_ns()
+                and current_pid() == listener_owner_pid
+                and record.get("parent_process_id") == listener_owner_pid
+                and record.get("owner_thread_id") == current_thread_id()
+                and valid_hex(observed_packet_digest, 64)
+                and observed_packet_digest == record.get("packet_digest")
+                and listener_is_exact()
+            )
+
+    def authenticate_report_parent_listener(
+        packet: object,
+        envelope: Mapping[str, object],
+        target_node_id: str,
+    ) -> None:
+        """Require the real parent to attest the exact packet before artifact access."""
+
+        real_parent_pid = parent_pid()
+        if type_of(packet) is not dict_type:
+            invalid()
+        exact_packet = cast(dict[str, object], packet)
+        if (
+            exact_packet.get("domain") != domain
+            or exact_packet.get("protocol") != "report_close"
+            or type_of(exact_packet.get("parent_pid")) is not int_type
+            or exact_packet.get("parent_pid") != real_parent_pid
+            or real_parent_pid <= 1
+            or type_of(exact_packet.get("target_node_id")) is not str_type
+            or exact_packet.get("target_node_id") != target_node_id
+            or type_of(exact_packet.get("mode")) is not str_type
+            or not valid_hex(envelope.get("packet_sha256"), 64)
+        ):
+            invalid()
+        exact_packet_digest = cast(str, envelope["packet_sha256"])
+        attestation_channel: socket.socket | None = None
+        attestation_ok = False
+        close_failed = False
+        try:
+            attestation_channel = socket_constructor(socket_family, socket_sequence_packet)
+            attestation_channel.settimeout(maximum_parent_handshake_lifetime_ns / 1_000_000_000)
+            channel_descriptor = attestation_channel.fileno()
+            channel_details = stat_file(channel_descriptor)
+            if (
+                channel_descriptor <= 2
+                or descriptor_is_inheritable(channel_descriptor)
+                or not stat.S_ISSOCK(channel_details.st_mode)
+                or channel_details.st_uid != current_uid()
+                or attestation_channel.getsockopt(socket_level, socket_type_option)
+                != socket_sequence_packet
+            ):
+                invalid()
+            attestation_channel.connect(listener_address(real_parent_pid))
+            peer_raw = attestation_channel.getsockopt(
+                socket_level,
+                socket_peer_credentials,
+                credentials_size,
+            )
+            peer_pid, peer_uid, _ = unpack_credentials("3i", peer_raw)
+            challenge = issue_nonce(32)
+            if (
+                peer_pid != real_parent_pid
+                or peer_uid != current_uid()
+                or not valid_hex(challenge, 64)
+            ):
+                invalid()
+            request = canonical_json(
+                {
+                    "challenge": challenge,
+                    "child_pid": current_pid(),
+                    "domain": f"{domain}/parent-attestation",
+                    "mode": exact_packet["mode"],
+                    "packet_sha256": exact_packet_digest,
+                    "parent_pid": real_parent_pid,
+                    "target_node_id": target_node_id,
+                }
+            ).encode("ascii")
+            attestation_channel.sendall(request)
+            raw_response = attestation_channel.recv(maximum_envelope_bytes + 1)
+            if not 0 < length_of(raw_response) <= maximum_envelope_bytes:
+                invalid()
+            response_text = raw_response.decode("ascii")
+            response = canonical_load(response_text)
+            if (
+                type_of(response) is not dict_type
+                or set_type(response)
+                != {
+                    "challenge",
+                    "child_pid",
+                    "domain",
+                    "mode",
+                    "packet_sha256",
+                    "parent_pid",
+                    "status",
+                    "target_node_id",
+                }
+                or canonical_json(response) != response_text
+                or response["domain"] != f"{domain}/parent-attestation"
+                or response["challenge"] != challenge
+                or response["packet_sha256"] != exact_packet_digest
+                or response["child_pid"] != current_pid()
+                or response["parent_pid"] != real_parent_pid
+                or response["mode"] != exact_packet["mode"]
+                or response["target_node_id"] != target_node_id
+                or response["status"] != "ATTESTED"
+                or attestation_channel.recv(1) != b""
+            ):
+                invalid()
+            attestation_ok = True
+        except failure_type:
+            raise
+        except (os_error, socket_timeout_error, unicode_error, type_error, value_error):
+            invalid()
+        finally:
+            if attestation_channel is not None:
+                try:
+                    attestation_channel.close()
+                except os_error:
+                    close_failed = True
+            if close_failed:
+                mark_authority_uncertain()
+        if not attestation_ok or close_failed:
+            invalid()
 
     def authenticate_before_fixture(
         target_node_id: str,
@@ -5822,6 +7008,11 @@ def _build_task064_child_provenance_authority() -> tuple[
             raise
         except (os_error, unicode_error, type_error, value_error):
             invalid()
+        if (
+            type_of(packet) is dict_type
+            and cast(dict[str, object], packet).get("protocol") == "report_close"
+        ):
+            authenticate_report_parent_listener(packet, envelope, target_node_id)
         expected_packet_keys = {
             "domain",
             "protocol",
@@ -5841,6 +7032,21 @@ def _build_task064_child_provenance_authority() -> tuple[
             "marker_inode",
             "marker_uid",
             "marker_mode",
+            "artifact_descriptor",
+            "artifact_device",
+            "artifact_inode",
+            "artifact_uid",
+            "artifact_mode",
+            "artifact_nlink",
+            "artifact_length",
+            "artifact_sha256",
+            "artifact_nonce",
+            "artifact_deadline_ns",
+            "contract_generation",
+            "contract_digest",
+            "schema_fingerprint",
+            "source_fingerprints",
+            *publication_metadata_keys,
         }
         if (
             type_of(packet) is not dict_type
@@ -5860,6 +7066,162 @@ def _build_task064_child_provenance_authority() -> tuple[
             if protocol == "post_return_fixture_replay"
             else target_node_id
         )
+        artifact_descriptor = -1
+        artifact_bytes: bytes | None = None
+        authenticated_source_fingerprints: tuple[tuple[str, str], ...] | None = None
+        authenticated_publication_binding: Mapping[str, object] | None = None
+        if protocol == "report_close":
+            if (
+                report_artifact_validator is None
+                or report_source_fingerprints is None
+                or type_of(packet["artifact_descriptor"]) is not int_type
+                or packet["artifact_descriptor"] <= 2
+                or packet["artifact_descriptor"] == descriptor
+                or any_values(
+                    type_of(packet[name]) is not int_type
+                    for name in (
+                        "artifact_device",
+                        "artifact_inode",
+                        "artifact_uid",
+                        "artifact_mode",
+                        "artifact_nlink",
+                        "artifact_length",
+                        "artifact_deadline_ns",
+                        "contract_generation",
+                    )
+                )
+                or packet["artifact_nlink"] != 0
+                or not 0 < packet["artifact_length"] <= maximum_report_artifact_bytes
+                or not 0
+                < packet["artifact_deadline_ns"] - monotonic_ns()
+                <= maximum_report_child_lifetime_ns
+                or packet["contract_generation"] != task_contract_generation
+                or packet["contract_digest"] != task_contract_digest
+                or packet["schema_fingerprint"] != schema_fingerprint_provider()
+                or not valid_hex(packet["artifact_sha256"], 64)
+                or not valid_hex(packet["artifact_nonce"], 64)
+                or any_values(
+                    not valid_hex(packet[name], 64)
+                    for name in (
+                        "publication_nonce",
+                        "publication_run_digest",
+                        "publication_aggregate_digest",
+                        "publication_report_object_digest",
+                        "publication_context_digest",
+                    )
+                )
+                or any_values(
+                    type_of(packet[name]) is not int_type
+                    for name in (
+                        "publication_root_device",
+                        "publication_root_inode",
+                        "publication_root_uid",
+                        "publication_root_mode",
+                        "publication_device",
+                        "publication_inode",
+                        "publication_uid",
+                        "publication_mode",
+                        "publication_nlink",
+                        "publication_process_id",
+                        "publication_thread_id",
+                        "publication_expires_ns",
+                    )
+                )
+                or any_values(
+                    type_of(packet[name]) is not str_type
+                    for name in (
+                        "publication_root_path",
+                        "publication_path",
+                        "publication_node_id",
+                    )
+                )
+                or packet["publication_root_path"] != packet["root_path"]
+                or packet["publication_path"]
+                != str_type(path_type(packet["root_path"]) / "task064-evidence.json")
+                or packet["publication_root_mode"] != 0o700
+                or packet["publication_mode"] != 0o600
+                or packet["publication_nlink"] != 1
+                or packet["publication_process_id"] != packet["parent_pid"]
+                or packet["publication_thread_id"] <= 0
+                or packet["publication_node_id"] != packet["issuer_node_id"]
+                or packet["publication_expires_ns"] < packet["artifact_deadline_ns"]
+                or packet["publication_nonce"] in {packet["nonce"], packet["artifact_nonce"]}
+                or packet["publication_nonce"] in consumed_nonces
+                or type_of(packet["source_fingerprints"]) is not list_type
+                or not packet["source_fingerprints"]
+                or any_values(
+                    type_of(item) is not list_type
+                    or length_of(item) != 2
+                    or type_of(item[0]) is not str_type
+                    or not valid_hex(item[1], 64)
+                    for item in packet["source_fingerprints"]
+                )
+            ):
+                invalid()
+            artifact_descriptor = cast(int, packet["artifact_descriptor"])
+            authenticated_source_fingerprints = tuple_type(
+                (str_type(item[0]), str_type(item[1])) for item in packet["source_fingerprints"]
+            )
+            if authenticated_source_fingerprints != report_source_fingerprints():
+                invalid()
+            try:
+                artifact_details = stat_file(artifact_descriptor)
+                if (
+                    descriptor_flags(artifact_descriptor, get_file_status_flags) & access_mode_mask
+                    != read_only
+                    or not stat_is_regular(artifact_details.st_mode)
+                    or artifact_details.st_dev != packet["artifact_device"]
+                    or artifact_details.st_ino != packet["artifact_inode"]
+                    or artifact_details.st_uid != packet["artifact_uid"]
+                    or artifact_details.st_uid != current_uid()
+                    or stat_mode(artifact_details.st_mode) != packet["artifact_mode"]
+                    or packet["artifact_mode"] != 0o600
+                    or artifact_details.st_nlink != packet["artifact_nlink"]
+                    or artifact_details.st_size != packet["artifact_length"]
+                ):
+                    invalid()
+                seek_file(artifact_descriptor, 0, seek_start)
+                artifact_fragments: list[bytes] = []
+                artifact_size = 0
+                while artifact_size <= packet["artifact_length"]:
+                    artifact_fragment = read_file(
+                        artifact_descriptor,
+                        minimum_value(
+                            65_536,
+                            packet["artifact_length"] + 1 - artifact_size,
+                        ),
+                    )
+                    if type_of(artifact_fragment) is not bytes_type:
+                        invalid()
+                    if artifact_fragment == b"":
+                        break
+                    artifact_fragments.append(artifact_fragment)
+                    artifact_size += length_of(artifact_fragment)
+                artifact_bytes = b"".join(artifact_fragments)
+            except failure_type:
+                raise
+            except (os_error, value_error):
+                invalid()
+            if (
+                artifact_bytes is None
+                or length_of(artifact_bytes) != packet["artifact_length"]
+                or digest_constructor(artifact_bytes).hexdigest() != packet["artifact_sha256"]
+            ):
+                invalid()
+            report_artifact_validator(artifact_bytes)
+            authenticated_publication_binding = MappingProxyType(
+                {name: packet[name] for name in publication_metadata_keys}
+            )
+            if not published_origin_matches(
+                authenticated_publication_binding,
+                artifact_bytes,
+            ):
+                invalid()
+        elif any_values(
+            packet[name] is not None
+            for name in (*artifact_metadata_keys, *publication_metadata_keys)
+        ):
+            invalid()
         if (
             packet["target_node_id"] != target_node_id
             or packet["legacy_environment"] != legacy_environment
@@ -5878,6 +7240,13 @@ def _build_task064_child_provenance_authority() -> tuple[
             )
             or not valid_hex(packet["nonce"], 64)
             or packet["nonce"] in consumed_nonces
+            or (
+                protocol == "report_close"
+                and (
+                    packet["artifact_nonce"] == packet["nonce"]
+                    or packet["artifact_nonce"] in consumed_nonces
+                )
+            )
             or type_of(packet["root_path"]) is not str_type
             or type_of(packet["marker_name"]) is not str_type
             or packet["marker_name"] != f".task064-child-provenance-{packet['nonce']}.json"
@@ -5900,9 +7269,13 @@ def _build_task064_child_provenance_authority() -> tuple[
             invalid()
         root_path = path_type(packet["root_path"])
         marker_path = path_type(envelope["marker_path"])
+        publication_path = (
+            path_type(cast(str, packet["publication_path"])) if protocol == "report_close" else None
+        )
         try:
             root_details = root_path.lstat()
             path_marker_details = marker_path.lstat()
+            publication_details = publication_path.lstat() if publication_path is not None else None
         except os_error:
             invalid()
         if (
@@ -5925,6 +7298,27 @@ def _build_task064_child_provenance_authority() -> tuple[
             or marker_details.st_nlink != 1
             or path_marker_details.st_dev != marker_details.st_dev
             or path_marker_details.st_ino != marker_details.st_ino
+            or (
+                protocol == "report_close"
+                and (
+                    publication_details is None
+                    or publication_path is None
+                    or publication_path.parent != root_path
+                    or stat_is_link(publication_details.st_mode)
+                    or not stat_is_regular(publication_details.st_mode)
+                    or publication_details.st_dev != packet["publication_device"]
+                    or publication_details.st_ino != packet["publication_inode"]
+                    or publication_details.st_uid != packet["publication_uid"]
+                    or publication_details.st_uid != current_uid()
+                    or stat_mode(publication_details.st_mode) != packet["publication_mode"]
+                    or publication_details.st_nlink != packet["publication_nlink"]
+                    or publication_details.st_size != packet["artifact_length"]
+                    or root_details.st_dev != packet["publication_root_device"]
+                    or root_details.st_ino != packet["publication_root_inode"]
+                    or root_details.st_uid != packet["publication_root_uid"]
+                    or stat_mode(root_details.st_mode) != packet["publication_root_mode"]
+                )
+            )
         ):
             invalid()
         if length_of(consumed_nonces) >= maximum_consumed_nonces:
@@ -5948,6 +7342,10 @@ def _build_task064_child_provenance_authority() -> tuple[
                 invalid()
             unlink_file(packet["marker_name"], dir_fd=root_descriptor)
             consumption_irreversible = True
+            if artifact_descriptor >= 0:
+                descriptor_to_close = artifact_descriptor
+                artifact_descriptor = -1
+                close_file(descriptor_to_close)
             close_file(descriptor)
         except failure_type:
             consumption_failed = True
@@ -5961,6 +7359,9 @@ def _build_task064_child_provenance_authority() -> tuple[
                     root_close_failed = True
         if consumption_irreversible:
             consumed_nonces.add(packet["nonce"])
+            if protocol == "report_close":
+                consumed_nonces.add(cast(str, packet["artifact_nonce"]))
+                consumed_nonces.add(cast(str, packet["publication_nonce"]))
             scrub_child_environment()
         if consumption_failed or root_close_failed:
             if consumption_irreversible or root_close_failed:
@@ -5989,6 +7390,19 @@ def _build_task064_child_provenance_authority() -> tuple[
                 "protocol": protocol,
                 "issuer_node_id": expected_issuer_node_id,
                 "mode": str_type(packet["mode"]),
+                "parent_process_id": packet["parent_pid"],
+                "provenance_nonce": packet["nonce"],
+                "report_artifact": artifact_bytes,
+                "report_artifact_digest": packet["artifact_sha256"],
+                "report_artifact_length": packet["artifact_length"],
+                "report_artifact_nonce": packet["artifact_nonce"],
+                "report_deadline_ns": packet["artifact_deadline_ns"],
+                "report_contract_generation": packet["contract_generation"],
+                "report_contract_digest": packet["contract_digest"],
+                "report_schema_fingerprint": packet["schema_fingerprint"],
+                "report_source_fingerprints": authenticated_source_fingerprints,
+                "report_publication_binding": authenticated_publication_binding,
+                "report_artifact_state": ("AUTHENTICATED" if protocol == "report_close" else None),
                 "provenance_root": root_path,
                 "provenance_root_fields": (
                     root_details.st_dev,
@@ -6145,6 +7559,28 @@ def _build_task064_child_provenance_authority() -> tuple[
         record["context_token"] = finalize_token
         record["state"] = "CLAIMED"
 
+    def ticket_context_is_exact(
+        record: dict[str, object],
+        ticket: _Task064ChildProvenanceTicket,
+    ) -> bool:
+        context_token = record.get("context_token")
+        if (
+            type_of(context_token) is not context_token_type
+            or active_body_ticket.get() is not ticket
+        ):
+            return False
+        try:
+            active_body_ticket.reset(
+                cast(Token[_Task064ChildProvenanceTicket | None], context_token)
+            )
+            rotated_token = active_body_ticket.set(ticket)
+        except base_exception_type:
+            return False
+        if type_of(rotated_token) is not context_token_type:
+            return False
+        record["context_token"] = rotated_token
+        return True
+
     def claim_post_return(
         ticket: _Task064ChildProvenanceTicket | None,
         target_node_id: str,
@@ -6172,6 +7608,27 @@ def _build_task064_child_provenance_authority() -> tuple[
             invalid()
         transition_to_claimed(record, ticket)
         return True
+
+    def ticket_is_report_close(
+        ticket: _Task064ChildProvenanceTicket | None,
+        target_node_id: str,
+    ) -> bool:
+        if ticket is None:
+            return False
+        record = exact_ticket_record(ticket, target_node_id)
+        if (
+            record is None
+            or record["state"] != "ACTIVATED"
+            or active_body_ticket.get() is not ticket
+            or not reserved_environment_is_absent()
+            or not roots_are_exact(record, require_active=False)
+        ):
+            invalid()
+        return bool_type(
+            record["protocol"] == "report_close"
+            and record["issuer_node_id"] == target_node_id
+            and record["report_artifact_state"] == "AUTHENTICATED"
+        )
 
     def claim_body_dispatch(
         protocol: str,
@@ -6224,6 +7681,438 @@ def _build_task064_child_provenance_authority() -> tuple[
             invalid()
         transition_to_claimed(record, ticket)
         return str_type(record["mode"])
+
+    def bind_report_artifact_validation(
+        validator: Callable[[bytes], None],
+        fingerprint_provider: Callable[[], tuple[tuple[str, str], ...]],
+        capability_resolver: Callable[
+            ...,
+            tuple[bytes, Mapping[str, object], Callable[..., object]],
+        ],
+    ) -> None:
+        nonlocal report_artifact_validator
+        nonlocal report_source_fingerprints
+        nonlocal resolve_published_report_artifact
+
+        if (
+            report_artifact_validator is not None
+            or report_source_fingerprints is not None
+            or resolve_published_report_artifact is not None
+            or not callable(validator)
+            or not callable(fingerprint_provider)
+            or not callable(capability_resolver)
+        ):
+            invalid()
+        report_artifact_validator = validator
+        report_source_fingerprints = fingerprint_provider
+        resolve_published_report_artifact = capability_resolver
+
+    def exact_report_permit_record(
+        permit: _Task064ReportPublicationPermit,
+    ) -> dict[str, object] | None:
+        if type_of(permit) is not report_permit_type:
+            return None
+        record = report_permit_records.get(object_identity(permit))
+        if (
+            record is None
+            or record["permit"] is not permit
+            or record["permit_fields"]
+            != (object_identity(permit._authority_nonce), permit._authority_nonce)
+            or record["child_process_id"] != current_pid()
+            or record["child_thread_id"] != current_thread_id()
+        ):
+            return None
+        return record
+
+    def terminalize_report_permit_record(
+        record: dict[str, object],
+        terminal_state: str,
+    ) -> bool:
+        permit = record.get("permit")
+        if type_of(permit) is not report_permit_type:
+            mark_authority_uncertain()
+            return False
+        exact_permit = cast(_Task064ReportPublicationPermit, permit)
+        permit_key = object_identity(exact_permit)
+        if (
+            report_permit_records.get(permit_key) is not record
+            or record.get("state") not in {"ACTIVE", "PREPARED"}
+            or terminal_state not in {"CONSUMED", "TERMINALIZED"}
+            or length_of(terminal_report_permit_records) >= maximum_report_permits
+        ):
+            mark_authority_uncertain()
+            return False
+        ticket = record.get("ticket")
+        ticket_record = (
+            ticket_records.get(object_identity(ticket)) if type_of(ticket) is ticket_type else None
+        )
+        ticket_is_exact = bool_type(
+            type_of(ticket) is ticket_type
+            and ticket_record is not None
+            and ticket_record.get("ticket") is ticket
+            and ticket_record.get("state") == "CLAIMED"
+            and ticket_record.get("report_artifact_state") == "PERMIT_ISSUED"
+            and active_body_ticket.get() is ticket
+        )
+        record["state"] = terminal_state
+        if ticket_is_exact:
+            cast(dict[str, object], ticket_record)["report_artifact_state"] = terminal_state
+        else:
+            mark_authority_uncertain()
+        terminal_report_permit_records[permit_key] = (
+            exact_permit,
+            current_pid(),
+            terminal_state,
+        )
+        del report_permit_records[permit_key]
+        return ticket_is_exact
+
+    def report_permit_is_valid(
+        permit: _Task064ReportPublicationPermit,
+        publication_root: Path,
+        artifact: bytes,
+        *,
+        terminalize_invalid: bool = True,
+    ) -> bool:
+        if type_of(terminalize_invalid) is not bool_type:
+            return False
+        record = exact_report_permit_record(permit)
+        if record is None:
+            return False
+        ticket = record.get("ticket")
+        ticket_record = (
+            ticket_records.get(object_identity(ticket)) if type_of(ticket) is ticket_type else None
+        )
+        if (
+            type_of(ticket) is ticket_type
+            and ticket_record is not None
+            and ticket_record.get("ticket") is ticket
+            and not ticket_context_is_exact(
+                ticket_record,
+                cast(_Task064ChildProvenanceTicket, ticket),
+            )
+        ):
+            return False
+        try:
+            source_fingerprints = (
+                report_source_fingerprints() if report_source_fingerprints is not None else None
+            )
+            schema_fingerprint = schema_fingerprint_provider()
+            deadline_ns = record.get("deadline_ns")
+            publication_binding = record.get("publication_binding")
+            bindings_are_exact = bool_type(
+                record.get("state") in {"ACTIVE", "PREPARED"}
+                and reserved_environment_is_absent()
+                and isinstance_value(publication_root, path_type)
+                and publication_root is record.get("publication_root")
+                and type_of(artifact) is bytes_type
+                and artifact is record.get("report_artifact")
+                and type_of(deadline_ns) is int_type
+                and 0 < cast(int, deadline_ns) - monotonic_ns() <= maximum_report_child_lifetime_ns
+                and report_artifact_validator is not None
+                and report_source_fingerprints is not None
+                and record.get("source_fingerprints") == source_fingerprints
+                and record.get("contract_generation") == task_contract_generation
+                and record.get("contract_digest") == task_contract_digest
+                and record.get("schema_fingerprint") == schema_fingerprint
+                and record.get("report_digest") == digest_constructor(artifact).hexdigest()
+                and record.get("report_length") == length_of(artifact)
+                and isinstance_value(publication_binding, Mapping)
+                and set_type(cast(Mapping[str, object], publication_binding))
+                == set_type(publication_metadata_keys)
+                and cast(Mapping[str, object], publication_binding).get("publication_process_id")
+                == parent_pid()
+                and cast(Mapping[str, object], publication_binding).get("publication_node_id")
+                == record.get("issuer_node_id")
+                and cast(
+                    int,
+                    cast(Mapping[str, object], publication_binding).get("publication_expires_ns"),
+                )
+                >= cast(int, deadline_ns)
+                and type_of(ticket) is ticket_type
+                and ticket_record is not None
+                and ticket_record.get("ticket") is ticket
+                and ticket_record.get("ticket_fields")
+                == (
+                    object_identity(cast(_Task064ChildProvenanceTicket, ticket)._authority_nonce),
+                    cast(_Task064ChildProvenanceTicket, ticket)._authority_nonce,
+                )
+                and ticket_record.get("owner_process_id") == current_pid()
+                and ticket_record.get("node_id") == record.get("target_node_id")
+                and ticket_record.get("protocol") == record.get("protocol")
+                and record.get("protocol") == "report_close"
+                and ticket_record.get("mode") == record.get("mode")
+                and ticket_record.get("issuer_node_id") == record.get("issuer_node_id")
+                and record.get("issuer_node_id") == record.get("target_node_id")
+                and ticket_record.get("parent_process_id") == record.get("parent_process_id")
+                and record.get("parent_process_id") == parent_pid()
+                and record.get("child_process_id") == current_pid()
+                and record.get("child_thread_id") == current_thread_id()
+                and ticket_record.get("provenance_nonce") == record.get("provenance_nonce")
+                and ticket_record.get("report_artifact_nonce") == record.get("artifact_nonce")
+                and ticket_record.get("report_artifact") is artifact
+                and ticket_record.get("report_artifact_digest") == record.get("report_digest")
+                and ticket_record.get("report_artifact_length") == record.get("report_length")
+                and ticket_record.get("report_deadline_ns") == deadline_ns
+                and ticket_record.get("report_contract_generation")
+                == record.get("contract_generation")
+                and ticket_record.get("report_contract_digest") == record.get("contract_digest")
+                and ticket_record.get("report_schema_fingerprint")
+                == record.get("schema_fingerprint")
+                and ticket_record.get("report_source_fingerprints")
+                == record.get("source_fingerprints")
+                and ticket_record.get("report_publication_binding") is publication_binding
+                and ticket_record.get("report_artifact_state") == "PERMIT_ISSUED"
+                and ticket_record.get("state") == "CLAIMED"
+                and active_body_ticket.get() is ticket
+                and roots_are_exact(ticket_record, require_active=True)
+            )
+        except (failure_type, os_error, value_error, type_error):
+            bindings_are_exact = False
+        if not bindings_are_exact:
+            if terminalize_invalid:
+                terminalize_report_permit_record(record, "TERMINALIZED")
+            return False
+        try:
+            root_details = publication_root.lstat()
+            exact_publication_binding = cast(Mapping[str, object], publication_binding)
+            origin_root = path_type(cast(str, exact_publication_binding["publication_root_path"]))
+            origin_path = path_type(cast(str, exact_publication_binding["publication_path"]))
+            origin_root_details = origin_root.lstat()
+            origin_details = origin_path.lstat()
+        except os_error:
+            if terminalize_invalid:
+                terminalize_report_permit_record(record, "TERMINALIZED")
+            return False
+        active_root = lookup_root(publication_root)
+        if (
+            active_root is None
+            or active_root.path_object is not publication_root
+            or active_root.node_id != record["target_node_id"]
+            or not validate_root_identity(active_root)
+            or not session_owns_root(active_root, False)
+            or (
+                object_identity(publication_root),
+                root_details.st_dev,
+                root_details.st_ino,
+                root_details.st_uid,
+                stat_mode(root_details.st_mode),
+            )
+            != record["publication_root_fields"]
+            or origin_path.parent != origin_root
+            or stat_is_link(origin_root_details.st_mode)
+            or not stat_is_directory(origin_root_details.st_mode)
+            or origin_root_details.st_dev != exact_publication_binding["publication_root_device"]
+            or origin_root_details.st_ino != exact_publication_binding["publication_root_inode"]
+            or origin_root_details.st_uid != exact_publication_binding["publication_root_uid"]
+            or stat_mode(origin_root_details.st_mode)
+            != exact_publication_binding["publication_root_mode"]
+            or stat_is_link(origin_details.st_mode)
+            or not stat_is_regular(origin_details.st_mode)
+            or origin_details.st_dev != exact_publication_binding["publication_device"]
+            or origin_details.st_ino != exact_publication_binding["publication_inode"]
+            or origin_details.st_uid != exact_publication_binding["publication_uid"]
+            or stat_mode(origin_details.st_mode) != exact_publication_binding["publication_mode"]
+            or origin_details.st_nlink != exact_publication_binding["publication_nlink"]
+            or origin_details.st_size != record["report_length"]
+        ):
+            if terminalize_invalid:
+                terminalize_report_permit_record(record, "TERMINALIZED")
+            return False
+        try:
+            assert report_artifact_validator is not None
+            report_artifact_validator(artifact)
+        except failure_type:
+            if terminalize_invalid:
+                terminalize_report_permit_record(record, "TERMINALIZED")
+            return False
+        if not published_origin_matches(exact_publication_binding, artifact):
+            if terminalize_invalid:
+                terminalize_report_permit_record(record, "TERMINALIZED")
+            return False
+        return True
+
+    def claim_report_publication(
+        target_node_id: str,
+        publication_root: Path,
+    ) -> tuple[bytes, _Task064ReportPublicationPermit]:
+        ticket = active_body_ticket.get()
+        if type_of(ticket) is not ticket_type:
+            invalid()
+        exact_ticket = cast(_Task064ChildProvenanceTicket, ticket)
+        record = exact_ticket_record(exact_ticket, target_node_id)
+        if (
+            record is None
+            or record["state"] != "CLAIMED"
+            or record["protocol"] != "report_close"
+            or record["report_artifact_state"] != "AUTHENTICATED"
+            or not roots_are_exact(record, require_active=True)
+            or not reserved_environment_is_absent()
+            or report_artifact_validator is None
+            or report_source_fingerprints is None
+            or length_of(report_permit_records) >= maximum_report_permits
+            or length_of(terminal_report_permit_records) >= maximum_report_permits
+        ):
+            invalid()
+        raw_value = record["report_artifact"]
+        deadline_value = record["report_deadline_ns"]
+        publication_binding_value = record["report_publication_binding"]
+        if (
+            type_of(raw_value) is not bytes_type
+            or type_of(deadline_value) is not int_type
+            or not isinstance_value(publication_binding_value, Mapping)
+            or set_type(cast(Mapping[str, object], publication_binding_value))
+            != set_type(publication_metadata_keys)
+        ):
+            invalid()
+        raw = cast(bytes, raw_value)
+        exact_deadline_ns = cast(int, deadline_value)
+        if (
+            not 0 < exact_deadline_ns - monotonic_ns() <= maximum_report_child_lifetime_ns
+            or record["report_source_fingerprints"] != report_source_fingerprints()
+            or record["report_contract_generation"] != task_contract_generation
+            or record["report_contract_digest"] != task_contract_digest
+            or record["report_schema_fingerprint"] != schema_fingerprint_provider()
+            or record["report_artifact_digest"] != digest_constructor(raw).hexdigest()
+            or record["report_artifact_length"] != length_of(raw)
+            or cast(Mapping[str, object], publication_binding_value)["publication_process_id"]
+            != parent_pid()
+            or cast(Mapping[str, object], publication_binding_value)["publication_node_id"]
+            != target_node_id
+            or cast(
+                int,
+                cast(Mapping[str, object], publication_binding_value)["publication_expires_ns"],
+            )
+            < exact_deadline_ns
+        ):
+            invalid()
+        report_artifact_validator(raw)
+        resolved_root = validate_root(publication_root)
+        active_root = lookup_root(publication_root)
+        if (
+            active_root is None
+            or active_root.path_object is not publication_root
+            or active_root.node_id != target_node_id
+            or not validate_root_identity(active_root)
+            or not session_owns_root(active_root, False)
+        ):
+            invalid()
+        try:
+            root_details = resolved_root.lstat()
+        except os_error:
+            invalid()
+        permit = report_permit_type(_authority_nonce=issue_ticket_nonce(32))
+        if (
+            type_of(permit._authority_nonce) is not bytes_type
+            or length_of(permit._authority_nonce) != 32
+            or object_identity(permit) in report_permit_records
+        ):
+            invalid()
+        permit_record: dict[str, object] = {
+            "permit": permit,
+            "permit_fields": (
+                object_identity(permit._authority_nonce),
+                permit._authority_nonce,
+            ),
+            "ticket": ticket,
+            "protocol": record["protocol"],
+            "mode": record["mode"],
+            "issuer_node_id": record["issuer_node_id"],
+            "target_node_id": record["node_id"],
+            "parent_process_id": record["parent_process_id"],
+            "child_process_id": current_pid(),
+            "child_thread_id": current_thread_id(),
+            "provenance_nonce": record["provenance_nonce"],
+            "artifact_nonce": record["report_artifact_nonce"],
+            "publication_root": publication_root,
+            "publication_root_fields": (
+                object_identity(publication_root),
+                root_details.st_dev,
+                root_details.st_ino,
+                root_details.st_uid,
+                stat_mode(root_details.st_mode),
+            ),
+            "source_fingerprints": record["report_source_fingerprints"],
+            "contract_generation": record["report_contract_generation"],
+            "contract_digest": record["report_contract_digest"],
+            "schema_fingerprint": record["report_schema_fingerprint"],
+            "publication_binding": record["report_publication_binding"],
+            "report_artifact": raw,
+            "report_digest": record["report_artifact_digest"],
+            "report_length": record["report_artifact_length"],
+            "deadline_ns": record["report_deadline_ns"],
+            "state": "ACTIVE",
+        }
+        report_permit_records[object_identity(permit)] = permit_record
+        record["report_artifact_state"] = "PERMIT_ISSUED"
+        if not report_permit_is_valid(permit, publication_root, raw):
+            invalid()
+        return raw, permit
+
+    def prepare_report_permit_consumption(
+        permit: _Task064ReportPublicationPermit,
+    ) -> tuple[Callable[[], bool], Callable[[], bool], Callable[[], bool]]:
+        record = exact_report_permit_record(permit)
+        if (
+            record is None
+            or record["state"] != "ACTIVE"
+            or not report_permit_is_valid(
+                permit,
+                cast(Path, record["publication_root"]),
+                cast(bytes, record["report_artifact"]),
+            )
+        ):
+            invalid()
+        preparation_nonce = issue_ticket_nonce(32)
+        if type_of(preparation_nonce) is not bytes_type or length_of(preparation_nonce) != 32:
+            terminalize_report_permit_record(record, "TERMINALIZED")
+            invalid()
+        record["state"] = "PREPARED"
+        record["preparation_fields"] = (
+            object_identity(preparation_nonce),
+            preparation_nonce,
+        )
+        prepared_state = "READY"
+        permit_key = object_identity(permit)
+
+        def terminalize(state: str) -> bool:
+            nonlocal prepared_state
+            if (
+                prepared_state != "READY"
+                or exact_report_permit_record(permit) is not record
+                or record.get("state") != "PREPARED"
+                or record.get("preparation_fields")
+                != (object_identity(preparation_nonce), preparation_nonce)
+            ):
+                return False
+            if not terminalize_report_permit_record(record, state):
+                return False
+            prepared_state = state
+            return True
+
+        def commit() -> bool:
+            if not report_permit_is_valid(
+                permit,
+                cast(Path, record["publication_root"]),
+                cast(bytes, record["report_artifact"]),
+            ):
+                return False
+            return terminalize("CONSUMED")
+
+        def terminate() -> bool:
+            return terminalize("TERMINALIZED")
+
+        def is_terminal() -> bool:
+            terminal = terminal_report_permit_records.get(permit_key)
+            return bool_type(
+                terminal is not None
+                and terminal[0] is permit
+                and terminal[1] == current_pid()
+                and terminal[2] in {"CONSUMED", "TERMINALIZED"}
+                and permit_key not in report_permit_records
+            )
+
+        return commit, terminate, is_terminal
 
     def terminalize_fixture_ticket(
         ticket: _Task064ChildProvenanceTicket,
@@ -6282,6 +8171,23 @@ def _build_task064_child_provenance_authority() -> tuple[
                 terminal_state="UNCLAIMED",
             )
             invalid()
+        if record["protocol"] == "report_close" and record.get("report_artifact_state") not in {
+            "CONSUMED",
+            "TERMINALIZED",
+        }:
+            for permit_record in tuple_type(report_permit_records.values()):
+                if permit_record.get("ticket") is ticket:
+                    terminalize_report_permit_record(
+                        permit_record,
+                        "TERMINALIZED",
+                    )
+            terminalize_fixture_ticket(
+                ticket,
+                target_node_id,
+                require_claimed=True,
+                terminal_state="UNCLAIMED",
+            )
+            invalid()
         terminalize_fixture_ticket(
             ticket,
             target_node_id,
@@ -6303,6 +8209,12 @@ def _build_task064_child_provenance_authority() -> tuple[
             if terminal_record[:3] != (ticket, current_pid(), target_node_id):
                 invalid()
             return
+        for permit_record in tuple_type(report_permit_records.values()):
+            if permit_record.get("ticket") is ticket:
+                terminalize_report_permit_record(
+                    permit_record,
+                    "TERMINALIZED",
+                )
         terminalize_fixture_ticket(
             ticket,
             target_node_id,
@@ -6311,9 +8223,57 @@ def _build_task064_child_provenance_authority() -> tuple[
         )
 
     def close(provenance: _Task064ChildProvenance) -> bool:
-        if type_of(provenance) is not provenance_type:
+        if (
+            type_of(provenance) is not provenance_type
+            or current_pid() != listener_owner_pid
+            or not listener_is_exact()
+        ):
+            invalid()
+        provenance_record = provenance_records.get(object_identity(provenance))
+        if (
+            provenance_record is None
+            or provenance_record.get("provenance") is not provenance
+            or provenance_record.get("provenance_fields") != provenance_fields(provenance)
+            or provenance_record.get("owner_process_id") != current_pid()
+            or provenance_record.get("owner_thread_id") != current_thread_id()
+            or provenance_record.get("state") != "ISSUED"
+        ):
             invalid()
         close_ok = True
+        launch_record = exact_launch_record(provenance)
+        launch_state_lock: AbstractContextManager[None] | None = None
+        if launch_record is not None:
+            cancel = launch_record.get("cancel")
+            state_lock_value = launch_record.get("state_lock")
+            if (
+                not isinstance_value(state_lock_value, lock_type)
+                or not callable(cancel)
+                or launch_record.get("parent_process_id") != listener_owner_pid
+                or launch_record.get("owner_thread_id") != current_thread_id()
+            ):
+                invalid()
+            launch_state_lock = cast(AbstractContextManager[None], state_lock_value)
+            try:
+                with launch_state_lock:
+                    terminal_state = launch_record.get("state")
+                    if (
+                        terminal_state not in {"ISSUED", "ATTESTED"}
+                        or (
+                            launch_record.get("child_process_id") is not None
+                            and terminal_state != "ATTESTED"
+                        )
+                        or launch_record.get("transport_error") is not None
+                        or not listener_is_exact()
+                    ):
+                        close_ok = False
+                cast(Callable[[], None], cancel)()
+            except base_exception_type:
+                close_ok = False
+        if provenance.artifact_descriptor >= 0:
+            try:
+                close_file(provenance.artifact_descriptor)
+            except os_error:
+                close_ok = False
         try:
             close_file(provenance.descriptor)
         except os_error:
@@ -6341,30 +8301,56 @@ def _build_task064_child_provenance_authority() -> tuple[
                 except os_error:
                     close_ok = False
         if not close_ok:
+            if launch_record is not None and launch_state_lock is not None:
+                with launch_state_lock:
+                    launch_record["state"] = "CLOSE_UNCERTAIN"
+            provenance_record["state"] = "CLOSE_UNCERTAIN"
+            mark_authority_uncertain()
             invalid()
+        if launch_record is not None and launch_state_lock is not None:
+            with launch_state_lock:
+                launch_record["state"] = "CLOSED"
+        provenance_record["state"] = "CLOSED"
+        provenance_records.pop(object_identity(provenance), None)
+        if launch_record is not None:
+            launch_records.pop(object_identity(provenance), None)
         return consumed
 
     return (
         issue,
+        spawn_authenticated_child,
+        probe_parent_attestation_binding,
         authenticate_before_fixture,
         activate_fixture_ticket,
         claim_post_return,
+        ticket_is_report_close,
         claim_body_dispatch,
         finish_fixture_ticket,
         cancel_fixture_ticket,
         close,
+        bind_report_artifact_validation,
+        claim_report_publication,
+        report_permit_is_valid,
+        prepare_report_permit_consumption,
     )
 
 
 (
     _issue_task064_child_provenance,
+    _spawn_task064_authenticated_child,
+    _probe_task064_parent_attestation_binding,
     _authenticate_task064_child_provenance,
     _activate_task064_child_provenance,
     _claim_task064_post_return_child_provenance,
+    _task064_child_ticket_is_report_close,
     _claim_task064_child_dispatch_provenance,
     _finish_task064_child_provenance,
     _cancel_task064_child_provenance,
     _close_task064_child_provenance,
+    _bind_task064_report_artifact_validation,
+    _claim_task064_report_close_publication,
+    _validate_task064_report_publication_permit,
+    _prepare_task064_report_publication_permit_consumption,
 ) = _build_task064_child_provenance_authority()
 del _build_task064_child_provenance_authority
 
@@ -6385,6 +8371,7 @@ def _build_evidence_run_authority() -> tuple[
     root_session_owns = _pytest_root_session_owns
     mark_authority_uncertain = _latch_pytest_root_authority_uncertainty
     active_run_context = _ACTIVE_EVIDENCE_RUN
+    evidence_ledger_type = _EvidenceLedger
     records: dict[int, dict[str, object]] = {}
     begin_stage_faults = frozenset(
         {
@@ -6455,7 +8442,11 @@ def _build_evidence_run_authority() -> tuple[
         )
 
     def record_matches(run: _EvidenceRun, phases: tuple[str, ...]) -> bool:
-        if type(run) is not _EvidenceRun or type(phases) is not tuple:
+        if (
+            type(run) is not _EvidenceRun
+            or type(phases) is not tuple
+            or type(run._pytest_registration.evidence_ledger) is not evidence_ledger_type
+        ):
             return False
         record = records.get(id(run))
         return not (
@@ -6482,7 +8473,8 @@ def _build_evidence_run_authority() -> tuple[
             raise HarnessFailure(HarnessFailureCode.CORRUPT)
         ledger = registration.evidence_ledger
         if (
-            ledger.closed
+            type(ledger) is not evidence_ledger_type
+            or ledger.closed
             or ledger.consumed
             or ledger.recording
             or ledger.run is not None
@@ -6683,17 +8675,20 @@ def _validated_evidence_run(run: _EvidenceRun) -> _EvidenceLedger:
     registration = run._pytest_registration
     _validate_bootstrap_root(registration.path_object)
     ledger = registration.evidence_ledger
+    if type(ledger) is not _EvidenceLedger:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    exact_ledger = ledger
     if (
-        ledger.closed
-        or ledger.consumed
-        or ledger.run is not run
+        exact_ledger.closed
+        or exact_ledger.consumed
+        or exact_ledger.run is not run
         or registration.process_id != os.getpid()
-        or type(ledger.nonce) is not bytes
-        or len(ledger.nonce) != 32
-        or (ledger.recording and _ACTIVE_EVIDENCE_RUN.get() is not run)
+        or type(exact_ledger.nonce) is not bytes
+        or len(exact_ledger.nonce) != 32
+        or (exact_ledger.recording and _ACTIVE_EVIDENCE_RUN.get() is not run)
     ):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
-    return ledger
+    return exact_ledger
 
 
 def _traceback_contains_harness_executor(
@@ -6728,12 +8723,15 @@ def _active_rejection_recording_ledger(
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     registration = run._pytest_registration
     ledger = registration.evidence_ledger
+    if type(ledger) is not _EvidenceLedger:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    exact_ledger = ledger
     if (
-        ledger.run is not run
-        or not ledger.recording
-        or ledger.receipt is not None
-        or ledger.closed
-        or ledger.consumed
+        exact_ledger.run is not run
+        or not exact_ledger.recording
+        or exact_ledger.receipt is not None
+        or exact_ledger.closed
+        or exact_ledger.consumed
         or registration.process_id != os.getpid()
         or _lookup_active_pytest_root(registration.path_object) is not registration
         or not _pytest_root_session_owns(registration, False)
@@ -6741,7 +8739,7 @@ def _active_rejection_recording_ledger(
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     if not allow_intentional_root_fault:
         _validate_bootstrap_root(registration.path_object)
-    return ledger
+    return exact_ledger
 
 
 def _capture_harness_rejection_unsealed(
@@ -7809,20 +9807,23 @@ def _build_evidence_receipt_authority(
         ):
             return False
         record = issued.get(id(receipt.run))
+        registration = receipt.run._pytest_registration
+        ledger = registration.evidence_ledger
         if (
-            record is None
+            type(ledger) is not _EvidenceLedger
+            or record is None
             or record["phase"] != "SEALED"
             or record["run"] is not receipt.run
-            or record["registration"] is not receipt.run._pytest_registration
-            or record["ledger"] is not receipt.run._pytest_registration.evidence_ledger
+            or record["registration"] is not registration
+            or record["ledger"] is not ledger
             or record["receipt"] is not receipt
             or record["gates"] is not receipt.gates
             or record["evidence"] is not receipt.evidence
             or not validate_run(receipt.run, ("SEALED",))
-            or receipt.run._pytest_registration.evidence_ledger.receipt is not receipt
-            or receipt.run._pytest_registration.evidence_ledger.recording
-            or receipt.run._pytest_registration.evidence_ledger.closed
-            or receipt.run._pytest_registration.evidence_ledger.consumed
+            or ledger.receipt is not receipt
+            or ledger.recording
+            or ledger.closed
+            or ledger.consumed
         ):
             return False
         try:
@@ -7858,8 +9859,7 @@ def _build_evidence_receipt_authority(
                 or gate.payload_digest != payload_digest
                 or current_digest != payload_digest
                 or not validate_gate_observation(observation, receipt.run, ordinal)
-                or receipt.run._pytest_registration.evidence_ledger.observations.get(ordinal)
-                is not observation
+                or ledger.observations.get(ordinal) is not observation
             ):
                 return False
         return not require_exact_evidence or (
@@ -18330,6 +20330,1234 @@ for _closed_gate_authority_name in (
 globals().pop("_closed_gate_authority_name", None)
 
 
+def _build_task064_report_artifact_validation() -> tuple[
+    Callable[[bytes], None],
+    Callable[[], tuple[tuple[str, str], ...]],
+]:
+    """Close exact sanitized-report validation and source binding over immutable primitives."""
+
+    canonical_load = json.loads
+    canonical_dump = json.dumps
+    digest_constructor = hashlib.sha256
+    path_type = Path
+    path_resolve = Path.resolve
+    path_joinpath = Path.joinpath
+    path_lstat = Path.lstat
+    path_read_bytes = Path.read_bytes
+    current_uid = os.getuid
+    stat_is_link = stat.S_ISLNK
+    stat_is_regular = stat.S_ISREG
+    stat_mode = stat.S_IMODE
+    type_of = type
+    dict_type = dict
+    list_type = list
+    str_type = str
+    int_type = int
+    bytes_type = bytes
+    length_of = len
+    tuple_type = tuple
+    set_type = set
+    failure_type = HarnessFailure
+    corrupt_code = HarnessFailureCode.CORRUPT
+    validate_timestamp = _validated_evidence_timestamp
+    uuid_type = UUID
+    maximum_artifact_bytes = 4 * 1024 * 1024
+    maximum_database_bytes = MAX_TEST_DATABASE_BYTES
+    maximum_wal_bytes = MAX_TEST_WAL_BYTES
+    maximum_page_count = MAX_PAGE_COUNT
+    maximum_contract_integer = MAX_CONTRACT_INTEGER
+    database_basename = _DATABASE_BASENAME
+    owned_database_filenames = _OWNED_DATABASE_FILENAMES
+    task_id = TASK_ID
+    task_contract_generation = TASK_CONTRACT_GENERATION
+    task_contract_digest = TASK_CONTRACT_DIGEST
+    application_id = APPLICATION_ID
+    user_version = USER_VERSION
+    schema_generation = SCHEMA_GENERATION
+    page_size = PAGE_SIZE
+    storage_marker = STORAGE_MARKER.decode("ascii")
+    accepted_python_version = ACCEPTED_PYTHON_VERSION
+    accepted_sqlite_version = ACCEPTED_SQLITE_VERSION
+    accepted_sqlite_source_id = ACCEPTED_SQLITE_SOURCE_ID
+    accepted_threadsafety = ACCEPTED_THREADSAFETY
+    accepted_compile_options = list(ACCEPTED_COMPILE_OPTIONS)
+    workload_seed = WORKLOAD_SEED
+    workload_runs = WORKLOAD_RUNS
+    record_size_matrix = [list(item) for item in RECORD_SIZE_MATRIX]
+    workload_matrix = [list(item) for item in WORKLOAD_MATRIX]
+    maximum_operation_latency_ns = MAX_OPERATION_LATENCY_NS
+    maximum_traced_memory_bytes = MAX_TEST_TRACED_MEMORY_BYTES
+    maximum_open_cursors = MAX_TEST_OPEN_CURSORS
+    wal_autocheckpoint_pages = WAL_AUTOCHECKPOINT_PAGES
+    expected_schema_fingerprint = load_schema_fingerprint()
+    checkout_root = path_resolve(path_type(__file__), strict=True).parents[2]
+    source_suffixes = (
+        "tests/support/continuous_public_trade_stream_sqlite_harness.py",
+        "tests/integration/test_task_064_continuous_public_trade_stream_sqlite_evidence.py",
+        "tests/unit/test_task_064_continuous_public_trade_stream_sqlite_schema.py",
+        "docs/decisions/0032-continuous-public-trade-stream-sqlite-schema-evidence-harness.md",
+    )
+    source_snapshots: tuple[tuple[str, Path, tuple[int, int, int, int, int], str], ...] = tuple()
+    mutable_source_snapshots: list[tuple[str, Path, tuple[int, int, int, int, int], str]] = []
+    for source_suffix in source_suffixes:
+        source_path = path_joinpath(checkout_root, *source_suffix.split("/"))
+        try:
+            resolved_source = path_resolve(source_path, strict=True)
+            source_details = path_lstat(source_path)
+            source_raw = path_read_bytes(source_path)
+        except (OSError, RuntimeError):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+        if (
+            resolved_source != source_path
+            or stat_is_link(source_details.st_mode)
+            or not stat_is_regular(source_details.st_mode)
+            or source_details.st_uid != current_uid()
+            or source_details.st_size != length_of(source_raw)
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        mutable_source_snapshots.append(
+            (
+                source_suffix,
+                source_path,
+                (
+                    source_details.st_dev,
+                    source_details.st_ino,
+                    source_details.st_uid,
+                    stat_mode(source_details.st_mode),
+                    source_details.st_size,
+                ),
+                digest_constructor(source_raw).hexdigest(),
+            )
+        )
+    source_snapshots = tuple(mutable_source_snapshots)
+    del mutable_source_snapshots
+    expected_runtime_profiles = [
+        {
+            "role": profile.role,
+            "dbconfig": [list(item) for item in profile.dbconfig],
+            "defensive_available": profile.defensive_available,
+            "defensive_enabled": profile.defensive_enabled,
+            "limits": [list(item) for item in profile.limits],
+            "pragmas": [list(item) for item in profile.pragmas],
+        }
+        for profile in ACCEPTED_CONNECTION_PROFILES
+    ]
+    expected_gates = [
+        *[
+            {
+                "name": name,
+                "disposition": EvidenceDisposition.PASS.value,
+                "reason": None,
+            }
+            for name in GENERATED_EVIDENCE_GATES
+        ],
+        *[
+            {
+                "name": name,
+                "disposition": EvidenceDisposition.NOT_APPLICABLE.value,
+                "reason": TARGET_NOT_APPLICABLE_REASON,
+            }
+            for name in TARGET_NOT_APPLICABLE_GATES
+        ],
+    ]
+
+    def invalid() -> Never:
+        raise failure_type(corrupt_code)
+
+    def exact_keys(value: object, keys: tuple[str, ...]) -> dict[str, object]:
+        if type_of(value) is not dict_type:
+            invalid()
+        exact_mapping = cast(dict[str, object], value)
+        if tuple_type(exact_mapping) != keys:
+            invalid()
+        return exact_mapping
+
+    def valid_prefixed_digest(value: object) -> bool:
+        if type_of(value) is not str_type:
+            return False
+        exact_value = cast(str, value)
+        return bool(
+            length_of(exact_value) == 71
+            and exact_value.startswith("sha256:")
+            and all(character in "0123456789abcdef" for character in exact_value[7:])
+        )
+
+    def exact_value(value: object, expected: object) -> bool:
+        if type_of(value) is not type_of(expected):
+            return False
+        if type_of(expected) is dict_type:
+            exact_mapping = cast(dict[str, object], value)
+            expected_mapping = cast(dict[str, object], expected)
+            return bool(
+                tuple_type(exact_mapping) == tuple_type(expected_mapping)
+                and all(
+                    exact_value(exact_mapping[key], expected_mapping[key])
+                    for key in expected_mapping
+                )
+            )
+        if type_of(expected) is list_type:
+            exact_list = cast(list[object], value)
+            expected_list = cast(list[object], expected)
+            return bool(
+                length_of(exact_list) == length_of(expected_list)
+                and all(
+                    exact_value(item, expected_item)
+                    for item, expected_item in zip(exact_list, expected_list, strict=True)
+                )
+            )
+        return bool(value == expected)
+
+    def exact_int(value: object, *, minimum: int, maximum: int) -> int:
+        if type_of(value) is not int_type or not minimum <= cast(int, value) <= maximum:
+            invalid()
+        return cast(int, value)
+
+    def source_fingerprints() -> tuple[tuple[str, str], ...]:
+        result: list[tuple[str, str]] = []
+        for suffix, path, expected_identity, expected_digest in source_snapshots:
+            try:
+                resolved = path_resolve(path, strict=True)
+                details = path_lstat(path)
+                raw = path_read_bytes(path)
+            except (OSError, RuntimeError):
+                invalid()
+            if (
+                resolved != path
+                or stat_is_link(details.st_mode)
+                or not stat_is_regular(details.st_mode)
+                or details.st_uid != current_uid()
+                or (
+                    details.st_dev,
+                    details.st_ino,
+                    details.st_uid,
+                    stat_mode(details.st_mode),
+                    details.st_size,
+                )
+                != expected_identity
+                or length_of(raw) != details.st_size
+                or digest_constructor(raw).hexdigest() != expected_digest
+            ):
+                invalid()
+            result.append((suffix, expected_digest))
+        return tuple_type(result)
+
+    def validate(raw: bytes) -> None:
+        if (
+            type_of(raw) is not bytes_type
+            or not 0 < length_of(raw) <= maximum_artifact_bytes
+            or not raw.endswith(b"\n")
+            or raw.endswith(b"\n\n")
+        ):
+            invalid()
+        try:
+            text = raw.decode("ascii")
+            document = canonical_load(text)
+            canonical = (
+                canonical_dump(
+                    document,
+                    allow_nan=False,
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                ).encode("ascii")
+                + b"\n"
+            )
+        except (UnicodeError, TypeError, ValueError, RecursionError):
+            invalid()
+        if canonical != raw:
+            invalid()
+        report = exact_keys(
+            document,
+            (
+                "report_version",
+                "task",
+                "schema",
+                "runtime",
+                "environment_class",
+                "evidence_recorded_at_utc",
+                "workload_contract",
+                "measurements",
+                "backup_manifest",
+                "gates",
+            ),
+        )
+        task = exact_keys(
+            report["task"],
+            ("task_id", "contract_generation", "contract_digest"),
+        )
+        schema = exact_keys(
+            report["schema"],
+            (
+                "schema_fingerprint",
+                "application_id",
+                "user_version",
+                "schema_generation",
+                "page_size",
+                "storage_marker",
+            ),
+        )
+        runtime = exact_keys(
+            report["runtime"],
+            (
+                "python_version",
+                "sqlite_version",
+                "sqlite_source_id",
+                "threadsafety",
+                "compile_options",
+                "connection_profiles",
+            ),
+        )
+        workload = exact_keys(
+            report["workload_contract"],
+            ("seed", "runs", "record_size_matrix", "workload_matrix", "thresholds"),
+        )
+        thresholds = exact_keys(
+            workload["thresholds"],
+            (
+                "maximum_operation_latency_ns",
+                "maximum_database_bytes",
+                "maximum_wal_bytes",
+                "maximum_traced_memory_bytes",
+                "maximum_open_cursors",
+                "maximum_page_count",
+                "wal_autocheckpoint_pages",
+            ),
+        )
+        measurements = exact_keys(
+            report["measurements"],
+            (
+                "stream_rows",
+                "history_rows",
+                "query_rows",
+                "database_bytes",
+                "wal_bytes",
+                "page_count",
+                "freelist_count",
+                "maximum_open_cursors",
+                "peak_traced_memory_bytes",
+                "latency_samples_ns",
+            ),
+        )
+        manifest = exact_keys(
+            report["backup_manifest"],
+            (
+                "source_generation_id",
+                "destination_generation_id",
+                "schema_fingerprint",
+                "sqlite_source_id",
+                "page_size",
+                "source_page_count",
+                "destination_page_count",
+                "checkpoint_outcome",
+                "finalization_outcome",
+                "evidence_recorded_at_utc",
+                "source_streams",
+                "source_history_rows",
+                "destination_streams",
+                "destination_history_rows",
+                "files",
+                "per_stream_tails",
+            ),
+        )
+        if (
+            report["report_version"] != 1
+            or type_of(report["report_version"]) is not int_type
+            or not exact_value(
+                task,
+                {
+                    "task_id": task_id,
+                    "contract_generation": task_contract_generation,
+                    "contract_digest": task_contract_digest,
+                },
+            )
+            or not exact_value(
+                schema,
+                {
+                    "schema_fingerprint": expected_schema_fingerprint,
+                    "application_id": application_id,
+                    "user_version": user_version,
+                    "schema_generation": schema_generation,
+                    "page_size": page_size,
+                    "storage_marker": storage_marker,
+                },
+            )
+            or not exact_value(
+                runtime,
+                {
+                    "python_version": accepted_python_version,
+                    "sqlite_version": accepted_sqlite_version,
+                    "sqlite_source_id": accepted_sqlite_source_id,
+                    "threadsafety": accepted_threadsafety,
+                    "compile_options": accepted_compile_options,
+                    "connection_profiles": expected_runtime_profiles,
+                },
+            )
+            or report["environment_class"] != "generated-linux-pytest"
+            or type_of(report["evidence_recorded_at_utc"]) is not str_type
+            or not exact_value(
+                workload,
+                {
+                    "seed": workload_seed,
+                    "runs": workload_runs,
+                    "record_size_matrix": record_size_matrix,
+                    "workload_matrix": workload_matrix,
+                    "thresholds": {
+                        "maximum_operation_latency_ns": maximum_operation_latency_ns,
+                        "maximum_database_bytes": maximum_database_bytes,
+                        "maximum_wal_bytes": maximum_wal_bytes,
+                        "maximum_traced_memory_bytes": maximum_traced_memory_bytes,
+                        "maximum_open_cursors": maximum_open_cursors,
+                        "maximum_page_count": maximum_page_count,
+                        "wal_autocheckpoint_pages": wal_autocheckpoint_pages,
+                    },
+                },
+            )
+            or thresholds is not workload["thresholds"]
+            or not exact_value(report["gates"], expected_gates)
+        ):
+            invalid()
+        validate_timestamp(cast(str, report["evidence_recorded_at_utc"]))
+        stream_rows = exact_int(measurements["stream_rows"], minimum=0, maximum=2**63 - 1)
+        history_rows = exact_int(measurements["history_rows"], minimum=0, maximum=2**63 - 1)
+        exact_int(measurements["query_rows"], minimum=0, maximum=2**63 - 1)
+        database_bytes = exact_int(
+            measurements["database_bytes"], minimum=0, maximum=maximum_database_bytes
+        )
+        wal_bytes = exact_int(measurements["wal_bytes"], minimum=0, maximum=maximum_wal_bytes)
+        page_count = exact_int(measurements["page_count"], minimum=1, maximum=maximum_page_count)
+        freelist_count = exact_int(measurements["freelist_count"], minimum=0, maximum=page_count)
+        del database_bytes, wal_bytes, freelist_count
+        exact_int(
+            measurements["maximum_open_cursors"],
+            minimum=1,
+            maximum=maximum_open_cursors,
+        )
+        exact_int(
+            measurements["peak_traced_memory_bytes"],
+            minimum=0,
+            maximum=maximum_traced_memory_bytes,
+        )
+        latency_samples = measurements["latency_samples_ns"]
+        if type_of(latency_samples) is not list_type:
+            invalid()
+        exact_latency_samples = cast(list[object], latency_samples)
+        if length_of(exact_latency_samples) != workload_runs:
+            invalid()
+        for latency_sample in exact_latency_samples:
+            exact_int(
+                latency_sample,
+                minimum=0,
+                maximum=maximum_operation_latency_ns,
+            )
+        source_generation_id = manifest["source_generation_id"]
+        destination_generation_id = manifest["destination_generation_id"]
+        source_page_count = exact_int(
+            manifest["source_page_count"], minimum=1, maximum=maximum_page_count
+        )
+        destination_page_count = exact_int(
+            manifest["destination_page_count"], minimum=1, maximum=maximum_page_count
+        )
+        source_streams = exact_int(manifest["source_streams"], minimum=0, maximum=2**63 - 1)
+        source_history_rows = exact_int(
+            manifest["source_history_rows"], minimum=0, maximum=2**63 - 1
+        )
+        destination_streams = exact_int(
+            manifest["destination_streams"], minimum=0, maximum=2**63 - 1
+        )
+        destination_history_rows = exact_int(
+            manifest["destination_history_rows"], minimum=0, maximum=2**63 - 1
+        )
+        if (
+            not valid_prefixed_digest(source_generation_id)
+            or not valid_prefixed_digest(destination_generation_id)
+            or source_generation_id == destination_generation_id
+            or manifest["schema_fingerprint"] != schema["schema_fingerprint"]
+            or not valid_prefixed_digest(manifest["schema_fingerprint"])
+            or manifest["sqlite_source_id"] != runtime["sqlite_source_id"]
+            or manifest["page_size"] != page_size
+            or type_of(manifest["page_size"]) is not int_type
+            or source_page_count != destination_page_count
+            or destination_page_count != page_count
+            or not exact_value(manifest["checkpoint_outcome"], [0, 0, 0])
+            or manifest["evidence_recorded_at_utc"] != report["evidence_recorded_at_utc"]
+            or type_of(manifest["finalization_outcome"]) is not str_type
+            or source_streams != destination_streams
+            or source_history_rows != destination_history_rows
+            or destination_streams != stream_rows
+            or destination_history_rows != history_rows
+            or type_of(manifest["files"]) is not list_type
+            or not manifest["files"]
+            or type_of(manifest["per_stream_tails"]) is not list_type
+            or length_of(cast(list[object], manifest["per_stream_tails"])) != destination_streams
+        ):
+            invalid()
+        files = cast(list[object], manifest["files"])
+        file_names: list[str] = []
+        for item in files:
+            if type_of(item) is not list_type:
+                invalid()
+            exact_item = cast(list[object], item)
+            if length_of(exact_item) != 3:
+                invalid()
+            name = exact_item[0]
+            size = exact_item[1]
+            digest = exact_item[2]
+            if (
+                type_of(name) is not str_type
+                or name not in owned_database_filenames
+                or type_of(size) is not int_type
+                or not 0
+                <= cast(int, size)
+                <= (maximum_database_bytes if name == database_basename else maximum_wal_bytes)
+                or (name == database_basename and size == 0)
+                or not valid_prefixed_digest(digest)
+            ):
+                invalid()
+            file_names.append(name)
+        if (
+            tuple_type(file_names) != tuple_type(sorted(file_names))
+            or length_of(set_type(file_names)) != length_of(file_names)
+            or database_basename not in file_names
+        ):
+            invalid()
+        expected_finalization = (
+            "TRUNCATE_CHECKPOINT_CLOSED_STANDALONE_MAIN"
+            if tuple_type(file_names) == (database_basename,)
+            else "TRUNCATE_CHECKPOINT_CLOSED_COMPLETE_FILE_SET"
+        )
+        if manifest["finalization_outcome"] != expected_finalization:
+            invalid()
+        prior_stream_id = ""
+        for item in cast(list[object], manifest["per_stream_tails"]):
+            if type_of(item) is not list_type:
+                invalid()
+            exact_item = cast(list[object], item)
+            if length_of(exact_item) != 4:
+                invalid()
+            stream_id = exact_item[0]
+            version = exact_item[1]
+            if (
+                type_of(stream_id) is not str_type
+                or type_of(version) is not int_type
+                or not 1 <= cast(int, version) <= maximum_contract_integer
+                or cast(str, stream_id) <= prior_stream_id
+                or not valid_prefixed_digest(exact_item[2])
+                or not valid_prefixed_digest(exact_item[3])
+            ):
+                invalid()
+            try:
+                if str(uuid_type(cast(str, stream_id))) != stream_id:
+                    invalid()
+            except (ValueError, TypeError, AttributeError):
+                invalid()
+            prior_stream_id = stream_id
+
+    return validate, source_fingerprints
+
+
+def _build_task064_published_report_artifact_authority(
+    validate_artifact: Callable[[bytes], None],
+    source_fingerprints: Callable[[], tuple[tuple[str, str], ...]],
+) -> tuple[
+    Callable[..., None],
+    Callable[[Path], _Task064PublishedReportArtifactCapability],
+    Callable[
+        ...,
+        tuple[
+            bytes,
+            Mapping[str, object],
+            Callable[
+                [str],
+                tuple[
+                    Callable[[int], bool],
+                    Callable[[str, int, int], bool],
+                    Callable[[str, int, int], bool],
+                    Callable[[], None],
+                ],
+            ],
+        ],
+    ],
+]:
+    """Mint report-close authority only from a consumed normal publication."""
+
+    capability_type = _Task064PublishedReportArtifactCapability
+    receipt_type = _EvidenceReceipt
+    report_type = EvidenceReport
+    ledger_type = _EvidenceLedger
+    path_type = Path
+    mapping_proxy_type = MappingProxyType
+    type_of = type
+    isinstance_value = isinstance
+    object_identity = id
+    length_of = len
+    current_pid = os.getpid
+    current_thread_id = get_ident
+    current_uid = os.getuid
+    monotonic_ns = time.monotonic_ns
+    issue_nonce = secrets.token_bytes
+    issue_hex_nonce = secrets.token_hex
+    digest_constructor = hashlib.sha256
+    payload_digest = _evidence_payload_digest
+    root_lookup = _lookup_active_pytest_root
+    root_session_owns = _pytest_root_session_owns
+    mark_authority_uncertain = _latch_pytest_root_authority_uncertainty
+    schema_fingerprint_provider = load_schema_fingerprint
+    open_file = os.open
+    close_file = os.close
+    read_file = os.read
+    stat_file = os.fstat
+    path_lstat = Path.lstat
+    descriptor_flags = fcntl.fcntl
+    get_file_status_flags = fcntl.F_GETFL
+    access_mode_mask = os.O_ACCMODE
+    read_only = os.O_RDONLY
+    no_follow = getattr(os, "O_NOFOLLOW", 0)
+    close_on_exec = getattr(os, "O_CLOEXEC", 0)
+    directory_only = getattr(os, "O_DIRECTORY", 0)
+    stat_is_link = stat.S_ISLNK
+    stat_is_regular = stat.S_ISREG
+    stat_is_directory = stat.S_ISDIR
+    stat_mode = stat.S_IMODE
+    failure_type = HarnessFailure
+    corrupt_code = HarnessFailureCode.CORRUPT
+    invalid_root_code = HarnessFailureCode.INVALID_BOOTSTRAP_ROOT
+    task_contract_generation = TASK_CONTRACT_GENERATION
+    task_contract_digest = TASK_CONTRACT_DIGEST
+    maximum_lifetime_ns = 900_000_000_000
+    maximum_records = 64
+    report_name = "task064-evidence.json"
+    report_close_modes = frozenset(
+        {
+            "readback_verified_root_close_ambiguity",
+            "staging_close_ambiguity",
+            "readback_close_ambiguity",
+            "reentrant_root_revocation",
+        }
+    )
+    context_binding: ContextVar[bytes | None] = ContextVar(
+        "task064_published_report_artifact_context",
+        default=None,
+    )
+    context_token_type = Token
+    base_exception_type = BaseException
+    lock_type = threading.Lock
+    records: dict[int, dict[str, object]] = {}
+    paths: dict[int, dict[str, object]] = {}
+
+    def corrupt() -> Never:
+        raise failure_type(corrupt_code)
+
+    def invalid() -> Never:
+        raise failure_type(invalid_root_code)
+
+    def exact_record(
+        capability: _Task064PublishedReportArtifactCapability,
+    ) -> dict[str, object] | None:
+        if type_of(capability) is not capability_type:
+            return None
+        record = records.get(object_identity(capability))
+        if (
+            record is None
+            or record.get("capability") is not capability
+            or record.get("capability_fields")
+            != (
+                object_identity(capability._authority_nonce),
+                capability._authority_nonce,
+            )
+        ):
+            return None
+        return record
+
+    def read_exact_published_artifact(record: Mapping[str, object]) -> bytes:
+        root = record.get("root")
+        path = record.get("path")
+        raw = record.get("raw")
+        if (
+            not isinstance_value(root, path_type)
+            or not isinstance_value(path, path_type)
+            or type_of(raw) is not bytes
+            or cast(Path, path).parent != cast(Path, root)
+            or cast(Path, path).name != report_name
+        ):
+            invalid()
+        root_descriptor = -1
+        descriptor = -1
+        try:
+            root_descriptor = open_file(
+                cast(Path, root),
+                read_only | directory_only | no_follow | close_on_exec,
+            )
+            root_details = stat_file(root_descriptor)
+            descriptor = open_file(
+                report_name,
+                read_only | no_follow | close_on_exec,
+                dir_fd=root_descriptor,
+            )
+            details = stat_file(descriptor)
+            path_details = path_lstat(cast(Path, path))
+            if (
+                descriptor_flags(descriptor, get_file_status_flags) & access_mode_mask != read_only
+                or not stat_is_directory(root_details.st_mode)
+                or (
+                    root_details.st_dev,
+                    root_details.st_ino,
+                    root_details.st_uid,
+                    stat_mode(root_details.st_mode),
+                )
+                != record.get("root_fields")
+                or stat_is_link(path_details.st_mode)
+                or not stat_is_regular(details.st_mode)
+                or not stat_is_regular(path_details.st_mode)
+                or (
+                    details.st_dev,
+                    details.st_ino,
+                    details.st_uid,
+                    stat_mode(details.st_mode),
+                    details.st_nlink,
+                    details.st_size,
+                )
+                != record.get("path_fields")
+                or (
+                    path_details.st_dev,
+                    path_details.st_ino,
+                    path_details.st_uid,
+                    stat_mode(path_details.st_mode),
+                    path_details.st_nlink,
+                    path_details.st_size,
+                )
+                != record.get("path_fields")
+            ):
+                invalid()
+            observed = bytearray()
+            expected_length = length_of(cast(bytes, raw))
+            while length_of(observed) <= expected_length:
+                fragment = read_file(
+                    descriptor,
+                    min(65_536, expected_length + 1 - length_of(observed)),
+                )
+                if type_of(fragment) is not bytes:
+                    invalid()
+                if not fragment:
+                    break
+                observed.extend(fragment)
+            exact = bytes(observed)
+            if (
+                exact is raw
+                or length_of(exact) != expected_length
+                or exact != raw
+                or digest_constructor(exact).hexdigest() != record.get("report_digest")
+            ):
+                invalid()
+            return exact
+        except failure_type:
+            raise
+        except (OSError, TypeError, ValueError):
+            invalid()
+        finally:
+            close_failed = False
+            for pending_descriptor in (descriptor, root_descriptor):
+                if pending_descriptor >= 0:
+                    try:
+                        close_file(pending_descriptor)
+                    except OSError:
+                        close_failed = True
+            if close_failed:
+                mark_authority_uncertain()
+                invalid()
+
+    def evidence_run_digest(run: _EvidenceRun, root: _ActivePytestRoot) -> str:
+        hasher = digest_constructor()
+        hasher.update(b"TASK064-PUBLISHED-REPORT-RUN-V1\x00")
+        hasher.update(run._nonce)
+        hasher.update(root.nonce)
+        hasher.update(str(object_identity(run)).encode("ascii"))
+        return hasher.hexdigest()
+
+    def register(
+        pytest_root: Path,
+        *,
+        receipt: _EvidenceReceipt,
+        report: EvidenceReport,
+        ledger: _EvidenceLedger,
+        path: Path,
+        raw: bytes,
+    ) -> None:
+        if (
+            not isinstance_value(pytest_root, path_type)
+            or not isinstance_value(path, path_type)
+            or type_of(receipt) is not receipt_type
+            or type_of(report) is not report_type
+            or type_of(ledger) is not ledger_type
+            or type_of(raw) is not bytes
+            or not raw
+            or length_of(records) >= maximum_records
+            or length_of(paths) >= maximum_records
+        ):
+            corrupt()
+        active_root = root_lookup(pytest_root)
+        if (
+            active_root is None
+            or active_root.path_object is not pytest_root
+            or active_root.process_id != current_pid()
+            or type_of(active_root.evidence_ledger) is not ledger_type
+            or active_root.evidence_ledger is not ledger
+            or not root_session_owns(active_root, False)
+            or receipt.run._pytest_registration is not active_root
+            or receipt.evidence is not report.evidence
+            or receipt.evidence_digest != payload_digest(report.evidence)
+            or ledger.run is not receipt.run
+            or ledger.receipt is not receipt
+            or ledger.recording
+            or ledger.closed
+            or not ledger.consumed
+            or report.contract_generation != task_contract_generation
+            or report.contract_digest != task_contract_digest
+            or report.schema_fingerprint != schema_fingerprint_provider()
+            or path != pytest_root / report_name
+            or paths.get(object_identity(path)) is not None
+        ):
+            corrupt()
+        validate_artifact(raw)
+        exact_sources = source_fingerprints()
+        try:
+            root_details = path_lstat(pytest_root)
+            path_details = path_lstat(path)
+        except OSError:
+            corrupt()
+        if (
+            stat_is_link(root_details.st_mode)
+            or not stat_is_directory(root_details.st_mode)
+            or root_details.st_uid != current_uid()
+            or stat_mode(root_details.st_mode) != 0o700
+            or stat_is_link(path_details.st_mode)
+            or not stat_is_regular(path_details.st_mode)
+            or path_details.st_dev != root_details.st_dev
+            or path_details.st_uid != current_uid()
+            or stat_mode(path_details.st_mode) != 0o600
+            or path_details.st_nlink != 1
+            or path_details.st_size != length_of(raw)
+        ):
+            corrupt()
+        capability = capability_type(_authority_nonce=issue_nonce(32))
+        context_nonce = issue_nonce(32)
+        publication_nonce = issue_hex_nonce(32)
+        if (
+            type_of(capability._authority_nonce) is not bytes
+            or length_of(capability._authority_nonce) != 32
+            or type_of(context_nonce) is not bytes
+            or length_of(context_nonce) != 32
+            or type_of(publication_nonce) is not str
+            or length_of(publication_nonce) != 64
+            or object_identity(capability) in records
+        ):
+            corrupt()
+        report_digest = digest_constructor(raw).hexdigest()
+        expires_ns = monotonic_ns() + maximum_lifetime_ns
+        publication_binding: Mapping[str, object] = mapping_proxy_type(
+            {
+                "publication_nonce": publication_nonce,
+                "publication_run_digest": evidence_run_digest(receipt.run, active_root),
+                "publication_aggregate_digest": receipt.evidence_digest,
+                "publication_report_object_digest": payload_digest(report),
+                "publication_root_path": str(pytest_root),
+                "publication_root_device": root_details.st_dev,
+                "publication_root_inode": root_details.st_ino,
+                "publication_root_uid": root_details.st_uid,
+                "publication_root_mode": stat_mode(root_details.st_mode),
+                "publication_path": str(path),
+                "publication_device": path_details.st_dev,
+                "publication_inode": path_details.st_ino,
+                "publication_uid": path_details.st_uid,
+                "publication_mode": stat_mode(path_details.st_mode),
+                "publication_nlink": path_details.st_nlink,
+                "publication_process_id": current_pid(),
+                "publication_thread_id": current_thread_id(),
+                "publication_node_id": active_root.node_id,
+                "publication_context_digest": digest_constructor(context_nonce).hexdigest(),
+                "publication_expires_ns": expires_ns,
+            }
+        )
+        try:
+            context_token = context_binding.set(context_nonce)
+        except base_exception_type:
+            corrupt()
+        if type_of(context_token) is not context_token_type:
+            corrupt()
+        record: dict[str, object] = {
+            "capability": capability,
+            "capability_fields": (
+                object_identity(capability._authority_nonce),
+                capability._authority_nonce,
+            ),
+            "context_fields": (object_identity(context_nonce), context_nonce),
+            "context_token": context_token,
+            "owner_process_id": current_pid(),
+            "owner_thread_id": current_thread_id(),
+            "node_id": active_root.node_id,
+            "root": pytest_root,
+            "root_identity": active_root,
+            "root_fields": (
+                root_details.st_dev,
+                root_details.st_ino,
+                root_details.st_uid,
+                stat_mode(root_details.st_mode),
+            ),
+            "path": path,
+            "path_fields": (
+                path_details.st_dev,
+                path_details.st_ino,
+                path_details.st_uid,
+                stat_mode(path_details.st_mode),
+                path_details.st_nlink,
+                path_details.st_size,
+            ),
+            "run": receipt.run,
+            "receipt": receipt,
+            "ledger": ledger,
+            "aggregate": report.evidence,
+            "report": report,
+            "raw": raw,
+            "raw_fields": (object_identity(raw), raw),
+            "report_digest": report_digest,
+            "source_fingerprints": exact_sources,
+            "contract_generation": task_contract_generation,
+            "contract_digest": task_contract_digest,
+            "schema_fingerprint": report.schema_fingerprint,
+            "publication_binding": publication_binding,
+            "expires_ns": expires_ns,
+            "issued_modes": set(),
+            "state": "PUBLISHED",
+        }
+        records[object_identity(capability)] = record
+        paths[object_identity(path)] = record
+
+    def context_is_exact(record: dict[str, object]) -> bool:
+        context_fields = record.get("context_fields")
+        context_token = record.get("context_token")
+        if (
+            type_of(context_fields) is not tuple
+            or length_of(cast(tuple[object, ...], context_fields)) != 2
+            or type_of(context_token) is not context_token_type
+            or context_binding.get() is not cast(tuple[object, ...], context_fields)[1]
+        ):
+            return False
+        try:
+            context_binding.reset(cast(Token[bytes | None], context_token))
+            rotated_token = context_binding.set(
+                cast(bytes, cast(tuple[object, ...], context_fields)[1])
+            )
+        except base_exception_type:
+            return False
+        if type_of(rotated_token) is not context_token_type:
+            return False
+        record["context_token"] = rotated_token
+        return True
+
+    def record_is_current(record: dict[str, object]) -> bool:
+        root = record.get("root")
+        root_identity = record.get("root_identity")
+        run = record.get("run")
+        receipt = record.get("receipt")
+        ledger = record.get("ledger")
+        aggregate = record.get("aggregate")
+        report = record.get("report")
+        raw = record.get("raw")
+        raw_fields = record.get("raw_fields")
+        publication_binding = record.get("publication_binding")
+        return bool(
+            record.get("owner_process_id") == current_pid()
+            and record.get("owner_thread_id") == current_thread_id()
+            and context_is_exact(record)
+            and record.get("source_fingerprints") == source_fingerprints()
+            and record.get("contract_generation") == task_contract_generation
+            and record.get("contract_digest") == task_contract_digest
+            and record.get("schema_fingerprint") == schema_fingerprint_provider()
+            and type_of(record.get("expires_ns")) is int
+            and 0 < cast(int, record["expires_ns"]) - monotonic_ns() <= maximum_lifetime_ns
+            and isinstance_value(root, path_type)
+            and type_of(root_identity) is _ActivePytestRoot
+            and root_lookup(cast(Path, root)) is root_identity
+            and cast(_ActivePytestRoot, root_identity).path_object is root
+            and root_session_owns(cast(_ActivePytestRoot, root_identity), False)
+            and type_of(run) is _EvidenceRun
+            and type_of(receipt) is receipt_type
+            and type_of(ledger) is ledger_type
+            and type_of(report) is report_type
+            and type_of(raw) is bytes
+            and type_of(raw_fields) is tuple
+            and raw_fields == (object_identity(raw), raw)
+            and cast(_EvidenceReceipt, receipt).run is run
+            and cast(_EvidenceReceipt, receipt).evidence is aggregate
+            and cast(_EvidenceReceipt, receipt).evidence_digest == payload_digest(aggregate)
+            and cast(_EvidenceLedger, ledger).run is run
+            and cast(_EvidenceLedger, ledger).receipt is receipt
+            and not cast(_EvidenceLedger, ledger).recording
+            and not cast(_EvidenceLedger, ledger).closed
+            and cast(_EvidenceLedger, ledger).consumed
+            and cast(EvidenceReport, report).evidence is aggregate
+            and isinstance_value(publication_binding, Mapping)
+            and cast(Mapping[str, object], publication_binding).get("publication_run_digest")
+            == evidence_run_digest(
+                run,
+                cast(_ActivePytestRoot, root_identity),
+            )
+            and cast(Mapping[str, object], publication_binding).get("publication_aggregate_digest")
+            == payload_digest(aggregate)
+            and cast(Mapping[str, object], publication_binding).get(
+                "publication_report_object_digest"
+            )
+            == payload_digest(report)
+            and record.get("report_digest") == digest_constructor(cast(bytes, raw)).hexdigest()
+        )
+
+    def claim(path: Path) -> _Task064PublishedReportArtifactCapability:
+        if not isinstance_value(path, path_type):
+            invalid()
+        record = paths.get(object_identity(path))
+        capability = None if record is None else record.get("capability")
+        if (
+            record is None
+            or record.get("path") is not path
+            or record.get("state") != "PUBLISHED"
+            or type_of(capability) is not capability_type
+            or exact_record(cast(_Task064PublishedReportArtifactCapability, capability))
+            is not record
+            or not record_is_current(record)
+        ):
+            invalid()
+        exact = read_exact_published_artifact(record)
+        if exact != record.get("raw"):
+            invalid()
+        record["state"] = "CLAIMED"
+        return cast(_Task064PublishedReportArtifactCapability, capability)
+
+    def resolve(
+        capability: _Task064PublishedReportArtifactCapability,
+        *,
+        pytest_root: Path,
+        issuer_node_id: str,
+        target_node_id: str,
+        mode: str,
+        deadline_ns: int,
+    ) -> tuple[
+        bytes,
+        Mapping[str, object],
+        Callable[
+            [str],
+            tuple[
+                Callable[[int], bool],
+                Callable[[str, int, int], bool],
+                Callable[[str, int, int], bool],
+                Callable[[], None],
+            ],
+        ],
+    ]:
+        record = exact_record(capability)
+        if (
+            record is None
+            or record.get("state") not in {"CLAIMED", "FANOUTING"}
+            or not record_is_current(record)
+            or not isinstance_value(pytest_root, path_type)
+            or record.get("root") is not pytest_root
+            or type_of(issuer_node_id) is not str
+            or type_of(target_node_id) is not str
+            or issuer_node_id != target_node_id
+            or issuer_node_id != record.get("node_id")
+            or type_of(mode) is not str
+            or mode not in report_close_modes
+            or type_of(deadline_ns) is not int
+            or not 0 < deadline_ns - monotonic_ns() <= maximum_lifetime_ns
+            or deadline_ns > cast(int, record.get("expires_ns"))
+        ):
+            invalid()
+        active_root = root_lookup(pytest_root)
+        issued_modes = record.get("issued_modes")
+        if (
+            active_root is None
+            or active_root is not record.get("root_identity")
+            or active_root.path_object is not pytest_root
+            or not root_session_owns(active_root, False)
+            or type_of(issued_modes) is not set
+            or mode in cast(set[object], issued_modes)
+            or length_of(cast(set[object], issued_modes)) >= length_of(report_close_modes)
+        ):
+            invalid()
+        exact = read_exact_published_artifact(record)
+        raw = record.get("raw")
+        binding = record.get("publication_binding")
+        if (
+            type_of(raw) is not bytes
+            or exact != raw
+            or digest_constructor(exact).hexdigest() != record.get("report_digest")
+            or not isinstance_value(binding, Mapping)
+        ):
+            invalid()
+        cast(set[object], issued_modes).add(mode)
+        record["state"] = (
+            "FANOUT_COMPLETE"
+            if length_of(cast(set[object], issued_modes)) == length_of(report_close_modes)
+            else "FANOUTING"
+        )
+
+        session_lock = lock_type()
+        session_state = "UNBOUND"
+        session_packet_digest: str | None = None
+        session_child_pid: int | None = None
+
+        def bind_packet_digest(
+            packet_digest: str,
+        ) -> tuple[
+            Callable[[int], bool],
+            Callable[[str, int, int], bool],
+            Callable[[str, int, int], bool],
+            Callable[[], None],
+        ]:
+            nonlocal session_state
+            nonlocal session_packet_digest
+            if (
+                session_state != "UNBOUND"
+                or type_of(packet_digest) is not str
+                or length_of(packet_digest) != 64
+                or any(character not in "0123456789abcdef" for character in packet_digest)
+                or exact_record(capability) is not record
+                or not record_is_current(record)
+                or mode not in cast(set[object], record.get("issued_modes"))
+            ):
+                invalid()
+            session_packet_digest = packet_digest
+            session_state = "BOUND"
+
+            def arm(child_pid: int) -> bool:
+                nonlocal session_state
+                nonlocal session_child_pid
+                with session_lock:
+                    if (
+                        session_state != "BOUND"
+                        or type_of(child_pid) is not int
+                        or child_pid <= 1
+                        or session_packet_digest != packet_digest
+                        or exact_record(capability) is not record
+                        or not record_is_current(record)
+                        or mode not in cast(set[object], record.get("issued_modes"))
+                        or deadline_ns <= monotonic_ns()
+                    ):
+                        session_state = "CANCELLED"
+                        return False
+                    session_child_pid = child_pid
+                    session_state = "ARMED"
+                    return True
+
+            def attest(
+                observed_packet_digest: str,
+                child_pid: int,
+                handshake_deadline_ns: int,
+            ) -> bool:
+                nonlocal session_state
+                with session_lock:
+                    if (
+                        session_state != "ARMED"
+                        or observed_packet_digest != session_packet_digest
+                        or child_pid != session_child_pid
+                        or exact_record(capability) is not record
+                        or record.get("state") not in {"FANOUTING", "FANOUT_COMPLETE"}
+                        or not record_is_current(record)
+                        or mode not in cast(set[object], record.get("issued_modes"))
+                        or deadline_ns <= monotonic_ns()
+                        or type_of(handshake_deadline_ns) is not int
+                        or not monotonic_ns() < handshake_deadline_ns <= deadline_ns
+                    ):
+                        session_state = "CANCELLED"
+                        return False
+                    try:
+                        exact_at_ack = read_exact_published_artifact(record)
+                    except failure_type:
+                        session_state = "CANCELLED"
+                        return False
+                    if (
+                        exact_at_ack != record.get("raw")
+                        or digest_constructor(exact_at_ack).hexdigest()
+                        != record.get("report_digest")
+                        or handshake_deadline_ns <= monotonic_ns()
+                    ):
+                        session_state = "CANCELLED"
+                        return False
+                    session_state = "ACK_READY"
+                    return True
+
+            def commit(
+                observed_packet_digest: str,
+                child_pid: int,
+                handshake_deadline_ns: int,
+            ) -> bool:
+                nonlocal session_state
+                with session_lock:
+                    if (
+                        session_state != "ACK_READY"
+                        or observed_packet_digest != session_packet_digest
+                        or child_pid != session_child_pid
+                        or exact_record(capability) is not record
+                        or record.get("state") not in {"FANOUTING", "FANOUT_COMPLETE"}
+                        or not record_is_current(record)
+                        or mode not in cast(set[object], record.get("issued_modes"))
+                        or deadline_ns <= monotonic_ns()
+                        or type_of(handshake_deadline_ns) is not int
+                        or not monotonic_ns() < handshake_deadline_ns <= deadline_ns
+                    ):
+                        session_state = "CANCELLED"
+                        return False
+                    try:
+                        exact_at_commit = read_exact_published_artifact(record)
+                    except failure_type:
+                        session_state = "CANCELLED"
+                        return False
+                    if (
+                        exact_at_commit != record.get("raw")
+                        or digest_constructor(exact_at_commit).hexdigest()
+                        != record.get("report_digest")
+                        or handshake_deadline_ns <= monotonic_ns()
+                    ):
+                        session_state = "CANCELLED"
+                        return False
+                    session_state = "ATTESTED"
+                    return True
+
+            def cancel() -> None:
+                nonlocal session_state
+                with session_lock:
+                    if session_state != "ATTESTED":
+                        session_state = "CANCELLED"
+
+            return arm, attest, commit, cancel
+
+        return raw, cast(Mapping[str, object], binding), bind_packet_digest
+
+    return register, claim, resolve
+
+
+(
+    _task064_report_artifact_validator,
+    _task064_report_source_fingerprints,
+) = _build_task064_report_artifact_validation()
+(
+    _register_task064_published_report_artifact,
+    _claim_task064_published_report_artifact,
+    _resolve_task064_published_report_artifact,
+) = _build_task064_published_report_artifact_authority(
+    _task064_report_artifact_validator,
+    _task064_report_source_fingerprints,
+)
+_bind_task064_report_artifact_validation(
+    _task064_report_artifact_validator,
+    _task064_report_source_fingerprints,
+    _resolve_task064_published_report_artifact,
+)
+del _build_task064_report_artifact_validation
+del _build_task064_published_report_artifact_authority
+del _bind_task064_report_artifact_validation
+del _task064_report_artifact_validator
+del _task064_report_source_fingerprints
+del _resolve_task064_published_report_artifact
+
+
 def _validated_report_query_rows(evidence: QueryEvidence) -> int:
     if (
         type(evidence) is not QueryEvidence
@@ -19320,6 +22548,281 @@ def _validate_live_backup_manifest(
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
 
 
+def _publish_evidence_report_bytes_unbound(
+    mark_cleanup_uncertain: Callable[[], None],
+    cleanup_uncertain_observed: Callable[[], bool],
+    root_lookup: Callable[[Path], _ActivePytestRoot | None],
+    pytest_root: Path,
+    raw: bytes,
+    *,
+    validate_before_link: Callable[[], bool],
+    prepare_consumption: Callable[
+        [],
+        tuple[Callable[[], bool], Callable[[], bool], Callable[[], bool]],
+    ],
+) -> Path:
+    """Publish one exact canonical report through the single closed state machine."""
+
+    if cleanup_uncertain_observed():
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+    if type(raw) is not bytes or not raw:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    root = _validate_bootstrap_root(pytest_root)
+    if not validate_before_link():
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    commit_consumption, terminalize_consumption, consumption_terminal = prepare_consumption()
+    report_name = "task064-evidence.json"
+    path = root / report_name
+    stage_name = f".task064-evidence-{secrets.token_hex(16)}.tmp"
+    flags = (
+        os.O_CREAT
+        | os.O_EXCL
+        | os.O_WRONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    root_descriptor = -1
+    stage_descriptor = -1
+    readback_descriptor = -1
+    stage_created = False
+    publication_attempted = False
+    published = False
+    publication_readback_verified = False
+    cleanup_uncertain = False
+    stage_details: os.stat_result | None = None
+    try:
+        directory_flags = (
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+        root_descriptor = os.open(root, directory_flags)
+        active_root = root_lookup(pytest_root)
+        if active_root is None:
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        root_details = os.fstat(root_descriptor)
+        if (
+            root_details.st_dev != active_root.device
+            or root_details.st_ino != active_root.inode
+            or root_details.st_uid != active_root.uid
+            or stat.S_IMODE(root_details.st_mode) != active_root.mode
+            or not stat.S_ISDIR(root_details.st_mode)
+        ):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        stage_descriptor = os.open(stage_name, flags, 0o600, dir_fd=root_descriptor)
+        stage_created = True
+        os.fchmod(stage_descriptor, 0o600)
+        view = memoryview(raw)
+        while view:
+            written = os.write(stage_descriptor, view)
+            if written <= 0:
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            view = view[written:]
+        os.fsync(stage_descriptor)
+        stage_details = os.fstat(stage_descriptor)
+        if (
+            not stat.S_ISREG(stage_details.st_mode)
+            or stage_details.st_dev != root_details.st_dev
+            or stage_details.st_uid != active_root.uid
+            or stat.S_IMODE(stage_details.st_mode) != 0o600
+            or stage_details.st_nlink != 1
+            or stage_details.st_size != len(raw)
+        ):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        descriptor = stage_descriptor
+        stage_descriptor = -1
+        try:
+            os.close(descriptor)
+        except OSError:
+            cleanup_uncertain = True
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+
+        if not validate_before_link():
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        final_root_details = os.fstat(root_descriptor)
+        if (
+            final_root_details.st_dev != root_details.st_dev
+            or final_root_details.st_ino != root_details.st_ino
+            or final_root_details.st_uid != root_details.st_uid
+            or stat.S_IMODE(final_root_details.st_mode) != stat.S_IMODE(root_details.st_mode)
+        ):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        publication_attempted = True
+        os.link(
+            stage_name,
+            report_name,
+            src_dir_fd=root_descriptor,
+            dst_dir_fd=root_descriptor,
+            follow_symlinks=False,
+        )
+        published = True
+        os.unlink(stage_name, dir_fd=root_descriptor)
+        stage_created = False
+        os.fsync(root_descriptor)
+        final_path_details = os.stat(
+            report_name,
+            dir_fd=root_descriptor,
+            follow_symlinks=False,
+        )
+        readback_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        readback_descriptor = os.open(
+            report_name,
+            readback_flags,
+            dir_fd=root_descriptor,
+        )
+        final_details = os.fstat(readback_descriptor)
+        if (
+            stage_details is None
+            or final_details.st_dev != stage_details.st_dev
+            or final_details.st_ino != stage_details.st_ino
+            or final_details.st_uid != stage_details.st_uid
+            or final_details.st_size != len(raw)
+            or final_details.st_nlink != 1
+            or not stat.S_ISREG(final_details.st_mode)
+            or stat.S_IMODE(final_details.st_mode) != 0o600
+            or final_path_details.st_dev != final_details.st_dev
+            or final_path_details.st_ino != final_details.st_ino
+            or final_path_details.st_uid != final_details.st_uid
+            or final_path_details.st_mode != final_details.st_mode
+            or final_path_details.st_nlink != final_details.st_nlink
+            or final_path_details.st_size != final_details.st_size
+        ):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        observed = bytearray()
+        while len(observed) < len(raw):
+            try:
+                chunk = os.read(readback_descriptor, len(raw) - len(observed))
+            except InterruptedError:
+                continue
+            if not chunk:
+                break
+            observed.extend(chunk)
+        while True:
+            try:
+                trailing = os.read(readback_descriptor, 1)
+                break
+            except InterruptedError:
+                continue
+        if bytes(observed) != raw or trailing != b"":
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        publication_readback_verified = True
+        descriptor = readback_descriptor
+        readback_descriptor = -1
+        try:
+            os.close(descriptor)
+        except OSError:
+            cleanup_uncertain = True
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        descriptor = root_descriptor
+        root_descriptor = -1
+        try:
+            os.close(descriptor)
+        except OSError:
+            cleanup_uncertain = True
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        if not commit_consumption() or not consumption_terminal():
+            cleanup_uncertain = True
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        return path
+    except BaseException as error:
+        cleanup_ok = not cleanup_uncertain
+        if readback_descriptor >= 0:
+            descriptor = readback_descriptor
+            readback_descriptor = -1
+            try:
+                os.close(descriptor)
+            except OSError:
+                cleanup_ok = False
+        if stage_descriptor >= 0:
+            descriptor = stage_descriptor
+            stage_descriptor = -1
+            try:
+                os.close(descriptor)
+            except OSError:
+                cleanup_ok = False
+        if root_descriptor >= 0 and publication_attempted and not publication_readback_verified:
+            try:
+                final_details = os.stat(
+                    report_name,
+                    dir_fd=root_descriptor,
+                    follow_symlinks=False,
+                )
+                same_staged_inode = stage_details is not None and (
+                    final_details.st_dev == stage_details.st_dev
+                    and final_details.st_ino == stage_details.st_ino
+                )
+                if same_staged_inode:
+                    os.unlink(report_name, dir_fd=root_descriptor)
+                    published = False
+                elif isinstance(error, FileExistsError) and not published:
+                    pass
+                else:
+                    cleanup_ok = False
+            except FileNotFoundError:
+                published = False
+            except OSError:
+                cleanup_ok = False
+        if root_descriptor >= 0 and stage_created:
+            try:
+                pending_details = os.stat(
+                    stage_name,
+                    dir_fd=root_descriptor,
+                    follow_symlinks=False,
+                )
+                if (
+                    (
+                        stage_details is not None
+                        and (
+                            pending_details.st_dev != stage_details.st_dev
+                            or pending_details.st_ino != stage_details.st_ino
+                        )
+                    )
+                    or not stat.S_ISREG(pending_details.st_mode)
+                    or pending_details.st_uid != os.getuid()
+                    or stat.S_IMODE(pending_details.st_mode) != 0o600
+                    or pending_details.st_nlink != 1
+                ):
+                    cleanup_ok = False
+                else:
+                    os.unlink(stage_name, dir_fd=root_descriptor)
+                    stage_created = False
+            except FileNotFoundError:
+                stage_created = False
+            except OSError:
+                cleanup_ok = False
+        if root_descriptor >= 0 and not publication_readback_verified:
+            try:
+                os.fsync(root_descriptor)
+            except OSError:
+                cleanup_ok = False
+        if root_descriptor >= 0:
+            descriptor = root_descriptor
+            root_descriptor = -1
+            try:
+                os.close(descriptor)
+            except OSError:
+                cleanup_ok = False
+        elif stage_created or (
+            publication_attempted
+            and not publication_readback_verified
+            and not isinstance(error, FileExistsError)
+        ):
+            cleanup_ok = False
+        if not cleanup_ok:
+            mark_cleanup_uncertain()
+        if publication_readback_verified or not cleanup_ok:
+            terminalized = terminalize_consumption()
+            if not terminalized and not consumption_terminal():
+                mark_cleanup_uncertain()
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        if isinstance(error, HarnessFailure):
+            raise
+        if isinstance(error, (MemoryError, OSError)):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        raise
+
+
 def _write_evidence_report_unbound(
     validate_receipt: Callable[
         [Path, _EvidenceReceipt, GeneratedEvidenceAggregate, bool],
@@ -19333,10 +22836,12 @@ def _write_evidence_report_unbound(
             Callable[[], bool],
         ],
     ],
+    publish_bytes: Callable[..., Path],
     mark_cleanup_uncertain: Callable[[], None],
     cleanup_uncertain_observed: Callable[[], bool],
     root_lookup: Callable[[Path], _ActivePytestRoot | None],
     serialize_report: Callable[[Mapping[str, object]], bytes],
+    register_published_artifact: Callable[..., None],
     pytest_root: Path,
     *,
     receipt: _EvidenceReceipt,
@@ -19534,273 +23039,47 @@ def _write_evidence_report_unbound(
     )
     if exact_receipt_ledger is not receipt_ledger:
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
-    (
-        commit_receipt_consumption,
-        terminalize_receipt_consumption,
-        receipt_consumption_terminal,
-    ) = prepare_receipt_consumption(receipt)
-    report_name = "task064-evidence.json"
-    path = root / report_name
-    stage_name = f".task064-evidence-{secrets.token_hex(16)}.tmp"
-    flags = (
-        os.O_CREAT
-        | os.O_EXCL
-        | os.O_WRONLY
-        | getattr(os, "O_NOFOLLOW", 0)
-        | getattr(os, "O_CLOEXEC", 0)
-    )
-    root_descriptor = -1
-    stage_descriptor = -1
-    readback_descriptor = -1
-    stage_created = False
-    publication_attempted = False
-    published = False
-    publication_readback_verified = False
-    cleanup_uncertain = False
-    stage_details: os.stat_result | None = None
-    try:
-        directory_flags = (
-            os.O_RDONLY
-            | getattr(os, "O_DIRECTORY", 0)
-            | getattr(os, "O_NOFOLLOW", 0)
-            | getattr(os, "O_CLOEXEC", 0)
-        )
-        root_descriptor = os.open(root, directory_flags)
-        active_root = root_lookup(pytest_root)
-        if active_root is None:
-            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
-        root_details = os.fstat(root_descriptor)
-        if (
-            root_details.st_dev != active_root.device
-            or root_details.st_ino != active_root.inode
-            or root_details.st_uid != active_root.uid
-            or stat.S_IMODE(root_details.st_mode) != active_root.mode
-            or not stat.S_ISDIR(root_details.st_mode)
-        ):
-            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
-        stage_descriptor = os.open(stage_name, flags, 0o600, dir_fd=root_descriptor)
-        stage_created = True
-        os.fchmod(stage_descriptor, 0o600)
-        view = memoryview(raw)
-        while view:
-            written = os.write(stage_descriptor, view)
-            if written <= 0:
-                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-            view = view[written:]
-        os.fsync(stage_descriptor)
-        stage_details = os.fstat(stage_descriptor)
-        if (
-            not stat.S_ISREG(stage_details.st_mode)
-            or stage_details.st_dev != root_details.st_dev
-            or stage_details.st_uid != active_root.uid
-            or stat.S_IMODE(stage_details.st_mode) != 0o600
-            or stage_details.st_nlink != 1
-            or stage_details.st_size != len(raw)
-        ):
-            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-        descriptor = stage_descriptor
-        stage_descriptor = -1
-        try:
-            os.close(descriptor)
-        except OSError:
-            cleanup_uncertain = True
-            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
 
-        final_ledger = validate_receipt(
+    def validate_before_link() -> bool:
+        return (
+            validate_receipt(
+                pytest_root,
+                receipt,
+                report.evidence,
+                True,
+            )
+            is receipt_ledger
+        )
+
+    def prepare_consumption() -> tuple[
+        Callable[[], bool],
+        Callable[[], bool],
+        Callable[[], bool],
+    ]:
+        return prepare_receipt_consumption(receipt)
+
+    published_path = publish_bytes(
+        mark_cleanup_uncertain,
+        cleanup_uncertain_observed,
+        root_lookup,
+        pytest_root,
+        raw,
+        validate_before_link=validate_before_link,
+        prepare_consumption=prepare_consumption,
+    )
+    try:
+        register_published_artifact(
             pytest_root,
-            receipt,
-            report.evidence,
-            True,
+            receipt=receipt,
+            report=report,
+            ledger=receipt_ledger,
+            path=published_path,
+            raw=raw,
         )
-        if final_ledger is not receipt_ledger:
-            raise HarnessFailure(HarnessFailureCode.CORRUPT)
-        final_root_details = os.fstat(root_descriptor)
-        if (
-            final_root_details.st_dev != root_details.st_dev
-            or final_root_details.st_ino != root_details.st_ino
-            or final_root_details.st_uid != root_details.st_uid
-            or stat.S_IMODE(final_root_details.st_mode) != stat.S_IMODE(root_details.st_mode)
-        ):
-            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
-        publication_attempted = True
-        os.link(
-            stage_name,
-            report_name,
-            src_dir_fd=root_descriptor,
-            dst_dir_fd=root_descriptor,
-            follow_symlinks=False,
-        )
-        published = True
-        os.unlink(stage_name, dir_fd=root_descriptor)
-        stage_created = False
-        os.fsync(root_descriptor)
-        final_path_details = os.stat(
-            report_name,
-            dir_fd=root_descriptor,
-            follow_symlinks=False,
-        )
-        readback_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
-        readback_descriptor = os.open(
-            report_name,
-            readback_flags,
-            dir_fd=root_descriptor,
-        )
-        final_details = os.fstat(readback_descriptor)
-        if (
-            stage_details is None
-            or final_details.st_dev != stage_details.st_dev
-            or final_details.st_ino != stage_details.st_ino
-            or final_details.st_uid != stage_details.st_uid
-            or final_details.st_size != len(raw)
-            or final_details.st_nlink != 1
-            or not stat.S_ISREG(final_details.st_mode)
-            or stat.S_IMODE(final_details.st_mode) != 0o600
-            or final_path_details.st_dev != final_details.st_dev
-            or final_path_details.st_ino != final_details.st_ino
-            or final_path_details.st_uid != final_details.st_uid
-            or final_path_details.st_mode != final_details.st_mode
-            or final_path_details.st_nlink != final_details.st_nlink
-            or final_path_details.st_size != final_details.st_size
-        ):
-            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-        observed = bytearray()
-        while len(observed) < len(raw):
-            try:
-                chunk = os.read(
-                    readback_descriptor,
-                    len(raw) - len(observed),
-                )
-            except InterruptedError:
-                continue
-            if not chunk:
-                break
-            observed.extend(chunk)
-        while True:
-            try:
-                trailing = os.read(readback_descriptor, 1)
-                break
-            except InterruptedError:
-                continue
-        if bytes(observed) != raw or trailing != b"":
-            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-        # Local fsync plus exact immediate readback verifies the temporary report bytes
-        # at publication time only; it is not durability evidence. The draft PR and CI
-        # logs remain the separately governed durable evidence channel.
-        publication_readback_verified = True
-        descriptor = readback_descriptor
-        readback_descriptor = -1
-        try:
-            os.close(descriptor)
-        except OSError:
-            cleanup_uncertain = True
-            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
-        descriptor = root_descriptor
-        root_descriptor = -1
-        try:
-            os.close(descriptor)
-        except OSError:
-            cleanup_uncertain = True
-            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
-        if not commit_receipt_consumption() or not receipt_consumption_terminal():
-            cleanup_uncertain = True
-            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
-        return path
-    except BaseException as error:
-        cleanup_ok = not cleanup_uncertain
-        if readback_descriptor >= 0:
-            descriptor = readback_descriptor
-            readback_descriptor = -1
-            try:
-                os.close(descriptor)
-            except OSError:
-                cleanup_ok = False
-        if stage_descriptor >= 0:
-            descriptor = stage_descriptor
-            stage_descriptor = -1
-            try:
-                os.close(descriptor)
-            except OSError:
-                cleanup_ok = False
-        if root_descriptor >= 0 and publication_attempted and not publication_readback_verified:
-            try:
-                final_details = os.stat(
-                    report_name,
-                    dir_fd=root_descriptor,
-                    follow_symlinks=False,
-                )
-                same_staged_inode = stage_details is not None and (
-                    final_details.st_dev == stage_details.st_dev
-                    and final_details.st_ino == stage_details.st_ino
-                )
-                if same_staged_inode:
-                    os.unlink(report_name, dir_fd=root_descriptor)
-                    published = False
-                elif isinstance(error, FileExistsError) and not published:
-                    pass
-                else:
-                    cleanup_ok = False
-            except FileNotFoundError:
-                published = False
-            except OSError:
-                cleanup_ok = False
-        if root_descriptor >= 0 and stage_created:
-            try:
-                pending_details = os.stat(
-                    stage_name,
-                    dir_fd=root_descriptor,
-                    follow_symlinks=False,
-                )
-                if (
-                    (
-                        stage_details is not None
-                        and (
-                            pending_details.st_dev != stage_details.st_dev
-                            or pending_details.st_ino != stage_details.st_ino
-                        )
-                    )
-                    or not stat.S_ISREG(pending_details.st_mode)
-                    or pending_details.st_uid != os.getuid()
-                    or stat.S_IMODE(pending_details.st_mode) != 0o600
-                    or pending_details.st_nlink != 1
-                ):
-                    cleanup_ok = False
-                else:
-                    os.unlink(stage_name, dir_fd=root_descriptor)
-                    stage_created = False
-            except FileNotFoundError:
-                stage_created = False
-            except OSError:
-                cleanup_ok = False
-        if root_descriptor >= 0 and not publication_readback_verified:
-            try:
-                os.fsync(root_descriptor)
-            except OSError:
-                cleanup_ok = False
-        if root_descriptor >= 0:
-            descriptor = root_descriptor
-            root_descriptor = -1
-            try:
-                os.close(descriptor)
-            except OSError:
-                cleanup_ok = False
-        elif stage_created or (
-            publication_attempted
-            and not publication_readback_verified
-            and not isinstance(error, FileExistsError)
-        ):
-            cleanup_ok = False
-        if not cleanup_ok:
-            mark_cleanup_uncertain()
-        if publication_readback_verified or not cleanup_ok:
-            terminalized = terminalize_receipt_consumption()
-            if not terminalized and not receipt_consumption_terminal():
-                mark_cleanup_uncertain()
-            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
-        if isinstance(error, HarnessFailure):
-            raise
-        if isinstance(error, (MemoryError, OSError)):
-            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+    except BaseException:
+        mark_cleanup_uncertain()
         raise
+    return published_path
 
 
 def _build_evidence_report_writer(
@@ -19816,11 +23095,18 @@ def _build_evidence_report_writer(
             Callable[[], bool],
         ],
     ],
-) -> Callable[..., Path]:
+    validate_report_permit: Callable[[_Task064ReportPublicationPermit, Path, bytes], bool],
+    prepare_report_permit_consumption: Callable[
+        [_Task064ReportPublicationPermit],
+        tuple[Callable[[], bool], Callable[[], bool], Callable[[], bool]],
+    ],
+    register_published_artifact: Callable[..., None],
+) -> tuple[Callable[..., Path], Callable[..., Path]]:
     """Capture receipt validation and consumption behind the public writer."""
 
     validation_implementation = _validate_evidence_receipt_unbound
     writer_implementation = _write_evidence_report_unbound
+    publisher_implementation = _publish_evidence_report_bytes_unbound
     mark_cleanup_uncertain = _mark_process_cleanup_uncertain
     cleanup_uncertain_observed = _has_process_cleanup_uncertainty
     root_lookup = _lookup_active_pytest_root
@@ -19865,28 +23151,66 @@ def _build_evidence_report_writer(
         return writer_implementation(
             validate_receipt,
             prepare_receipt_consumption,
+            publisher_implementation,
             mark_cleanup_uncertain,
             cleanup_uncertain_observed,
             root_lookup,
             serialize_report,
+            register_published_artifact,
             pytest_root,
             receipt=receipt,
             report=report,
         )
 
-    return writer
+    def report_close_probe_writer(
+        pytest_root: Path,
+        *,
+        permit: _Task064ReportPublicationPermit,
+        artifact: bytes,
+    ) -> Path:
+        def validate_before_link() -> bool:
+            return validate_report_permit(permit, pytest_root, artifact)
+
+        def prepare_consumption() -> tuple[
+            Callable[[], bool],
+            Callable[[], bool],
+            Callable[[], bool],
+        ]:
+            return prepare_report_permit_consumption(permit)
+
+        return publisher_implementation(
+            mark_cleanup_uncertain,
+            cleanup_uncertain_observed,
+            root_lookup,
+            pytest_root,
+            artifact,
+            validate_before_link=validate_before_link,
+            prepare_consumption=prepare_consumption,
+        )
+
+    return writer, report_close_probe_writer
 
 
-write_evidence_report = _build_evidence_report_writer(
+(
+    write_evidence_report,
+    _publish_task064_report_close_probe,
+) = _build_evidence_report_writer(
     _validate_issued_evidence_receipt,
     _prepare_issued_evidence_receipt_consumption,
+    _validate_task064_report_publication_permit,
+    _prepare_task064_report_publication_permit_consumption,
+    _register_task064_published_report_artifact,
 )
 for _closed_report_writer_authority_name in (
     "_build_evidence_report_writer",
     "_validate_evidence_receipt_unbound",
     "_write_evidence_report_unbound",
+    "_publish_evidence_report_bytes_unbound",
     "_validate_issued_evidence_receipt",
     "_prepare_issued_evidence_receipt_consumption",
+    "_validate_task064_report_publication_permit",
+    "_prepare_task064_report_publication_permit_consumption",
+    "_register_task064_published_report_artifact",
 ):
     globals().pop(_closed_report_writer_authority_name, None)
 globals().pop("_closed_report_writer_authority_name", None)
