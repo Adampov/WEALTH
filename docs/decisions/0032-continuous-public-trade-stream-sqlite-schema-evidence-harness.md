@@ -576,19 +576,34 @@ duplicate, reordered, extra, negative, or differently reasoned gates are rejecte
 arbitrary PRAGMA names and user/host/device/path identifiers. No committed report claims to bind
 its own future commit; the durable exact-head evidence is the draft pull request and CI logs.
 
-The parent sequentially pre-issues four distinct one-shot provenance packets, inherited
-descriptors, environments, and fresh bytecode-cache prefixes in its original fixture context,
-then launches the four destructive report-close ambiguity modes concurrently as independently
-authenticated pytest children. Their output drains have fixed per-stream and aggregate byte
-ceilings, all siblings share one deadline, any failure terminates and boundedly reaps the entire
-set, and every provenance marker and process is checked before the parent begins its own evidence
-run. Every close child still collects all twelve positive gates, constructs the exact report, and
-seals a valid receipt before entering its one destructive close branch. Each branch retains the
-exact staging/report inventory, descriptor-close count, cleanup-uncertainty or root-revocation
-state, terminal-receipt, and nine protected fork-guard assertions, then returns. Tamper, splice,
-shallow-query, seal-transition, second-digest, and generic negative report regressions remain in
-the normal parent together with the successful publication path; isolated close children do not
-repeat those unrelated negative checks.
+The normal parent completes one generated evidence run, derives all twelve positive gates once,
+seals the exact receipt, publishes and readback-verifies the canonical report, and then claims one
+closure-owned opaque published-artifact capability. That capability remains valid only while its
+consumed receipt and ledger, exact run and aggregate/report identities, pytest-root and report-path
+identities, process/thread/node and context binding, source fingerprints, contract
+generation/digest, schema fingerprint, exact artifact bytes/digest, and expiry remain current.
+Report-shaped bytes, copied or forged capabilities, and child processes cannot mint this authority
+or semantic gate evidence.
+
+From that capability the parent sequentially pre-issues four distinct one-shot, mode-bound
+provenance packets with separate unlinked read-only artifact descriptors and fresh bytecode-cache
+prefixes. It launches each independent pytest child through the authenticated launcher and waits
+for that child's bounded kernel-credential attestation before launching the next. Launcher
+attestations are therefore serialized; simultaneous child overlap is neither claimed nor required.
+After the launch sequence, output drains run concurrently with fixed per-stream and aggregate byte
+ceilings under one shared deadline. Any failure terminates and boundedly reaps the remaining set and
+requires exact marker, descriptor, process, and bytecode-cache cleanup.
+
+Each child revalidates the inherited parent artifact and its complete publication binding before
+claiming one child-local publication permit, then exercises only its assigned destructive
+close-publication state transition: staging-descriptor close ambiguity, readback-descriptor close
+ambiguity, readback-verified root-descriptor close ambiguity, or reentrant root revocation. Each
+branch verifies the exact staging/report inventory, terminal publication-permit state,
+cleanup-uncertainty or root-revocation state, and nine protected fork guards before returning. No
+child begins an evidence run, builds gates, constructs a report, seals a receipt, or claims the
+parent capability. Tamper, splice, shallow-query, seal-transition, second-digest, generic negative
+report regressions, and the successful publication path remain in the normal parent and are not
+repeated by the close children.
 
 ## Security and Authority Boundary
 
@@ -609,6 +624,20 @@ boundary. They do not prove resistance to hostile same-UID TOCTOU, descriptor-ca
 isolation, target path policy, or production runtime ownership. Those are explicit independent
 production blockers and target/deployment `NOT_APPLICABLE` evidence, never generated `PASS`
 evidence.
+
+For report-close children, the abstract `AF_UNIX` `SOCK_SEQPACKET` exchange uses kernel peer and
+message credentials to bind the real parent PID, the exact registered `Popen` child PID, same UID,
+packet digest, target node, mode, and bounded handshake/shared deadlines before artifact access.
+The parent commits the one-shot attestation state before emitting `ATTESTED`; a response-send or
+socket-close ambiguity cannot reopen it and latches authority uncertainty. A missing or malformed
+`ATTESTED` response or required EOF fails the child and batch; when the parent has already
+committed, that one-shot state is never reopened. A destructive publication close or root-revocation
+ambiguity terminalizes the child-local permit, latches cleanup uncertainty, and blocks replay and
+later fork/publication. Unprovable marker, descriptor, process, pipe, or bytecode-cache cleanup
+fails the batch and boundedly terminates and reaps remaining children. These kernel checks
+strengthen only the controlled cooperating-process protocol; they do not resolve same-interpreter
+authority mutation, hostile same-UID pathname races, target/VFS isolation, or production runtime
+ownership.
 
 ## Consequences
 
