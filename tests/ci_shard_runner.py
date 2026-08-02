@@ -1,0 +1,22922 @@
+"""Frozen Generation-6 TASK-064 native pytest shard runner.
+
+This module is test infrastructure only.  It deliberately has no production import surface and
+fails closed whenever an identity, lifecycle, packet, or cleanup fact cannot be proved exactly.
+"""
+
+from __future__ import annotations
+
+import argparse
+import ast
+import atexit
+import base64
+import binascii
+import builtins
+import ctypes
+import errno
+import fcntl
+import gc
+import hashlib
+import importlib.metadata
+import importlib.util
+import json
+import math
+import mmap
+import os
+import re
+import resource
+import secrets
+import selectors
+import shutil
+import signal
+import socket
+import stat
+import struct
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import warnings
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from contextlib import suppress
+from dataclasses import dataclass, replace
+from functools import partial
+from pathlib import Path
+from types import FrameType, ModuleType, SimpleNamespace
+from typing import Any, Final, TypeVar, cast
+
+_OPAQUE_OWNER_QUARANTINE: Final[list[object]] = []
+_CAPTURED_RUNNER_OS_EXIT: Final = os._exit
+
+CONTRACT_GENERATION: Final = 6
+CONTRACT_SHA256: Final = "ec89a1df740805cc9b43e6f2530e940c0bf9b66e8f25ed878d3207d091c4bcb8"
+FULL_MANIFEST_COUNT: Final = 2_298
+FULL_MANIFEST_BYTES: Final = 296_078
+FULL_MANIFEST_SHA256: Final = "96a15ecb6af6469f6da82bace28350163b99d48b8226d867830f7aec5816b483"
+PYTHON_VERSION_FILE_SHA256: Final = (
+    "02e735b3dfe1c32833eb550b7ff8ffa17f5f2bc3fa1e7bae61a8f5a3883ce398"
+)
+UV_LOCK_SHA256: Final = "86f4e40b898d8585b32f50c5db5a87d73766c6b364480e596b07768c7320f733"
+REPORT_NODE: Final = (
+    "tests/integration/test_task_064_continuous_public_trade_stream_sqlite_evidence.py::"
+    "test_finite_typical_workload_measurements_and_sanitized_report"
+)
+REPORT_PROOF_MODES: Final = (
+    "unprimed-success",
+    "expired-entry",
+    "ready-teardown",
+)
+SHARD_IDS: Final = (
+    "report",
+    "remainder-0",
+    "remainder-1",
+    "remainder-2",
+    "remainder-3",
+)
+EXPECTED_EXTERNAL_PLUGINS: Final = [
+    [
+        "hypothesis",
+        "6.157.1",
+        "pytest11",
+        "hypothesispytest",
+        "_hypothesis_pytestplugin",
+    ]
+]
+FORBIDDEN_ENV: Final = (
+    "PYTEST_ADDOPTS",
+    "PYTEST_PLUGINS",
+    "PYTEST_DISABLE_PLUGIN_AUTOLOAD",
+    "PYTHONPATH",
+    "PYTHONHOME",
+)
+GITHUB_COMMAND_NAMES: Final = (
+    "GITHUB_OUTPUT",
+    "GITHUB_ENV",
+    "GITHUB_PATH",
+    "GITHUB_STEP_SUMMARY",
+)
+AGGREGATE_NAMES: Final = (
+    "TASK064_AGG_QUALITY_GATES_RESULT",
+    "TASK064_AGG_REPORT_RESULT",
+    "TASK064_AGG_REMAINDER_0_RESULT",
+    "TASK064_AGG_REMAINDER_1_RESULT",
+    "TASK064_AGG_REMAINDER_2_RESULT",
+    "TASK064_AGG_REMAINDER_3_RESULT",
+    "TASK064_AGG_REPORT_PACKET_B64",
+    "TASK064_AGG_REPORT_PACKET_SHA256",
+    "TASK064_AGG_REMAINDER_0_PACKET_B64",
+    "TASK064_AGG_REMAINDER_0_PACKET_SHA256",
+    "TASK064_AGG_REMAINDER_1_PACKET_B64",
+    "TASK064_AGG_REMAINDER_1_PACKET_SHA256",
+    "TASK064_AGG_REMAINDER_2_PACKET_B64",
+    "TASK064_AGG_REMAINDER_2_PACKET_SHA256",
+    "TASK064_AGG_REMAINDER_3_PACKET_B64",
+    "TASK064_AGG_REMAINDER_3_PACKET_SHA256",
+)
+OBSERVATION_LIMITS: Final = {
+    "collection": 400_000,
+    "execution": 1_500_000,
+    "proof": 4_096,
+}
+SHARD_RESULT_LIMIT: Final = 8_192
+PROOF_RESULT_LIMIT: Final = 4_096
+STREAM_LIMIT: Final = 2 * 1024 * 1024
+COMMAND_FILE_LIMIT: Final = 2 * 1024 * 1024
+IO_CHUNK: Final = 65_536
+COLLECTION_TIMEOUT_NS: Final = 60_000_000_000
+EXECUTION_TIMEOUT_NS: Final = 720_000_000_000
+CLEANUP_TIMEOUT_NS: Final = 60_000_000_000
+MAX_ARG_BYTES_WITH_NUL: Final = 131_072
+MAX_CLEANUP_DEPTH: Final = 64
+MAX_CLEANUP_ENTRIES: Final = 100_000
+MAX_CLEANUP_NAME_BYTES: Final = 16_777_216
+MAX_CLEANUP_OPERATIONS: Final = 500_000
+MAX_COMPONENT_BYTES: Final = 255
+POINTER_RESERVE: Final = 32_768
+MAX_SPAWNS: Final = 64
+HEX_40: Final = re.compile(r"[0-9a-f]{40}\Z")
+HEX_64: Final = re.compile(r"[0-9a-f]{64}\Z")
+BASE64_TEXT: Final = re.compile(r"[A-Za-z0-9+/]*={0,2}\Z")
+SPECIAL_PERMISSION_BITS: Final = stat.S_ISUID | stat.S_ISGID | stat.S_ISVTX
+
+
+@dataclass(frozen=True)
+class ShardExpectation:
+    count: int
+    canonical_bytes: int
+    sha256: str
+    selector_bytes: int
+
+
+SHARD_EXPECTATIONS: Final = {
+    "report": ShardExpectation(
+        1,
+        302,
+        "f0530be0d219c64bbd1b9eb4df635dd138a345e8685172d188d02e177e488a3e",
+        146,
+    ),
+    "remainder-0": ShardExpectation(
+        600,
+        76_664,
+        "9946638e834ffa44c0cd1e511c348b1f8226fc078ef79eb9e4100e770de80044",
+        75_290,
+    ),
+    "remainder-1": ShardExpectation(
+        563,
+        72_767,
+        "e6814eb76767d9462ed9bfa82c85d8e7daebd7265027883290ca88842365dfd0",
+        71_471,
+    ),
+    "remainder-2": ShardExpectation(
+        588,
+        75_756,
+        "8d86911d7a7cfc4f32022d68be1eaa3d6b459d5a968a462deea188df2369ed5b",
+        74_394,
+    ),
+    "remainder-3": ShardExpectation(
+        546,
+        71_332,
+        "69e69516345c674cadf552202b80c392f8297b74b46328278b098b462e25b4ca",
+        70_049,
+    ),
+}
+
+
+class ContractError(RuntimeError):
+    """Represent a sanitized fail-closed runner result."""
+
+
+T = TypeVar("T")
+
+
+def _require(condition: bool, message: str) -> None:
+    if not condition:
+        raise ContractError(message)
+
+
+def _sha256(payload: bytes) -> str:
+    _require(type(payload) is bytes, "hash input is not exact bytes")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _ascii(value: object, label: str) -> str:
+    _require(type(value) is str, f"{label} is not an exact string")
+    text = cast(str, value)
+    _require("\x00" not in text and "\r" not in text and "\n" not in text, f"invalid {label}")
+    try:
+        text.encode("ascii")
+    except UnicodeEncodeError as error:
+        raise ContractError(f"non-ASCII {label}") from error
+    return text
+
+
+def _hex(value: object, length: int, label: str) -> str:
+    text = _ascii(value, label)
+    pattern = HEX_40 if length == 40 else HEX_64
+    _require(pattern.fullmatch(text) is not None, f"invalid {label}")
+    return text
+
+
+def _integer(value: object, label: str, *, minimum: int = 0) -> int:
+    if type(value) is not int:
+        raise ContractError(f"invalid {label}")
+    _require(value >= minimum, f"invalid {label}")
+    return value
+
+
+def _boolean(value: object, label: str) -> bool:
+    _require(type(value) is bool, f"invalid {label}")
+    return cast(bool, value)
+
+
+def _exact_keys(packet: Mapping[str, object], expected: Sequence[str], label: str) -> None:
+    _require(type(packet) is dict, f"{label} is not an exact object")
+    _require(tuple(packet) == tuple(expected), f"{label} keys or order differ")
+
+
+def _validate_json_values(value: object) -> None:
+    if isinstance(value, float):
+        _require(math.isfinite(value), "non-finite JSON value")
+    elif isinstance(value, dict):
+        _require(type(value) is dict, "JSON object subclass is forbidden")
+        for key, child in value.items():
+            _ascii(key, "JSON key")
+            _validate_json_values(child)
+    elif isinstance(value, list):
+        _require(type(value) is list, "JSON list subclass is forbidden")
+        for child in value:
+            _validate_json_values(child)
+    elif isinstance(value, str):
+        _ascii(value, "JSON string")
+    else:
+        _require(value is None or type(value) in {bool, int}, "invalid JSON scalar")
+
+
+def _canonical_bytes(packet: dict[str, object], *, limit: int) -> bytes:
+    _validate_json_values(packet)
+    try:
+        encoded = json.dumps(
+            packet,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("ascii")
+    except (TypeError, ValueError, UnicodeError) as error:
+        raise ContractError("canonical JSON encoding failed") from error
+    _require(len(encoded) <= limit, "canonical JSON exceeds its byte cap")
+    return encoded
+
+
+def _reject_constant(value: str) -> object:
+    raise ContractError(f"forbidden JSON constant {value}")
+
+
+def _pairs_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        _ascii(key, "JSON key")
+        _require(key not in result, "duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def _decode_canonical(payload: bytes, *, limit: int, label: str) -> dict[str, object]:
+    _require(type(payload) is bytes and 0 < len(payload) <= limit, f"invalid {label} length")
+    _require(not payload.startswith(b"\xef\xbb\xbf"), f"{label} has a BOM")
+    _require(b"\r" not in payload and b"\n" not in payload, f"{label} has a line ending")
+    try:
+        text = payload.decode("ascii")
+        decoded = json.loads(
+            text,
+            object_pairs_hook=_pairs_object,
+            parse_constant=_reject_constant,
+        )
+    except (UnicodeError, json.JSONDecodeError, TypeError, ValueError) as error:
+        raise ContractError(f"invalid {label}") from error
+    _require(type(decoded) is dict, f"{label} is not an exact object")
+    packet = cast(dict[str, object], decoded)
+    _require(_canonical_bytes(packet, limit=limit) == payload, f"{label} is not canonical")
+    return packet
+
+
+def _checked_clock(previous: int | None = None) -> int:
+    value = time.monotonic_ns()
+    _require(type(value) is int and value >= 0, "invalid monotonic clock")
+    if previous is not None:
+        _require(value >= previous, "monotonic clock regressed")
+    return value
+
+
+@dataclass(frozen=True)
+class DescriptorSnapshot:
+    device: int
+    inode: int
+    uid: int
+    mode: int
+    link_count: int
+    size: int
+    mtime_ns: int
+    ctime_ns: int
+
+
+def _snapshot_fd(descriptor: int) -> DescriptorSnapshot:
+    _require(type(descriptor) is int and descriptor > 2, "invalid owned descriptor")
+    try:
+        status = os.fstat(descriptor)
+    except OSError as error:
+        raise ContractError("descriptor status unavailable") from error
+    values = (
+        status.st_dev,
+        status.st_ino,
+        status.st_uid,
+        status.st_mode,
+        status.st_nlink,
+        status.st_size,
+        status.st_mtime_ns,
+        status.st_ctime_ns,
+    )
+    _require(
+        all(type(value) is int and value >= 0 for value in values), "invalid descriptor status"
+    )
+    return DescriptorSnapshot(*values)
+
+
+def _snapshot_stat(status: os.stat_result) -> DescriptorSnapshot:
+    values = (
+        status.st_dev,
+        status.st_ino,
+        status.st_uid,
+        status.st_mode,
+        status.st_nlink,
+        status.st_size,
+        status.st_mtime_ns,
+        status.st_ctime_ns,
+    )
+    _require(all(type(value) is int and value >= 0 for value in values), "invalid path status")
+    return DescriptorSnapshot(*values)
+
+
+def _stable_directory_matches(
+    current: DescriptorSnapshot,
+    expected: DescriptorSnapshot,
+    *,
+    require_link_count: bool,
+) -> bool:
+    return (
+        current.device == expected.device
+        and current.inode == expected.inode
+        and current.uid == expected.uid
+        and current.mode == expected.mode
+        and stat.S_ISDIR(current.mode)
+        and (not require_link_count or current.link_count == expected.link_count)
+    )
+
+
+def _read_bounded_file(
+    path: str,
+    *,
+    limit: int,
+    label: str,
+    excluded_descriptors: Iterable[int] = (),
+    poisoned_descriptors: Iterable[int] = (),
+    poison_sink: set[int],
+    before_open: Callable[[], None] | None = None,
+) -> bytes:
+    _require(path.startswith("/"), f"{label} path is not absolute")
+    _require(type(limit) is int and limit > 0, f"invalid {label} byte limit")
+    _require(not poison_sink, f"descriptor close uncertainty forbids {label} acquisition")
+    try:
+        excluded_values = tuple(excluded_descriptors)
+    except BaseException as error:
+        raise ContractError(f"{label} descriptor exclusions are unavailable") from error
+    _require(
+        all(type(value) is int and value > 2 for value in excluded_values),
+        f"invalid {label} descriptor exclusion",
+    )
+    try:
+        poisoned_values = tuple(poisoned_descriptors)
+    except BaseException as error:
+        raise ContractError(f"{label} poisoned descriptors are unavailable") from error
+    _require(
+        all(type(value) is int and value > 2 for value in poisoned_values),
+        f"invalid {label} poisoned descriptor",
+    )
+    protected_numbers = {0, 1, 2, *excluded_values, *poisoned_values}
+    raw_descriptor: object = _PID_SENTINEL
+    owner: FdOwner | None = None
+    primary: BaseException | None = None
+    payload = bytearray()
+    try:
+        if before_open is not None:
+            before_open()
+        raw_descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        if (
+            type(raw_descriptor) is int
+            and raw_descriptor > 2
+            and raw_descriptor not in protected_numbers
+        ):
+            owner = FdOwner(raw_descriptor, label)
+            raw_descriptor = _PID_SENTINEL
+        _require(owner is not None, f"invalid {label} descriptor")
+        live_owner = cast(FdOwner, owner)
+        while True:
+            chunk = os.read(live_owner.require(), min(IO_CHUNK, limit + 1 - len(payload)))
+            _require(type(chunk) is bytes, f"invalid {label} read")
+            if not chunk:
+                break
+            payload.extend(chunk)
+            _require(len(payload) <= limit, f"{label} exceeds its byte cap")
+    except BaseException as error:
+        primary = error
+    if owner is not None and not owner.terminal:
+        closing_number = owner.descriptor
+        try:
+            owner.close_once()
+        except BaseException as close_error:
+            poison_sink.add(closing_number)
+            if primary is not None:
+                primary.add_note(f"{label} close uncertainty: {close_error!r}")
+            else:
+                primary = ContractError(f"uncertain {label} close")
+    if primary is not None:
+        if isinstance(primary, OSError):
+            raise ContractError(f"failed to open or read {label}") from primary
+        raise primary
+    return bytes(payload)
+
+
+def _read_bounded_at(
+    directory_fd: int,
+    name: str,
+    *,
+    limit: int,
+    label: str,
+    excluded_descriptors: Iterable[int] = (),
+    poisoned_descriptors: Iterable[int] = (),
+    poison_sink: set[int],
+) -> bytes:
+    _require(type(directory_fd) is int and directory_fd > 2, f"invalid {label} directory")
+    _require(
+        type(name) is str
+        and name not in {"", ".", ".."}
+        and "/" not in name
+        and "\x00" not in name,
+        f"invalid {label} name",
+    )
+    _require(type(limit) is int and limit > 0, f"invalid {label} byte limit")
+    _require(not poison_sink, f"descriptor close uncertainty forbids {label} acquisition")
+    try:
+        excluded_values = tuple(excluded_descriptors)
+    except BaseException as error:
+        raise ContractError(f"{label} descriptor exclusions are unavailable") from error
+    _require(
+        all(type(value) is int and value > 2 for value in excluded_values),
+        f"invalid {label} descriptor exclusion",
+    )
+    try:
+        poisoned_values = tuple(poisoned_descriptors)
+    except BaseException as error:
+        raise ContractError(f"{label} poisoned descriptors are unavailable") from error
+    _require(
+        all(type(value) is int and value > 2 for value in poisoned_values),
+        f"invalid {label} poisoned descriptor",
+    )
+    protected_numbers = {
+        0,
+        1,
+        2,
+        directory_fd,
+        *excluded_values,
+        *poisoned_values,
+    }
+    raw_descriptor: object = _PID_SENTINEL
+    owner: FdOwner | None = None
+    primary: BaseException | None = None
+    payload = bytearray()
+    try:
+        raw_descriptor = os.open(
+            name,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=directory_fd,
+        )
+        if (
+            type(raw_descriptor) is int
+            and raw_descriptor > 2
+            and raw_descriptor not in protected_numbers
+        ):
+            owner = FdOwner(raw_descriptor, label)
+            raw_descriptor = _PID_SENTINEL
+        _require(owner is not None, f"invalid {label} descriptor")
+        live_owner = cast(FdOwner, owner)
+        while True:
+            chunk = os.read(live_owner.require(), min(IO_CHUNK, limit + 1 - len(payload)))
+            _require(type(chunk) is bytes, f"invalid {label} read")
+            if not chunk:
+                break
+            payload.extend(chunk)
+            _require(len(payload) <= limit, f"{label} exceeds its byte cap")
+    except BaseException as error:
+        primary = error
+    if owner is not None and not owner.terminal:
+        closing_number = owner.descriptor
+        try:
+            owner.close_once()
+        except BaseException as close_error:
+            poison_sink.add(closing_number)
+            if primary is not None:
+                primary.add_note(f"{label} close uncertainty: {close_error!r}")
+            else:
+                primary = ContractError(f"uncertain {label} close")
+    if primary is not None:
+        if isinstance(primary, OSError):
+            raise ContractError(f"failed to open or read {label}") from primary
+        raise primary
+    return bytes(payload)
+
+
+def _canonical_proc_decimal(raw: bytes, *, label: str, allow_zero: bool) -> int:
+    _require(
+        type(raw) is bytes and raw.isdigit() and (raw == b"0" or not raw.startswith(b"0")),
+        f"invalid {label}",
+    )
+    value = int(raw, 10)
+    _require(value >= (0 if allow_zero else 1), f"invalid {label}")
+    return value
+
+
+def _mount_id(
+    descriptor: int,
+    *,
+    excluded_descriptors: Iterable[int] = (),
+    poisoned_descriptors: Iterable[int] = (),
+    poison_sink: set[int],
+    before_open: Callable[[], None] | None = None,
+) -> int:
+    _require(type(descriptor) is int and descriptor > 2, "invalid mount descriptor")
+    payload = _read_bounded_file(
+        f"/proc/self/fdinfo/{descriptor}",
+        limit=4_096,
+        label="descriptor fdinfo",
+        excluded_descriptors=(descriptor, *tuple(excluded_descriptors)),
+        poisoned_descriptors=poisoned_descriptors,
+        poison_sink=poison_sink,
+        before_open=before_open,
+    )
+    _require(payload != b"" and b"\x00" not in payload, "invalid fdinfo payload")
+    values: list[int] = []
+    for line in payload.splitlines():
+        if line.startswith(b"mnt_id:"):
+            raw = line.partition(b":")[2].strip()
+            _require(raw.isdigit() and not raw.startswith(b"0"), "invalid mount identity")
+            values.append(int(raw, 10))
+    _require(len(values) == 1 and values[0] > 0, "mount identity differs")
+    return values[0]
+
+
+def _require_ext4_mount(
+    mount_id: int,
+    *,
+    excluded_descriptors: Iterable[int] = (),
+    poisoned_descriptors: Iterable[int] = (),
+    poison_sink: set[int],
+) -> None:
+    _require(type(mount_id) is int and mount_id > 0, "invalid ext4 mount identity")
+    payload = _read_bounded_file(
+        "/proc/self/mountinfo",
+        limit=1_048_576,
+        label="mountinfo",
+        excluded_descriptors=excluded_descriptors,
+        poisoned_descriptors=poisoned_descriptors,
+        poison_sink=poison_sink,
+    )
+    _require(
+        payload != b""
+        and payload.endswith(b"\n")
+        and b"\x00" not in payload
+        and b"\r" not in payload,
+        "mountinfo payload is invalid",
+    )
+    lines = payload.splitlines()
+    _require(len(lines) <= 100_000, "mountinfo line cap exceeded")
+    matches: list[bytes] = []
+    expected = str(mount_id).encode("ascii")
+    for line in lines:
+        fields = line.split(b" ", 1)
+        if len(fields) == 2 and fields[0] == expected:
+            matches.append(line)
+    _require(len(matches) == 1, "mount identity is absent from mountinfo")
+    _require(matches[0].count(b" - ") == 1, "mountinfo separator cardinality differs")
+    left, separator, right = matches[0].partition(b" - ")
+    left_fields = left.split()
+    right_fields = right.split()
+    _require(
+        separator == b" - "
+        and len(left_fields) >= 6
+        and left == b" ".join(left_fields)
+        and right == b" ".join(right_fields)
+        and left_fields[0] == expected
+        and left_fields[3].startswith(b"/")
+        and left_fields[4].startswith(b"/")
+        and left_fields[5] != b"",
+        "mountinfo selected record differs",
+    )
+    _canonical_proc_decimal(left_fields[0], label="mount id", allow_zero=False)
+    _canonical_proc_decimal(left_fields[1], label="parent mount id", allow_zero=False)
+    device_fields = left_fields[2].split(b":")
+    _require(len(device_fields) == 2, "mountinfo device identity differs")
+    _canonical_proc_decimal(device_fields[0], label="mount major number", allow_zero=True)
+    _canonical_proc_decimal(device_fields[1], label="mount minor number", allow_zero=True)
+    _require(len(right_fields) == 3 and right_fields[0] == b"ext4", "mount is not ext4")
+
+
+@dataclass
+class FdOwner:
+    descriptor: int
+    label: str
+    terminal: bool = False
+
+    def require(self) -> int:
+        _require(not self.terminal and self.descriptor > 2, f"{self.label} is not live")
+        return self.descriptor
+
+    def detach(self) -> int:
+        descriptor = self.require()
+        self.descriptor = -1
+        self.terminal = True
+        return descriptor
+
+    def close_once(self) -> None:
+        descriptor = self.detach()
+        try:
+            os.close(descriptor)
+        except BaseException as error:
+            raise ContractError(f"uncertain {self.label} close") from error
+
+
+@dataclass
+class DirectoryOwner:
+    fd: FdOwner
+    snapshot: DescriptorSnapshot
+    mount_id: int
+    name: str
+    path: Path
+
+
+@dataclass
+class ObservationOwner:
+    fd: FdOwner
+    initial: DescriptorSnapshot
+    limit: int
+    label: str
+
+
+def _open_directory(path: Path, *, label: str, poison_sink: set[int]) -> DirectoryOwner:
+    _require(path.is_absolute(), f"{label} path is not absolute")
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError as error:
+        raise ContractError(f"{label} path is unavailable") from error
+    _require(resolved == path, f"{label} path is not canonical")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise ContractError(f"failed to open {label}") from error
+    owner = FdOwner(descriptor, label)
+    try:
+        snapshot = _snapshot_fd(descriptor)
+        _require(stat.S_ISDIR(snapshot.mode), f"{label} is not a directory")
+        mount_identity = _mount_id(descriptor, poison_sink=poison_sink)
+    except BaseException:
+        owner.close_once()
+        raise
+    return DirectoryOwner(owner, snapshot, mount_identity, path.name, path)
+
+
+def _component(name: object, *, label: str) -> tuple[str, int]:
+    text = _ascii(name, label)
+    _require(text not in {"", ".", ".."}, f"invalid {label}")
+    _require("/" not in text and os.sep not in text, f"invalid {label}")
+    encoded = os.fsencode(text)
+    _require(b"\x00" not in encoded and 0 < len(encoded) <= MAX_COMPONENT_BYTES, f"invalid {label}")
+    return text, len(encoded)
+
+
+def _filesystem_component(name: object, *, label: str) -> tuple[str, int]:
+    if type(name) is not str:
+        raise ContractError(f"{label} is not an exact string")
+    text = name
+    _require(text not in {"", ".", ".."}, f"invalid {label}")
+    _require("\x00" not in text and "/" not in text, f"invalid {label}")
+    try:
+        encoded = os.fsencode(text)
+    except UnicodeError as error:
+        raise ContractError(f"invalid {label} encoding") from error
+    _require(0 < len(encoded) <= MAX_COMPONENT_BYTES, f"invalid {label}")
+    return text, len(encoded)
+
+
+@dataclass
+class CleanupBudget:
+    started_ns: int
+    deadline_ns: int
+    previous_ns: int
+    entries: int = 0
+    name_bytes: int = 0
+    operations: int = 0
+    terminal: bool = False
+
+    @classmethod
+    def create(cls) -> CleanupBudget:
+        started = _checked_clock()
+        return cls(started, started + CLEANUP_TIMEOUT_NS, started)
+
+    def charge(self, *, depth: int, entry_bytes: int = 0, yielded: bool = False) -> None:
+        _require(not self.terminal, "cleanup budget is terminal")
+        try:
+            _require(
+                type(depth) is int and 0 <= depth <= MAX_CLEANUP_DEPTH,
+                "cleanup depth exceeded",
+            )
+            now = _checked_clock(self.previous_ns)
+            next_operations = self.operations + 1
+            next_entries = self.entries + int(yielded)
+            next_bytes = self.name_bytes + entry_bytes
+            _require(next_operations <= MAX_CLEANUP_OPERATIONS, "cleanup operation cap exceeded")
+            _require(next_entries <= MAX_CLEANUP_ENTRIES, "cleanup entry cap exceeded")
+            _require(next_bytes <= MAX_CLEANUP_NAME_BYTES, "cleanup name-byte cap exceeded")
+            _require(now < self.deadline_ns, "cleanup deadline exceeded")
+            self.previous_ns = now
+            self.operations = next_operations
+            self.entries = next_entries
+            self.name_bytes = next_bytes
+        except BaseException:
+            self.terminal = True
+            raise
+
+    def exhausted(self) -> bool:
+        return self.terminal
+
+    def account_name_bytes(self, *, depth: int, entry_bytes: int) -> None:
+        _require(not self.terminal, "cleanup budget is terminal")
+        try:
+            _require(
+                type(depth) is int
+                and 0 <= depth <= MAX_CLEANUP_DEPTH
+                and type(entry_bytes) is int
+                and entry_bytes >= 0,
+                "cleanup name-byte accounting differs",
+            )
+            now = _checked_clock(self.previous_ns)
+            next_bytes = self.name_bytes + entry_bytes
+            _require(next_bytes <= MAX_CLEANUP_NAME_BYTES, "cleanup name-byte cap exceeded")
+            _require(now < self.deadline_ns, "cleanup deadline exceeded")
+            self.previous_ns = now
+            self.name_bytes = next_bytes
+        except BaseException:
+            self.terminal = True
+            raise
+
+    def terminate(self) -> None:
+        self.terminal = True
+
+
+@dataclass
+class CleanupResult:
+    status: str
+    residue_count: int
+    failures: tuple[str, ...]
+
+
+class PrivateRoot:
+    """Own one authenticated private root and remove only fd-relative proven entries."""
+
+    def __init__(self) -> None:
+        poisoned_descriptors: set[int] = set()
+        raw_parent = os.environ.get("RUNNER_TEMP") if _on_github() else tempfile.gettempdir()
+        _require(type(raw_parent) is str and raw_parent != "", "temporary parent is unavailable")
+        parent_path = Path(cast(str, raw_parent))
+        if not parent_path.is_absolute():
+            parent_path = parent_path.resolve(strict=True)
+        parent = _open_directory(
+            parent_path,
+            label="temporary parent",
+            poison_sink=poisoned_descriptors,
+        )
+        root_name = f"task064-g6-{secrets.token_hex(16)}"
+        root_fd: FdOwner | None = None
+        root: DirectoryOwner | None = None
+        created = False
+        try:
+            _require_ext4_mount(
+                parent.mount_id,
+                poisoned_descriptors=poisoned_descriptors,
+                poison_sink=poisoned_descriptors,
+            )
+            _component(root_name, label="private-root name")
+            parent_fd = parent.fd.require()
+            os.mkdir(root_name, mode=0o700, dir_fd=parent_fd)
+            created = True
+            root_descriptor = os.open(
+                root_name,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                dir_fd=parent_fd,
+            )
+            root_fd = FdOwner(root_descriptor, "private root")
+            snapshot = _snapshot_fd(root_descriptor)
+            named = _snapshot_stat(os.stat(root_name, dir_fd=parent_fd, follow_symlinks=False))
+            _require(snapshot == named, "private-root descriptor/name identity differs")
+            _require(
+                stat.S_ISDIR(snapshot.mode)
+                and snapshot.uid == os.getuid()
+                and stat.S_IMODE(snapshot.mode) == 0o700,
+                "private root is not exact mode-0700 same-UID directory",
+            )
+            mount_identity = _mount_id(
+                root_descriptor,
+                poisoned_descriptors=poisoned_descriptors,
+                poison_sink=poisoned_descriptors,
+            )
+            _require(mount_identity == parent.mount_id, "private-root mount identity differs")
+            root = DirectoryOwner(
+                root_fd,
+                snapshot,
+                mount_identity,
+                root_name,
+                parent.path / root_name,
+            )
+        except BaseException as primary:
+            if root_fd is not None and not root_fd.terminal:
+                try:
+                    root_fd.close_once()
+                except BaseException as close_error:
+                    primary.add_note(
+                        f"private-root constructor fd close uncertainty: {close_error!r}"
+                    )
+            if created:
+                primary.add_note(
+                    "private-root constructor preserved unverified created-name residue"
+                )
+            if not parent.fd.terminal:
+                try:
+                    parent.fd.close_once()
+                except BaseException as close_error:
+                    primary.add_note(f"temporary-parent close uncertainty: {close_error!r}")
+            raise
+        if root is None:
+            raise ContractError("private-root constructor did not establish ownership")
+        self.parent = parent
+        self.root_name = root_name
+        self.root = root
+        self._children: list[DirectoryOwner] = []
+        self._known_directories: dict[tuple[str, ...], DescriptorSnapshot] = {}
+        self._protected_paths: set[tuple[str, ...]] = set()
+        self._poisoned_descriptors = poisoned_descriptors
+        self._opaque_close_uncertain = False
+        self._opaque_owner_quarantine = _OPAQUE_OWNER_QUARANTINE
+        self._process_tree_uncertain = False
+        self._cleaned = False
+
+    def create_child(self, label: str) -> DirectoryOwner:
+        _require(not self._cleaned, "private root is terminal")
+        safe_label = _ascii(label, "child-root label").replace("_", "-")
+        name = f"{safe_label}-{secrets.token_hex(8)}"
+        _component(name, label="child-root name")
+        root_fd = self.root.fd.require()
+        relative = (name,)
+        try:
+            os.mkdir(name, mode=0o700, dir_fd=root_fd)
+            self._protected_paths.add(relative)
+            descriptor = os.open(
+                name,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                dir_fd=root_fd,
+            )
+        except OSError as error:
+            raise ContractError("failed to create child root") from error
+        owner = FdOwner(descriptor, f"child root {safe_label}")
+        try:
+            snapshot = _snapshot_fd(descriptor)
+            named = _snapshot_stat(os.stat(name, dir_fd=root_fd, follow_symlinks=False))
+            _require(snapshot == named, "child-root descriptor/name identity differs")
+            _require(
+                stat.S_ISDIR(snapshot.mode)
+                and snapshot.uid == os.getuid()
+                and stat.S_IMODE(snapshot.mode) == 0o700,
+                "child root is not exact mode-0700 same-UID directory",
+            )
+            mount_identity = _mount_id(
+                descriptor,
+                poisoned_descriptors=self._poisoned_descriptors,
+                poison_sink=self._poisoned_descriptors,
+            )
+            _require(mount_identity == self.root.mount_id, "child-root mount identity differs")
+        except BaseException as primary:
+            closing_number = owner.descriptor
+            try:
+                owner.close_once()
+            except BaseException as close_error:
+                if type(closing_number) is int and closing_number > 2:
+                    self._poisoned_descriptors.add(closing_number)
+                primary.add_note(f"child-root close uncertainty: {close_error!r}")
+            raise
+        child = DirectoryOwner(owner, snapshot, mount_identity, name, self.root.path / name)
+        self._known_directories[relative] = snapshot
+        self._protected_paths.discard(relative)
+        self._children.append(child)
+        return child
+
+    def create_child_directory(self, child: DirectoryOwner, name: str) -> Path:
+        component, _ = _component(name, label="child directory")
+        child_fd = child.fd.require()
+        relative = (child.name, component)
+        try:
+            os.mkdir(component, mode=0o700, dir_fd=child_fd)
+            self._protected_paths.add(relative)
+            descriptor = os.open(
+                component,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                dir_fd=child_fd,
+            )
+        except OSError as error:
+            raise ContractError("failed to create child directory") from error
+        owner = FdOwner(descriptor, f"child directory {component}")
+        try:
+            snapshot = _snapshot_fd(descriptor)
+            named = _snapshot_stat(os.stat(component, dir_fd=child_fd, follow_symlinks=False))
+            _require(snapshot == named, "child directory identity differs")
+            _require(
+                stat.S_ISDIR(snapshot.mode)
+                and snapshot.uid == os.getuid()
+                and stat.S_IMODE(snapshot.mode) == 0o700
+                and _mount_id(
+                    descriptor,
+                    poisoned_descriptors=self._poisoned_descriptors,
+                    poison_sink=self._poisoned_descriptors,
+                )
+                == self.root.mount_id,
+                "child directory attributes differ",
+            )
+            self._known_directories[relative] = snapshot
+        finally:
+            closing_number = owner.descriptor
+            try:
+                owner.close_once()
+            except BaseException:
+                if type(closing_number) is int and closing_number > 2:
+                    self._poisoned_descriptors.add(closing_number)
+                raise
+        self._protected_paths.discard(relative)
+        return child.path / component
+
+    def create_observation(
+        self, child: DirectoryOwner, *, label: str, limit: int
+    ) -> ObservationOwner:
+        _require(hasattr(os, "O_TMPFILE"), "O_TMPFILE is unavailable")
+        flags = os.O_RDWR | os.O_TMPFILE | os.O_CLOEXEC
+        try:
+            descriptor = os.open(".", flags, 0o600, dir_fd=child.fd.require())
+        except OSError as error:
+            raise ContractError("anonymous observation creation failed") from error
+        owner = FdOwner(descriptor, label)
+        try:
+            snapshot = _snapshot_fd(descriptor)
+            _require(
+                stat.S_ISREG(snapshot.mode)
+                and snapshot.uid == os.getuid()
+                and stat.S_IMODE(snapshot.mode) == 0o600
+                and snapshot.link_count == 0
+                and snapshot.size == 0,
+                "anonymous observation attributes differ",
+            )
+            _require(
+                _mount_id(
+                    descriptor,
+                    poisoned_descriptors=self._poisoned_descriptors,
+                    poison_sink=self._poisoned_descriptors,
+                )
+                == child.mount_id,
+                "observation mount differs",
+            )
+        except BaseException as primary:
+            closing_number = owner.descriptor
+            try:
+                owner.close_once()
+            except BaseException as close_error:
+                if type(closing_number) is int and closing_number > 2:
+                    self._poisoned_descriptors.add(closing_number)
+                primary.add_note(f"observation close uncertainty: {close_error!r}")
+            raise
+        return ObservationOwner(owner, snapshot, limit, label)
+
+    def _walk(
+        self,
+        directory_fd: int,
+        *,
+        relative_parent: tuple[str, ...],
+        depth: int,
+        budget: CleanupBudget,
+        failures: list[str],
+        seen_known: set[tuple[str, ...]],
+    ) -> int:
+        residue = 0
+        if (
+            self._opaque_close_uncertain
+            or self._poisoned_descriptors
+            or self._process_tree_uncertain
+        ):
+            budget.terminate()
+            failures.append("descriptor close uncertainty terminated directory scan")
+            return 1
+        try:
+            budget.charge(depth=depth)
+            entries = os.scandir(directory_fd)
+        except BaseException:
+            failures.append("directory scan")
+            return 1
+        try:
+            for entry in entries:
+                if budget.exhausted():
+                    residue += 1
+                    failures.append("terminal cleanup budget")
+                    break
+                path_owner: FdOwner | None = None
+                directory_owner: FdOwner | None = None
+                try:
+                    budget.charge(depth=depth, yielded=True)
+                    raw_name = entry.name
+                    if type(raw_name) is not str:
+                        budget.terminate()
+                        raise ContractError("cleanup entry name is not an exact string")
+                    try:
+                        raw_name_bytes = os.fsencode(raw_name)
+                    except UnicodeError:
+                        budget.terminate()
+                        raise
+                    budget.account_name_bytes(
+                        depth=depth,
+                        entry_bytes=len(raw_name_bytes),
+                    )
+                    try:
+                        name, _ = _filesystem_component(raw_name, label="cleanup entry")
+                    except BaseException:
+                        budget.terminate()
+                        raise
+                    relative = (*relative_parent, name)
+                    _require(relative not in self._protected_paths, "protected cleanup path")
+                    if not relative_parent:
+                        _require(
+                            relative in self._known_directories,
+                            "unexpected private-root entry",
+                        )
+                    budget.charge(depth=depth)
+                    named_status = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                    named = _snapshot_stat(named_status)
+                    budget.charge(depth=depth)
+                    path_descriptor = os.open(
+                        name,
+                        os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC,
+                        dir_fd=directory_fd,
+                    )
+                    path_owner = FdOwner(path_descriptor, "cleanup O_PATH handle")
+                    opened = _snapshot_fd(path_descriptor)
+                    _require(opened == named, "cleanup entry identity differs")
+                    _require(
+                        _mount_id(
+                            path_descriptor,
+                            poisoned_descriptors=self._poisoned_descriptors,
+                            poison_sink=self._poisoned_descriptors,
+                            before_open=lambda: budget.charge(depth=depth),
+                        )
+                        == self.root.mount_id,
+                        "cleanup mount differs",
+                    )
+                    _require(opened.uid == os.getuid(), "cleanup entry owner differs")
+                    permissions = stat.S_IMODE(opened.mode)
+                    _require(0 <= permissions <= 0o777, "cleanup permissions differ")
+                    _require(
+                        opened.mode & SPECIAL_PERMISSION_BITS == 0,
+                        "special cleanup mode is forbidden",
+                    )
+                    expected_directory = self._known_directories.get(relative)
+                    known_alias = next(
+                        (
+                            known_path
+                            for known_path, expected in self._known_directories.items()
+                            if expected.device == opened.device and expected.inode == opened.inode
+                        ),
+                        None,
+                    )
+                    _require(
+                        known_alias is None or known_alias == relative,
+                        "known directory appeared at a different path",
+                    )
+                    if expected_directory is not None:
+                        _require(
+                            _stable_directory_matches(
+                                opened,
+                                expected_directory,
+                                require_link_count=False,
+                            ),
+                            "known directory stable identity differs",
+                        )
+                        seen_known.add(relative)
+                    if stat.S_ISREG(opened.mode):
+                        _require(
+                            expected_directory is None,
+                            "known directory was replaced by a regular file",
+                        )
+                        _require(opened.link_count == 1, "hard-linked cleanup file is forbidden")
+                        budget.charge(depth=depth)
+                        os.unlink(name, dir_fd=directory_fd)
+                    elif stat.S_ISDIR(opened.mode):
+                        _require(depth < MAX_CLEANUP_DEPTH, "cleanup depth exceeded")
+                        budget.charge(depth=depth + 1)
+                        child_fd = os.open(
+                            name,
+                            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                            dir_fd=directory_fd,
+                        )
+                        directory_owner = FdOwner(child_fd, "cleanup directory handle")
+                        child_snapshot = _snapshot_fd(child_fd)
+                        _require(
+                            child_snapshot == opened, "cleanup directory open identity differs"
+                        )
+                        _require(
+                            _mount_id(
+                                child_fd,
+                                poisoned_descriptors=self._poisoned_descriptors,
+                                poison_sink=self._poisoned_descriptors,
+                                before_open=lambda: budget.charge(depth=depth + 1),
+                            )
+                            == self.root.mount_id,
+                            "cleanup directory mount differs",
+                        )
+                        child_residue = self._walk(
+                            child_fd,
+                            relative_parent=relative,
+                            depth=depth + 1,
+                            budget=budget,
+                            failures=failures,
+                            seen_known=seen_known,
+                        )
+                        residue += child_residue
+                        if self._opaque_close_uncertain or self._poisoned_descriptors:
+                            budget.terminate()
+                            raise ContractError("nested cleanup descriptor close is uncertain")
+                        final_child = _snapshot_fd(child_fd)
+                        budget.charge(depth=depth)
+                        final_named = _snapshot_stat(
+                            os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                        )
+                        _require(
+                            final_child == final_named,
+                            "cleanup directory final identity differs",
+                        )
+                        if expected_directory is not None:
+                            _require(
+                                _stable_directory_matches(
+                                    final_child,
+                                    expected_directory,
+                                    require_link_count=True,
+                                ),
+                                "known directory final stable identity differs",
+                            )
+                        closing_number = directory_owner.descriptor
+                        try:
+                            directory_owner.close_once()
+                        except BaseException:
+                            if type(closing_number) is int and closing_number > 2:
+                                self._poisoned_descriptors.add(closing_number)
+                            budget.terminate()
+                            raise
+                        directory_owner = None
+                        if child_residue == 0 and not budget.exhausted():
+                            budget.charge(depth=depth)
+                            os.rmdir(name, dir_fd=directory_fd)
+                    else:
+                        raise ContractError("cleanup entry type is not removable")
+                except BaseException:
+                    residue += 1
+                    failures.append("entry preservation")
+                finally:
+                    for owner in (directory_owner, path_owner):
+                        if owner is not None and not owner.terminal:
+                            closing_number = owner.descriptor
+                            try:
+                                owner.close_once()
+                            except BaseException:
+                                if type(closing_number) is int and closing_number > 2:
+                                    self._poisoned_descriptors.add(closing_number)
+                                budget.terminate()
+                                residue += 1
+                                failures.append("cleanup handle close")
+                if self._opaque_close_uncertain or self._poisoned_descriptors:
+                    budget.terminate()
+                if budget.exhausted():
+                    break
+        finally:
+            try:
+                entries.close()
+            except BaseException:
+                self._opaque_close_uncertain = True
+                self._opaque_owner_quarantine.append(entries)
+                budget.terminate()
+                residue += 1
+                failures.append("directory iterator close")
+        return residue
+
+    def cleanup(self) -> CleanupResult:
+        _require(not self._cleaned, "private root cleanup repeated")
+        self._cleaned = True
+        failures: list[str] = []
+        residue = 0
+        if (
+            self._opaque_close_uncertain
+            or self._poisoned_descriptors
+            or self._process_tree_uncertain
+        ):
+            for directory in (*self._children, self.root, self.parent):
+                if directory.fd.terminal:
+                    continue
+                closing_number = directory.fd.descriptor
+                try:
+                    directory.fd.close_once()
+                except BaseException:
+                    if type(closing_number) is int and closing_number > 2:
+                        self._poisoned_descriptors.add(closing_number)
+                    failures.append(f"{directory.fd.label} close uncertainty")
+            return CleanupResult(
+                "FAIL",
+                1,
+                ("cleanup uncertainty preserved private root", *failures),
+            )
+        path_owner: FdOwner | None = None
+        parent_path_owner: FdOwner | None = None
+        try:
+            budget = CleanupBudget.create()
+            for child in self._children:
+                if not child.fd.terminal:
+                    closing_number = child.fd.descriptor
+                    try:
+                        child.fd.close_once()
+                    except BaseException:
+                        if type(closing_number) is int and closing_number > 2:
+                            self._poisoned_descriptors.add(closing_number)
+                        budget.terminate()
+                        residue += 1
+                        failures.append("retained child close")
+                        self._protected_paths.add((child.name,))
+            if self._opaque_close_uncertain or self._poisoned_descriptors:
+                budget.terminate()
+                raise ContractError("retained child close is uncertain")
+            budget.charge(depth=0)
+            parent_path_descriptor = os.open(
+                self.parent.path,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+            )
+            parent_path_owner = FdOwner(parent_path_descriptor, "temporary-parent path handle")
+            current_parent = _snapshot_fd(parent_path_descriptor)
+            _require(
+                _stable_directory_matches(
+                    current_parent,
+                    self.parent.snapshot,
+                    require_link_count=False,
+                ),
+                "temporary-parent path identity changed",
+            )
+            _require(
+                _mount_id(
+                    parent_path_descriptor,
+                    poisoned_descriptors=self._poisoned_descriptors,
+                    poison_sink=self._poisoned_descriptors,
+                    before_open=lambda: budget.charge(depth=0),
+                )
+                == self.parent.mount_id,
+                "temporary-parent path mount changed",
+            )
+            parent_fd = self.parent.fd.require()
+            budget.charge(depth=0)
+            initial_named_root = _snapshot_stat(
+                os.stat(self.root_name, dir_fd=parent_fd, follow_symlinks=False)
+            )
+            budget.charge(depth=0)
+            root_path_descriptor = os.open(
+                self.root_name,
+                os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC,
+                dir_fd=parent_fd,
+            )
+            path_owner = FdOwner(root_path_descriptor, "private-root O_PATH handle")
+            initial_opened_root = _snapshot_fd(root_path_descriptor)
+            _require(
+                initial_named_root == initial_opened_root,
+                "private-root initial descriptor/name identity differs",
+            )
+            _require(
+                _stable_directory_matches(
+                    initial_opened_root,
+                    self.root.snapshot,
+                    require_link_count=False,
+                ),
+                "private-root initial stable identity changed",
+            )
+            _require(
+                _mount_id(
+                    root_path_descriptor,
+                    poisoned_descriptors=self._poisoned_descriptors,
+                    poison_sink=self._poisoned_descriptors,
+                    before_open=lambda: budget.charge(depth=0),
+                )
+                == self.root.mount_id,
+                "private-root initial mount changed",
+            )
+            seen_known: set[tuple[str, ...]] = set()
+            if not self.root.fd.terminal:
+                residue += self._walk(
+                    self.root.fd.require(),
+                    relative_parent=(),
+                    depth=0,
+                    budget=budget,
+                    failures=failures,
+                    seen_known=seen_known,
+                )
+            if self._opaque_close_uncertain or self._poisoned_descriptors:
+                budget.terminate()
+                raise ContractError("private-root cleanup descriptor close is uncertain")
+            if seen_known != set(self._known_directories):
+                residue += 1
+                failures.append("known directory inventory differs")
+            if self._protected_paths:
+                residue += 1
+                failures.append("unverified created paths were preserved")
+            if budget.exhausted():
+                residue += 1
+                failures.append("terminal cleanup budget preserved private root")
+            else:
+                budget.charge(depth=0)
+                named = _snapshot_stat(
+                    os.stat(self.root_name, dir_fd=parent_fd, follow_symlinks=False)
+                )
+                opened = _snapshot_fd(path_owner.require())
+                _require(named == opened, "private-root descriptor/name identity changed")
+                _require(
+                    _stable_directory_matches(
+                        opened,
+                        self.root.snapshot,
+                        require_link_count=True,
+                    ),
+                    "private-root stable identity changed",
+                )
+                _require(
+                    _mount_id(
+                        path_owner.require(),
+                        poisoned_descriptors=self._poisoned_descriptors,
+                        poison_sink=self._poisoned_descriptors,
+                        before_open=lambda: budget.charge(depth=0),
+                    )
+                    == self.root.mount_id,
+                    "private-root mount changed",
+                )
+                if residue == 0:
+                    budget.charge(depth=0)
+                    inventory = os.scandir(self.root.fd.require())
+                    inventory_error: BaseException | None = None
+                    try:
+                        final_entry = next(inventory, None)
+                        if final_entry is not None:
+                            budget.charge(depth=0, yielded=True)
+                            raw_final_name = final_entry.name
+                            if type(raw_final_name) is not str:
+                                budget.terminate()
+                                raise ContractError("final inventory name is not an exact string")
+                            try:
+                                encoded_final_name = os.fsencode(raw_final_name)
+                            except UnicodeError:
+                                budget.terminate()
+                                raise
+                            budget.account_name_bytes(
+                                depth=0,
+                                entry_bytes=len(encoded_final_name),
+                            )
+                            try:
+                                _filesystem_component(
+                                    raw_final_name,
+                                    label="final inventory entry",
+                                )
+                            except BaseException:
+                                budget.terminate()
+                                raise
+                            raise ContractError("private-root inventory is not empty")
+                    except BaseException as error:
+                        inventory_error = error
+                    try:
+                        inventory.close()
+                    except BaseException as close_error:
+                        self._opaque_close_uncertain = True
+                        self._opaque_owner_quarantine.append(inventory)
+                        budget.terminate()
+                        if inventory_error is not None:
+                            inventory_error.add_note(
+                                f"final inventory close uncertainty: {close_error!r}"
+                            )
+                        else:
+                            inventory_error = ContractError("final inventory close uncertainty")
+                    if inventory_error is not None:
+                        raise inventory_error
+                    closing_root = self.root.fd.descriptor
+                    try:
+                        self.root.fd.close_once()
+                    except BaseException:
+                        if type(closing_root) is int and closing_root > 2:
+                            self._poisoned_descriptors.add(closing_root)
+                        budget.terminate()
+                        raise
+                    budget.charge(depth=0)
+                    os.rmdir(self.root_name, dir_fd=parent_fd)
+        except BaseException:
+            residue += 1
+            failures.append("private-root preservation")
+        finally:
+            for owner in (path_owner, parent_path_owner, self.root.fd, self.parent.fd):
+                if owner is not None and not owner.terminal:
+                    closing_number = owner.descriptor
+                    try:
+                        owner.close_once()
+                    except BaseException:
+                        if type(closing_number) is int and closing_number > 2:
+                            self._poisoned_descriptors.add(closing_number)
+                        residue += 1
+                        failures.append("retained directory close")
+        status = "PASS" if residue == 0 and not failures else "FAIL"
+        return CleanupResult(status, residue, tuple(failures))
+
+
+def _on_github() -> bool:
+    value = os.environ.get("GITHUB_ACTIONS")
+    if value is None:
+        return False
+    _require(value == "true", "invalid GITHUB_ACTIONS value")
+    return True
+
+
+def _pread_payload(descriptor: int, size: int, *, limit: int) -> bytes:
+    _require(type(size) is int and 0 <= size <= limit, "descriptor byte bound exceeded")
+    chunks: list[bytes] = []
+    offset = 0
+    while offset < size:
+        requested = min(IO_CHUNK, size - offset)
+        try:
+            chunk = os.pread(descriptor, requested, offset)
+        except OSError as error:
+            raise ContractError("positional read failed") from error
+        _require(type(chunk) is bytes and 0 < len(chunk) <= requested, "invalid pread progress")
+        chunks.append(chunk)
+        offset += len(chunk)
+    try:
+        trailing = os.pread(descriptor, 1, size)
+    except OSError as error:
+        raise ContractError("trailing EOF read failed") from error
+    _require(trailing == b"", "descriptor has bytes beyond the expected size")
+    payload = b"".join(chunks)
+    _require(len(payload) == size, "descriptor read length differs")
+    return payload
+
+
+def _pwrite_payload(descriptor: int, payload: bytes, *, limit: int) -> None:
+    _require(type(payload) is bytes and len(payload) <= limit, "invalid positional-write payload")
+    offset = 0
+    while offset < len(payload):
+        remaining = len(payload) - offset
+        chunk = payload[offset : offset + min(IO_CHUNK, remaining)]
+        try:
+            written = os.pwrite(descriptor, chunk, offset)
+        except OSError as error:
+            raise ContractError("positional write failed") from error
+        _require(
+            type(written) is int and 0 < written <= len(chunk),
+            "invalid pwrite progress",
+        )
+        offset += written
+    _require(offset == len(payload), "positional write length differs")
+
+
+def _read_observation(
+    owner: ObservationOwner, *, poison_sink: set[int]
+) -> tuple[dict[str, object], bytes]:
+    descriptor = owner.fd.require()
+    primary: BaseException | None = None
+    packet: dict[str, object] | None = None
+    payload = b""
+    try:
+        before = _snapshot_fd(descriptor)
+        _require(
+            before.device == owner.initial.device
+            and before.inode == owner.initial.inode
+            and before.uid == owner.initial.uid
+            and before.mode == owner.initial.mode
+            and before.link_count == owner.initial.link_count
+            and 0 < before.size <= owner.limit,
+            "observation terminal identity differs",
+        )
+        payload = _pread_payload(descriptor, before.size, limit=owner.limit)
+        after = _snapshot_fd(descriptor)
+        _require(after == before, "observation metadata changed during parent read")
+        packet = _decode_canonical(payload, limit=owner.limit, label=owner.label)
+    except BaseException as error:
+        primary = error
+    closing_number = owner.fd.descriptor
+    try:
+        owner.fd.close_once()
+    except BaseException as close_error:
+        if type(closing_number) is int and closing_number > 2:
+            poison_sink.add(closing_number)
+        if primary is not None:
+            primary.add_note(f"observation close uncertainty: {close_error!r}")
+        else:
+            primary = close_error
+    if primary is not None:
+        raise primary
+    if packet is None:
+        raise ContractError("observation packet is absent")
+    return packet, payload
+
+
+@dataclass(frozen=True)
+class CommandSnapshot:
+    descriptor: DescriptorSnapshot
+    mount_id: int
+    sha256: str
+
+
+@dataclass
+class CommandFile:
+    name: str
+    path: Path
+    fd: FdOwner
+    initial: CommandSnapshot
+
+
+def _command_snapshot(command: CommandFile, *, poison_sink: set[int]) -> CommandSnapshot:
+    descriptor = command.fd.require()
+    descriptor_status = _snapshot_fd(descriptor)
+    try:
+        path_status = _snapshot_stat(command.path.stat(follow_symlinks=False))
+    except OSError as error:
+        raise ContractError(f"{command.name} path status unavailable") from error
+    _require(path_status == descriptor_status, f"{command.name} path/descriptor identity differs")
+    _require(descriptor_status.size <= COMMAND_FILE_LIMIT, f"{command.name} exceeds its byte cap")
+    before = descriptor_status
+    payload = _pread_payload(descriptor, before.size, limit=COMMAND_FILE_LIMIT)
+    after = _snapshot_fd(descriptor)
+    _require(after == before, f"{command.name} changed during snapshot")
+    return CommandSnapshot(
+        after,
+        _mount_id(
+            descriptor,
+            poisoned_descriptors=poison_sink,
+            poison_sink=poison_sink,
+        ),
+        _sha256(payload),
+    )
+
+
+class CommandFiles:
+    """Retain and continuously authenticate the four GitHub command files."""
+
+    def __init__(self, private_root: PrivateRoot) -> None:
+        self.enabled = _on_github()
+        self._files: dict[str, CommandFile] = {}
+        self._published = False
+        self._poisoned_descriptors = private_root._poisoned_descriptors
+        if not self.enabled:
+            return
+        runner_temp_raw = os.environ.get("RUNNER_TEMP")
+        _require(type(runner_temp_raw) is str and runner_temp_raw != "", "RUNNER_TEMP is missing")
+        runner_temp = Path(cast(str, runner_temp_raw))
+        _require(runner_temp.is_absolute(), "RUNNER_TEMP is not absolute")
+        runner_temp = runner_temp.resolve(strict=True)
+        _require(runner_temp == private_root.parent.path, "RUNNER_TEMP identity differs")
+        normalized_paths: list[bytes] = []
+        identities: list[tuple[int, int]] = []
+        opened: list[CommandFile] = []
+        try:
+            for name in GITHUB_COMMAND_NAMES:
+                raw_path = os.environ.get(name)
+                _require(type(raw_path) is str and raw_path != "", f"{name} is missing")
+                supplied = Path(cast(str, raw_path))
+                _require(supplied.is_absolute(), f"{name} is not absolute")
+                resolved = supplied.resolve(strict=True)
+                _require(supplied == resolved, f"{name} is not canonical")
+                _require(resolved.is_relative_to(runner_temp), f"{name} is outside RUNNER_TEMP")
+                normalized_paths.append(os.fsencode(resolved))
+                try:
+                    descriptor = os.open(resolved, os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC)
+                except OSError as error:
+                    raise ContractError(f"failed to open {name}") from error
+                owner = FdOwner(descriptor, name)
+                try:
+                    descriptor_status = _snapshot_fd(descriptor)
+                    _require(
+                        stat.S_ISREG(descriptor_status.mode)
+                        and descriptor_status.uid == os.getuid()
+                        and descriptor_status.link_count == 1
+                        and stat.S_IMODE(descriptor_status.mode) & 0o022 == 0,
+                        f"invalid {name} attributes",
+                    )
+                    _require(
+                        _mount_id(
+                            descriptor,
+                            poisoned_descriptors=self._poisoned_descriptors,
+                            poison_sink=self._poisoned_descriptors,
+                        )
+                        == private_root.parent.mount_id,
+                        f"{name} mount differs",
+                    )
+                    placeholder = CommandFile(
+                        name,
+                        resolved,
+                        owner,
+                        CommandSnapshot(descriptor_status, private_root.parent.mount_id, ""),
+                    )
+                    snapshot = _command_snapshot(
+                        placeholder,
+                        poison_sink=self._poisoned_descriptors,
+                    )
+                    command = CommandFile(name, resolved, owner, snapshot)
+                    opened.append(command)
+                except BaseException as current_error:
+                    if not owner.terminal:
+                        closing_number = owner.descriptor
+                        try:
+                            owner.close_once()
+                        except BaseException as close_error:
+                            if type(closing_number) is int and closing_number > 2:
+                                self._poisoned_descriptors.add(closing_number)
+                            current_error.add_note(
+                                f"current command-file close uncertainty: {close_error!r}"
+                            )
+                    raise
+                identities.append((descriptor_status.device, descriptor_status.inode))
+            _require(len(set(normalized_paths)) == 4, "GitHub command paths alias")
+            _require(len(set(identities)) == 4, "GitHub command inodes alias")
+            _require(opened[0].initial.descriptor.size == 0, "GITHUB_OUTPUT is not initially empty")
+        except BaseException as primary:
+            close_failures: list[str] = []
+            for command in opened:
+                if not command.fd.terminal:
+                    closing_number = command.fd.descriptor
+                    try:
+                        command.fd.close_once()
+                    except BaseException:
+                        if type(closing_number) is int and closing_number > 2:
+                            self._poisoned_descriptors.add(closing_number)
+                        close_failures.append(command.name)
+            if close_failures:
+                primary.add_note(f"command-file initialization closes failed: {close_failures!r}")
+            raise
+        self._files = {command.name: command for command in opened}
+
+    def live_descriptors(self) -> tuple[int, ...]:
+        return tuple(
+            command.fd.require() for command in self._files.values() if not command.fd.terminal
+        )
+
+    def assert_unchanged(self) -> None:
+        if not self.enabled:
+            return
+        _require(
+            not self._poisoned_descriptors,
+            "descriptor close uncertainty forbids command-file inspection",
+        )
+        for command in self._files.values():
+            _require(not command.fd.terminal, f"{command.name} closed before publication")
+            _require(
+                _command_snapshot(
+                    command,
+                    poison_sink=self._poisoned_descriptors,
+                )
+                == command.initial,
+                f"{command.name} changed",
+            )
+
+    def _fresh_rollback(self, output: CommandFile, intended: bytes) -> None:
+        _require(
+            not self._poisoned_descriptors,
+            "descriptor close uncertainty forbids fresh rollback",
+        )
+        try:
+            descriptor = os.open(output.path, os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC)
+        except OSError as error:
+            raise ContractError("fresh GITHUB_OUTPUT rollback open failed") from error
+        fresh = FdOwner(descriptor, "fresh GITHUB_OUTPUT rollback")
+        primary: BaseException | None = None
+        try:
+            current = _snapshot_fd(descriptor)
+            original = output.initial.descriptor
+            _require(
+                current.device == original.device
+                and current.inode == original.inode
+                and current.uid == original.uid
+                and current.mode == original.mode
+                and current.link_count == original.link_count,
+                "fresh rollback identity differs",
+            )
+            path_status = _snapshot_stat(output.path.stat(follow_symlinks=False))
+            _require(path_status == current, "fresh rollback path identity differs")
+            payload = _pread_payload(descriptor, current.size, limit=len(intended))
+            _require(intended.startswith(payload), "GITHUB_OUTPUT residue is not an exact prefix")
+            os.ftruncate(descriptor, 0)
+            os.fsync(descriptor)
+            empty = _snapshot_fd(descriptor)
+            _require(empty.size == 0, "fresh rollback truncate differs")
+            _require(
+                _pread_payload(descriptor, 0, limit=0) == b"", "fresh rollback readback differs"
+            )
+            final_path = _snapshot_stat(output.path.stat(follow_symlinks=False))
+            _require(final_path == empty, "fresh rollback final path differs")
+        except BaseException as error:
+            primary = error
+        closing_number = fresh.descriptor
+        try:
+            fresh.close_once()
+        except BaseException as close_error:
+            if type(closing_number) is int and closing_number > 2:
+                self._poisoned_descriptors.add(closing_number)
+            if primary is not None:
+                primary.add_note(f"fresh rollback close uncertainty: {close_error!r}")
+            else:
+                primary = close_error
+        if primary is not None:
+            raise primary
+
+    def publish(self, payload: bytes) -> None:
+        _require(self.enabled and not self._published, "GitHub publication state differs")
+        output = self._files["GITHUB_OUTPUT"]
+        self.assert_unchanged()
+        descriptor = output.fd.require()
+        primary: BaseException | None = None
+        original_close_certain = False
+        try:
+            _pwrite_payload(descriptor, payload, limit=SHARD_RESULT_LIMIT * 2)
+            os.fsync(descriptor)
+            after_write = _snapshot_fd(descriptor)
+            original = output.initial.descriptor
+            _require(
+                after_write.device == original.device
+                and after_write.inode == original.inode
+                and after_write.uid == original.uid
+                and after_write.mode == original.mode
+                and after_write.link_count == original.link_count
+                and after_write.size == len(payload),
+                "GITHUB_OUTPUT post-write identity differs",
+            )
+            _require(
+                _pread_payload(descriptor, len(payload), limit=len(payload)) == payload,
+                "GITHUB_OUTPUT readback differs",
+            )
+            after_read = _snapshot_fd(descriptor)
+            _require(after_read == after_write, "GITHUB_OUTPUT changed during readback")
+            _require(
+                _snapshot_stat(output.path.stat(follow_symlinks=False)) == after_read,
+                "GITHUB_OUTPUT final path identity differs",
+            )
+            for name, command in self._files.items():
+                if name != "GITHUB_OUTPUT":
+                    _require(
+                        _command_snapshot(
+                            command,
+                            poison_sink=self._poisoned_descriptors,
+                        )
+                        == command.initial,
+                        f"{name} changed during GITHUB_OUTPUT publication",
+                    )
+        except BaseException as error:
+            primary = error
+        closing_output = output.fd.descriptor
+        try:
+            output.fd.close_once()
+            original_close_certain = True
+        except BaseException as close_error:
+            if type(closing_output) is int and closing_output > 2:
+                self._poisoned_descriptors.add(closing_output)
+            if primary is not None:
+                primary.add_note(f"original GITHUB_OUTPUT close uncertainty: {close_error!r}")
+            else:
+                primary = close_error
+        other_close_errors: list[tuple[str, BaseException]] = []
+        for name, command in self._files.items():
+            if name != "GITHUB_OUTPUT":
+                closing_number = command.fd.descriptor
+                try:
+                    command.fd.close_once()
+                except BaseException as close_error:
+                    if type(closing_number) is int and closing_number > 2:
+                        self._poisoned_descriptors.add(closing_number)
+                    other_close_errors.append((name, close_error))
+        if other_close_errors:
+            close_failure = primary or ContractError("GitHub command-file close uncertainty")
+            for name, recorded_error in other_close_errors:
+                close_failure.add_note(f"{name} close failed: {recorded_error!r}")
+            primary = close_failure
+        if primary is not None:
+            if original_close_certain and not self._poisoned_descriptors:
+                try:
+                    self._fresh_rollback(output, payload)
+                except BaseException as rollback_error:
+                    primary.add_note(f"fresh GITHUB_OUTPUT rollback failed: {rollback_error!r}")
+            raise primary
+        self._published = True
+
+    def close_without_publication(self) -> None:
+        failures: list[BaseException] = []
+        for command in self._files.values():
+            if not command.fd.terminal:
+                closing_number = command.fd.descriptor
+                try:
+                    command.fd.close_once()
+                except BaseException as error:
+                    if type(closing_number) is int and closing_number > 2:
+                        self._poisoned_descriptors.add(closing_number)
+                    failures.append(error)
+        _require(not failures, "GitHub command-file close uncertainty")
+
+
+_CAPTURED_POPEN: Final = subprocess.Popen
+_CAPTURED_POPEN_INIT: Final = subprocess.Popen.__init__
+_CAPTURED_FORK_EXEC: Final = getattr(subprocess, "_fork_exec", None)
+_CAPTURED_PIDFD_SEND_SIGNAL: Final = signal.pidfd_send_signal
+_PIDFD_SEND_SIGNAL: Final = cast(Callable[..., object], signal.pidfd_send_signal)
+_PID_SENTINEL: Final = object()
+
+
+@dataclass
+class _SignalLatch:
+    pending: bool = False
+
+    def handler(self, signum: int, frame: FrameType | None) -> None:
+        del frame
+        if signum == signal.SIGINT:
+            self.pending = True
+
+
+class _NoImplicitWaitPopen(subprocess.Popen[bytes]):
+    """Popen variant whose exact owner exists before base child creation."""
+
+    def __init__(
+        self,
+        owner_slot: list[_NoImplicitWaitPopen | None],
+        latch: _SignalLatch,
+        stored_sigint_handler: Callable[[int, FrameType | None], None],
+        arguments: list[str],
+        *,
+        stdin: int,
+        stdout: int,
+        stderr: int,
+        pass_fds: tuple[int, ...],
+        cwd: Path,
+        env: dict[str, str],
+    ) -> None:
+        self.pid = cast(int, _PID_SENTINEL)
+        self._child_created = False
+        self._task064_owner_slot = owner_slot
+        _require(len(owner_slot) == 1 and owner_slot[0] is None, "Popen owner slot is not empty")
+        owner_slot[0] = self
+        _require(owner_slot[0] is self, "Popen provisional ownership differs")
+        _require(
+            signal.getsignal(signal.SIGINT) is stored_sigint_handler,
+            "preinstalled SIGINT latch identity differs",
+        )
+        primary: BaseException | None = None
+        try:
+            _CAPTURED_POPEN_INIT(
+                self,
+                arguments,
+                stdin=stdin,
+                stdout=stdout,
+                stderr=stderr,
+                close_fds=True,
+                pass_fds=pass_fds,
+                cwd=os.fspath(cwd),
+                env=env,
+                start_new_session=True,
+            )
+        except BaseException as error:
+            primary = error
+        try:
+            restored = signal.signal(signal.SIGINT, signal.default_int_handler)
+            _require(restored is stored_sigint_handler, "SIGINT latch restoration differs")
+            _require(
+                signal.getsignal(signal.SIGINT) is signal.default_int_handler,
+                "SIGINT readback differs",
+            )
+        except BaseException as restore_error:
+            if primary is not None:
+                primary.add_note(f"SIGINT restoration failed: {restore_error!r}")
+            else:
+                primary = restore_error
+        if primary is not None:
+            raise primary
+        _require(owner_slot[0] is self, "Popen owner slot changed during construction")
+
+    def __del__(self) -> None:
+        """The closure-owned slot is the sole lifecycle owner."""
+
+
+@dataclass(frozen=True)
+class ProcessIdentity:
+    pid: int
+    ppid: int
+    uid: int
+    start_time: int
+    session_id: int
+    process_group_id: int
+
+
+@dataclass(frozen=True)
+class TerminalIdentity:
+    pid: int
+    uid: int
+    signo: int
+    status: int
+    code: int
+
+
+@dataclass(frozen=True)
+class ChildResult:
+    pid: int
+    exit_code: int
+    stdout: bytes
+    stderr: bytes
+    elapsed_ns: int
+    survivor_count: int
+
+
+def _terminal_identity(
+    result: os.waitid_result,
+    *,
+    expected_pid: int,
+    expected_uid: int,
+) -> TerminalIdentity:
+    values = (result.si_pid, result.si_uid, result.si_signo, result.si_status, result.si_code)
+    _require(all(type(value) is int and value >= 0 for value in values), "invalid waitid result")
+    terminal = TerminalIdentity(*values)
+    _require(
+        terminal.pid == expected_pid
+        and terminal.uid == expected_uid
+        and terminal.signo == signal.SIGCHLD,
+        "waitid child identity differs",
+    )
+    return terminal
+
+
+def _reserved_terminal(terminal: TerminalIdentity) -> bool:
+    return terminal.code == os.CLD_EXITED and terminal.status == 191
+
+
+def _raw_reserved_terminal(
+    result: os.waitid_result,
+) -> bool:
+    return (
+        type(result.si_code) is int
+        and type(result.si_status) is int
+        and result.si_code == os.CLD_EXITED
+        and result.si_status == 191
+    )
+
+
+def _raw_waitpid_reserved_terminal(status: object) -> bool:
+    return type(status) is int and os.WIFEXITED(status) and os.WEXITSTATUS(status) == 191
+
+
+def _raw_popen_reserved_terminal(returncode: object) -> bool:
+    return type(returncode) is int and returncode == 191
+
+
+def _consume_and_propagate_raw_reserved(
+    result: os.waitid_result,
+    *,
+    pid: int,
+    pidfd: FdOwner | None,
+) -> bool:
+    if not _raw_reserved_terminal(result):
+        return False
+    if pidfd is not None and not pidfd.terminal:
+        consumed = _waitid_pid(os.P_PIDFD, pidfd.require(), os.WEXITED)
+    else:
+        consumed = _waitid_pid(os.P_PID, pid, os.WEXITED)
+    _require(consumed is not None, "reserved child consuming wait returned no result")
+    _CAPTURED_RUNNER_OS_EXIT(191)
+
+
+def _parse_proc_stat_projection(payload: bytes, *, expected_pid: int) -> tuple[int, int, int, int]:
+    _require(
+        type(payload) is bytes
+        and payload != b""
+        and payload.endswith(b"\n")
+        and b"\x00" not in payload
+        and b"\r" not in payload,
+        "process stat payload is invalid",
+    )
+    close_paren = payload.rfind(b")")
+    _require(close_paren > 0, "process stat format differs")
+    prefix = payload[:close_paren]
+    open_paren = prefix.find(b"(")
+    _require(open_paren > 0, "process stat command differs")
+    expected_prefix = str(expected_pid).encode("ascii") + b" "
+    _require(prefix[:open_paren] == expected_prefix, "process stat PID differs")
+    _require(payload[close_paren + 1 : close_paren + 2] == b" ", "process stat spacing differs")
+    fields = payload[close_paren + 2 :].split()
+    _require(
+        len(fields) >= 20 and len(fields[0]) == 1,
+        "process stat differs",
+    )
+    ppid = _canonical_proc_decimal(fields[1], label="process parent PID", allow_zero=True)
+    process_group_id = _canonical_proc_decimal(fields[2], label="process group id", allow_zero=True)
+    session_id = _canonical_proc_decimal(fields[3], label="process session id", allow_zero=True)
+    start_time = _canonical_proc_decimal(fields[19], label="process start time", allow_zero=False)
+    return ppid, process_group_id, session_id, start_time
+
+
+def _parse_proc_status(payload: bytes, *, expected_pid: int, expected_ppid: int) -> int:
+    _require(
+        type(payload) is bytes
+        and payload != b""
+        and payload.endswith(b"\n")
+        and b"\x00" not in payload
+        and b"\r" not in payload,
+        "process status payload is invalid",
+    )
+    lines = payload.splitlines()
+    pid_lines = [line for line in lines if line.startswith(b"Pid:")]
+    ppid_lines = [line for line in lines if line.startswith(b"PPid:")]
+    uid_lines = [line for line in lines if line.startswith(b"Uid:")]
+    _require(len(pid_lines) == 1 and len(ppid_lines) == 1, "process status PID differs")
+    _require(len(uid_lines) == 1, "process UID status differs")
+    raw_pid = pid_lines[0].partition(b":")[2].strip()
+    raw_ppid = ppid_lines[0].partition(b":")[2].strip()
+    _require(
+        _canonical_proc_decimal(raw_pid, label="status PID", allow_zero=False) == expected_pid
+        and _canonical_proc_decimal(raw_ppid, label="status parent PID", allow_zero=True)
+        == expected_ppid,
+        "process status identity differs",
+    )
+    uid_fields = uid_lines[0].partition(b":")[2].split()
+    _require(len(uid_fields) == 4, "process UID differs")
+    uid_values = tuple(
+        _canonical_proc_decimal(value, label="process UID", allow_zero=True) for value in uid_fields
+    )
+    _require(len(set(uid_values)) == 1, "process UID tuple differs")
+    return uid_values[0]
+
+
+def _read_proc_identity(
+    pid: int,
+    *,
+    excluded_descriptors: Iterable[int] = (),
+    poisoned_descriptors: Iterable[int] = (),
+    poison_sink: set[int],
+) -> ProcessIdentity:
+    _require(type(pid) is int and pid > 0, "invalid process identity")
+    _require(
+        not poison_sink,
+        "descriptor close uncertainty forbids process-directory acquisition",
+    )
+    try:
+        excluded_values = tuple(excluded_descriptors)
+    except BaseException as error:
+        raise ContractError("process descriptor exclusions are unavailable") from error
+    _require(
+        all(type(value) is int and value > 2 for value in excluded_values),
+        "invalid process descriptor exclusion",
+    )
+    try:
+        poisoned_values = tuple(poisoned_descriptors)
+    except BaseException as error:
+        raise ContractError("process poisoned descriptors are unavailable") from error
+    _require(
+        all(type(value) is int and value > 2 for value in poisoned_values),
+        "invalid process poisoned descriptor",
+    )
+    protected_numbers = {0, 1, 2, *excluded_values, *poisoned_values}
+    raw_directory: object = _PID_SENTINEL
+    owner: FdOwner | None = None
+    identity: ProcessIdentity | None = None
+    primary: BaseException | None = None
+    try:
+        raw_directory = os.open(
+            f"/proc/{pid}",
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        )
+        if (
+            type(raw_directory) is int
+            and raw_directory > 2
+            and raw_directory not in protected_numbers
+        ):
+            owner = FdOwner(raw_directory, "process directory")
+            raw_directory = _PID_SENTINEL
+        _require(owner is not None, "invalid process-directory descriptor")
+        live_owner = cast(FdOwner, owner)
+        initial_directory = _snapshot_fd(live_owner.require())
+        _require(stat.S_ISDIR(initial_directory.mode), "process-directory type differs")
+        first_stat_payload = _read_bounded_at(
+            live_owner.require(),
+            "stat",
+            limit=16_384,
+            label="first process stat",
+            excluded_descriptors=excluded_values,
+            poisoned_descriptors=poisoned_values,
+            poison_sink=poison_sink,
+        )
+        status_payload = _read_bounded_at(
+            live_owner.require(),
+            "status",
+            limit=131_072,
+            label="process status",
+            excluded_descriptors=excluded_values,
+            poisoned_descriptors=poisoned_values,
+            poison_sink=poison_sink,
+        )
+        second_stat_payload = _read_bounded_at(
+            live_owner.require(),
+            "stat",
+            limit=16_384,
+            label="second process stat",
+            excluded_descriptors=excluded_values,
+            poisoned_descriptors=poisoned_values,
+            poison_sink=poison_sink,
+        )
+        first_projection = _parse_proc_stat_projection(
+            first_stat_payload,
+            expected_pid=pid,
+        )
+        second_projection = _parse_proc_stat_projection(
+            second_stat_payload,
+            expected_pid=pid,
+        )
+        _require(first_projection == second_projection, "process generation changed during read")
+        ppid, process_group_id, session_id, start_time = first_projection
+        uid = _parse_proc_status(status_payload, expected_pid=pid, expected_ppid=ppid)
+        final_directory = _snapshot_fd(live_owner.require())
+        _require(
+            _stable_directory_matches(
+                final_directory,
+                initial_directory,
+                require_link_count=False,
+            )
+            and initial_directory.uid == uid,
+            "process-directory identity changed",
+        )
+        values = (ppid, uid, start_time, session_id, process_group_id)
+        _require(
+            all(type(value) is int and value >= 0 for value in values),
+            "invalid process identity field",
+        )
+        identity = ProcessIdentity(pid, ppid, uid, start_time, session_id, process_group_id)
+    except BaseException as error:
+        primary = error
+    if owner is not None and not owner.terminal:
+        closing_number = owner.descriptor
+        try:
+            owner.close_once()
+        except BaseException as close_error:
+            if type(closing_number) is int and closing_number > 2:
+                poison_sink.add(closing_number)
+            if primary is not None:
+                primary.add_note(f"process-directory close uncertainty: {close_error!r}")
+            else:
+                primary = close_error
+    if primary is not None:
+        if isinstance(primary, OSError):
+            raise ContractError("process-directory identity unavailable") from primary
+        raise primary
+    _require(identity is not None, "process identity was not constructed")
+    return cast(ProcessIdentity, identity)
+
+
+def _no_descriptor_exclusions() -> tuple[int, ...]:
+    return ()
+
+
+def _same_process(
+    expected: ProcessIdentity,
+    *,
+    private_root: PrivateRoot,
+    exclusion_provider: Callable[[], tuple[int, ...]] = _no_descriptor_exclusions,
+    poisoned_provider: Callable[[], tuple[int, ...]] = _no_descriptor_exclusions,
+) -> ProcessIdentity:
+    _require(
+        not private_root._poisoned_descriptors and not private_root._opaque_close_uncertain,
+        "descriptor close uncertainty forbids process identity acquisition",
+    )
+    current = _read_proc_identity(
+        expected.pid,
+        excluded_descriptors=exclusion_provider(),
+        poisoned_descriptors=poisoned_provider(),
+        poison_sink=private_root._poisoned_descriptors,
+    )
+    _require(current == expected, "anchored process identity changed")
+    return current
+
+
+def _confirmed_proc_vanished(pid: int) -> bool:
+    _require(type(pid) is int and pid > 0, "invalid vanished-process probe")
+    path = f"/proc/{pid}"
+    for _ in range(2):
+        try:
+            os.stat(path, follow_symlinks=False)
+        except OSError as error:
+            if error.errno in {errno.ENOENT, errno.ESRCH}:
+                continue
+            raise ContractError("process disappearance confirmation failed") from error
+        return False
+    return True
+
+
+def _scan_initial_group(
+    expected: ProcessIdentity,
+    *,
+    private_root: PrivateRoot,
+    exclusion_provider: Callable[[], tuple[int, ...]] = _no_descriptor_exclusions,
+    poisoned_provider: Callable[[], tuple[int, ...]] = _no_descriptor_exclusions,
+) -> tuple[ProcessIdentity, ...]:
+    _require(
+        not private_root._poisoned_descriptors and not private_root._opaque_close_uncertain,
+        "descriptor close uncertainty forbids process-table acquisition",
+    )
+    _same_process(
+        expected,
+        private_root=private_root,
+        exclusion_provider=exclusion_provider,
+        poisoned_provider=poisoned_provider,
+    )
+    members: list[ProcessIdentity] = []
+    try:
+        entries = os.scandir("/proc")
+    except OSError as error:
+        raise ContractError("process table scan failed") from error
+    primary: BaseException | None = None
+    try:
+        yielded = 0
+        for entry in entries:
+            _require(
+                not private_root._poisoned_descriptors and not private_root._opaque_close_uncertain,
+                "descriptor close uncertainty terminates process-table scan",
+            )
+            yielded += 1
+            _require(yielded <= 100_000, "process table scan cap exceeded")
+            name = entry.name
+            _require(type(name) is str, "process table name is not an exact string")
+            if not name.isdigit():
+                continue
+            pid = int(name, 10)
+            if pid == expected.pid:
+                continue
+            try:
+                candidate = _read_proc_identity(
+                    pid,
+                    excluded_descriptors=exclusion_provider(),
+                    poisoned_descriptors=poisoned_provider(),
+                    poison_sink=private_root._poisoned_descriptors,
+                )
+            except ContractError as identity_error:
+                if private_root._poisoned_descriptors or private_root._opaque_close_uncertain:
+                    raise
+                if _confirmed_proc_vanished(pid):
+                    continue
+                raise ContractError(
+                    "process-table member identity is uncertain"
+                ) from identity_error
+            if (
+                candidate.session_id == expected.session_id
+                and candidate.process_group_id == expected.process_group_id
+            ):
+                _require(candidate.uid == expected.uid, "initial-group member UID differs")
+                members.append(candidate)
+    except BaseException as error:
+        primary = error
+    try:
+        entries.close()
+    except BaseException as close_error:
+        private_root._opaque_close_uncertain = True
+        private_root._opaque_owner_quarantine.append(entries)
+        if primary is not None:
+            primary.add_note(f"process-table iterator close uncertainty: {close_error!r}")
+        else:
+            primary = ContractError("process-table iterator close uncertainty")
+    if primary is not None:
+        raise primary
+    members.sort(key=lambda item: (item.start_time, item.pid))
+    return tuple(members)
+
+
+def _runtime_spawn_gate() -> None:
+    _require(
+        sys.implementation.name == "cpython" and sys.version_info[:3] == (3, 13, 14),
+        "Python runtime differs",
+    )
+    _require(subprocess.Popen is _CAPTURED_POPEN, "Popen identity changed")
+    _require(subprocess.Popen.__init__ is _CAPTURED_POPEN_INIT, "Popen initializer changed")
+    _require(getattr(subprocess, "_fork_exec", None) is _CAPTURED_FORK_EXEC, "_fork_exec changed")
+    threads = threading.enumerate()
+    _require(
+        len(threads) == 1 and threads[0] is threading.main_thread(),
+        "spawn requires the sole main thread",
+    )
+    _require(sys.gettrace() is None and sys.getprofile() is None, "trace/profile is forbidden")
+    for signal_number in signal.valid_signals():
+        if signal_number in {signal.SIGKILL, signal.SIGSTOP}:
+            continue
+        try:
+            handler = signal.getsignal(signal_number)
+        except (OSError, ValueError) as error:
+            raise ContractError("signal handler identity is unavailable") from error
+        if signal_number == signal.SIGINT:
+            _require(handler is signal.default_int_handler, "SIGINT handler differs")
+        elif signal_number == signal.SIGCHLD:
+            _require(handler is signal.SIG_DFL, "SIGCHLD handler differs")
+        else:
+            _require(
+                handler is signal.SIG_DFL or handler is signal.SIG_IGN, "signal handler differs"
+            )
+
+
+def _reset_sigchld() -> None:
+    _require(signal.getsignal(signal.SIGCHLD) is signal.SIG_DFL, "SIGCHLD is not DFL")
+    prior = signal.signal(signal.SIGCHLD, signal.SIG_DFL)
+    _require(prior is signal.SIG_DFL, "SIGCHLD reset prior differs")
+    _require(signal.getsignal(signal.SIGCHLD) is signal.SIG_DFL, "SIGCHLD reset readback differs")
+
+
+def _send_pidfd_signal(descriptor: int, signal_number: int, *, label: str) -> None:
+    _require(
+        signal.pidfd_send_signal is _CAPTURED_PIDFD_SEND_SIGNAL,
+        "pidfd signal function identity changed",
+    )
+    result = _PIDFD_SEND_SIGNAL(descriptor, signal_number, None, 0)
+    _require(result is None, f"{label} result differs")
+
+
+def _exec_projection_bytes(arguments: list[str], environment: dict[str, str]) -> int:
+    _require(bool(arguments) and all(type(value) is str for value in arguments), "invalid argv")
+    _require(type(environment) is dict, "invalid environment")
+    argument_bytes = 0
+    for argument in arguments:
+        try:
+            encoded = os.fsencode(argument)
+        except (UnicodeEncodeError, ValueError) as error:
+            raise ContractError("argv encoding differs") from error
+        _require(
+            b"\x00" not in encoded and len(encoded) + 1 <= MAX_ARG_BYTES_WITH_NUL, "argv string cap"
+        )
+        argument_bytes += len(encoded) + 1
+    environment_bytes = 0
+    for name, value in environment.items():
+        _require(
+            type(name) is str and type(value) is str and "=" not in name, "invalid environment"
+        )
+        try:
+            encoded_name = os.fsencode(name)
+            encoded_value = os.fsencode(value)
+        except (UnicodeEncodeError, ValueError) as error:
+            raise ContractError("environment encoding differs") from error
+        _require(
+            b"\x00" not in encoded_name
+            and b"\x00" not in encoded_value
+            and len(encoded_name) + 1 + len(encoded_value) + 1 <= MAX_ARG_BYTES_WITH_NUL,
+            "environment string cap",
+        )
+        environment_bytes += len(encoded_name) + 1 + len(encoded_value) + 1
+    projection = (
+        argument_bytes
+        + environment_bytes
+        + (len(arguments) + len(environment) + 2) * struct.calcsize("P")
+        + POINTER_RESERVE
+    )
+    return projection
+
+
+def _validate_exec_projection(arguments: list[str], environment: dict[str, str]) -> None:
+    projection = _exec_projection_bytes(arguments, environment)
+    arg_max = os.sysconf("SC_ARG_MAX")
+    _require(type(arg_max) is int and arg_max > 0, "SC_ARG_MAX differs")
+    _require(projection <= arg_max, "exec projection exceeds SC_ARG_MAX")
+
+
+def _set_cloexec(descriptor: int) -> None:
+    flags = fcntl.fcntl(descriptor, fcntl.F_GETFD)
+    _require(type(flags) is int and flags >= 0, "invalid descriptor flags")
+    _require(flags & fcntl.FD_CLOEXEC != 0, "descriptor lacks CLOEXEC")
+
+
+def _open_process_fds(
+    *, poison_sink: set[int]
+) -> tuple[FdOwner, FdOwner, FdOwner, FdOwner, FdOwner]:
+    acquired: list[FdOwner] = []
+    adopted_numbers: set[int] = set()
+    provisional_returns: list[object] = []
+    validation_numbers: list[int] = []
+    primary: BaseException | None = None
+
+    def retain_raw(raw_value: object) -> int:
+        provisional_returns.append(raw_value)
+        return len(provisional_returns) - 1
+
+    def adopt(slot: int, label: str) -> FdOwner:
+        raw_value = provisional_returns[slot]
+        _require(type(raw_value) is int and raw_value > 2, "invalid process descriptor")
+        descriptor = cast(int, raw_value)
+        _require(descriptor not in adopted_numbers, "process descriptor alias")
+        owner = FdOwner(descriptor, label)
+        provisional_returns[slot] = _PID_SENTINEL
+        acquired.append(owner)
+        adopted_numbers.add(descriptor)
+        return owner
+
+    def adopt_pipe(raw_value: object, label: str) -> tuple[FdOwner, FdOwner]:
+        slots: tuple[int, ...]
+        if type(raw_value) is tuple:
+            slots = tuple(retain_raw(value) for value in raw_value)
+        else:
+            if type(raw_value) is int:
+                retain_raw(raw_value)
+            slots = ()
+        raw_value = _PID_SENTINEL
+        _require(len(slots) == 2, f"{label} pipe differs")
+        return (
+            adopt(slots[0], f"child {label} read"),
+            adopt(slots[1], f"child {label} write"),
+        )
+
+    try:
+        stdin_owner = adopt(
+            retain_raw(os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC)),
+            "child stdin",
+        )
+        stdout_owners = adopt_pipe(os.pipe2(os.O_CLOEXEC), "stdout")
+        _require(len(stdout_owners) == 2, "stdout owner cardinality differs")
+        stderr_owners = adopt_pipe(os.pipe2(os.O_CLOEXEC), "stderr")
+        _require(len(stderr_owners) == 2, "stderr owner cardinality differs")
+        _require(len(acquired) == 5, "process descriptor cardinality differs")
+        validation_numbers = [owner.require() for owner in acquired]
+        _require(
+            stdin_owner is acquired[0]
+            and all(value > 2 for value in validation_numbers)
+            and len(set(validation_numbers)) == 5,
+            "process fds alias",
+        )
+        for descriptor in validation_numbers:
+            _set_cloexec(descriptor)
+    except BaseException as error:
+        primary = error
+    if primary is not None:
+        validation_numbers.clear()
+        adopted_numbers.clear()
+        raw_failures = 0
+        for index in range(len(provisional_returns)):
+            raw_value = provisional_returns[index]
+            provisional_returns[index] = _PID_SENTINEL
+            if type(raw_value) is not int or raw_value <= 2:
+                continue
+            for duplicate_index in range(index + 1, len(provisional_returns)):
+                if provisional_returns[duplicate_index] == raw_value:
+                    provisional_returns[duplicate_index] = _PID_SENTINEL
+            if any(not owner.terminal and owner.descriptor == raw_value for owner in acquired):
+                continue
+            closing_number = raw_value
+            raw_value = _PID_SENTINEL
+            try:
+                os.close(closing_number)
+            except BaseException:
+                poison_sink.add(closing_number)
+                raw_failures += 1
+            finally:
+                closing_number = -1
+        provisional_returns.clear()
+        close_failures = _close_independent(acquired, poison_sink=poison_sink)
+        if raw_failures:
+            primary.add_note("provisional raw process-fd close uncertainty")
+        if close_failures:
+            primary.add_note(f"process-fd adoption closes failed: {close_failures!r}")
+    if primary is not None:
+        raise ContractError("process descriptor creation or validation failed") from primary
+    validation_numbers.clear()
+    adopted_numbers.clear()
+    provisional_returns.clear()
+    return cast(tuple[FdOwner, FdOwner, FdOwner, FdOwner, FdOwner], tuple(acquired))
+
+
+def _child_environment(
+    private_root: PrivateRoot,
+    child: DirectoryOwner,
+    *,
+    base_environment: dict[str, str] | None,
+) -> dict[str, str]:
+    if base_environment is None:
+        environment = dict(os.environ)
+        for name in tuple(environment):
+            if name.startswith("GIT_"):
+                environment.pop(name)
+    else:
+        _require(
+            type(base_environment) is dict
+            and all(
+                type(name) is str and type(value) is str for name, value in base_environment.items()
+            ),
+            "closed child environment differs",
+        )
+        environment = dict(base_environment)
+    for name in (*FORBIDDEN_ENV, *GITHUB_COMMAND_NAMES):
+        environment.pop(name, None)
+    _require("PYTHONOPTIMIZE" not in environment, "PYTHONOPTIMIZE is forbidden")
+    hypothesis = private_root.create_child_directory(child, "hypothesis")
+    pycache = private_root.create_child_directory(child, "pycache")
+    coverage = private_root.create_child_directory(child, "coverage")
+    child_path = os.fspath(child.path)
+    environment.update(
+        {
+            "TMPDIR": child_path,
+            "TEMP": child_path,
+            "TMP": child_path,
+            "HYPOTHESIS_STORAGE_DIRECTORY": os.fspath(hypothesis),
+            "PYTHONPYCACHEPREFIX": os.fspath(pycache),
+            "COVERAGE_FILE": os.fspath(coverage / ".coverage"),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
+    )
+    return environment
+
+
+def _close_independent(owners: Iterable[FdOwner], *, poison_sink: set[int]) -> tuple[str, ...]:
+    failures: list[str] = []
+    for owner in owners:
+        if owner.terminal:
+            continue
+        closing_number = owner.descriptor
+        try:
+            owner.close_once()
+        except BaseException:
+            if type(closing_number) is int and closing_number > 2:
+                poison_sink.add(closing_number)
+            failures.append(owner.label)
+    return tuple(failures)
+
+
+def _open_pidfd(
+    pid: int,
+    *,
+    other_descriptors: Iterable[int],
+    poisoned_descriptors: Iterable[int] = (),
+    poison_sink: set[int],
+) -> FdOwner:
+    _require(
+        not poison_sink,
+        "descriptor close uncertainty forbids pidfd acquisition",
+    )
+    try:
+        ordered_others = tuple(other_descriptors)
+    except BaseException as error:
+        raise ContractError("owned descriptor set is unavailable") from error
+    _require(
+        all(type(descriptor) is int and descriptor > 2 for descriptor in ordered_others)
+        and len(set(ordered_others)) == len(ordered_others),
+        "owned descriptor set differs",
+    )
+    try:
+        poisoned_values = tuple(poisoned_descriptors)
+    except BaseException as error:
+        raise ContractError("poisoned descriptor set is unavailable") from error
+    _require(
+        all(type(descriptor) is int and descriptor > 2 for descriptor in poisoned_values),
+        "poisoned descriptor set differs",
+    )
+    other_numbers = set(ordered_others)
+    protected_numbers = {*other_numbers, *poisoned_values}
+    other_identities = {
+        (
+            snapshot.device,
+            snapshot.inode,
+            snapshot.mode,
+        )
+        for snapshot in (_snapshot_fd(descriptor) for descriptor in ordered_others)
+    }
+    raw_descriptor: object = _PID_SENTINEL
+    owner: FdOwner | None = None
+    primary: BaseException | None = None
+    try:
+        raw_descriptor = os.pidfd_open(pid, 0)
+        if (
+            type(raw_descriptor) is int
+            and raw_descriptor > 2
+            and raw_descriptor not in protected_numbers
+        ):
+            owner = FdOwner(raw_descriptor, "child pidfd")
+            raw_descriptor = _PID_SENTINEL
+        _require(owner is not None, "child pidfd number aliases an owned handle")
+        live_owner = cast(FdOwner, owner)
+        identity = _snapshot_fd(live_owner.require())
+        _require(
+            (identity.device, identity.inode, identity.mode) not in other_identities,
+            "child pidfd identity aliases an owned handle",
+        )
+        _set_cloexec(live_owner.require())
+    except BaseException as error:
+        primary = error
+    if primary is not None:
+        if owner is not None and not owner.terminal:
+            closing_number = owner.descriptor
+            try:
+                owner.close_once()
+            except BaseException as close_error:
+                if type(closing_number) is int and closing_number > 2:
+                    poison_sink.add(closing_number)
+                primary.add_note(f"child pidfd close uncertainty: {close_error!r}")
+        if isinstance(primary, OSError):
+            raise ContractError("pidfd acquisition failed") from primary
+        raise primary
+    _require(owner is not None, "child pidfd owner was not constructed")
+    return cast(FdOwner, owner)
+
+
+def _waitid_pid(
+    id_type: int,
+    identity: int,
+    options: int,
+) -> os.waitid_result | None:
+    try:
+        result = os.waitid(id_type, identity, options)
+    except ChildProcessError:
+        raise
+    except OSError as error:
+        raise ContractError("waitid failed") from error
+    if result is None:
+        return None
+    return result
+
+
+def _cleanup_provisional_child(
+    process: _NoImplicitWaitPopen,
+    *,
+    private_root: PrivateRoot,
+    other_descriptors: Iterable[int],
+    poisoned_descriptors: set[int],
+) -> None:
+    prior_process_uncertain = private_root._process_tree_uncertain
+    private_root._process_tree_uncertain = True
+    pid_value = getattr(process, "pid", _PID_SENTINEL)
+    child_created = getattr(process, "_child_created", False)
+    valid_pid = type(pid_value) is int and pid_value > 0
+    possible = valid_pid or child_created is True
+    _require(possible, "partial Popen contains no provable child")
+    _require(valid_pid, "partial Popen child flag lacks a valid PID")
+    pid = cast(int, pid_value)
+    try:
+        probe = os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    except ChildProcessError as error:
+        raise ContractError("partial Popen child was already consumed") from error
+    except OSError as error:
+        if error.errno == errno.ECHILD:
+            raise ContractError("partial Popen child was already consumed") from error
+        raise ContractError("partial Popen ownership probe failed") from error
+    reserved = probe is not None and _raw_reserved_terminal(probe)
+    if probe is not None:
+        _consume_and_propagate_raw_reserved(probe, pid=pid, pidfd=None)
+    observed_terminal: TerminalIdentity | None = None
+    observed_error: BaseException | None = None
+    if probe is not None:
+        try:
+            observed_terminal = _terminal_identity(
+                probe,
+                expected_pid=pid,
+                expected_uid=os.getuid(),
+            )
+        except BaseException as error:
+            observed_error = error
+    try:
+        other_values = tuple(other_descriptors)
+    except BaseException as error:
+        raise ContractError("partial descriptor exclusions are unavailable") from error
+    pidfd: FdOwner | None = None
+    identity: ProcessIdentity | None = None
+    terminal_result = probe
+    consumed: TerminalIdentity | None = None
+    consume_attempted = False
+    leader_signal_attempted = False
+    group_signal_attempted = False
+    group_signal_succeeded = False
+    leader_signal_succeeded = False
+    group_cleanup_required = False
+    group_empty_proved = False
+    primary: BaseException | None = None
+
+    def record(error: BaseException, *, label: str) -> None:
+        nonlocal primary
+        if primary is not None:
+            primary.add_note(f"{label}: {error!r}")
+        else:
+            primary = error
+
+    def exclusions() -> tuple[int, ...]:
+        return (
+            *other_values,
+            *((pidfd.require(),) if pidfd is not None and not pidfd.terminal else ()),
+        )
+
+    if observed_error is not None:
+        record(observed_error, label="partial observed terminal identity failed")
+
+    try:
+        pidfd = _open_pidfd(
+            pid,
+            other_descriptors=other_values,
+            poisoned_descriptors=poisoned_descriptors,
+            poison_sink=poisoned_descriptors,
+        )
+    except BaseException as pidfd_error:
+        record(pidfd_error, label="partial pidfd acquisition failed")
+    try:
+        identity = _read_proc_identity(
+            pid,
+            excluded_descriptors=exclusions(),
+            poisoned_descriptors=poisoned_descriptors,
+            poison_sink=poisoned_descriptors,
+        )
+        _require(
+            identity.ppid == os.getpid() and identity.uid == os.getuid(),
+            "partial child identity differs",
+        )
+    except BaseException as identity_error:
+        record(identity_error, label="partial process identity failed")
+        identity = None
+    if probe is None and identity is not None:
+        try:
+            _require(not leader_signal_attempted, "partial leader signal was already attempted")
+            leader_signal_attempted = True
+            if pidfd is not None:
+                _send_pidfd_signal(
+                    pidfd.require(),
+                    signal.SIGKILL,
+                    label="partial child pidfd SIGKILL",
+                )
+            else:
+                os.kill(pid, signal.SIGKILL)
+            leader_signal_succeeded = True
+        except BaseException as signal_error:
+            record(signal_error, label="partial leader SIGKILL failed")
+        if (
+            leader_signal_succeeded
+            and identity.session_id == pid
+            and identity.process_group_id == pid
+        ):
+            group_cleanup_required = True
+            try:
+                _same_process(
+                    identity,
+                    private_root=private_root,
+                    exclusion_provider=exclusions,
+                    poisoned_provider=lambda: tuple(sorted(poisoned_descriptors)),
+                )
+                _require(not group_signal_attempted, "partial group signal was already attempted")
+                group_signal_attempted = True
+                os.killpg(pid, signal.SIGKILL)
+                group_signal_succeeded = True
+            except BaseException as group_error:
+                record(group_error, label="partial group SIGKILL failed")
+    elif probe is not None and identity is not None:
+        group_cleanup_required = identity.session_id == pid and identity.process_group_id == pid
+    if terminal_result is None and identity is not None and leader_signal_succeeded:
+        try:
+            deadline = _checked_clock() + 5_000_000_000
+            if pidfd is not None:
+                terminal_result = _await_pidfd_terminal(
+                    pidfd.require(),
+                    deadline_ns=deadline,
+                )
+            else:
+                prior = _checked_clock()
+                while terminal_result is None:
+                    terminal_result = _waitid_pid(
+                        os.P_PID,
+                        pid,
+                        os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                    )
+                    if terminal_result is not None:
+                        break
+                    now = _checked_clock(prior)
+                    _require(now < deadline, "partial direct child did not terminate")
+                    prior = now
+                    time.sleep(0.005)
+            _require(terminal_result is not None, "partial child did not become terminal")
+        except BaseException as terminal_error:
+            record(terminal_error, label="partial terminal wait failed")
+    if terminal_result is not None:
+        _consume_and_propagate_raw_reserved(terminal_result, pid=pid, pidfd=pidfd)
+    if group_cleanup_required and identity is not None and terminal_result is not None:
+        try:
+            if probe is not None:
+                _require(
+                    not _scan_initial_group(
+                        identity,
+                        private_root=private_root,
+                        exclusion_provider=exclusions,
+                        poisoned_provider=lambda: tuple(sorted(poisoned_descriptors)),
+                    ),
+                    "terminal partial child retained initial-group survivors",
+                )
+            else:
+                _require(group_signal_succeeded, "partial group signal was not proved")
+                prior = _checked_clock()
+                deadline = prior + 5_000_000_000
+                while _scan_initial_group(
+                    identity,
+                    private_root=private_root,
+                    exclusion_provider=exclusions,
+                    poisoned_provider=lambda: tuple(sorted(poisoned_descriptors)),
+                ):
+                    now = _checked_clock(prior)
+                    _require(now < deadline, "partial initial-group survivors remain")
+                    prior = now
+                    time.sleep(0.005)
+            group_empty_proved = True
+        except BaseException as group_scan_error:
+            record(group_scan_error, label="partial group cleanup proof failed")
+    cleanup_safe = (
+        identity is not None
+        and terminal_result is not None
+        and (not group_cleanup_required or group_empty_proved)
+        and (probe is not None or leader_signal_succeeded)
+        and (not group_cleanup_required or probe is not None or group_signal_succeeded)
+    )
+    if (cleanup_safe or reserved) and not consume_attempted:
+        try:
+            consume_attempted = True
+            if pidfd is not None:
+                consumed_result = _waitid_pid(os.P_PIDFD, pidfd.require(), os.WEXITED)
+            else:
+                consumed_result = _waitid_pid(os.P_PID, pid, os.WEXITED)
+            if consumed_result is None:
+                raise ContractError("partial consuming wait differs")
+            reserved = reserved or _raw_reserved_terminal(consumed_result)
+            if reserved:
+                _CAPTURED_RUNNER_OS_EXIT(191)
+            terminal = _terminal_identity(
+                cast(os.waitid_result, terminal_result),
+                expected_pid=pid,
+                expected_uid=os.getuid(),
+            )
+            consumed = _terminal_identity(
+                consumed_result,
+                expected_pid=pid,
+                expected_uid=os.getuid(),
+            )
+            _require(consumed == terminal, "partial consuming wait identity differs")
+            if observed_terminal is not None:
+                _require(consumed == observed_terminal, "partial observed identity differs")
+            reserved = reserved or _reserved_terminal(consumed)
+        except BaseException as consume_error:
+            record(consume_error, label="partial consuming wait failed")
+    if not cleanup_safe or consumed is None:
+        quarantine = ContractError("partial child is quarantined unreaped until runner exit")
+        record(quarantine, label="partial cleanup quarantine")
+    if pidfd is not None and not pidfd.terminal:
+        closing_pidfd = pidfd.descriptor
+        try:
+            pidfd.close_once()
+        except BaseException as close_error:
+            if type(closing_pidfd) is int and closing_pidfd > 2:
+                poisoned_descriptors.add(closing_pidfd)
+            if primary is not None:
+                primary.add_note(f"partial pidfd close uncertainty: {close_error!r}")
+            else:
+                primary = close_error
+    if primary is not None:
+        raise primary
+    _require(consume_attempted and consumed is not None, "partial child was not consumed")
+    private_root._process_tree_uncertain = prior_process_uncertain
+
+
+def _scan_unbound_initial_group(
+    leader_pid: int,
+    *,
+    private_root: PrivateRoot,
+    exclusion_provider: Callable[[], tuple[int, ...]] = _no_descriptor_exclusions,
+    poisoned_provider: Callable[[], tuple[int, ...]] = _no_descriptor_exclusions,
+) -> tuple[ProcessIdentity, ...]:
+    _require(
+        not private_root._poisoned_descriptors and not private_root._opaque_close_uncertain,
+        "descriptor close uncertainty forbids unbound process-table acquisition",
+    )
+    members: list[ProcessIdentity] = []
+    try:
+        entries = os.scandir("/proc")
+    except OSError as error:
+        raise ContractError("unbound process-table scan failed") from error
+    primary: BaseException | None = None
+    try:
+        yielded = 0
+        for entry in entries:
+            _require(
+                not private_root._poisoned_descriptors and not private_root._opaque_close_uncertain,
+                "descriptor close uncertainty terminates unbound process-table scan",
+            )
+            yielded += 1
+            _require(yielded <= 100_000, "unbound process-table scan cap exceeded")
+            name = entry.name
+            _require(type(name) is str, "unbound process-table name is not an exact string")
+            if not name.isdigit():
+                continue
+            candidate_pid = int(name, 10)
+            if candidate_pid == leader_pid:
+                continue
+            try:
+                candidate = _read_proc_identity(
+                    candidate_pid,
+                    excluded_descriptors=exclusion_provider(),
+                    poisoned_descriptors=poisoned_provider(),
+                    poison_sink=private_root._poisoned_descriptors,
+                )
+            except ContractError as identity_error:
+                if private_root._poisoned_descriptors or private_root._opaque_close_uncertain:
+                    raise
+                if _confirmed_proc_vanished(candidate_pid):
+                    continue
+                raise ContractError(
+                    "unbound process-table member identity is uncertain"
+                ) from identity_error
+            if candidate.session_id == leader_pid and candidate.process_group_id == leader_pid:
+                _require(candidate.uid == os.getuid(), "unbound initial-group member UID differs")
+                members.append(candidate)
+    except BaseException as error:
+        primary = error
+    try:
+        entries.close()
+    except BaseException as close_error:
+        private_root._opaque_close_uncertain = True
+        private_root._opaque_owner_quarantine.append(entries)
+        if primary is not None:
+            primary.add_note(f"unbound iterator close uncertainty: {close_error!r}")
+        else:
+            primary = ContractError("unbound iterator close uncertainty")
+    if primary is not None:
+        raise primary
+    members.sort(key=lambda item: (item.start_time, item.pid))
+    return tuple(members)
+
+
+def _cleanup_post_spawn_unbound(
+    pid: int,
+    *,
+    private_root: PrivateRoot,
+    other_descriptors: Iterable[int],
+    poisoned_descriptors: set[int],
+    existing_pidfd: FdOwner | None = None,
+    pidfd_attempted: bool = False,
+) -> int:
+    prior_process_uncertain = private_root._process_tree_uncertain
+    private_root._process_tree_uncertain = True
+    _require(type(pid) is int and pid > 0, "invalid unbound child PID")
+    try:
+        probe = os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    except ChildProcessError as error:
+        raise ContractError("unbound child was already consumed") from error
+    except OSError as error:
+        if error.errno == errno.ECHILD:
+            raise ContractError("unbound child was already consumed") from error
+        raise ContractError("unbound child ownership probe failed") from error
+    reserved = probe is not None and _raw_reserved_terminal(probe)
+    if probe is not None:
+        _consume_and_propagate_raw_reserved(probe, pid=pid, pidfd=None)
+    observed: TerminalIdentity | None = None
+    observed_error: BaseException | None = None
+    if probe is not None:
+        try:
+            observed = _terminal_identity(probe, expected_pid=pid, expected_uid=os.getuid())
+        except BaseException as error:
+            observed_error = error
+    try:
+        other_values = tuple(other_descriptors)
+        poisoned_values = tuple(poisoned_descriptors)
+    except BaseException as error:
+        raise ContractError("unbound descriptor exclusions are unavailable") from error
+    pidfd: FdOwner | None = existing_pidfd
+    primary: BaseException | None = None
+    consumed: TerminalIdentity | None = None
+    final_survivor_count = -1
+    consume_attempted = False
+    terminal_result = probe
+    identity: ProcessIdentity | None = None
+    cleanup_safe = False
+
+    def record(error: BaseException, *, label: str) -> None:
+        nonlocal primary
+        if primary is not None:
+            primary.add_note(f"{label}: {error!r}")
+        else:
+            primary = error
+
+    def exclusions() -> tuple[int, ...]:
+        return (
+            *other_values,
+            *((pidfd.require(),) if pidfd is not None and not pidfd.terminal else ()),
+        )
+
+    def poisoned() -> tuple[int, ...]:
+        return tuple(sorted(poisoned_descriptors))
+
+    if observed_error is not None:
+        record(observed_error, label="unbound observed terminal identity failed")
+
+    def send_stage(signal_number: int, *, leader_live: bool, label: str) -> bool:
+        if identity is None:
+            raise ContractError(f"{label} lacks an exact process identity")
+        _same_process(
+            identity,
+            private_root=private_root,
+            exclusion_provider=exclusions,
+            poisoned_provider=poisoned,
+        )
+        if leader_live:
+            if pidfd is not None:
+                _send_pidfd_signal(
+                    pidfd.require(),
+                    signal_number,
+                    label=f"{label} pidfd signal",
+                )
+            else:
+                os.kill(pid, signal_number)
+        _same_process(
+            identity,
+            private_root=private_root,
+            exclusion_provider=exclusions,
+            poisoned_provider=poisoned,
+        )
+        os.killpg(pid, signal_number)
+        return True
+
+    if pidfd is not None:
+        try:
+            pidfd.require()
+        except BaseException as pidfd_error:
+            record(pidfd_error, label="existing unbound pidfd differs")
+            pidfd = None
+    elif not pidfd_attempted:
+        try:
+            pidfd = _open_pidfd(
+                pid,
+                other_descriptors=other_values,
+                poisoned_descriptors=poisoned_values,
+                poison_sink=poisoned_descriptors,
+            )
+        except BaseException as pidfd_error:
+            record(pidfd_error, label="unbound pidfd acquisition failed")
+            pidfd = None
+    try:
+        identity = _read_proc_identity(
+            pid,
+            excluded_descriptors=exclusions(),
+            poisoned_descriptors=poisoned(),
+            poison_sink=poisoned_descriptors,
+        )
+        _require(
+            identity.ppid == os.getpid()
+            and identity.uid == os.getuid()
+            and identity.session_id == pid
+            and identity.process_group_id == pid,
+            "unbound process identity differs",
+        )
+    except BaseException as identity_error:
+        record(identity_error, label="unbound process identity failed")
+        identity = None
+    if identity is not None and probe is not None:
+        try:
+            _require(
+                not _scan_unbound_initial_group(
+                    pid,
+                    private_root=private_root,
+                    exclusion_provider=exclusions,
+                    poisoned_provider=poisoned,
+                ),
+                "terminal unbound child retained initial-group survivors",
+            )
+            final_survivor_count = 0
+            cleanup_safe = True
+        except BaseException as scan_error:
+            record(scan_error, label="terminal unbound group proof failed")
+    elif identity is not None:
+        term_stage_succeeded = False
+        try:
+            term_stage_succeeded = send_stage(
+                signal.SIGTERM,
+                leader_live=True,
+                label="unbound TERM stage",
+            )
+        except BaseException as term_error:
+            record(term_error, label="unbound TERM stage failed")
+        if term_stage_succeeded:
+            try:
+                prior = _checked_clock()
+                term_deadline = prior + 1_000_000_000
+                members: tuple[ProcessIdentity, ...] = ()
+                while True:
+                    if terminal_result is None:
+                        if pidfd is not None:
+                            terminal_result = _waitid_pid(
+                                os.P_PIDFD,
+                                pidfd.require(),
+                                os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                            )
+                        else:
+                            terminal_result = _waitid_pid(
+                                os.P_PID,
+                                pid,
+                                os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                            )
+                    if terminal_result is not None:
+                        _consume_and_propagate_raw_reserved(
+                            terminal_result,
+                            pid=pid,
+                            pidfd=pidfd,
+                        )
+                    members = _scan_unbound_initial_group(
+                        pid,
+                        private_root=private_root,
+                        exclusion_provider=exclusions,
+                        poisoned_provider=poisoned,
+                    )
+                    if terminal_result is not None and not members:
+                        final_survivor_count = 0
+                        cleanup_safe = True
+                        break
+                    now = _checked_clock(prior)
+                    if now >= term_deadline:
+                        break
+                    prior = now
+                    time.sleep(0.005)
+                if not cleanup_safe:
+                    kill_stage_succeeded = send_stage(
+                        signal.SIGKILL,
+                        leader_live=terminal_result is None,
+                        label="unbound KILL stage",
+                    )
+                    _require(kill_stage_succeeded, "unbound KILL stage differs")
+                    prior = _checked_clock()
+                    kill_deadline = prior + 5_000_000_000
+                    while True:
+                        if terminal_result is None:
+                            if pidfd is not None:
+                                terminal_result = _waitid_pid(
+                                    os.P_PIDFD,
+                                    pidfd.require(),
+                                    os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                                )
+                            else:
+                                terminal_result = _waitid_pid(
+                                    os.P_PID,
+                                    pid,
+                                    os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                                )
+                        if terminal_result is not None:
+                            _consume_and_propagate_raw_reserved(
+                                terminal_result,
+                                pid=pid,
+                                pidfd=pidfd,
+                            )
+                        members = _scan_unbound_initial_group(
+                            pid,
+                            private_root=private_root,
+                            exclusion_provider=exclusions,
+                            poisoned_provider=poisoned,
+                        )
+                        if terminal_result is not None and not members:
+                            final_survivor_count = 0
+                            cleanup_safe = True
+                            break
+                        now = _checked_clock(prior)
+                        _require(now < kill_deadline, "unbound KILL cleanup deadline exceeded")
+                        prior = now
+                        time.sleep(0.005)
+            except BaseException as cleanup_error:
+                record(cleanup_error, label="unbound staged cleanup failed")
+                cleanup_safe = False
+    if (cleanup_safe or reserved) and terminal_result is not None:
+        try:
+            consume_attempted = True
+            if pidfd is not None:
+                result = _waitid_pid(os.P_PIDFD, pidfd.require(), os.WEXITED)
+            else:
+                result = _waitid_pid(os.P_PID, pid, os.WEXITED)
+            if result is None:
+                raise ContractError("unbound consuming wait differs")
+            reserved = reserved or _raw_reserved_terminal(result)
+            if reserved:
+                _CAPTURED_RUNNER_OS_EXIT(191)
+            terminal = _terminal_identity(
+                terminal_result,
+                expected_pid=pid,
+                expected_uid=os.getuid(),
+            )
+            consumed = _terminal_identity(
+                result,
+                expected_pid=pid,
+                expected_uid=os.getuid(),
+            )
+            _require(consumed == terminal, "unbound terminal/consume identity differs")
+            if observed is not None:
+                _require(consumed == observed, "unbound observed identity differs")
+        except BaseException as consume_error:
+            record(consume_error, label="unbound consuming wait failed")
+    if not cleanup_safe or consumed is None:
+        record(
+            ContractError("unbound child/group quarantined unreaped until runner exit"),
+            label="unbound cleanup quarantine",
+        )
+    if pidfd is not None and not pidfd.terminal:
+        closing_pidfd = pidfd.descriptor
+        try:
+            pidfd.close_once()
+        except BaseException as close_error:
+            if type(closing_pidfd) is int and closing_pidfd > 2:
+                poisoned_descriptors.add(closing_pidfd)
+            if primary is not None:
+                primary.add_note(f"unbound pidfd close uncertainty: {close_error!r}")
+            else:
+                primary = close_error
+    if primary is not None:
+        raise primary
+    if consumed is None or not consume_attempted:
+        raise ContractError("unbound child was not consumed")
+    _require(final_survivor_count == 0, "unbound initial-group cleanup was not proved")
+    private_root._process_tree_uncertain = prior_process_uncertain
+    return final_survivor_count
+
+
+def _signal_initial_group(
+    identity: ProcessIdentity,
+    pidfd: FdOwner,
+    signal_number: int,
+    *,
+    private_root: PrivateRoot,
+    leader_live: bool,
+    exclusion_provider: Callable[[], tuple[int, ...]],
+    poisoned_provider: Callable[[], tuple[int, ...]],
+) -> None:
+    _same_process(
+        identity,
+        private_root=private_root,
+        exclusion_provider=exclusion_provider,
+        poisoned_provider=poisoned_provider,
+    )
+    if leader_live:
+        _send_pidfd_signal(pidfd.require(), signal_number, label="pidfd signal")
+    _same_process(
+        identity,
+        private_root=private_root,
+        exclusion_provider=exclusion_provider,
+        poisoned_provider=poisoned_provider,
+    )
+    try:
+        os.killpg(identity.process_group_id, signal_number)
+    except ProcessLookupError:
+        if leader_live:
+            raise ContractError("live child group disappeared") from None
+
+
+def _await_pidfd_terminal(pidfd: int, *, deadline_ns: int) -> os.waitid_result | None:
+    prior = _checked_clock()
+    while True:
+        result = _waitid_pid(os.P_PIDFD, pidfd, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        if result is not None:
+            return result
+        now = _checked_clock(prior)
+        if now >= deadline_ns:
+            return None
+        prior = now
+        time.sleep(0.005)
+
+
+def _terminate_and_authenticate(
+    identity: ProcessIdentity,
+    pidfd: FdOwner,
+    *,
+    private_root: PrivateRoot,
+    terminal: os.waitid_result | None,
+    exclusion_provider: Callable[[], tuple[int, ...]],
+    poisoned_provider: Callable[[], tuple[int, ...]],
+) -> os.waitid_result:
+    leader_live = terminal is None
+    _signal_initial_group(
+        identity,
+        pidfd,
+        signal.SIGTERM,
+        private_root=private_root,
+        leader_live=leader_live,
+        exclusion_provider=exclusion_provider,
+        poisoned_provider=poisoned_provider,
+    )
+    deadline = _checked_clock() + 1_000_000_000
+    if terminal is None:
+        terminal = _await_pidfd_terminal(pidfd.require(), deadline_ns=deadline)
+    if terminal is None:
+        _signal_initial_group(
+            identity,
+            pidfd,
+            signal.SIGKILL,
+            private_root=private_root,
+            leader_live=True,
+            exclusion_provider=exclusion_provider,
+            poisoned_provider=poisoned_provider,
+        )
+        terminal = _await_pidfd_terminal(
+            pidfd.require(),
+            deadline_ns=_checked_clock() + 5_000_000_000,
+        )
+    else:
+        members = _scan_initial_group(
+            identity,
+            private_root=private_root,
+            exclusion_provider=exclusion_provider,
+            poisoned_provider=poisoned_provider,
+        )
+        if members:
+            _signal_initial_group(
+                identity,
+                pidfd,
+                signal.SIGKILL,
+                private_root=private_root,
+                leader_live=False,
+                exclusion_provider=exclusion_provider,
+                poisoned_provider=poisoned_provider,
+            )
+    if terminal is None:
+        raise ContractError("child did not reach a terminal state")
+    return terminal
+
+
+def _drain_child(
+    identity: ProcessIdentity,
+    pidfd: FdOwner,
+    stdout_owner: FdOwner,
+    stderr_owner: FdOwner,
+    *,
+    started_ns: int,
+    deadline_ns: int,
+    exclusion_provider: Callable[[], tuple[int, ...]],
+    poisoned_descriptors: set[int],
+    private_root: PrivateRoot,
+) -> tuple[bytes, bytes, TerminalIdentity, int, bool, int]:
+    prior_process_uncertain = private_root._process_tree_uncertain
+    private_root._process_tree_uncertain = True
+    selector: selectors.BaseSelector | None = None
+    terminal_result: os.waitid_result | None = None
+    stdout = bytearray()
+    stderr = bytearray()
+    timed_out = False
+    started = started_ns
+    deadline = deadline_ns
+    _require(
+        type(started) is int and type(deadline) is int and 0 <= started < deadline,
+        "invalid child invocation deadline",
+    )
+    previous = started
+    streams: dict[int, tuple[str, FdOwner, bytearray]] = {}
+    primary: BaseException | None = None
+    termination_attempted = False
+    reserved = False
+
+    def poisoned_provider() -> tuple[int, ...]:
+        return tuple(sorted(poisoned_descriptors))
+
+    def retain_terminal(result: os.waitid_result | None) -> os.waitid_result | None:
+        nonlocal reserved
+        if result is not None:
+            reserved = reserved or _raw_reserved_terminal(result)
+        return result
+
+    def close_stream_resources() -> None:
+        nonlocal primary
+        if selector is not None:
+            try:
+                selector.close()
+            except BaseException as selector_error:
+                private_root._opaque_close_uncertain = True
+                private_root._opaque_owner_quarantine.append(selector)
+                if primary is not None:
+                    primary.add_note(f"selector close uncertainty: {selector_error!r}")
+                else:
+                    primary = selector_error
+        streams.clear()
+        close_failures: list[str] = []
+        for stream_owner in (stdout_owner, stderr_owner):
+            if stream_owner.terminal:
+                continue
+            closing_number = stream_owner.descriptor
+            try:
+                stream_owner.close_once()
+            except BaseException:
+                if type(closing_number) is int and closing_number > 2:
+                    poisoned_descriptors.add(closing_number)
+                close_failures.append(stream_owner.label)
+        if close_failures:
+            close_error = ContractError("child stream close uncertainty")
+            if primary is not None:
+                primary.add_note(f"child stream closes failed: {close_failures!r}")
+            else:
+                primary = close_error
+
+    try:
+        selector = selectors.DefaultSelector()
+        previous = _checked_clock(started)
+        for name, owner, target in (
+            ("stdout", stdout_owner, stdout),
+            ("stderr", stderr_owner, stderr),
+        ):
+            descriptor = owner.require()
+            os.set_blocking(descriptor, False)
+            selector.register(descriptor, selectors.EVENT_READ, name)
+            streams[descriptor] = (name, owner, target)
+        selector.register(pidfd.require(), selectors.EVENT_READ, "pidfd")
+        while terminal_result is None or streams:
+            now = _checked_clock(previous)
+            previous = now
+            if now >= deadline:
+                timed_out = True
+                if terminal_result is None:
+                    termination_attempted = True
+                    terminal_result = retain_terminal(
+                        _terminate_and_authenticate(
+                            identity,
+                            pidfd,
+                            private_root=private_root,
+                            terminal=None,
+                            exclusion_provider=exclusion_provider,
+                            poisoned_provider=poisoned_provider,
+                        )
+                    )
+                raise ContractError("child deadline reached before complete output drain")
+            events = selector.select(0.05)
+            for key, _ in events:
+                if key.data == "pidfd":
+                    if terminal_result is None:
+                        result = _waitid_pid(
+                            os.P_PIDFD,
+                            pidfd.require(),
+                            os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                        )
+                        if result is not None:
+                            terminal_result = retain_terminal(result)
+                            selector.unregister(pidfd.require())
+                            if reserved:
+                                break
+                    continue
+                descriptor = key.fd
+                stream = streams.get(descriptor)
+                if stream is None:
+                    raise ContractError("unknown child stream")
+                _, owner, target = stream
+                try:
+                    chunk = os.read(descriptor, IO_CHUNK)
+                except BlockingIOError:
+                    continue
+                except OSError as error:
+                    raise ContractError("child output read failed") from error
+                _require(type(chunk) is bytes, "child output is not bytes")
+                if chunk:
+                    _require(
+                        len(target) + len(chunk) <= STREAM_LIMIT, "child output exceeds its cap"
+                    )
+                    target.extend(chunk)
+                else:
+                    selector.unregister(descriptor)
+                    del streams[descriptor]
+            if reserved:
+                break
+    except BaseException as error:
+        primary = error
+    if terminal_result is None and not termination_attempted:
+        try:
+            termination_attempted = True
+            terminal_result = retain_terminal(
+                _terminate_and_authenticate(
+                    identity,
+                    pidfd,
+                    private_root=private_root,
+                    terminal=None,
+                    exclusion_provider=exclusion_provider,
+                    poisoned_provider=poisoned_provider,
+                )
+            )
+        except BaseException as cleanup_error:
+            if primary is not None:
+                primary.add_note(f"child termination failed: {cleanup_error!r}")
+            else:
+                primary = cleanup_error
+    elif terminal_result is None:
+        quarantine_error = ContractError(
+            "child termination was attempted; status is quarantined until runner exit"
+        )
+        if primary is not None:
+            primary.add_note(str(quarantine_error))
+        else:
+            primary = quarantine_error
+    _require(terminal_result is not None or primary is not None, "child terminal state disappeared")
+    if terminal_result is None:
+        close_stream_resources()
+        if not pidfd.terminal:
+            closing_pidfd = pidfd.descriptor
+            try:
+                pidfd.close_once()
+            except BaseException as pidfd_error:
+                if type(closing_pidfd) is int and closing_pidfd > 2:
+                    poisoned_descriptors.add(closing_pidfd)
+                if primary is not None:
+                    primary.add_note(f"pidfd close uncertainty: {pidfd_error!r}")
+        if primary is None:
+            raise ContractError("child cleanup failed without an error")
+        raise primary
+    reserved = reserved or _raw_reserved_terminal(terminal_result)
+    _consume_and_propagate_raw_reserved(
+        terminal_result,
+        pid=identity.pid,
+        pidfd=pidfd,
+    )
+    terminal: TerminalIdentity | None = None
+    try:
+        terminal = _terminal_identity(
+            terminal_result,
+            expected_pid=identity.pid,
+            expected_uid=identity.uid,
+        )
+    except BaseException as terminal_error:
+        if primary is not None:
+            primary.add_note(f"terminal identity failed: {terminal_error!r}")
+        else:
+            primary = terminal_error
+    group_safe = False
+    survivor_count = 0
+    try:
+        members = _scan_initial_group(
+            identity,
+            private_root=private_root,
+            exclusion_provider=exclusion_provider,
+            poisoned_provider=poisoned_provider,
+        )
+        survivor_count = len(members)
+        if members:
+            terminal_result = cast(
+                os.waitid_result,
+                retain_terminal(
+                    _terminate_and_authenticate(
+                        identity,
+                        pidfd,
+                        private_root=private_root,
+                        terminal=terminal_result,
+                        exclusion_provider=exclusion_provider,
+                        poisoned_provider=poisoned_provider,
+                    )
+                ),
+            )
+            prior = _checked_clock()
+            end = prior + 5_000_000_000
+            while _scan_initial_group(
+                identity,
+                private_root=private_root,
+                exclusion_provider=exclusion_provider,
+                poisoned_provider=poisoned_provider,
+            ):
+                now = _checked_clock(prior)
+                _require(now < end, "initial-group survivors remain")
+                prior = now
+                time.sleep(0.005)
+        group_safe = True
+    except BaseException as group_error:
+        if primary is not None:
+            primary.add_note(f"initial-group cleanup failed: {group_error!r}")
+        else:
+            primary = group_error
+    consumed: TerminalIdentity | None = None
+    consume_attempted = False
+    if group_safe or reserved:
+        if terminal_result is None:
+            raise ContractError("child terminal state disappeared before consume")
+        try:
+            consume_attempted = True
+            consumed_result = _waitid_pid(os.P_PIDFD, pidfd.require(), os.WEXITED)
+            if consumed_result is None:
+                raise ContractError("child consuming wait returned no result")
+            reserved = reserved or _raw_reserved_terminal(consumed_result)
+            if reserved:
+                _CAPTURED_RUNNER_OS_EXIT(191)
+            consumed = _terminal_identity(
+                consumed_result,
+                expected_pid=identity.pid,
+                expected_uid=identity.uid,
+            )
+            _require(
+                terminal is not None and consumed == terminal, "consuming wait identity differs"
+            )
+        except BaseException as consume_error:
+            if primary is not None:
+                primary.add_note(f"consuming wait failed: {consume_error!r}")
+            else:
+                primary = consume_error
+    close_stream_resources()
+    if not pidfd.terminal:
+        closing_pidfd = pidfd.descriptor
+        try:
+            pidfd.close_once()
+        except BaseException as pidfd_error:
+            if type(closing_pidfd) is int and closing_pidfd > 2:
+                poisoned_descriptors.add(closing_pidfd)
+            if primary is not None:
+                primary.add_note(f"pidfd close uncertainty: {pidfd_error!r}")
+            else:
+                primary = pidfd_error
+    elapsed = _checked_clock(previous) - started
+    _require(elapsed <= deadline - started, "child invocation exceeded its deadline")
+    if survivor_count != 0:
+        survivor_error = ContractError("child initial group had survivors")
+        if primary is not None:
+            primary.add_note(f"initial survivor count: {survivor_count}")
+        else:
+            primary = survivor_error
+    if timed_out:
+        timeout_error = ContractError("child timed out")
+        if primary is not None:
+            primary.add_note("child timed out")
+        else:
+            primary = timeout_error
+    if primary is not None:
+        raise primary
+    if consumed is None or not consume_attempted:
+        raise ContractError("child was not consumed")
+    private_root._process_tree_uncertain = prior_process_uncertain
+    return bytes(stdout), bytes(stderr), consumed, survivor_count, timed_out, elapsed
+
+
+def _decode_exit(terminal: TerminalIdentity) -> int:
+    _require(
+        terminal.code in {os.CLD_EXITED, os.CLD_KILLED, os.CLD_DUMPED},
+        "terminal code is outside the closed set",
+    )
+    if terminal.code == os.CLD_EXITED:
+        _require(0 <= terminal.status <= 255, "invalid child exit status")
+        if terminal.status == 191:
+            _CAPTURED_RUNNER_OS_EXIT(191)
+        return terminal.status
+    valid_signals = {int(value) for value in signal.valid_signals()}
+    _require(
+        terminal.status > 0 and terminal.status in valid_signals,
+        "invalid child signal status",
+    )
+    return -terminal.status
+
+
+class ProcessSupervisor:
+    """Own every subprocess from provisional adoption through one consuming wait."""
+
+    def __init__(self, private_root: PrivateRoot, command_files: CommandFiles) -> None:
+        self.private_root = private_root
+        self.command_files = command_files
+        self._slots: tuple[list[_NoImplicitWaitPopen | None], ...] = tuple(
+            [None] for _ in range(MAX_SPAWNS)
+        )
+        self._next_slot = 0
+        _runtime_spawn_gate()
+
+    @property
+    def owner_slots(self) -> tuple[list[_NoImplicitWaitPopen | None], ...]:
+        return self._slots
+
+    def run(
+        self,
+        arguments: list[str],
+        *,
+        cwd: Path,
+        pass_fds: tuple[int, ...] = (),
+        timeout_ns: int,
+        label: str,
+        child_root: DirectoryOwner | None = None,
+        base_environment: dict[str, str] | None = None,
+    ) -> ChildResult:
+        _require(self._next_slot < len(self._slots), "spawn ordinal cap exceeded")
+        slot = self._slots[self._next_slot]
+        ordinal = self._next_slot
+        self._next_slot += 1
+        _require(slot[0] is None, "spawn owner slot was reused")
+        if child_root is None:
+            child_root = self.private_root.create_child(f"spawn-{ordinal:02d}-{label}")
+        environment = _child_environment(
+            self.private_root,
+            child_root,
+            base_environment=base_environment,
+        )
+        _validate_exec_projection(arguments, environment)
+        _require(len(pass_fds) == len(set(pass_fds)), "pass_fds contains an alias")
+        _require(all(type(fd) is int and fd > 2 for fd in pass_fds), "invalid pass_fds")
+        self.command_files.assert_unchanged()
+        latch = _SignalLatch()
+        stored_latch_handler = latch.handler
+        _reset_sigchld()
+        owners: tuple[FdOwner, FdOwner, FdOwner, FdOwner, FdOwner] | None = None
+        process: _NoImplicitWaitPopen | None = None
+        process_pid: int | None = None
+        identity: ProcessIdentity | None = None
+        pidfd: FdOwner | None = None
+        other_descriptors: tuple[int, ...] = ()
+        descriptor_ledger: tuple[FdOwner, ...] = ()
+        poisoned_descriptors = self.private_root._poisoned_descriptors
+        invocation_started: int | None = None
+        invocation_deadline: int | None = None
+        constructor_returned = False
+        latch_install_attempted = False
+        pidfd_attempted = False
+        primary: BaseException | None = None
+
+        def live_exclusions() -> tuple[int, ...]:
+            return (
+                *pass_fds,
+                *(owner.descriptor for owner in descriptor_ledger if not owner.terminal),
+                *((pidfd.descriptor,) if pidfd is not None and not pidfd.terminal else ()),
+            )
+
+        def close_and_poison(close_owners: Iterable[FdOwner]) -> tuple[str, ...]:
+            failures: list[str] = []
+            for close_owner in close_owners:
+                if close_owner.terminal:
+                    continue
+                closing_number = close_owner.descriptor
+                try:
+                    close_owner.close_once()
+                except BaseException:
+                    if type(closing_number) is int and closing_number > 2:
+                        poisoned_descriptors.add(closing_number)
+                    failures.append(close_owner.label)
+            return tuple(failures)
+
+        try:
+            prior_sigint = signal.getsignal(signal.SIGINT)
+            _require(
+                prior_sigint is signal.default_int_handler,
+                "SIGINT handler differs before latch install",
+            )
+            latch_install_attempted = True
+            install_prior = signal.signal(signal.SIGINT, stored_latch_handler)
+            _require(install_prior is prior_sigint, "SIGINT latch install prior differs")
+            _require(
+                signal.getsignal(signal.SIGINT) is stored_latch_handler,
+                "SIGINT latch install readback differs",
+            )
+            owners = _open_process_fds(poison_sink=poisoned_descriptors)
+            stdin_owner, stdout_read, stdout_write, stderr_read, stderr_write = owners
+            descriptor_ledger = (
+                *owners,
+                *(command.fd for command in self.command_files._files.values()),
+                self.private_root.root.fd,
+                self.private_root.parent.fd,
+                child_root.fd,
+            )
+            complete_numbers = (*pass_fds, *(owner.require() for owner in descriptor_ledger))
+            _require(
+                len(complete_numbers) == len(set(complete_numbers)),
+                "complete process descriptor ledger aliases",
+            )
+            invocation_started = _checked_clock()
+            invocation_deadline = invocation_started + timeout_ns
+            process = _NoImplicitWaitPopen(
+                slot,
+                latch,
+                stored_latch_handler,
+                arguments,
+                stdin=stdin_owner.require(),
+                stdout=stdout_write.require(),
+                stderr=stderr_write.require(),
+                pass_fds=pass_fds,
+                cwd=cwd,
+                env=environment,
+            )
+            constructor_returned = True
+            _require(
+                signal.getsignal(signal.SIGINT) is signal.default_int_handler,
+                "SIGINT was not restored after Popen",
+            )
+            _require(process is slot[0], "returned child is not slot-owned")
+            post_spawn_failures = close_and_poison((stdin_owner, stdout_write, stderr_write))
+            _require(not post_spawn_failures, "post-spawn descriptor close uncertainty")
+            _require(not latch.pending, "SIGINT arrived during child construction")
+            pid_value = getattr(process, "pid", None)
+            if type(pid_value) is not int or pid_value <= 0:
+                raise ContractError("returned Popen PID differs")
+            process_pid = pid_value
+            other_descriptors = live_exclusions()
+            pidfd_attempted = True
+            pidfd = _open_pidfd(
+                process_pid,
+                other_descriptors=other_descriptors,
+                poisoned_descriptors=poisoned_descriptors,
+                poison_sink=poisoned_descriptors,
+            )
+            identity = _read_proc_identity(
+                process_pid,
+                excluded_descriptors=live_exclusions(),
+                poisoned_descriptors=poisoned_descriptors,
+                poison_sink=poisoned_descriptors,
+            )
+            _require(
+                identity.ppid == os.getpid()
+                and identity.uid == os.getuid()
+                and identity.session_id == process_pid
+                and identity.process_group_id == process_pid,
+                "child session/process identity differs",
+            )
+        except BaseException as error:
+            primary = error
+        if latch_install_attempted:
+            try:
+                current_sigint = signal.getsignal(signal.SIGINT)
+                if current_sigint is stored_latch_handler:
+                    restored = signal.signal(signal.SIGINT, signal.default_int_handler)
+                    _require(restored is stored_latch_handler, "SIGINT latch restore differs")
+                    _require(
+                        signal.getsignal(signal.SIGINT) is signal.default_int_handler,
+                        "SIGINT latch restore readback differs",
+                    )
+                else:
+                    _require(
+                        current_sigint is signal.default_int_handler,
+                        "SIGINT handler changed across spawn boundary",
+                    )
+            except BaseException as restore_error:
+                if primary is not None:
+                    primary.add_note(f"SIGINT restoration failed: {restore_error!r}")
+                else:
+                    primary = restore_error
+        if primary is not None:
+            if constructor_returned and process is not None and slot[0] is not process:
+                slot[0] = process
+                _require(
+                    slot[0] is process,
+                    "returned child ownership could not be restored for cleanup",
+                )
+            owned = slot[0]
+            if owned is not None:
+                try:
+                    if constructor_returned and process_pid is not None:
+                        _cleanup_post_spawn_unbound(
+                            process_pid,
+                            private_root=self.private_root,
+                            other_descriptors=live_exclusions(),
+                            poisoned_descriptors=poisoned_descriptors,
+                            existing_pidfd=pidfd,
+                            pidfd_attempted=pidfd_attempted,
+                        )
+                    else:
+                        _cleanup_provisional_child(
+                            owned,
+                            private_root=self.private_root,
+                            other_descriptors=live_exclusions(),
+                            poisoned_descriptors=poisoned_descriptors,
+                        )
+                except BaseException as cleanup_error:
+                    primary.add_note(f"spawn-boundary child cleanup failed: {cleanup_error!r}")
+            if not poisoned_descriptors and not self.private_root._opaque_close_uncertain:
+                try:
+                    self.command_files.assert_unchanged()
+                except BaseException as command_error:
+                    primary.add_note(f"command-file failure snapshot failed: {command_error!r}")
+            else:
+                primary.add_note(
+                    "descriptor close uncertainty skipped command-file failure snapshot"
+                )
+            if pidfd is not None and not pidfd.terminal:
+                closing_pidfd = pidfd.descriptor
+                try:
+                    pidfd.close_once()
+                except BaseException as pidfd_error:
+                    if type(closing_pidfd) is int and closing_pidfd > 2:
+                        poisoned_descriptors.add(closing_pidfd)
+                    primary.add_note(f"spawn-boundary pidfd close failed: {pidfd_error!r}")
+            close_failures = close_and_poison(owners or ())
+            if close_failures:
+                primary.add_note(f"spawn-boundary descriptor closes failed: {close_failures!r}")
+            if not child_root.fd.terminal:
+                closing_child_root = child_root.fd.descriptor
+                try:
+                    child_root.fd.close_once()
+                except BaseException as root_error:
+                    if type(closing_child_root) is int and closing_child_root > 2:
+                        poisoned_descriptors.add(closing_child_root)
+                    primary.add_note(f"spawn child-root close failed: {root_error!r}")
+            raise ContractError("Popen/adoption boundary failed closed") from primary
+        if (
+            owners is None
+            or process is None
+            or process_pid is None
+            or identity is None
+            or pidfd is None
+            or invocation_started is None
+            or invocation_deadline is None
+        ):
+            raise ContractError("successful process adoption state is incomplete")
+        stdin_owner, stdout_read, stdout_write, stderr_read, stderr_write = owners
+        drain_primary: BaseException | None = None
+        drain_result: tuple[bytes, bytes, TerminalIdentity, int, bool, int] | None = None
+        try:
+            drain_result = _drain_child(
+                identity,
+                pidfd,
+                stdout_read,
+                stderr_read,
+                started_ns=invocation_started,
+                deadline_ns=invocation_deadline,
+                exclusion_provider=live_exclusions,
+                poisoned_descriptors=poisoned_descriptors,
+                private_root=self.private_root,
+            )
+        except BaseException as error:
+            drain_primary = error
+        if drain_primary is None and not pidfd.terminal:
+            drain_primary = ContractError("child drain returned with a live pidfd owner")
+        if not poisoned_descriptors and not self.private_root._opaque_close_uncertain:
+            try:
+                self.command_files.assert_unchanged()
+            except BaseException as command_error:
+                if drain_primary is not None:
+                    drain_primary.add_note(
+                        f"command-file reauthentication failed: {command_error!r}"
+                    )
+                else:
+                    drain_primary = command_error
+        else:
+            uncertainty_error = ContractError(
+                "descriptor close uncertainty skipped command-file reauthentication"
+            )
+            if drain_primary is not None:
+                drain_primary.add_note(str(uncertainty_error))
+            else:
+                drain_primary = uncertainty_error
+        if not pidfd.terminal:
+            closing_pidfd = pidfd.descriptor
+            try:
+                pidfd.close_once()
+            except BaseException as close_error:
+                if type(closing_pidfd) is int and closing_pidfd > 2:
+                    poisoned_descriptors.add(closing_pidfd)
+                if drain_primary is not None:
+                    drain_primary.add_note(f"pidfd close uncertainty: {close_error!r}")
+                else:
+                    drain_primary = close_error
+        if not child_root.fd.terminal:
+            closing_child_root = child_root.fd.descriptor
+            try:
+                child_root.fd.close_once()
+            except BaseException as root_error:
+                if type(closing_child_root) is int and closing_child_root > 2:
+                    poisoned_descriptors.add(closing_child_root)
+                if drain_primary is not None:
+                    drain_primary.add_note(f"spawn child-root close failed: {root_error!r}")
+                else:
+                    drain_primary = root_error
+        if drain_primary is not None:
+            raise drain_primary
+        _require(drain_result is not None, "child drain result is absent")
+        stdout, stderr, terminal, survivors, timed_out, elapsed = cast(
+            tuple[bytes, bytes, TerminalIdentity, int, bool, int],
+            drain_result,
+        )
+        exit_code = _decode_exit(terminal)
+        _require(not timed_out, "child timed out")
+        _require(elapsed <= timeout_ns, "child invocation exceeded its timeout")
+        _require(survivors == 0, "child initial group had survivors")
+        return ChildResult(process_pid, exit_code, stdout, stderr, elapsed, survivors)
+
+
+@dataclass(frozen=True)
+class GitIdentity:
+    event_name: str
+    candidate_relation: str
+    candidate_commit_sha: str
+    candidate_tree_sha: str
+    tested_checkout_commit_sha: str
+    tested_checkout_tree_sha: str
+    tested_checkout_parent_count: int
+    tested_checkout_second_parent_sha: str | None
+
+
+def _git_executable() -> Path:
+    raw = shutil.which("git", path=os.defpath)
+    _require(raw is not None, "deterministic Git executable is unavailable")
+    path = Path(cast(str, raw))
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError as error:
+        raise ContractError("git executable identity is unavailable") from error
+    status = resolved.stat(follow_symlinks=False)
+    _require(
+        stat.S_ISREG(status.st_mode)
+        and status.st_mode & 0o111 != 0
+        and status.st_mode & 0o022 == 0,
+        "Git executable attributes differ",
+    )
+    return resolved
+
+
+def _git_environment() -> dict[str, str]:
+    return {
+        "PATH": os.defpath,
+        "HOME": "/nonexistent/task064-ci-git-home",
+        "XDG_CONFIG_HOME": "/nonexistent/task064-ci-git-xdg",
+        "LANG": "C",
+        "LC_ALL": "C",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_COUNT": "0",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_NO_REPLACE_OBJECTS": "1",
+    }
+
+
+def _git_raw(
+    supervisor: ProcessSupervisor,
+    root: Path,
+    *arguments: str,
+    allowed_exit_codes: tuple[int, ...] = (0,),
+) -> tuple[bytes, int]:
+    _require(bool(arguments), "deterministic Git command is missing")
+    command = [
+        os.fspath(_git_executable()),
+        "--no-replace-objects",
+        "-C",
+        os.fspath(root),
+        *arguments,
+    ]
+    result = supervisor.run(
+        command,
+        cwd=root,
+        timeout_ns=60_000_000_000,
+        label="git",
+        base_environment=_git_environment(),
+    )
+    _require(result.exit_code in allowed_exit_codes, "git command failed")
+    _require(
+        len(result.stdout) <= 1_048_576 and len(result.stderr) <= 1_048_576,
+        "Git output exceeded its bound",
+    )
+    _require(result.stderr == b"", "git command emitted stderr")
+    return result.stdout, result.exit_code
+
+
+def _git_line(supervisor: ProcessSupervisor, root: Path, *arguments: str) -> str:
+    payload, _ = _git_raw(supervisor, root, *arguments)
+    _require(payload.endswith(b"\n") and payload.count(b"\n") == 1, "git line shape differs")
+    try:
+        return payload[:-1].decode("ascii")
+    except UnicodeDecodeError as error:
+        raise ContractError("git output is non-ASCII") from error
+
+
+def _git_object(
+    supervisor: ProcessSupervisor,
+    root: Path,
+    identity: str,
+    expected_type: str,
+) -> None:
+    _hex(identity, 40, "Git object identity")
+    actual = _git_line(supervisor, root, "cat-file", "-t", identity)
+    _require(actual == expected_type, "Git object type differs")
+
+
+def _git_clean(supervisor: ProcessSupervisor, root: Path) -> bool:
+    payload, _ = _git_raw(
+        supervisor,
+        root,
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+    )
+    return payload == b""
+
+
+def _git_identity(supervisor: ProcessSupervisor, root: Path) -> GitIdentity:
+    event = _ascii(os.environ.get("GITHUB_EVENT_NAME"), "GITHUB_EVENT_NAME")
+    _require(event in {"pull_request", "push", "workflow_dispatch"}, "unsupported GitHub event")
+    github_sha = _hex(os.environ.get("GITHUB_SHA"), 40, "GITHUB_SHA")
+    candidate = _hex(os.environ.get("TASK064_CANDIDATE_SHA"), 40, "TASK064_CANDIDATE_SHA")
+    _require(
+        _git_raw(
+            supervisor,
+            root,
+            "rev-parse",
+            "--path-format=absolute",
+            "--show-toplevel",
+        )[0]
+        == os.fsencode(root) + b"\n",
+        "Git top-level differs from the runner root",
+    )
+    shallow = _git_line(supervisor, root, "rev-parse", "--is-shallow-repository")
+    _require(shallow == "false", "shallow checkout is forbidden")
+    head = _hex(_git_line(supervisor, root, "rev-parse", "HEAD"), 40, "HEAD")
+    _require(head == github_sha, "tested HEAD differs from GITHUB_SHA")
+    _git_object(supervisor, root, head, "commit")
+    _git_object(supervisor, root, candidate, "commit")
+    parent_line = _git_line(supervisor, root, "rev-list", "--parents", "-n", "1", head)
+    parent_values = parent_line.split(" ")
+    _require(bool(parent_values) and parent_values[0] == head, "Git parent list differs")
+    parents = tuple(_hex(value, 40, "Git parent") for value in parent_values[1:])
+    if event == "pull_request":
+        _require(
+            len(parents) == 2 and parents[1] == candidate, "pull-request parent relation differs"
+        )
+        _, ancestry_exit = _git_raw(
+            supervisor,
+            root,
+            "merge-base",
+            "--is-ancestor",
+            candidate,
+            head,
+            allowed_exit_codes=(0, 1),
+        )
+        _require(ancestry_exit == 0, "candidate is not an ancestor of tested checkout")
+        relation = "SECOND_PARENT"
+        second_parent: str | None = candidate
+    else:
+        _require(head == candidate == github_sha, "self candidate relation differs")
+        relation = "SELF"
+        second_parent = None
+    tested_tree = _hex(
+        _git_line(supervisor, root, "rev-parse", f"{head}^{{tree}}"),
+        40,
+        "tested tree",
+    )
+    candidate_tree = _hex(
+        _git_line(supervisor, root, "rev-parse", f"{candidate}^{{tree}}"),
+        40,
+        "candidate tree",
+    )
+    _git_object(supervisor, root, tested_tree, "tree")
+    _git_object(supervisor, root, candidate_tree, "tree")
+    return GitIdentity(
+        event,
+        relation,
+        candidate,
+        candidate_tree,
+        head,
+        tested_tree,
+        len(parents),
+        second_parent,
+    )
+
+
+def _repo_root() -> Path:
+    root = Path(__file__).resolve(strict=True).parent.parent
+    _require((root / "pyproject.toml").is_file(), "repository root differs")
+    _require(Path.cwd().resolve(strict=True) == root, "runner must start at repository root")
+    return root
+
+
+def _file_bytes(
+    supervisor: ProcessSupervisor,
+    path: Path,
+    *,
+    expected_size: int,
+) -> bytes:
+    _require(path.is_absolute(), "required file path is not absolute")
+    _require(type(expected_size) is int and expected_size > 0, "required file size is invalid")
+    exclusions = (
+        supervisor.private_root.parent.fd.require(),
+        supervisor.private_root.root.fd.require(),
+        *(
+            child.fd.require()
+            for child in supervisor.private_root._children
+            if not child.fd.terminal
+        ),
+        *supervisor.command_files.live_descriptors(),
+    )
+    _require(len(exclusions) == len(set(exclusions)), "required-file descriptor ledger aliases")
+    payload = _read_bounded_file(
+        os.fspath(path),
+        limit=expected_size,
+        label=f"required file {path.name}",
+        excluded_descriptors=exclusions,
+        poisoned_descriptors=supervisor.private_root._poisoned_descriptors,
+        poison_sink=supervisor.private_root._poisoned_descriptors,
+    )
+    _require(len(payload) == expected_size, "required file size differs")
+    return payload
+
+
+def _runtime_preflight(root: Path, supervisor: ProcessSupervisor) -> tuple[str, str]:
+    _runtime_spawn_gate()
+    _require(sys.flags.optimize == 0 and "PYTHONOPTIMIZE" not in os.environ, "optimized Python")
+    for name in FORBIDDEN_ENV:
+        _require(name not in os.environ, f"inherited {name} is forbidden")
+    _require(
+        not any(name.startswith("GIT_") for name in os.environ),
+        "inherited Git control environment is forbidden",
+    )
+    python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    _require(python_version == "3.13.14", "Python version differs")
+    pytest_version = importlib.metadata.version("pytest")
+    _require(pytest_version == "9.1.1", "pytest version differs")
+    version_bytes = _file_bytes(supervisor, root / ".python-version", expected_size=5)
+    _require(
+        version_bytes == b"3.13\n" and _sha256(version_bytes) == PYTHON_VERSION_FILE_SHA256,
+        ".python-version identity differs",
+    )
+    lock_bytes = _file_bytes(supervisor, root / "uv.lock", expected_size=42_597)
+    _require(_sha256(lock_bytes) == UV_LOCK_SHA256, "uv.lock identity differs")
+    fixture_hashes = {
+        "schema.sql": (
+            22_324,
+            "1263b831a3e73bfc730beef6df7df48fce0e3654aa806672650de9f40b8a3e37",
+        ),
+        "schema_descriptor.json": (
+            32_554,
+            "bb33dc9cb549be484c5dc7855abace6d851682e50883e51919a9169cdaae431a",
+        ),
+        "schema_fingerprint.txt": (
+            72,
+            "8a2508de6e018c67e9b18393cb0a5517cef3bea5df785bf432299a49a2a12ef8",
+        ),
+    }
+    fixture_root = root / "tests/fixtures/continuous_public_trade_stream_store/v1"
+    for name, (expected_size, expected_hash) in fixture_hashes.items():
+        _require(
+            _sha256(
+                _file_bytes(
+                    supervisor,
+                    fixture_root / name,
+                    expected_size=expected_size,
+                )
+            )
+            == expected_hash,
+            f"{name} identity differs",
+        )
+    return python_version, pytest_version
+
+
+def _node_list(value: object, label: str) -> list[str]:
+    _require(type(value) is list, f"{label} is not an exact list")
+    result: list[str] = []
+    for item in cast(list[object], value):
+        node = _ascii(item, label)
+        _require(node != "" and len(node.encode("ascii")) <= 308, f"invalid {label}")
+        result.append(node)
+    _require(len(result) == len(set(result)), f"duplicate {label}")
+    return result
+
+
+def _validate_common_observation(
+    packet: dict[str, object],
+    *,
+    nonce: str,
+    child: ChildResult,
+) -> None:
+    _require(_hex(packet["nonce"], 64, "observation nonce") == nonce, "observation nonce differs")
+    _require(
+        _integer(packet["observer_pid"], "observer PID", minimum=1) == child.pid,
+        "observer PID differs",
+    )
+    _require(
+        _integer(packet["observer_parent_pid"], "observer parent PID", minimum=1) == os.getpid(),
+        "observer parent PID differs",
+    )
+    _require(_integer(packet["pytest_exitstatus"], "pytest exitstatus") == 0, "pytest exit differs")
+    _require(child.exit_code == 0, "pytest child exit differs")
+    for name in (
+        "collect_failed_count",
+        "collect_skipped_count",
+        "interrupted_count",
+        "internal_error_count",
+        "worker_indicator_count",
+        "surviving_non_main_thread_count",
+    ):
+        _require(_integer(packet[name], name) == 0, f"{name} differs")
+    _require(packet["deselected_nodes"] == [], "pytest deselected nodes")
+    _require(
+        packet["external_plugins"] == EXPECTED_EXTERNAL_PLUGINS, "external plugin inventory differs"
+    )
+
+
+COLLECTION_KEYS: Final = (
+    "domain",
+    "nonce",
+    "observer_pid",
+    "observer_parent_pid",
+    "pytest_exitstatus",
+    "collect_failed_count",
+    "collect_skipped_count",
+    "deselected_nodes",
+    "interrupted_count",
+    "internal_error_count",
+    "external_plugins",
+    "worker_indicator_count",
+    "surviving_non_main_thread_count",
+    "nodes",
+)
+EXECUTION_KEYS: Final = (
+    "domain",
+    "nonce",
+    "observer_pid",
+    "observer_parent_pid",
+    "shard_id",
+    "pytest_exitstatus",
+    "collect_failed_count",
+    "collect_skipped_count",
+    "deselected_nodes",
+    "interrupted_count",
+    "internal_error_count",
+    "external_plugins",
+    "worker_indicator_count",
+    "surviving_non_main_thread_count",
+    "unknown_report_count",
+    "assigned_nodes",
+    "collected_nodes",
+    "started_nodes",
+    "finished_nodes",
+    "reports",
+)
+
+
+def _validate_collection(
+    packet: dict[str, object],
+    *,
+    nonce: str,
+    child: ChildResult,
+) -> tuple[str, ...]:
+    _exact_keys(packet, COLLECTION_KEYS, "collection observation")
+    _require(
+        packet["domain"] == "TASK064-CI-COLLECTION-OBSERVATION-V1", "collection domain differs"
+    )
+    _validate_common_observation(packet, nonce=nonce, child=child)
+    nodes = _node_list(packet["nodes"], "collection node")
+    _require(len(nodes) == FULL_MANIFEST_COUNT, "full collection count differs")
+    return tuple(nodes)
+
+
+@dataclass(frozen=True)
+class Shard:
+    shard_id: str
+    nodes: tuple[str, ...]
+    canonical: bytes
+    sha256: str
+    selector_bytes: int
+
+
+def _selector_vector_bytes(nodes: Sequence[str]) -> int:
+    _require(type(nodes) in {tuple, list}, "selector vector is not an exact sequence")
+    selector_bytes = 0
+    for node in nodes:
+        _require(type(node) is str, "selector node is not an exact string")
+        encoded = os.fsencode(node)
+        _require(
+            b"\x00" not in encoded and len(encoded) + 1 <= MAX_ARG_BYTES_WITH_NUL,
+            "argv string cap",
+        )
+        selector_bytes += len(encoded) + 1
+    _require(selector_bytes <= MAX_ARG_BYTES_WITH_NUL, "selector vector exceeds its byte cap")
+    return selector_bytes
+
+
+def _validate_shard_partition(
+    nodes: tuple[str, ...],
+    members: dict[str, tuple[str, ...]],
+) -> None:
+    _require(tuple(members) == SHARD_IDS, "shard identity inventory differs")
+    _require(all(members[shard_id] for shard_id in SHARD_IDS), "empty shard")
+    union: set[str] = set()
+    for shard_id in SHARD_IDS:
+        shard_nodes = members[shard_id]
+        _require(
+            type(shard_nodes) is tuple and all(type(node) is str for node in shard_nodes),
+            "shard identity inventory differs",
+        )
+        _require(
+            len(shard_nodes) == len(set(shard_nodes)) and not union.intersection(shard_nodes),
+            "shards overlap",
+        )
+        union.update(shard_nodes)
+    _require(union == set(nodes), "shard identity inventory differs")
+    _require(
+        all(len(members[shard_id]) == SHARD_EXPECTATIONS[shard_id].count for shard_id in SHARD_IDS),
+        "shard identity inventory differs",
+    )
+    for shard_id in SHARD_IDS:
+        shard_nodes = members[shard_id]
+        shard_members = set(shard_nodes)
+        _require(
+            shard_nodes == tuple(node for node in nodes if node in shard_members),
+            "shard execution order differs",
+        )
+
+
+def _partition_shard_id(node: str) -> str:
+    if node == REPORT_NODE:
+        return "report"
+    bucket = int.from_bytes(hashlib.sha256(node.encode("ascii")).digest()[:8], "big") % 4
+    return f"remainder-{bucket}"
+
+
+def _validate_shard_artifact(shard: Shard) -> None:
+    _require(
+        type(shard) is Shard and shard.shard_id in SHARD_EXPECTATIONS,
+        "shard artifact identity differs",
+    )
+    expected = SHARD_EXPECTATIONS[shard.shard_id]
+    packet = _decode_canonical(
+        shard.canonical,
+        limit=FULL_MANIFEST_BYTES,
+        label=f"{shard.shard_id} shard packet",
+    )
+    _exact_keys(
+        packet,
+        ("domain", "full_manifest_sha256", "shard_id", "nodes"),
+        f"{shard.shard_id} shard packet",
+    )
+    _require(
+        packet["domain"] == "TASK064-NODE-SHARD-V1"
+        and packet["full_manifest_sha256"] == FULL_MANIFEST_SHA256
+        and packet["shard_id"] == shard.shard_id
+        and packet["nodes"] == sorted(shard.nodes, key=lambda value: value.encode("ascii")),
+        f"{shard.shard_id} canonical packet differs",
+    )
+    _require(
+        len(shard.nodes) == expected.count
+        and len(shard.canonical) == expected.canonical_bytes
+        and shard.sha256 == expected.sha256
+        and _sha256(shard.canonical) == expected.sha256
+        and shard.selector_bytes == expected.selector_bytes
+        and shard.selector_bytes <= MAX_ARG_BYTES_WITH_NUL,
+        f"{shard.shard_id} identity differs",
+    )
+
+
+def _manifest_and_shards(nodes: tuple[str, ...]) -> tuple[bytes, dict[str, Shard]]:
+    _require(len(nodes) == FULL_MANIFEST_COUNT, "manifest nodes differ")
+    _require(nodes.count(REPORT_NODE) == 1, "report node cardinality differs")
+    _require(len(set(nodes)) == len(nodes), "manifest nodes differ")
+    sorted_nodes = sorted(nodes, key=lambda value: value.encode("ascii"))
+    manifest_packet: dict[str, object] = {
+        "domain": "TASK064-NODE-MANIFEST-V1",
+        "nodes": sorted_nodes,
+    }
+    manifest = _canonical_bytes(manifest_packet, limit=FULL_MANIFEST_BYTES)
+    _require(
+        len(manifest) == FULL_MANIFEST_BYTES and _sha256(manifest) == FULL_MANIFEST_SHA256,
+        "full manifest identity differs",
+    )
+    members: dict[str, list[str]] = {shard_id: [] for shard_id in SHARD_IDS}
+    for node in nodes:
+        members[_partition_shard_id(node)].append(node)
+    exact_members = {shard_id: tuple(members[shard_id]) for shard_id in SHARD_IDS}
+    _validate_shard_partition(nodes, exact_members)
+    shards: dict[str, Shard] = {}
+    for shard_id in SHARD_IDS:
+        execution_nodes = exact_members[shard_id]
+        sorted_shard_nodes = sorted(execution_nodes, key=lambda value: value.encode("ascii"))
+        packet: dict[str, object] = {
+            "domain": "TASK064-NODE-SHARD-V1",
+            "full_manifest_sha256": FULL_MANIFEST_SHA256,
+            "shard_id": shard_id,
+            "nodes": sorted_shard_nodes,
+        }
+        canonical = _canonical_bytes(packet, limit=FULL_MANIFEST_BYTES)
+        selector_bytes = _selector_vector_bytes(execution_nodes)
+        shard = Shard(
+            shard_id,
+            execution_nodes,
+            canonical,
+            _sha256(canonical),
+            selector_bytes,
+        )
+        _validate_shard_artifact(shard)
+        shards[shard_id] = shard
+    return manifest, shards
+
+
+def _sequence_sha256(nodes: Sequence[str]) -> str:
+    packet: dict[str, object] = {
+        "domain": "TASK064-NODE-SEQUENCE-V1",
+        "nodes": list(nodes),
+    }
+    return _sha256(_canonical_bytes(packet, limit=FULL_MANIFEST_BYTES))
+
+
+def _validate_execution(
+    packet: dict[str, object],
+    *,
+    nonce: str,
+    child: ChildResult,
+    shard: Shard,
+    observer_shard_id: str,
+) -> tuple[dict[str, int], dict[str, str], dict[str, int]]:
+    _exact_keys(packet, EXECUTION_KEYS, "execution observation")
+    _require(packet["domain"] == "TASK064-CI-EXECUTION-OBSERVATION-V1", "execution domain differs")
+    _validate_common_observation(packet, nonce=nonce, child=child)
+    _require(packet["shard_id"] == observer_shard_id, "execution observer shard differs")
+    _require(
+        _integer(packet["unknown_report_count"], "unknown report count") == 0, "unknown report"
+    )
+    assigned = _node_list(packet["assigned_nodes"], "assigned node")
+    collected = _node_list(packet["collected_nodes"], "collected node")
+    started = _node_list(packet["started_nodes"], "started node")
+    finished = _node_list(packet["finished_nodes"], "finished node")
+    expected = list(shard.nodes)
+    _require(assigned == expected, "assigned sequence differs")
+    _require(collected == expected, "collected sequence differs")
+    _require(started == expected, "started sequence differs")
+    _require(finished == expected, "finished sequence differs")
+    raw_reports = packet["reports"]
+    _require(type(raw_reports) is list, "execution reports are not a list")
+    reports = cast(list[object], raw_reports)
+    _require(len(reports) == len(expected) * 3, "execution report cardinality differs")
+    report_index = 0
+    for node in expected:
+        for when in ("setup", "call", "teardown"):
+            raw = reports[report_index]
+            report_index += 1
+            _require(
+                type(raw) is list and len(cast(list[object], raw)) == 4, "report shape differs"
+            )
+            values = cast(list[object], raw)
+            _require(_ascii(values[0], "report node") == node, "report node differs")
+            _require(_ascii(values[1], "report phase") == when, "report phase differs")
+            _require(_ascii(values[2], "report outcome") == "passed", "report outcome differs")
+            _require(_boolean(values[3], "report wasxfail") is False, "report xfail differs")
+    count = len(expected)
+    counts = {
+        "assigned": count,
+        "collected": count,
+        "started": count,
+        "finished": count,
+        "setup_passed": count,
+        "call_passed": count,
+        "teardown_passed": count,
+    }
+    sequence = {
+        "assigned": _sequence_sha256(assigned),
+        "collected": _sequence_sha256(collected),
+        "started": _sequence_sha256(started),
+        "finished": _sequence_sha256(finished),
+    }
+    _require(len(set(sequence.values())) == 1, "execution sequence digests differ")
+    anomalies = {
+        "unknown": 0,
+        "duplicate": 0,
+        "failed": 0,
+        "error": 0,
+        "skipped": 0,
+        "xfailed": 0,
+        "xpassed": 0,
+        "deselected": 0,
+        "interrupted": 0,
+        "unaccounted": 0,
+    }
+    return counts, sequence, anomalies
+
+
+PROOF_OBSERVATION_KEYS: Final = (
+    "domain",
+    "nonce",
+    "observer_pid",
+    "observer_parent_pid",
+    "mode",
+    "node_id",
+    "contract_generation",
+    "contract_sha256",
+    "publication_status",
+    "output_bytes",
+    "output_sha256",
+    "cache_state_at_assertion",
+    "cache_state_after_teardown",
+    "cache_teardown_completed",
+    "receipt_consumed",
+    "final_file_present",
+    "stage_residue_count",
+    "status",
+)
+
+
+def _validate_proof_observation(
+    packet: dict[str, object],
+    *,
+    nonce: str,
+    child: ChildResult,
+    mode: str,
+) -> dict[str, object]:
+    _exact_keys(packet, PROOF_OBSERVATION_KEYS, "proof observation")
+    _require(packet["domain"] == "TASK064-REPORT-PROOF-OBSERVATION-V1", "proof domain differs")
+    _require(_hex(packet["nonce"], 64, "proof nonce") == nonce, "proof nonce differs")
+    _require(
+        _integer(packet["observer_pid"], "proof PID", minimum=1) == child.pid, "proof PID differs"
+    )
+    _require(
+        _integer(packet["observer_parent_pid"], "proof parent PID", minimum=1) == os.getpid(),
+        "proof parent PID differs",
+    )
+    _require(packet["mode"] == mode and packet["node_id"] == REPORT_NODE, "proof mode/node differs")
+    _require(
+        _integer(packet["contract_generation"], "proof contract generation") == CONTRACT_GENERATION
+        and packet["contract_sha256"] == CONTRACT_SHA256,
+        "proof contract binding differs",
+    )
+    _require(packet["cache_state_after_teardown"] == "EMPTY", "proof teardown state differs")
+    _require(
+        _boolean(packet["cache_teardown_completed"], "proof teardown completed"),
+        "proof teardown missing",
+    )
+    _require(_integer(packet["stage_residue_count"], "proof stage residue") == 0, "proof residue")
+    _require(packet["status"] == "PASS", "proof status differs")
+    publication = _ascii(packet["publication_status"], "proof publication status")
+    receipt_consumed = _boolean(packet["receipt_consumed"], "proof receipt consumed")
+    final_present = _boolean(packet["final_file_present"], "proof final present")
+    asserted = _ascii(packet["cache_state_at_assertion"], "proof asserted state")
+    if mode in {"primed-full", "unprimed-success"}:
+        output_bytes = _integer(packet["output_bytes"], "proof output bytes", minimum=1)
+        output_sha = _hex(packet["output_sha256"], 64, "proof output sha256")
+        _require(
+            publication == "PUBLISHED"
+            and asserted == "EMPTY"
+            and receipt_consumed
+            and final_present,
+            "successful proof facts differ",
+        )
+    else:
+        output_bytes = None
+        output_sha = None
+        expected_asserted = "READY" if mode == "ready-teardown" else "EMPTY"
+        _require(
+            publication == "NONE"
+            and packet["output_bytes"] is None
+            and packet["output_sha256"] is None
+            and asserted == expected_asserted
+            and not receipt_consumed
+            and not final_present,
+            "nonpublication proof facts differ",
+        )
+    return {
+        "publication_status": publication,
+        "output_bytes": output_bytes,
+        "output_sha256": output_sha,
+        "cache_state_at_assertion": asserted,
+        "cache_state_after_teardown": "EMPTY",
+        "cache_teardown_completed": True,
+        "receipt_consumed": receipt_consumed,
+        "final_file_present": final_present,
+        "stage_residue_count": 0,
+    }
+
+
+def _observation_identities_distinct(
+    observations: Sequence[ObservationOwner],
+    command_files: CommandFiles,
+    private_root: PrivateRoot,
+    child_root: DirectoryOwner,
+) -> None:
+    descriptors = [item.fd.require() for item in observations]
+    descriptors.extend(command_files.live_descriptors())
+    descriptors.extend(
+        [
+            private_root.parent.fd.require(),
+            private_root.root.fd.require(),
+            child_root.fd.require(),
+        ]
+    )
+    _require(len(descriptors) == len(set(descriptors)), "observation descriptor number aliases")
+    identities = [
+        (snapshot.device, snapshot.inode, snapshot.mode)
+        for snapshot in (_snapshot_fd(descriptor) for descriptor in descriptors)
+    ]
+    _require(len(identities) == len(set(identities)), "observation descriptor identity aliases")
+
+
+def _pytest_prefix(
+    child_root: DirectoryOwner,
+    *,
+    phase: str,
+    nonce: str,
+    observation_fd: int,
+    shard_id: str | None,
+    proof_mode: str | None,
+    proof_nonce: str | None,
+    proof_fd: int | None,
+) -> list[str]:
+    arguments = [sys.executable, "-m", "pytest"]
+    if phase == "collect":
+        arguments.append("--collect-only")
+    arguments.extend(
+        [
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            f"--basetemp={child_root.path / f'{phase}-basetemp'}",
+            f"--task064-ci-phase={phase}",
+            f"--task064-ci-nonce={nonce}",
+            f"--task064-ci-observation-fd={observation_fd}",
+        ]
+    )
+    if shard_id is not None:
+        arguments.append(f"--task064-ci-shard-id={shard_id}")
+    if proof_mode is not None:
+        _require(proof_nonce is not None and proof_fd is not None, "proof argv is incomplete")
+        arguments.extend(
+            [
+                f"--task064-report-proof-mode={proof_mode}",
+                f"--task064-report-proof-nonce={proof_nonce}",
+                f"--task064-report-proof-observation-fd={proof_fd}",
+            ]
+        )
+    return arguments
+
+
+@dataclass(frozen=True)
+class ObservedPytest:
+    child: ChildResult
+    nonce: str
+    observation: dict[str, object]
+    observation_bytes: bytes
+    proof_nonce: str | None
+    proof: dict[str, object] | None
+    proof_bytes: bytes | None
+
+
+@dataclass
+class NonceLedger:
+    values: dict[str, str]
+
+    @classmethod
+    def empty(cls) -> NonceLedger:
+        return cls({})
+
+    def issue(self, label: str) -> str:
+        exact_label = _ascii(label, "nonce label")
+        _require(exact_label not in self.values, "nonce label was issued twice")
+        nonce = _hex(secrets.token_hex(32), 64, f"{exact_label} nonce")
+        _require(nonce not in self.values.values(), "issued TASK-064 nonce was not fresh")
+        self.values[exact_label] = nonce
+        return nonce
+
+    def prove(self, labels: tuple[str, ...]) -> None:
+        _require(tuple(self.values) == labels, "issued TASK-064 nonce labels differ")
+        _require(len(set(self.values.values())) == len(labels), "TASK-064 nonces are not unique")
+
+
+def _run_pytest_observed(
+    supervisor: ProcessSupervisor,
+    root: Path,
+    *,
+    phase: str,
+    shard_id: str | None,
+    nodes: Sequence[str],
+    nonce_ledger: NonceLedger,
+    nonce_label: str,
+    proof_mode: str | None = None,
+    timeout_ns: int,
+) -> ObservedPytest:
+    child_root = supervisor.private_root.create_child(f"pytest-{phase}-{shard_id or 'all'}")
+    observations: list[ObservationOwner] = []
+    try:
+        observation_limit = OBSERVATION_LIMITS["collection" if phase == "collect" else "execution"]
+        observation = supervisor.private_root.create_observation(
+            child_root,
+            label=f"{phase} observation",
+            limit=observation_limit,
+        )
+        observations.append(observation)
+        proof_observation: ObservationOwner | None = None
+        if proof_mode is not None:
+            proof_observation = supervisor.private_root.create_observation(
+                child_root,
+                label="proof observation",
+                limit=OBSERVATION_LIMITS["proof"],
+            )
+            observations.append(proof_observation)
+        _observation_identities_distinct(
+            observations,
+            supervisor.command_files,
+            supervisor.private_root,
+            child_root,
+        )
+        nonce = nonce_ledger.issue(f"{nonce_label}-ci")
+        proof_nonce = nonce_ledger.issue(f"{nonce_label}-proof") if proof_mode is not None else None
+        arguments = _pytest_prefix(
+            child_root,
+            phase=phase,
+            nonce=nonce,
+            observation_fd=observation.fd.require(),
+            shard_id=shard_id,
+            proof_mode=proof_mode,
+            proof_nonce=proof_nonce,
+            proof_fd=proof_observation.fd.require() if proof_observation is not None else None,
+        )
+        arguments.extend(nodes)
+        pass_fds = tuple(item.fd.require() for item in observations)
+        child = supervisor.run(
+            arguments,
+            cwd=root,
+            pass_fds=pass_fds,
+            timeout_ns=timeout_ns,
+            label=f"pytest-{phase}",
+            child_root=child_root,
+        )
+        observation_packet, observation_bytes = _read_observation(
+            observation,
+            poison_sink=supervisor.private_root._poisoned_descriptors,
+        )
+        proof_packet: dict[str, object] | None = None
+        proof_bytes: bytes | None = None
+        if proof_observation is not None:
+            proof_packet, proof_bytes = _read_observation(
+                proof_observation,
+                poison_sink=supervisor.private_root._poisoned_descriptors,
+            )
+        return ObservedPytest(
+            child,
+            nonce,
+            observation_packet,
+            observation_bytes,
+            proof_nonce,
+            proof_packet,
+            proof_bytes,
+        )
+    except BaseException as primary:
+        poison_sink = supervisor.private_root._poisoned_descriptors
+        close_failures = _close_independent(
+            (item.fd for item in observations), poison_sink=poison_sink
+        )
+        if close_failures:
+            primary.add_note(f"observation close uncertainties: {close_failures!r}")
+        if not child_root.fd.terminal:
+            closing_child_root = child_root.fd.descriptor
+            try:
+                child_root.fd.close_once()
+            except BaseException as root_error:
+                if type(closing_child_root) is int and closing_child_root > 2:
+                    poison_sink.add(closing_child_root)
+                primary.add_note(f"pytest child-root close uncertainty: {root_error!r}")
+        raise primary
+
+
+def _transport_lines(prefix: str, packet: bytes) -> bytes:
+    name = _ascii(prefix, "transport prefix")
+    digest = _sha256(packet)
+    encoded = base64.b64encode(packet).decode("ascii")
+    return (f"{name}_b64={encoded}\n{name}_sha256={digest}\n").encode("ascii")
+
+
+def _emit_stdout(payload: bytes) -> None:
+    _require(type(payload) is bytes and payload != b"", "stdout payload is invalid")
+    offset = 0
+    while offset < len(payload):
+        try:
+            written = os.write(1, payload[offset:])
+        except OSError as error:
+            raise ContractError("stdout publication failed") from error
+        _require(
+            type(written) is int and 0 < written <= len(payload) - offset, "stdout write differs"
+        )
+        offset += written
+
+
+def _shard_result_packet(
+    *,
+    shard: Shard,
+    git: GitIdentity,
+    python_version: str,
+    pytest_version: str,
+    collection: ChildResult,
+    execution: ChildResult,
+    counts: dict[str, int],
+    sequence: dict[str, str],
+    anomalies: dict[str, int],
+    report_output_bytes: int | None,
+    report_output_sha256: str | None,
+) -> bytes:
+    _require(
+        collection.exit_code == 0
+        and execution.exit_code == 0
+        and type(collection.elapsed_ns) is int
+        and 0 <= collection.elapsed_ns <= COLLECTION_TIMEOUT_NS
+        and type(execution.elapsed_ns) is int
+        and 0 <= execution.elapsed_ns <= EXECUTION_TIMEOUT_NS
+        and collection.survivor_count == 0
+        and execution.survivor_count == 0,
+        "shard child completion facts exceed the frozen limits",
+    )
+    packet: dict[str, object] = {
+        "domain": "TASK064-CI-SHARD-RESULT-V1",
+        "shard_id": shard.shard_id,
+        "contract_generation": CONTRACT_GENERATION,
+        "contract_sha256": CONTRACT_SHA256,
+        "event_name": git.event_name,
+        "candidate_relation": git.candidate_relation,
+        "candidate_commit_sha": git.candidate_commit_sha,
+        "candidate_tree_sha": git.candidate_tree_sha,
+        "tested_checkout_commit_sha": git.tested_checkout_commit_sha,
+        "tested_checkout_tree_sha": git.tested_checkout_tree_sha,
+        "tested_checkout_parent_count": git.tested_checkout_parent_count,
+        "tested_checkout_second_parent_sha": git.tested_checkout_second_parent_sha,
+        "python_version": python_version,
+        "pytest_version": pytest_version,
+        "python_version_file_sha256": PYTHON_VERSION_FILE_SHA256,
+        "uv_lock_sha256": UV_LOCK_SHA256,
+        "full_manifest_count": FULL_MANIFEST_COUNT,
+        "full_manifest_bytes": FULL_MANIFEST_BYTES,
+        "full_manifest_sha256": FULL_MANIFEST_SHA256,
+        "partition_status": "PASS",
+        "shard_manifest_count": len(shard.nodes),
+        "shard_manifest_bytes": len(shard.canonical),
+        "shard_manifest_sha256": shard.sha256,
+        "selector_bytes_including_nul": shard.selector_bytes,
+        "report_output_bytes": report_output_bytes,
+        "report_output_sha256": report_output_sha256,
+        "counts": counts,
+        "sequence_sha256": sequence,
+        "anomalies": anomalies,
+        "collection_exit_code": collection.exit_code,
+        "test_exit_code": execution.exit_code,
+        "collection_elapsed_ns": collection.elapsed_ns,
+        "test_elapsed_ns": execution.elapsed_ns,
+        "pre_clean": True,
+        "post_clean": True,
+        "cleanup_status": "PASS",
+        "survivor_count": execution.survivor_count,
+        "status": "PASS",
+    }
+    return _canonical_bytes(packet, limit=SHARD_RESULT_LIMIT)
+
+
+def _proof_result_packet(
+    *,
+    mode: str,
+    git: GitIdentity,
+    execution: ChildResult,
+    proof: dict[str, object],
+    proof_bytes: bytes,
+) -> bytes:
+    _require(
+        execution.exit_code == 0
+        and type(execution.elapsed_ns) is int
+        and 0 <= execution.elapsed_ns <= EXECUTION_TIMEOUT_NS
+        and execution.survivor_count == 0,
+        "proof child completion facts exceed the frozen limits",
+    )
+    packet: dict[str, object] = {
+        "domain": "TASK064-REPORT-PROOF-RESULT-V1",
+        "mode": mode,
+        "contract_generation": CONTRACT_GENERATION,
+        "contract_sha256": CONTRACT_SHA256,
+        "candidate_commit_sha": git.candidate_commit_sha,
+        "candidate_tree_sha": git.candidate_tree_sha,
+        "tested_checkout_commit_sha": git.tested_checkout_commit_sha,
+        "tested_checkout_tree_sha": git.tested_checkout_tree_sha,
+        "node_id": REPORT_NODE,
+        "observation_sha256": _sha256(proof_bytes),
+        "publication_status": proof["publication_status"],
+        "output_bytes": proof["output_bytes"],
+        "output_sha256": proof["output_sha256"],
+        "cache_state_at_assertion": proof["cache_state_at_assertion"],
+        "cache_state_after_teardown": proof["cache_state_after_teardown"],
+        "cache_teardown_completed": proof["cache_teardown_completed"],
+        "receipt_consumed": proof["receipt_consumed"],
+        "final_file_present": proof["final_file_present"],
+        "stage_residue_count": proof["stage_residue_count"],
+        "test_exit_code": execution.exit_code,
+        "test_elapsed_ns": execution.elapsed_ns,
+        "cleanup_status": "PASS",
+        "survivor_count": execution.survivor_count,
+        "status": "PASS",
+    }
+    return _canonical_bytes(packet, limit=PROOF_RESULT_LIMIT)
+
+
+def _close_failure_resources(
+    private_root: PrivateRoot | None,
+    command_files: CommandFiles | None,
+) -> None:
+    errors: list[str] = []
+    if private_root is not None and not private_root._cleaned:
+        try:
+            cleanup = private_root.cleanup()
+            if cleanup.status != "PASS":
+                errors.append("private-root cleanup")
+        except BaseException:
+            errors.append("private-root cleanup")
+    if command_files is not None and not command_files._published:
+        try:
+            command_files.close_without_publication()
+        except BaseException:
+            errors.append("command-file cleanup")
+    if errors:
+        raise ContractError(f"failure cleanup uncertainty: {errors!r}")
+
+
+def _run_shard(shard_id: str) -> None:
+    _require(shard_id in SHARD_IDS, "invalid shard ID")
+    root = _repo_root()
+    private_root: PrivateRoot | None = None
+    command_files: CommandFiles | None = None
+    primary: BaseException | None = None
+    result_payload: bytes | None = None
+    try:
+        private_root = PrivateRoot()
+        command_files = CommandFiles(private_root)
+        supervisor = ProcessSupervisor(private_root, command_files)
+        nonce_ledger = NonceLedger.empty()
+        python_version, pytest_version = _runtime_preflight(root, supervisor)
+        pre_clean = _git_clean(supervisor, root)
+        _require(pre_clean, "checkout is not clean before collection")
+        git = _git_identity(supervisor, root)
+        collection_run = _run_pytest_observed(
+            supervisor,
+            root,
+            phase="collect",
+            shard_id=None,
+            nodes=(),
+            nonce_ledger=nonce_ledger,
+            nonce_label="collection",
+            timeout_ns=COLLECTION_TIMEOUT_NS,
+        )
+        nodes = _validate_collection(
+            collection_run.observation,
+            nonce=collection_run.nonce,
+            child=collection_run.child,
+        )
+        _require(_git_clean(supervisor, root), "checkout changed during collection")
+        _require(
+            _git_identity(supervisor, root) == git,
+            "Git identity changed between collection and execution",
+        )
+        _, shards = _manifest_and_shards(nodes)
+        shard = shards[shard_id]
+        proof_mode = "primed-full" if shard_id == "report" else None
+        execution_run = _run_pytest_observed(
+            supervisor,
+            root,
+            phase="execute",
+            shard_id=shard_id,
+            nodes=shard.nodes,
+            nonce_ledger=nonce_ledger,
+            nonce_label="execute",
+            proof_mode=proof_mode,
+            timeout_ns=EXECUTION_TIMEOUT_NS,
+        )
+        expected_nonce_labels = (
+            ("collection-ci", "execute-ci", "execute-proof")
+            if proof_mode is not None
+            else ("collection-ci", "execute-ci")
+        )
+        nonce_ledger.prove(expected_nonce_labels)
+        counts, sequence, anomalies = _validate_execution(
+            execution_run.observation,
+            nonce=execution_run.nonce,
+            child=execution_run.child,
+            shard=shard,
+            observer_shard_id=shard_id,
+        )
+        report_bytes: int | None = None
+        report_sha: str | None = None
+        if proof_mode is not None:
+            proof_packet = execution_run.proof
+            proof_packet_bytes = execution_run.proof_bytes
+            proof_packet_nonce = execution_run.proof_nonce
+            if proof_packet is None or proof_packet_bytes is None:
+                raise ContractError("report shard proof is absent")
+            if proof_packet_nonce is None:
+                raise ContractError("report proof nonce is absent")
+            proof = _validate_proof_observation(
+                proof_packet,
+                nonce=proof_packet_nonce,
+                child=execution_run.child,
+                mode=proof_mode,
+            )
+            report_bytes = cast(int, proof["output_bytes"])
+            report_sha = cast(str, proof["output_sha256"])
+        post_clean = _git_clean(supervisor, root)
+        _require(post_clean, "checkout is not clean after execution")
+        _require(
+            _git_identity(supervisor, root) == git,
+            "Git identity changed before shard publication",
+        )
+        command_files.assert_unchanged()
+        cleanup = private_root.cleanup()
+        _require(
+            cleanup.status == "PASS" and cleanup.residue_count == 0, "private-root cleanup failed"
+        )
+        result_payload = _shard_result_packet(
+            shard=shard,
+            git=git,
+            python_version=python_version,
+            pytest_version=pytest_version,
+            collection=collection_run.child,
+            execution=execution_run.child,
+            counts=counts,
+            sequence=sequence,
+            anomalies=anomalies,
+            report_output_bytes=report_bytes,
+            report_output_sha256=report_sha,
+        )
+        transport = _transport_lines("task064_packet", result_payload)
+        if command_files.enabled:
+            command_files.publish(transport)
+        else:
+            command_files.close_without_publication()
+            _emit_stdout(transport)
+    except BaseException as error:
+        primary = error
+    if primary is not None:
+        try:
+            _close_failure_resources(private_root, command_files)
+        except BaseException as cleanup_error:
+            primary.add_note(f"runner failure cleanup failed: {cleanup_error!r}")
+        raise primary
+    _require(result_payload is not None, "shard result was not constructed")
+
+
+def _frozen_report_shard() -> Shard:
+    expected = SHARD_EXPECTATIONS["report"]
+    packet: dict[str, object] = {
+        "domain": "TASK064-NODE-SHARD-V1",
+        "full_manifest_sha256": FULL_MANIFEST_SHA256,
+        "shard_id": "report",
+        "nodes": [REPORT_NODE],
+    }
+    canonical = _canonical_bytes(packet, limit=FULL_MANIFEST_BYTES)
+    _require(
+        len(canonical) == expected.canonical_bytes and _sha256(canonical) == expected.sha256,
+        "frozen report shard differs",
+    )
+    return Shard("report", (REPORT_NODE,), canonical, expected.sha256, expected.selector_bytes)
+
+
+def _run_report_proof(mode: str) -> None:
+    _require(mode in REPORT_PROOF_MODES, "invalid report proof mode")
+    root = _repo_root()
+    private_root: PrivateRoot | None = None
+    command_files: CommandFiles | None = None
+    primary: BaseException | None = None
+    try:
+        private_root = PrivateRoot()
+        command_files = CommandFiles(private_root)
+        supervisor = ProcessSupervisor(private_root, command_files)
+        nonce_ledger = NonceLedger.empty()
+        _runtime_preflight(root, supervisor)
+        _require(_git_clean(supervisor, root), "checkout is not clean before proof")
+        git = _git_identity(supervisor, root)
+        observer_shard_id = f"report-proof-{mode}"
+        execution = _run_pytest_observed(
+            supervisor,
+            root,
+            phase="execute",
+            shard_id=observer_shard_id,
+            nodes=(REPORT_NODE,),
+            nonce_ledger=nonce_ledger,
+            nonce_label="proof",
+            proof_mode=mode,
+            timeout_ns=EXECUTION_TIMEOUT_NS,
+        )
+        nonce_ledger.prove(("proof-ci", "proof-proof"))
+        shard = _frozen_report_shard()
+        _validate_execution(
+            execution.observation,
+            nonce=execution.nonce,
+            child=execution.child,
+            shard=shard,
+            observer_shard_id=observer_shard_id,
+        )
+        proof_observation = execution.proof
+        proof_observation_bytes = execution.proof_bytes
+        proof_observation_nonce = execution.proof_nonce
+        if proof_observation is None or proof_observation_bytes is None:
+            raise ContractError("proof packet absent")
+        if proof_observation_nonce is None:
+            raise ContractError("proof nonce is absent")
+        proof = _validate_proof_observation(
+            proof_observation,
+            nonce=proof_observation_nonce,
+            child=execution.child,
+            mode=mode,
+        )
+        _require(_git_clean(supervisor, root), "checkout is not clean after proof")
+        _require(
+            _git_identity(supervisor, root) == git,
+            "Git identity changed before proof publication",
+        )
+        command_files.assert_unchanged()
+        cleanup = private_root.cleanup()
+        _require(cleanup.status == "PASS" and cleanup.residue_count == 0, "proof cleanup failed")
+        packet = _proof_result_packet(
+            mode=mode,
+            git=git,
+            execution=execution.child,
+            proof=proof,
+            proof_bytes=proof_observation_bytes,
+        )
+        command_files.close_without_publication()
+        _emit_stdout(_transport_lines("task064_report_proof", packet))
+    except BaseException as error:
+        primary = error
+    if primary is not None:
+        try:
+            _close_failure_resources(private_root, command_files)
+        except BaseException as cleanup_error:
+            primary.add_note(f"proof failure cleanup failed: {cleanup_error!r}")
+        raise primary
+
+
+RESULT_KEYS: Final = (
+    "domain",
+    "shard_id",
+    "contract_generation",
+    "contract_sha256",
+    "event_name",
+    "candidate_relation",
+    "candidate_commit_sha",
+    "candidate_tree_sha",
+    "tested_checkout_commit_sha",
+    "tested_checkout_tree_sha",
+    "tested_checkout_parent_count",
+    "tested_checkout_second_parent_sha",
+    "python_version",
+    "pytest_version",
+    "python_version_file_sha256",
+    "uv_lock_sha256",
+    "full_manifest_count",
+    "full_manifest_bytes",
+    "full_manifest_sha256",
+    "partition_status",
+    "shard_manifest_count",
+    "shard_manifest_bytes",
+    "shard_manifest_sha256",
+    "selector_bytes_including_nul",
+    "report_output_bytes",
+    "report_output_sha256",
+    "counts",
+    "sequence_sha256",
+    "anomalies",
+    "collection_exit_code",
+    "test_exit_code",
+    "collection_elapsed_ns",
+    "test_elapsed_ns",
+    "pre_clean",
+    "post_clean",
+    "cleanup_status",
+    "survivor_count",
+    "status",
+)
+COUNT_KEYS: Final = (
+    "assigned",
+    "collected",
+    "started",
+    "finished",
+    "setup_passed",
+    "call_passed",
+    "teardown_passed",
+)
+SEQUENCE_KEYS: Final = ("assigned", "collected", "started", "finished")
+ANOMALY_KEYS: Final = (
+    "unknown",
+    "duplicate",
+    "failed",
+    "error",
+    "skipped",
+    "xfailed",
+    "xpassed",
+    "deselected",
+    "interrupted",
+    "unaccounted",
+)
+
+
+def _decode_aggregate_packet(job_id: str) -> dict[str, object]:
+    stem = "REPORT" if job_id == "report" else job_id.upper()
+    encoded_name = f"TASK064_AGG_{stem}_PACKET_B64"
+    digest_name = f"TASK064_AGG_{stem}_PACKET_SHA256"
+    encoded = _ascii(os.environ.get(encoded_name), encoded_name)
+    supplied_digest = _hex(os.environ.get(digest_name), 64, digest_name)
+    _require(0 < len(encoded) <= 10_924, f"{encoded_name} length differs")
+    _require(
+        BASE64_TEXT.fullmatch(encoded) is not None and not any(c.isspace() for c in encoded),
+        "base64",
+    )
+    try:
+        decoded = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise ContractError("aggregate base64 decode failed") from error
+    _require(0 < len(decoded) <= SHARD_RESULT_LIMIT, "aggregate decoded packet cap differs")
+    _require(
+        base64.b64encode(decoded).decode("ascii") == encoded, "aggregate base64 is noncanonical"
+    )
+    _require(_sha256(decoded) == supplied_digest, "aggregate packet digest differs")
+    return _decode_canonical(decoded, limit=SHARD_RESULT_LIMIT, label=f"{job_id} result packet")
+
+
+def _validate_result_packet(job_id: str, packet: dict[str, object]) -> dict[str, object]:
+    _exact_keys(packet, RESULT_KEYS, f"{job_id} result")
+    expected_shard_id = "report" if job_id == "report" else job_id.replace("_", "-")
+    expected = SHARD_EXPECTATIONS[expected_shard_id]
+    _require(
+        packet["domain"] == "TASK064-CI-SHARD-RESULT-V1"
+        and packet["shard_id"] == expected_shard_id
+        and _integer(packet["contract_generation"], "contract generation") == CONTRACT_GENERATION
+        and packet["contract_sha256"] == CONTRACT_SHA256,
+        f"{job_id} task binding differs",
+    )
+    event = _ascii(packet["event_name"], "result event")
+    relation = _ascii(packet["candidate_relation"], "candidate relation")
+    candidate = _hex(packet["candidate_commit_sha"], 40, "candidate commit")
+    _hex(packet["candidate_tree_sha"], 40, "candidate tree")
+    checkout = _hex(packet["tested_checkout_commit_sha"], 40, "checkout commit")
+    _hex(packet["tested_checkout_tree_sha"], 40, "checkout tree")
+    parent_count = _integer(packet["tested_checkout_parent_count"], "parent count")
+    second_parent = packet["tested_checkout_second_parent_sha"]
+    if event == "pull_request":
+        _require(
+            relation == "SECOND_PARENT"
+            and parent_count == 2
+            and _hex(second_parent, 40, "second parent") == candidate,
+            "pull-request result relation differs",
+        )
+    else:
+        _require(
+            event in {"push", "workflow_dispatch"}
+            and relation == "SELF"
+            and checkout == candidate
+            and second_parent is None,
+            "self result relation differs",
+        )
+    _require(
+        packet["python_version"] == "3.13.14"
+        and packet["pytest_version"] == "9.1.1"
+        and packet["python_version_file_sha256"] == PYTHON_VERSION_FILE_SHA256
+        and packet["uv_lock_sha256"] == UV_LOCK_SHA256,
+        f"{job_id} runtime identity differs",
+    )
+    _require(
+        _integer(packet["full_manifest_count"], "full manifest count") == FULL_MANIFEST_COUNT
+        and _integer(packet["full_manifest_bytes"], "full manifest bytes") == FULL_MANIFEST_BYTES
+        and packet["full_manifest_sha256"] == FULL_MANIFEST_SHA256
+        and packet["partition_status"] == "PASS",
+        f"{job_id} manifest binding differs",
+    )
+    _require(
+        _integer(packet["shard_manifest_count"], "shard count") == expected.count
+        and _integer(packet["shard_manifest_bytes"], "shard bytes") == expected.canonical_bytes
+        and packet["shard_manifest_sha256"] == expected.sha256
+        and _integer(packet["selector_bytes_including_nul"], "selector bytes")
+        == expected.selector_bytes,
+        f"{job_id} shard identity differs",
+    )
+    if job_id == "report":
+        _integer(packet["report_output_bytes"], "report output bytes", minimum=1)
+        _hex(packet["report_output_sha256"], 64, "report output SHA-256")
+    else:
+        _require(
+            packet["report_output_bytes"] is None and packet["report_output_sha256"] is None,
+            f"{job_id} unexpectedly carries report output",
+        )
+    raw_counts = packet["counts"]
+    _require(type(raw_counts) is dict, "result counts are not an exact object")
+    counts = cast(dict[str, object], raw_counts)
+    _exact_keys(counts, COUNT_KEYS, "result counts")
+    for key in COUNT_KEYS:
+        _require(_integer(counts[key], f"count {key}") == expected.count, f"count {key} differs")
+    raw_sequence = packet["sequence_sha256"]
+    _require(type(raw_sequence) is dict, "result sequence is not an exact object")
+    sequence = cast(dict[str, object], raw_sequence)
+    _exact_keys(sequence, SEQUENCE_KEYS, "result sequence")
+    sequence_values = [_hex(sequence[key], 64, f"sequence {key}") for key in SEQUENCE_KEYS]
+    _require(len(set(sequence_values)) == 1, "result sequence digests differ")
+    raw_anomalies = packet["anomalies"]
+    _require(type(raw_anomalies) is dict, "result anomalies are not an exact object")
+    anomalies = cast(dict[str, object], raw_anomalies)
+    _exact_keys(anomalies, ANOMALY_KEYS, "result anomalies")
+    for key in ANOMALY_KEYS:
+        _require(_integer(anomalies[key], f"anomaly {key}") == 0, f"anomaly {key} differs")
+    _require(
+        _integer(packet["collection_exit_code"], "collection exit") == 0
+        and _integer(packet["test_exit_code"], "test exit") == 0
+        and _integer(packet["collection_elapsed_ns"], "collection elapsed") <= COLLECTION_TIMEOUT_NS
+        and _integer(packet["test_elapsed_ns"], "test elapsed") <= EXECUTION_TIMEOUT_NS
+        and _boolean(packet["pre_clean"], "pre-clean")
+        and _boolean(packet["post_clean"], "post-clean")
+        and packet["cleanup_status"] == "PASS"
+        and _integer(packet["survivor_count"], "survivor count") == 0
+        and packet["status"] == "PASS",
+        f"{job_id} completion fact differs",
+    )
+    return packet
+
+
+def _validate_aggregate(git: GitIdentity) -> None:
+    present_names = {name for name in os.environ if name.startswith("TASK064_AGG_")}
+    _require(present_names == set(AGGREGATE_NAMES), "aggregate environment names differ")
+    for name in AGGREGATE_NAMES[:6]:
+        _require(os.environ.get(name) == "success", f"{name} is not success")
+    packets = {
+        job_id: _validate_result_packet(job_id, _decode_aggregate_packet(job_id))
+        for job_id in ("report", "remainder_0", "remainder_1", "remainder_2", "remainder_3")
+    }
+    shared_keys = (
+        "contract_generation",
+        "contract_sha256",
+        "event_name",
+        "candidate_relation",
+        "candidate_commit_sha",
+        "candidate_tree_sha",
+        "tested_checkout_commit_sha",
+        "tested_checkout_tree_sha",
+        "tested_checkout_parent_count",
+        "tested_checkout_second_parent_sha",
+        "python_version",
+        "pytest_version",
+        "python_version_file_sha256",
+        "uv_lock_sha256",
+        "full_manifest_count",
+        "full_manifest_bytes",
+        "full_manifest_sha256",
+    )
+    report = packets["report"]
+    for packet in packets.values():
+        for key in shared_keys:
+            _require(packet[key] == report[key], f"aggregate shared {key} differs")
+    candidate = _hex(os.environ.get("TASK064_CANDIDATE_SHA"), 40, "workflow candidate")
+    github_sha = _hex(os.environ.get("GITHUB_SHA"), 40, "workflow checkout")
+    _require(report["candidate_commit_sha"] == candidate, "aggregate candidate differs")
+    _require(report["tested_checkout_commit_sha"] == github_sha, "aggregate checkout differs")
+    current_binding: dict[str, object] = {
+        "event_name": git.event_name,
+        "candidate_relation": git.candidate_relation,
+        "candidate_commit_sha": git.candidate_commit_sha,
+        "candidate_tree_sha": git.candidate_tree_sha,
+        "tested_checkout_commit_sha": git.tested_checkout_commit_sha,
+        "tested_checkout_tree_sha": git.tested_checkout_tree_sha,
+        "tested_checkout_parent_count": git.tested_checkout_parent_count,
+        "tested_checkout_second_parent_sha": git.tested_checkout_second_parent_sha,
+    }
+    for key, expected in current_binding.items():
+        _require(report[key] == expected, f"aggregate current {key} binding differs")
+    _require(
+        len({cast(str, packet["shard_id"]) for packet in packets.values()}) == 5, "shard IDs repeat"
+    )
+    for key in COUNT_KEYS:
+        total = sum(
+            cast(int, cast(dict[str, object], packet["counts"])[key]) for packet in packets.values()
+        )
+        _require(total == FULL_MANIFEST_COUNT, f"aggregate count {key} differs")
+    report_outputs = sum(
+        int(packet["report_output_bytes"] is not None) for packet in packets.values()
+    )
+    _require(report_outputs == 1, "aggregate report output cardinality differs")
+
+
+def _run_aggregate() -> None:
+    root = _repo_root()
+    private_root: PrivateRoot | None = None
+    command_files: CommandFiles | None = None
+    primary: BaseException | None = None
+    try:
+        private_root = PrivateRoot()
+        command_files = CommandFiles(private_root)
+        supervisor = ProcessSupervisor(private_root, command_files)
+        _runtime_preflight(root, supervisor)
+        _require(_git_clean(supervisor, root), "aggregate checkout is not initially clean")
+        git = _git_identity(supervisor, root)
+        _validate_aggregate(git)
+        _require(_git_clean(supervisor, root), "aggregate checkout is not finally clean")
+        _require(
+            _git_identity(supervisor, root) == git,
+            "Git identity changed before aggregate completion",
+        )
+        command_files.assert_unchanged()
+        cleanup = private_root.cleanup()
+        _require(
+            cleanup.status == "PASS" and cleanup.residue_count == 0, "aggregate cleanup failed"
+        )
+        command_files.close_without_publication()
+    except BaseException as error:
+        primary = error
+    if primary is not None:
+        try:
+            _close_failure_resources(private_root, command_files)
+        except BaseException as cleanup_error:
+            primary.add_note(f"aggregate failure cleanup failed: {cleanup_error!r}")
+        raise primary
+
+
+_GENERATION6_SELFTEST_RESULT_KEYS: Final = (
+    "observation_transport",
+    "raw_fork_191_clean",
+    "fd_relative_cleanup",
+    "process_provisional",
+    "command_rollback",
+)
+_CAPTURED_GENERATION6_EMIT_STDOUT: Final = _emit_stdout
+
+
+@dataclass(frozen=True)
+class _Generation6ProtocolCase:
+    case_id: str
+    category: str
+    result_key: str
+    atomic_ids: tuple[str, ...]
+    contract_lines: tuple[str, ...]
+    runner_surface: str
+    expected_fail_closed_checks: tuple[str, ...]
+    expected_forbidden_actions: tuple[str, ...]
+    expected_outcome: str
+    driver: Callable[[Path], None]
+
+
+def _generation6_case_ids(prefix: str, count: int) -> tuple[str, ...]:
+    _require(
+        type(prefix) is str
+        and len(prefix) == 1
+        and prefix in "OFRPCQMGNEKAUX"
+        and type(count) is int
+        and count > 0,
+        "invalid Generation-6 self-test group",
+    )
+    return tuple(f"{prefix}{ordinal:02d}" for ordinal in range(1, count + 1))
+
+
+GENERATION6_PROTOCOL_CASE_GROUPS: Final = (
+    ("observation_transport", _generation6_case_ids("O", 32)),
+    ("raw_fork_191_clean", _generation6_case_ids("F", 18)),
+    ("fd_relative_cleanup", _generation6_case_ids("R", 24)),
+    ("process_provisional", _generation6_case_ids("P", 45)),
+    ("command_rollback", _generation6_case_ids("C", 14)),
+    ("observation_transport", _generation6_case_ids("Q", 8)),
+    ("observation_transport", _generation6_case_ids("M", 12)),
+    ("process_provisional", _generation6_case_ids("G", 12)),
+    ("observation_transport", _generation6_case_ids("N", 5)),
+    ("observation_transport", _generation6_case_ids("E", 9)),
+    ("observation_transport", _generation6_case_ids("K", 12)),
+    ("observation_transport", _generation6_case_ids("A", 10)),
+    ("observation_transport", _generation6_case_ids("U", 9)),
+    ("observation_transport", _generation6_case_ids("X", 12)),
+)
+
+
+_GENERATION6_PROTOCOL_ATOMIC_MAP: Final = tuple(
+    (
+        case_id,
+        (f"{case_id}.a", f"{case_id}.b") if case_id.startswith("F") else (case_id,),
+    )
+    for _, case_ids in GENERATION6_PROTOCOL_CASE_GROUPS[:5]
+    for case_id in case_ids
+)
+
+
+_GENERATION6_SELFTEST_SURFACES: Final = {
+    "O": "anonymous observation descriptor adoption/write/read/close lifecycle",
+    "F": "fork inheritance poison and exact reserved-exit-191 propagation",
+    "R": "fd-relative authenticated private-root cleanup",
+    "P": "provisional process ownership, signalling, wait, and terminal consume",
+    "C": "authenticated GitHub command-file publication and fresh rollback",
+    "Q": "closed command-line grammar and terminal mode selection",
+    "M": "canonical full manifest and deterministic five-way partition",
+    "G": "closed Git history/event/candidate identity",
+    "N": "cross-invocation nonce ledger and observation binding",
+    "E": "runtime, dependency, environment, plugin, and worker preflight",
+    "K": "canonical observation/result/proof packet validators",
+    "A": "execution anomaly classifier and zero-anomaly publication gate",
+    "U": "ordered stdout/GITHUB_OUTPUT/proof publication boundary",
+    "X": "static aggregate transport and five-packet reconciliation",
+}
+
+
+def _generation6_rejection_events(label: str, message: str) -> tuple[str, str]:
+    return (f"inject:{label}", f"reject:{label}:{message}")
+
+
+_GENERATION6_O_REJECTIONS: Final[dict[str, tuple[tuple[str, str], ...]]] = {
+    "O01": (("O01 missing O_TMPFILE", "O_TMPFILE is unavailable"),),
+    "O02": (
+        ("O02 partial observer options", "TASK-064 CI observer options must be supplied together"),
+    ),
+    "O03": (("O03 duplicate phase option", "duplicate --task064-ci-phase is forbidden"),),
+    "O04": (("O04 noncanonical descriptor", "invalid TASK-064 CI options"),),
+    "O05": (("O05 standard descriptor", "invalid TASK-064 CI options"),),
+    "O06": (("O06 closed descriptor", "EBADF"),),
+    "O07": (("O07 aliased observations", "observation object identities are not distinct"),),
+    "O08": (("O08 nonregular observation", "invalid anonymous CI observation object"),),
+    "O09": (("O09 wrong observation owner", "invalid anonymous CI observation object"),),
+    "O10": (("O10 wrong observation mode", "invalid anonymous CI observation object"),),
+    "O11": (("O11 linked observation", "invalid anonymous CI observation object"),),
+    "O12": (("O12 nonempty observation", "invalid anonymous CI observation object"),),
+    "O13": (
+        ("O13 null capture root", "pytest capture root is not canonical"),
+        ("O13 noncanonical capture root", "pytest capture root is not canonical"),
+        ("O13 capture root probe exception", "pytest capture root probe is uncertain"),
+        ("O13 named-device stat exception", "runtime descriptor probe is uncertain"),
+        ("O13 capture root wrong uid", "pytest capture root identity differs"),
+        ("O13 capture root wrong gid", "pytest capture root identity differs"),
+        ("O13 capture root wrong mode", "pytest capture root identity differs"),
+        ("O13 capture root non-directory", "pytest capture root identity differs"),
+        ("O13 bool stat uid", "descriptor metadata is not exact"),
+        ("O13 string stat inode", "descriptor metadata is not exact"),
+        ("O13 negative stat device", "descriptor metadata is not exact"),
+        ("O13 bool descriptor metadata", "descriptor metadata is not exact"),
+        ("O13 non-int descriptor metadata", "descriptor metadata is not exact"),
+        ("O13 negative descriptor metadata", "descriptor metadata is not exact"),
+        (
+            "O13 zero scan transients",
+            "descriptor scan transient cardinality differs",
+        ),
+        (
+            "O13 two scan transients",
+            "descriptor scan transient cardinality differs",
+        ),
+        (
+            "O13 uncertain scan transient",
+            "descriptor scan transient probe is uncertain",
+        ),
+        ("O13 fstat probe exception", "runtime descriptor probe is uncertain"),
+        ("O13 readlink probe exception", "runtime descriptor probe is uncertain"),
+        ("O13 F_GETFD probe exception", "runtime descriptor probe is uncertain"),
+        ("O13 F_GETFL probe exception", "runtime descriptor probe is uncertain"),
+        ("O13 descriptor reuse during probe", "runtime descriptor probe is uncertain"),
+        ("O13 inherited pass-fd one observer", "unexpected inherited descriptor"),
+        ("O13 inherited pass-fd two observers", "unexpected inherited descriptor"),
+        (
+            "O13 actual inherited extra one observer",
+            "TASK-064 observer initialization failed",
+        ),
+        (
+            "O13 actual inherited extra two observers",
+            "TASK-064 observer initialization failed",
+        ),
+        ("O13 local CLOEXEC lookalike one observer", "unexpected inherited descriptor"),
+        ("O13 local CLOEXEC lookalike two observers", "unexpected inherited descriptor"),
+        ("O13 missing runtime descriptor", "runtime descriptor cardinality differs"),
+        ("O13 duplicate runtime number", "runtime descriptor numbers differ"),
+        ("O13 missing urandom", "runtime urandom cardinality differs"),
+        ("O13 duplicate urandom", "runtime urandom cardinality differs"),
+        ("O13 wrong urandom target", "runtime urandom identity differs"),
+        ("O13 wrong urandom type", "runtime urandom identity differs"),
+        ("O13 wrong urandom identity", "runtime urandom identity differs"),
+        ("O13 wrong descriptor flags", "runtime descriptor flags differ"),
+        ("O13 wrong status flags", "runtime descriptor flags differ"),
+        ("O13 named null non-character", "pytest capture standard identity differs"),
+        ("O13 named urandom non-character", "pytest capture standard identity differs"),
+        ("O13 wrong standard stat", "pytest capture standard identity differs"),
+        ("O13 wrong capture root device", "pytest capture standard identity differs"),
+        ("O13 wrong capture uid", "pytest capture standard identity differs"),
+        ("O13 wrong capture gid", "pytest capture standard identity differs"),
+        ("O13 wrong capture mode", "pytest capture standard identity differs"),
+        ("O13 wrong capture link", "pytest capture standard identity differs"),
+        ("O13 wrong capture target", "pytest capture standard identity differs"),
+        ("O13 wrong runtime type", "pytest capture topology order differs"),
+        ("O13 wrong runtime target", "pytest capture topology order differs"),
+        ("O13 wrong runtime order", "pytest capture topology order differs"),
+        ("O13 wrong capture alias", "pytest capture alias identity differs"),
+        ("O13 swapped capture aliases", "pytest capture alias identity differs"),
+        ("O13 duplicate pipe identity", "pytest capture pipe identity differs"),
+        ("O13 wrong pipe access", "pytest capture pipe identity differs"),
+        ("O13 wrong pipe stat", "pytest capture pipe identity differs"),
+        ("O13 runtime aliases observation", "observation descriptor identity differs"),
+    ),
+    "O14": tuple(
+        (f"O14 pwrite {variant}", message)
+        for variant, message in (
+            ("raise", "pwrite-sentinel"),
+            ("zero", "invalid positional write progress"),
+            ("bool", "invalid positional write progress"),
+            ("oversize", "invalid positional write progress"),
+        )
+    ),
+    "O15": tuple(
+        (f"O15 pread {variant}", message)
+        for variant, message in (
+            ("raise", "pread-sentinel"),
+            ("empty", "invalid positional read progress"),
+            ("bool", "invalid positional read progress"),
+            ("oversize", "invalid positional read progress"),
+        )
+    ),
+    "O16": (("O16 trailing EOF", "observation trailing EOF differs"),),
+    "O17": (("O17 fsync", "fsync-sentinel"),),
+    "O18": tuple((f"O18 snapshot {ordinal}", "snapshot-sentinel") for ordinal in range(1, 4)),
+    "O19": (("O19 wrong readback", "observation readback differs"),),
+    "O20": (("O20 uncertain close", "uncertain CI observation close"),),
+    "O21": tuple(
+        (f"O21 F_GETFD {variant}", message)
+        for variant, message in (
+            ("raise", "getfd-sentinel"),
+            ("bool", "invalid CI observation descriptor flags"),
+            ("negative", "invalid CI observation descriptor flags"),
+        )
+    ),
+    "O22": tuple(
+        (f"O22 F_SETFD {variant}", message)
+        for variant, message in (
+            ("raise", "setfd-sentinel"),
+            ("bool", "failed to restore CI observation CLOEXEC"),
+            ("nonzero", "failed to restore CI observation CLOEXEC"),
+        )
+    ),
+    "O23": tuple(
+        (f"O23 CLOEXEC readback {variant}", "CI observation CLOEXEC readback differs")
+        for variant in ("changed", "missing")
+    ),
+    "O24": (
+        ("O24 descriptor number alias", "observation descriptor number aliases"),
+        ("O24 descriptor identity alias", "observation descriptor identity aliases"),
+        ("O24 standard identity alias", "observation identity aliases a standard descriptor"),
+    ),
+    "O25": (("O25 pidfd acquisition", "pidfd-sentinel"),),
+    "O26": (("O26 noninteger pidfd", "self pidfd number aliases another handle"),),
+    "O27": (
+        ("O27 reserved pidfd number", "self pidfd number aliases another handle"),
+        ("O27 observation pidfd alias", "self pidfd number aliases another handle"),
+    ),
+    "O28": (("O28 pidfd identity alias", "self pidfd identity aliases another handle"),),
+    "O29": (
+        ("O29 pidfd F_GETFD", "invalid self-pidfd flags"),
+        ("O29 pidfd F_SETFD", "failed to restore self-pidfd CLOEXEC"),
+        ("O29 pidfd readback", "self-pidfd CLOEXEC readback differs"),
+    ),
+    "O30": (
+        ("O30 zero signal raise", "signal-sentinel"),
+        ("O30 zero signal return", "self-pidfd zero signal differs"),
+    ),
+    "O31": (("O31 pidfd close", "terminal observer anchor close uncertainty"),),
+    "O32": (("O32 mmap close", "terminal observer anchor close uncertainty"),),
+}
+
+
+_GENERATION6_F_REJECTIONS: Final[dict[str, tuple[tuple[str, str], ...]]] = {
+    "F01": (
+        ("F01.a inherited CI owner", "fork child retained CI observation ownership"),
+        ("F01.b inherited CI close", "fork child CI close attempt count differs"),
+    ),
+    "F02": (
+        ("F02.a independent proof close", "fork child skipped an independent proof close"),
+        ("F02.b independent CI close", "fork child skipped an independent CI close"),
+    ),
+    "F03": (
+        ("F03.a inherited self-pidfd owner", "fork child retained self-pidfd access"),
+        ("F03.b inherited self-pidfd close", "fork child explicitly closed self-pidfd copy"),
+    ),
+    "F04": (
+        ("F04.a descendant proof write", "observation writer is not the exec owner"),
+        ("F04.b descendant CI write", "observation writer is not the exec owner"),
+    ),
+    "F05": (
+        ("F05.a descendant cached selector", "TASK-064 observer runtime owner differs"),
+        ("F05.b descendant fresh selector", "TASK-064 observer runtime owner differs"),
+    ),
+    "F06": (
+        ("F06.a descendant handle restore", "observation writer is not the exec owner"),
+        ("F06.b descendant runtime revival", "TASK-064 observer runtime owner differs"),
+    ),
+    "F07": (
+        ("F07.a accepted crash classifier", "reserved observer exit preceded expected death"),
+        ("F07.b shared poison publication", "fork poison blocks owner publication"),
+    ),
+    "F08": (
+        ("F08.a poison-latch failure", "anchored owner SIGKILL was not observed"),
+        ("F08.b numeric owner signal", "numeric owner PID signal is forbidden"),
+    ),
+    "F09": (
+        ("F09.a poison and signal dual failure", "reserved observer exit did not propagate"),
+        ("F09.b owner-kill claim", "dual failure cannot claim an owner kill"),
+    ),
+    "F10": (
+        ("F10.a direct raw wait sentinel", "direct raw wait accepted reserved exit 191"),
+        ("F10.b direct raw wait continuation", "direct raw wait continued after reserved exit"),
+    ),
+    "F11": (
+        ("F11.a accepted other death", "expected-death route accepted reserved exit 191"),
+        ("F11.b accepted death continuation", "expected-death route continued after reserved exit"),
+    ),
+    "F12": (
+        ("F12.a nested leaf sentinel", "nested helper accepted reserved exit 191"),
+        ("F12.b nested ancestor sentinel", "ancestor did not propagate reserved exit 191"),
+    ),
+    "F13": (
+        ("F13.a live transaction waitpid guard", "named live-transaction guard is absent"),
+        ("F13.b live transaction cleanup order", "named live-transaction guard order differs"),
+    ),
+    "F14": (
+        ("F14.a connection runtime waitpid guard", "named connection-runtime guard is absent"),
+        ("F14.b connection runtime cleanup order", "named connection-runtime guard order differs"),
+    ),
+    "F15": (
+        ("F15.a nested-helper terminal consumer", "nested helper accepted reserved exit 191"),
+        ("F15.b nested-helper publication", "nested helper published after reserved exit"),
+    ),
+    "F16": (
+        ("F16.a Popen returncode sentinel", "Popen consumer accepted reserved exit 191"),
+        ("F16.b bool-as-returncode", "Popen reserved-exit type check differs"),
+    ),
+    "F17": (
+        ("F17.a broad BaseException catcher", "reserved exit was catchable"),
+        ("F17.b catch-and-continue", "consumer continued after reserved exit"),
+    ),
+    "F18": (
+        ("F18.a static reserved-exit inventory", "reserved exit inventory is incomplete"),
+        ("F18.b proof without final CI", "earlier proof substituted for final CI packet"),
+    ),
+}
+
+
+_GENERATION6_P_REJECTIONS: Final[dict[str, tuple[tuple[str, str], ...]]] = {
+    "P01": (
+        ("P01 pidfd open raises", "pidfd acquisition failed"),
+        ("P01 pidfd invalid result", "child pidfd number aliases an owned handle"),
+    ),
+    "P02": (("P02 leader UID mismatch", "anchored process identity changed"),),
+    "P03": (("P03 leader start-time mismatch", "anchored process identity changed"),),
+    "P04": (("P04 leader session mismatch", "anchored process identity changed"),),
+    "P05": (("P05 leader process-group mismatch", "anchored process identity changed"),),
+    "P06": (
+        ("P06 WNOWAIT raises", "waitid failed"),
+        ("P06 WNOWAIT wrong PID", "waitid child identity differs"),
+        ("P06 WNOWAIT wrong UID", "waitid child identity differs"),
+        ("P06 WNOWAIT invalid code", "terminal code is outside the closed set"),
+    ),
+    "P07": (("P07 clean success killpg", "clean success invoked no group signal"),),
+    "P08": (
+        ("P08 SIGTERM ignored", "SIGTERM did not terminate the child"),
+        ("P08 SIGKILL required", "SIGKILL completed before consume"),
+    ),
+    "P09": (
+        ("P09 TERM group signal failure", "TERM-group-sentinel"),
+        ("P09 KILL group signal failure", "KILL-group-sentinel"),
+    ),
+    "P10": (
+        ("P10 group existence failure", "process table scan failed"),
+        ("P10 group identity recheck", "anchored process identity changed"),
+    ),
+    "P11": (("P11 initial-group non-leader survivor", "child initial group had survivors"),),
+    "P12": (
+        (
+            "P12 nested setsid harness ownership",
+            "nested setsid child remained under its direct harness owner",
+        ),
+    ),
+    "P13": (
+        ("P13 consume raises before kernel consume", "consume-before-kernel-sentinel"),
+        ("P13 consume raises after kernel consume", "consume-after-kernel-sentinel"),
+    ),
+    "P14": (("P14 second consuming wait", "second consuming wait is forbidden"),),
+    "P15": (("P15 numeric PID after consume", "post-consume numeric PID is forbidden"),),
+    "P16": (("P16 numeric PGID after consume", "post-consume numeric PGID is forbidden"),),
+    "P17": (
+        ("P17 slot absent", "Popen owner slot is not empty"),
+        ("P17 slot prepopulated", "Popen owner slot is not empty"),
+        ("P17 slot readback differs", "Popen provisional ownership differs"),
+    ),
+    "P19": (("P19 partial constructor child", "P19 constructor sentinel"),),
+    "P20": tuple(
+        (f"P20 {label} close", f"uncertain child {label} close")
+        for label in (
+            "stdin",
+            "stdout read",
+            "stdout write",
+            "stderr read",
+            "stderr write",
+        )
+    ),
+    "P21": (("P21 CPython runtime identity", "Python runtime differs"),),
+    "P22": (
+        ("P22 Popen identity", "Popen identity changed"),
+        ("P22 Popen initializer identity", "Popen initializer changed"),
+        ("P22 fork-exec identity", "_fork_exec changed"),
+    ),
+    "P23": (
+        ("P23 second main thread", "spawn requires the sole main thread"),
+        ("P23 non-main live thread", "spawn requires the sole main thread"),
+    ),
+    "P24": (("P24 active trace function", "trace/profile is forbidden"),),
+    "P25": (("P25 active profile function", "trace/profile is forbidden"),),
+    "P26": tuple(
+        (f"P26 custom {name}", "signal handler differs")
+        for name in ("SIGTERM", "SIGHUP", "SIGUSR1")
+    ),
+    "P27": (("P27 SIGCHLD SIG_IGN", "SIGCHLD handler differs"),),
+    "P28": (
+        ("P28 SIGCHLD reset raises", "SIGCHLD-reset-sentinel"),
+        ("P28 SIGCHLD reset wrong return", "SIGCHLD reset prior differs"),
+    ),
+    "P29": (
+        ("P29 SIGCHLD readback raises", "SIGCHLD-readback-sentinel"),
+        ("P29 SIGCHLD readback wrong handler", "SIGCHLD reset readback differs"),
+    ),
+    "P30": (
+        (
+            "P30 actual unreset SA_NOCLDWAIT",
+            "unreset SA_NOCLDWAIT produced exact ECHILD",
+        ),
+    ),
+    "P31": (),
+    "P32": (("P32 persistent auto-reap", "partial Popen child was already consumed"),),
+    "P33": (("P33 pre-child-created interruption", "Popen/adoption boundary failed closed"),),
+    "P34": (("P34 pending SIGINT latch", "Popen/adoption boundary failed closed"),),
+    "P35": (("P35 exec-error ECHILD", "Popen/adoption boundary failed closed"),),
+    "P36": (("P36 exact ECHILD", "partial Popen child was already consumed"),),
+    "P37": (
+        ("P37 live leader pidfd", "live provisional child required bounded cleanup"),
+        ("P37 live leader numeric fallback", "pidfd acquisition failed"),
+    ),
+    "P38": (
+        ("P38 terminal zombie pidfd", "terminal provisional child required one consume"),
+        ("P38 terminal zombie numeric fallback", "pidfd acquisition failed"),
+    ),
+    "P39": (
+        ("P39 pidfd unavailable live", "pidfd acquisition failed"),
+        ("P39 pidfd unavailable terminal", "pidfd acquisition failed"),
+    ),
+    "P40": (("P40 stored returncode", "partial Popen contains no provable child"),),
+    "P41": (("P41 sentinel false no-child", "partial Popen contains no provable child"),),
+    "P42": (("P42 post-return slot replacement", "returned child is not slot-owned"),),
+    "P43": (
+        ("P43 forced GC", "slot-owned process cannot be implicitly finalized"),
+        ("P43 later Popen", "later Popen cannot poll an earlier slot owner"),
+        ("P43 subprocess active cleanup", "subprocess active cleanup is forbidden"),
+    ),
+    "P44": tuple(
+        (f"P44 forbidden {name}", f"forbidden Popen {name} call")
+        for name in (
+            "poll",
+            "wait",
+            "waitpid",
+            "communicate",
+            "send_signal",
+            "terminate",
+            "kill",
+            "_internal_poll",
+        )
+    ),
+}
+
+
+_GENERATION6_P_VALIDATIONS: Final[dict[str, str]] = {
+    "P18": "validate:P18:constructor-returned-slot-owned",
+    "P31": "validate:P31:exact-reset-restores-wait-ownership",
+    "P45": "validate:P45:clean-process-path",
+}
+
+
+_GENERATION6_G_VALIDATIONS: Final[dict[str, str]] = {
+    "G01": "validate:G01:candidate-commit-sha-grammar",
+    "G02": "validate:G02:checkout-commit-sha-grammar",
+    "G03": "validate:G03:commit-object-resolution",
+    "G04": "validate:G04:tested-checkout-head-binding",
+    "G05": "validate:G05:pull-request-two-parent-shape",
+    "G06": "validate:G06:pull-request-second-parent-binding",
+    "G07": "validate:G07:candidate-ancestry-proof",
+    "G08": "validate:G08:push-self-relation",
+    "G09": "validate:G09:workflow-dispatch-self-relation",
+    "G11": "validate:G11:commit-tree-result-binding",
+    "G12": "validate:G12:clean-stable-git-identity",
+}
+
+
+_GENERATION6_G_REJECTIONS: Final[dict[str, tuple[tuple[str, str], ...]]] = {
+    "G01": (("G01 malformed candidate SHA", "invalid TASK064_CANDIDATE_SHA"),),
+    "G02": (("G02 malformed checkout SHA", "invalid GITHUB_SHA"),),
+    "G03": (
+        ("G03 checkout object type", "Git object type differs"),
+        ("G03 candidate object type", "Git object type differs"),
+    ),
+    "G04": (("G04 HEAD and GitHub SHA mismatch", "tested HEAD differs from GITHUB_SHA"),),
+    "G05": (("G05 pull-request parent count", "pull-request parent relation differs"),),
+    "G06": (("G06 pull-request second parent", "pull-request parent relation differs"),),
+    "G07": (("G07 failed candidate ancestry", "candidate is not an ancestor of tested checkout"),),
+    "G08": (("G08 push candidate mismatch", "self candidate relation differs"),),
+    "G09": (("G09 workflow-dispatch candidate mismatch", "self candidate relation differs"),),
+    "G10": (
+        ("G10 shallow checkout", "shallow checkout is forbidden"),
+        ("G10 missing Git object", "git command failed"),
+        ("G10 extra pull-request parent", "pull-request parent relation differs"),
+        ("G10 failed ancestry proof", "candidate is not an ancestor of tested checkout"),
+    ),
+    "G11": (),
+    "G12": (),
+}
+
+
+_GENERATION6_K_REJECTIONS: Final[dict[str, tuple[tuple[str, str], ...]]] = {
+    "K01": (
+        ("K01 empty canonical packet", "invalid K01 empty packet length"),
+        ("K01 collection packet cap", "invalid K01 collection packet length"),
+        ("K01 execution packet cap", "invalid K01 execution packet length"),
+        ("K01 proof packet cap", "invalid K01 proof packet length"),
+    ),
+    "K02": (("K02 canonical packet BOM", "K02 packet has a BOM"),),
+    "K03": (
+        ("K03 canonical packet CR", "K03 packet has a line ending"),
+        ("K03 canonical packet LF", "K03 packet has a line ending"),
+    ),
+    "K04": (("K04 duplicate canonical key", "duplicate JSON key"),),
+    "K05": tuple(
+        (f"K05 nonfinite {token}", f"forbidden JSON constant {token}")
+        for token in ("NaN", "Infinity", "-Infinity")
+    ),
+    "K06": (
+        ("K06 semantic non-ASCII key", "non-ASCII JSON key"),
+        ("K06 semantic non-ASCII value", "non-ASCII JSON string"),
+        ("K06 raw non-ASCII octet", "invalid K06 packet"),
+    ),
+    "K07": (
+        ("K07 insignificant whitespace", "K07 packet is not canonical"),
+        ("K07 escaped ASCII spelling", "K07 packet is not canonical"),
+    ),
+    "K08": tuple(
+        (f"K08 {variant} key shape", "K08 object keys or order differ")
+        for variant in ("missing", "extra", "reordered")
+    ),
+    "K09": (("K09 bool-as-int", "invalid K09 integer"),),
+    "K10": (("K10 duplicate node identity", "duplicate K10 node"),),
+    "K11": tuple(
+        (f"K11 proof {variant} shape", "proof observation keys or order differ")
+        for variant in ("missing", "extra", "reordered")
+    ),
+    "K12": (
+        *tuple(
+            (
+                f"K12 proof completion {variant}",
+                "proof child completion facts exceed the frozen limits",
+            )
+            for variant in (
+                "nonzero-exit",
+                "bool-elapsed",
+                "negative-elapsed",
+                "over-elapsed",
+                "survivor",
+            )
+        ),
+        ("K12 proof result cap", "canonical JSON exceeds its byte cap"),
+        ("K12 shard result cap", "canonical JSON exceeds its byte cap"),
+    ),
+}
+
+
+_GENERATION6_A_REJECTIONS: Final[dict[str, tuple[tuple[str, str], ...]]] = {
+    "A01": (("A01 unknown anomaly", "unknown report"),),
+    "A02": (("A02 duplicate anomaly", "duplicate started node"),),
+    "A03": (("A03 failed anomaly", "report outcome differs"),),
+    "A04": (("A04 error anomaly", "report outcome differs"),),
+    "A05": (("A05 skipped anomaly", "report outcome differs"),),
+    "A06": (("A06 xfailed anomaly", "report outcome differs"),),
+    "A07": (("A07 xpassed anomaly", "report xfail differs"),),
+    "A08": (("A08 deselected anomaly", "pytest deselected nodes"),),
+    "A09": (("A09 interrupted anomaly", "interrupted_count differs"),),
+    "A10": (
+        ("A10 missing node", "assigned sequence differs"),
+        ("A10 extra node", "assigned sequence differs"),
+        ("A10 sequence", "collected sequence differs"),
+        ("A10 phase", "report phase differs"),
+        ("A10 exit", "pytest exit differs"),
+        ("A10 packet", "execution observation keys or order differ"),
+    ),
+}
+
+
+_GENERATION6_X_VALIDATIONS: Final[dict[str, str]] = {
+    "X01": "validate:X01:all-six-dependency-results-success",
+    "X02": "validate:X02:exact-aggregate-environment-and-expression",
+    "X06": "validate:X06:canonical-base64-roundtrip",
+    "X12": "validate:X12:no-execution-publication-or-operational-authority",
+}
+
+
+_GENERATION6_X_REJECTIONS: Final[dict[str, tuple[tuple[str, str], ...]]] = {
+    "X01": tuple(
+        (f"X01 non-success {name}", f"{name} is not success") for name in AGGREGATE_NAMES[:6]
+    ),
+    "X02": (
+        ("X02 extra TASK064_AGG name", "aggregate environment names differ"),
+        ("X02 defaulted workflow expression", "aggregate workflow environment expression differs"),
+    ),
+    "X03": (
+        (
+            "X03 missing packet b64",
+            "TASK064_AGG_REPORT_PACKET_B64 is not an exact string",
+        ),
+        ("X03 empty packet b64", "TASK064_AGG_REPORT_PACKET_B64 length differs"),
+        (
+            "X03 missing packet sha",
+            "TASK064_AGG_REPORT_PACKET_SHA256 is not an exact string",
+        ),
+        ("X03 empty packet sha", "invalid TASK064_AGG_REPORT_PACKET_SHA256"),
+    ),
+    "X04": (
+        ("X04 whitespace", "base64"),
+        ("X04 nonalphabet", "base64"),
+        ("X04 invalid padding", "base64"),
+        (
+            "X04 encoded over cap",
+            "TASK064_AGG_REPORT_PACKET_B64 length differs",
+        ),
+    ),
+    "X05": (("X05 decoded over cap", "aggregate decoded packet cap differs"),),
+    "X06": (("X06 nonzero unused pad bits", "aggregate base64 is noncanonical"),),
+    "X07": (("X07 packet digest mismatch", "aggregate packet digest differs"),),
+    "X08": (
+        ("X08 noncanonical JSON", "report result packet is not canonical"),
+        ("X08 result schema", "report result keys or order differ"),
+    ),
+    "X09": (
+        *tuple(
+            (f"X09 shared {key}", f"aggregate shared {key} differs")
+            for key in (
+                "contract_generation",
+                "contract_sha256",
+                "event_name",
+                "candidate_relation",
+                "candidate_commit_sha",
+                "candidate_tree_sha",
+                "tested_checkout_commit_sha",
+                "tested_checkout_tree_sha",
+                "tested_checkout_parent_count",
+                "tested_checkout_second_parent_sha",
+                "python_version",
+                "pytest_version",
+                "python_version_file_sha256",
+                "uv_lock_sha256",
+                "full_manifest_count",
+                "full_manifest_bytes",
+                "full_manifest_sha256",
+            )
+        ),
+        ("X09 workflow candidate", "aggregate candidate differs"),
+        ("X09 workflow checkout", "aggregate checkout differs"),
+    ),
+    "X10": (
+        ("X10 shard ID", "remainder_0 task binding differs"),
+        ("X10 shard manifest count", "remainder_0 shard identity differs"),
+        ("X10 sequence digest", "result sequence digests differ"),
+        ("X10 anomaly", "anomaly unknown differs"),
+        ("X10 collection exit", "remainder_0 completion fact differs"),
+        ("X10 collection elapsed", "remainder_0 completion fact differs"),
+        ("X10 pre-clean", "remainder_0 completion fact differs"),
+        ("X10 cleanup status", "remainder_0 completion fact differs"),
+    ),
+    "X11": (
+        *tuple((f"X11 total {key}", f"aggregate count {key} differs") for key in COUNT_KEYS),
+        ("X11 report cardinality zero", "aggregate report output cardinality differs"),
+        ("X11 report cardinality two", "aggregate report output cardinality differs"),
+    ),
+    "X12": (),
+}
+
+
+_GENERATION6_M_VALIDATIONS: Final[dict[str, str]] = {
+    "M01": "validate:M01:real-2298-node-collection",
+    "M02": "validate:M02:exact-node-identity-domain",
+    "M03": "validate:M03:nonempty-308-byte-unique-nodes",
+    "M04": "validate:M04:canonical-full-manifest-shape-bytes-and-digest",
+    "M05": "validate:M05:single-report-node-and-dedicated-shard",
+    "M06": "validate:M06:deterministic-four-bucket-five-nonempty-partition",
+    "M07": "validate:M07:pairwise-disjoint-exact-union",
+    "M08": "validate:M08:exact-shard-inventory-canonical-bytes-and-digests",
+    "M09": "validate:M09:argv-string-and-nul-cap",
+    "M10": "validate:M10:selector-vector-byte-count-and-cap",
+    "M11": "validate:M11:positive-exact-int-sc-arg-max",
+    "M12": "validate:M12:final-exec-projection-within-sc-arg-max",
+}
+
+
+_GENERATION6_M_REJECTIONS: Final[dict[str, tuple[tuple[str, str], ...]]] = {
+    "M01": (
+        ("M01 missing collected node", "full collection count differs"),
+        ("M01 extra collected node", "full collection count differs"),
+    ),
+    "M02": (
+        ("M02 non-string node", "collection node is not an exact string"),
+        ("M02 NUL node", "invalid collection node"),
+        ("M02 CR node", "invalid collection node"),
+        ("M02 LF node", "invalid collection node"),
+        ("M02 lone-surrogate node", "non-ASCII collection node"),
+        ("M02 non-ASCII node", "non-ASCII collection node"),
+    ),
+    "M03": (
+        ("M03 empty node", "invalid collection node"),
+        ("M03 overlong node", "invalid collection node"),
+        ("M03 duplicate node", "duplicate collection node"),
+    ),
+    "M04": (("M04 unknown same-count node", "full manifest identity differs"),),
+    "M05": (
+        ("M05 missing report node", "report node cardinality differs"),
+        ("M05 duplicate report node", "report node cardinality differs"),
+    ),
+    "M06": (
+        ("M06 empty shard", "empty shard"),
+        ("M06 deterministic wrong bucket", "shard identity inventory differs"),
+    ),
+    "M07": (("M07 overlapping shards", "shards overlap"),),
+    "M08": (
+        ("M08 missing shard ID", "shard identity inventory differs"),
+        ("M08 extra shard ID", "shard identity inventory differs"),
+        ("M08 missing shard member", "shard identity inventory differs"),
+        ("M08 extra shard member", "shard identity inventory differs"),
+        ("M08 reversed execution order", "shard execution order differs"),
+        ("M08 shard canonical key order", "report shard packet keys or order differ"),
+        ("M08 shard canonical byte", "report canonical packet differs"),
+        ("M08 shard trailing LF", "report shard packet has a line ending"),
+        ("M08 shard digest", "report identity differs"),
+    ),
+    "M09": (
+        ("M09 argv encoding", "argv encoding differs"),
+        ("M09 argv NUL", "argv string cap"),
+        ("M09 argv per-string cap", "argv string cap"),
+        ("M09 environment-name encoding", "environment encoding differs"),
+        ("M09 environment-value encoding", "environment encoding differs"),
+        ("M09 environment-name NUL", "environment string cap"),
+        ("M09 environment-value NUL", "environment string cap"),
+        ("M09 environment-name per-string cap", "environment string cap"),
+        ("M09 environment-value per-string cap", "environment string cap"),
+    ),
+    "M10": (
+        ("M10 selector NUL", "argv string cap"),
+        ("M10 single-selector per-string cap", "argv string cap"),
+        ("M10 selector vector overflow", "selector vector exceeds its byte cap"),
+    ),
+    "M11": (
+        ("M11 boolean SC_ARG_MAX", "SC_ARG_MAX differs"),
+        ("M11 non-integer SC_ARG_MAX", "SC_ARG_MAX differs"),
+        ("M11 zero SC_ARG_MAX", "SC_ARG_MAX differs"),
+        ("M11 negative SC_ARG_MAX", "SC_ARG_MAX differs"),
+    ),
+    "M12": (("M12 total exec projection overflow", "exec projection exceeds SC_ARG_MAX"),),
+}
+
+
+_GENERATION6_R_REJECTIONS: Final[dict[str, tuple[tuple[str, str], ...]]] = {
+    "R01": (
+        ("R01 retained parent replacement", "private-root cleanup preserved parent replacement"),
+    ),
+    "R02": (("R02 private-root replacement", "private-root cleanup preserved root replacement"),),
+    "R03": (("R03 known child replacement", "private-root cleanup preserved child replacement"),),
+    "R04": (("R04 unexpected root entry", "private-root cleanup preserved unexpected entry"),),
+    "R05": (
+        (
+            "R05 close ambiguity with descriptor reuse",
+            "private-root cleanup preserved close uncertainty",
+        ),
+    ),
+    "R06": (("R06 symlink entry", "private-root cleanup preserved symlink"),),
+    "R07": (("R07 socket entry", "private-root cleanup preserved socket"),),
+    "R08": (("R08 FIFO entry", "private-root cleanup preserved FIFO"),),
+    "R09": (("R09 hard-linked regular entry", "private-root cleanup preserved hardlink"),),
+    "R10": (("R10 special-mode regular entry", "private-root cleanup preserved special mode"),),
+    "R11": (("R11 foreign mount identity", "private-root cleanup preserved mount mismatch"),),
+    "R12": (("R12 unknown entry type", "private-root cleanup preserved unknown type"),),
+}
+
+
+_GENERATION6_U_REJECTIONS: Final[dict[str, tuple[tuple[str, str], ...]]] = {
+    "U01": (("U01 stdout write failure", "stdout publication failed"),),
+    "U02": (
+        ("U02 stdout zero progress", "stdout write differs"),
+        ("U02 stdout negative progress", "stdout write differs"),
+    ),
+    "U03": (
+        ("U03 stdout bool progress", "stdout write differs"),
+        ("U03 stdout overflow progress", "stdout write differs"),
+    ),
+}
+
+
+_GENERATION6_TERMINAL_CHECKS: Final = (
+    "publication:none",
+    "forbidden:none",
+    "reset:process-local-state",
+)
+_GENERATION6_TEMPORARILY_UNWIRED_CASES: Final[frozenset[str]] = frozenset(
+    (*_generation6_case_ids("C", 14), *_generation6_case_ids("U", 9)[3:])
+)
+
+
+def _generation6_expected_case_checks(case_id: str) -> tuple[str, ...]:
+    checks: list[str] = []
+    if case_id == "F18":
+        checks.append("validate:F18:clean")
+        for label, message in _GENERATION6_F_REJECTIONS[case_id]:
+            checks.extend(_generation6_rejection_events(label, message))
+    elif case_id in _GENERATION6_F_REJECTIONS:
+        for label, message in _GENERATION6_F_REJECTIONS[case_id]:
+            checks.extend(_generation6_rejection_events(label, message))
+    elif case_id in _GENERATION6_P_VALIDATIONS or case_id in _GENERATION6_P_REJECTIONS:
+        validation = _GENERATION6_P_VALIDATIONS.get(case_id)
+        if validation is not None:
+            checks.append(validation)
+        for label, message in _GENERATION6_P_REJECTIONS.get(case_id, ()):
+            checks.extend(_generation6_rejection_events(label, message))
+    elif case_id in _GENERATION6_G_VALIDATIONS or case_id in _GENERATION6_G_REJECTIONS:
+        validation = _GENERATION6_G_VALIDATIONS.get(case_id)
+        if validation is not None:
+            checks.append(validation)
+        for label, message in _GENERATION6_G_REJECTIONS.get(case_id, ()):
+            checks.extend(_generation6_rejection_events(label, message))
+    elif case_id in _GENERATION6_M_VALIDATIONS:
+        checks.append(_GENERATION6_M_VALIDATIONS[case_id])
+        for label, message in _GENERATION6_M_REJECTIONS[case_id]:
+            checks.extend(_generation6_rejection_events(label, message))
+    elif case_id in _GENERATION6_R_REJECTIONS:
+        for label, message in _GENERATION6_R_REJECTIONS[case_id]:
+            checks.extend(_generation6_rejection_events(label, message))
+    elif case_id == "O13":
+        checks.extend(
+            (
+                "validate:O13:mandatory-canonical-capture-root",
+                "validate:O13:immutable-exact-descriptor-records",
+                "validate:O13:one-observer-runtime-topology",
+                "validate:O13:two-observer-runtime-topology",
+                "validate:O13:runtime-descriptors-remain-unowned",
+            )
+        )
+        for label, message in _GENERATION6_O_REJECTIONS[case_id]:
+            checks.extend(_generation6_rejection_events(label, message))
+    elif case_id in _GENERATION6_O_REJECTIONS:
+        for label, message in _GENERATION6_O_REJECTIONS[case_id]:
+            checks.extend(_generation6_rejection_events(label, message))
+    elif case_id in _GENERATION6_K_REJECTIONS:
+        for label, message in _GENERATION6_K_REJECTIONS[case_id]:
+            checks.extend(_generation6_rejection_events(label, message))
+    elif case_id in _GENERATION6_A_REJECTIONS:
+        for label, message in _GENERATION6_A_REJECTIONS[case_id]:
+            checks.extend(_generation6_rejection_events(label, message))
+    elif case_id in _GENERATION6_X_VALIDATIONS or case_id in _GENERATION6_X_REJECTIONS:
+        validation = _GENERATION6_X_VALIDATIONS.get(case_id)
+        if validation is not None:
+            checks.append(validation)
+        for label, message in _GENERATION6_X_REJECTIONS.get(case_id, ()):
+            checks.extend(_generation6_rejection_events(label, message))
+    elif case_id in _GENERATION6_U_REJECTIONS:
+        for label, message in _GENERATION6_U_REJECTIONS[case_id]:
+            checks.extend(_generation6_rejection_events(label, message))
+    elif case_id.startswith("Q") and case_id != "Q08":
+        checks.extend(
+            _generation6_rejection_events(
+                f"CLI case {case_id}",
+                "runner argv is outside the exact grammar",
+            )
+        )
+    elif case_id == "Q08":
+        checks.extend(
+            (
+                "validate:canonical shard CLI mode",
+                "validate:canonical report-proof CLI mode",
+                "validate:canonical aggregate CLI mode",
+            )
+        )
+        for ordinal in range(1, 5):
+            checks.extend(
+                _generation6_rejection_events(
+                    f"conflicting or indirect CLI grammar {ordinal}",
+                    "runner argv is outside the exact grammar",
+                )
+            )
+        checks.append("validate:canonical CLI entrypoint inventory")
+    elif case_id == "N01":
+        checks.append("validate:N01:canonical-64-lowercase-nonce")
+        checks.extend(
+            _generation6_rejection_events(
+                "malformed nonce generator result",
+                "invalid malformed nonce",
+            )
+        )
+    elif case_id == "N02":
+        checks.extend(
+            _generation6_rejection_events(
+                "duplicate nonce label",
+                "nonce label was issued twice",
+            )
+        )
+        checks.extend(
+            _generation6_rejection_events(
+                "reused nonce",
+                "issued TASK-064 nonce was not fresh",
+            )
+        )
+    elif case_id == "N03":
+        checks.extend(
+            _generation6_rejection_events(
+                "missing nonce label",
+                "issued TASK-064 nonce labels differ",
+            )
+        )
+    elif case_id == "N04":
+        checks.extend(
+            _generation6_rejection_events(
+                "extra nonce label",
+                "issued TASK-064 nonce labels differ",
+            )
+        )
+    elif case_id == "N05":
+        for key, message in (
+            ("nonce", "observation nonce differs"),
+            ("observer_pid", "observer PID differs"),
+            ("observer_parent_pid", "observer parent PID differs"),
+        ):
+            checks.extend(_generation6_rejection_events(f"observation {key} binding", message))
+    elif case_id == "E01":
+        checks.append("validate:E01:canonical-Python-runtime")
+        checks.extend(
+            _generation6_rejection_events("Python runtime identity", "Python runtime differs")
+        )
+    elif case_id in {"E02", "E03", "E04"}:
+        checks.append(
+            {
+                "E02": "validate:E02:canonical-pytest-runtime",
+                "E03": "validate:E03:canonical-python-version-file",
+                "E04": "validate:E04:canonical-uv-lock",
+            }[case_id]
+        )
+        checks.extend(
+            _generation6_rejection_events(
+                f"runtime preflight {case_id}",
+                {
+                    "E02": "pytest version differs",
+                    "E03": ".python-version identity differs",
+                    "E04": "uv.lock identity differs",
+                }[case_id],
+            )
+        )
+    elif case_id == "E05":
+        for name in FORBIDDEN_ENV:
+            checks.extend(
+                _generation6_rejection_events(
+                    f"forbidden inherited {name}",
+                    f"inherited {name} is forbidden",
+                )
+            )
+        checks.extend(
+            _generation6_rejection_events(
+                "forbidden inherited Git control",
+                "inherited Git control environment is forbidden",
+            )
+        )
+    elif case_id == "E06":
+        checks.append("validate:canonical pytest addopts order")
+        checks.append("validate:canonical conftest argv identity")
+        for label, message in (
+            ("reordered conftest argv", "TASK-064 pytest argv prefix or option order differs"),
+            ("wrong conftest argv zero", "TASK-064 sys.argv identity differs"),
+            ("wrong conftest orig argv", "TASK-064 sys.orig_argv identity differs"),
+        ):
+            checks.extend(_generation6_rejection_events(label, message))
+        checks.extend(
+            _generation6_rejection_events(
+                "incomplete proof addopts",
+                "proof argv is incomplete",
+            )
+        )
+    elif case_id == "E07":
+        for variant in ("missing", "extra", "distribution", "version", "group", "name", "value"):
+            checks.extend(
+                _generation6_rejection_events(
+                    f"external plugin {variant}",
+                    "external plugin inventory differs",
+                )
+            )
+        checks.extend(
+            (
+                "validate:external plugin canonical sort",
+                "validate:external plugin duplicate collapse",
+            )
+        )
+    elif case_id == "E08":
+        for variant in (
+            "config.workerinput",
+            "PYTEST_XDIST_WORKER",
+            "PYTEST_XDIST_WORKER_COUNT",
+            "PYTEST_XDIST_TESTRUNUID",
+            "xdist plugin",
+            "execnet plugin",
+            "xdist module",
+            "execnet module",
+        ):
+            checks.extend(
+                _generation6_rejection_events(
+                    f"worker indicator {variant}",
+                    "worker_indicator_count differs",
+                )
+            )
+    elif case_id == "E09":
+        checks.append("validate:E09:zero-surviving-non-main-thread")
+        checks.extend(
+            _generation6_rejection_events(
+                "observer runtime residue",
+                "surviving_non_main_thread_count differs",
+            )
+        )
+    else:
+        checks.append(f"unwired:{case_id}")
+    checks.extend(_GENERATION6_TERMINAL_CHECKS)
+    return tuple(checks)
+
+
+def _generation6_expected_outcome(case_id: str, checks: Sequence[str]) -> str:
+    """Derive the exact case outcome from its frozen semantic event categories."""
+
+    exact_case_id = _ascii(case_id, "self-test outcome case ID")
+    exact_checks = tuple(_ascii(value, "self-test expected event") for value in checks)
+    _require(
+        len(exact_checks) >= len(_GENERATION6_TERMINAL_CHECKS)
+        and exact_checks[-len(_GENERATION6_TERMINAL_CHECKS) :] == _GENERATION6_TERMINAL_CHECKS,
+        "self-test terminal event shape differs",
+    )
+    semantic_events = exact_checks[: -len(_GENERATION6_TERMINAL_CHECKS)]
+    unwired_sentinel = (f"unwired:{exact_case_id}",)
+    if semantic_events == unwired_sentinel:
+        _require(
+            exact_case_id in _GENERATION6_TEMPORARILY_UNWIRED_CASES,
+            "unknown unwired self-test case",
+        )
+        return "UNWIRED"
+    _require(
+        exact_case_id not in _GENERATION6_TEMPORARILY_UNWIRED_CASES,
+        "temporarily unwired self-test case gained an unregistered shape",
+    )
+    _require(
+        bool(semantic_events) and len(semantic_events) == len(set(semantic_events)),
+        "self-test semantic event shape differs",
+    )
+    validation_events = tuple(value for value in semantic_events if value.startswith("validate:"))
+    hazard_events = tuple(value for value in semantic_events if not value.startswith("validate:"))
+    _require(
+        all(value != "validate:" for value in validation_events),
+        "self-test validation event shape differs",
+    )
+    _require(
+        len(hazard_events) % 2 == 0,
+        "self-test injection/rejection event count differs",
+    )
+    for index in range(0, len(hazard_events), 2):
+        injection = hazard_events[index]
+        rejection = hazard_events[index + 1]
+        _require(
+            injection.startswith("inject:") and injection != "inject:",
+            "self-test injection event shape differs",
+        )
+        label = injection.removeprefix("inject:")
+        rejection_prefix = f"reject:{label}:"
+        _require(
+            rejection.startswith(rejection_prefix) and rejection != rejection_prefix,
+            "self-test rejection event shape differs",
+        )
+    has_validation = bool(validation_events)
+    has_hazards = bool(hazard_events)
+    if has_validation and not has_hazards:
+        return "ACCEPT"
+    if has_hazards and not has_validation:
+        return "REJECT"
+    if has_validation and has_hazards:
+        return "MIXED"
+    raise ContractError("self-test expected event categories are incomplete")
+
+
+@dataclass
+class _Generation6SelftestPatch:
+    target: object
+    name: str
+    replacement: object
+    original: object = _PID_SENTINEL
+    active: bool = False
+
+    def __enter__(self) -> None:
+        _require(not self.active, "self-test patch was reused")
+        self.original = getattr(self.target, self.name)
+        try:
+            setattr(self.target, self.name, self.replacement)
+            _require(
+                getattr(self.target, self.name) is self.replacement,
+                "self-test patch install readback differs",
+            )
+        except BaseException:
+            try:
+                setattr(self.target, self.name, self.original)
+            finally:
+                self.original = _PID_SENTINEL
+            raise
+        self.active = True
+        marker = (
+            id(self),
+            id(self.target),
+            self.name,
+            id(self.original),
+            id(self.replacement),
+        )
+        _require(marker not in _GENERATION6_ACTIVE_PATCHES, "self-test patch marker repeats")
+        _GENERATION6_ACTIVE_PATCHES.append(marker)
+
+    def __exit__(
+        self,
+        error_type: type[BaseException] | None,
+        error: BaseException | None,
+        traceback: object,
+    ) -> None:
+        del error_type, error, traceback
+        _require(self.active and self.original is not _PID_SENTINEL, "self-test patch is absent")
+        marker = (
+            id(self),
+            id(self.target),
+            self.name,
+            id(self.original),
+            id(self.replacement),
+        )
+        _require(
+            _GENERATION6_ACTIVE_PATCHES.count(marker) == 1,
+            "self-test patch marker differs",
+        )
+        setattr(self.target, self.name, self.original)
+        _require(
+            getattr(self.target, self.name) is self.original,
+            "self-test patch restore readback differs",
+        )
+        _GENERATION6_ACTIVE_PATCHES.remove(marker)
+        self.original = _PID_SENTINEL
+        self.active = False
+
+
+def _generation6_module() -> object:
+    module = sys.modules.get(__name__)
+    _require(module is not None, "runner module is absent")
+    return cast(object, module)
+
+
+def _selftest_expect_contract_error(
+    operation: Callable[[], object],
+    *,
+    label: str,
+    expected_message: str,
+) -> None:
+    target_reached = False
+    _record_generation6_check(f"inject:{label}")
+    try:
+        target_reached = True
+        operation()
+    except ContractError as error:
+        _require(target_reached, f"{label} target was not reached")
+        _require(str(error) == expected_message, f"{label} rejected at the wrong branch")
+        _record_generation6_check(f"reject:{label}:{expected_message}")
+        return
+    except BaseException as error:
+        raise ContractError(f"{label} raised outside the fail-closed type") from error
+    raise ContractError(f"{label} was accepted")
+
+
+def _selftest_expect_exact_exception(
+    operation: Callable[[], object],
+    *,
+    label: str,
+    expected_type: type[BaseException],
+    expected_message: str,
+    expected_errno: int | None = None,
+) -> BaseException:
+    _record_generation6_check(f"inject:{label}")
+    try:
+        operation()
+    except BaseException as error:
+        _require(type(error) is expected_type, f"{label} raised the wrong exact type")
+        if expected_errno is None:
+            _require(str(error) == expected_message, f"{label} rejected at the wrong branch")
+        else:
+            _require(
+                isinstance(error, OSError) and error.errno == expected_errno,
+                f"{label} rejected with the wrong errno",
+            )
+        _record_generation6_check(f"reject:{label}:{expected_message}")
+        return error
+    raise ContractError(f"{label} was accepted")
+
+
+def _selftest_load_conftest(pytest_root: Path) -> object:
+    path = (pytest_root / "tests" / "conftest.py").resolve(strict=True)
+    _require(path.is_file(), "self-test conftest path differs")
+    name = f"_task064_generation6_conftest_{os.getpid()}"
+    existing = sys.modules.get(name)
+    if existing is not None:
+        _require(
+            Path(_ascii(vars(existing).get("__file__"), "self-test conftest file")).resolve(
+                strict=True
+            )
+            == path,
+            "self-test conftest module identity differs",
+        )
+        return cast(object, existing)
+    specification = importlib.util.spec_from_file_location(name, path)
+    if specification is None or specification.loader is None:
+        raise ContractError("self-test conftest specification differs")
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[name] = module
+    try:
+        specification.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+
+def _selftest_attribute(target: object, name: str) -> object:
+    return getattr(target, name)
+
+
+def _selftest_conftest_callable(module: object, name: str) -> Callable[..., object]:
+    value = getattr(module, name)
+    _require(callable(value), f"self-test conftest callable {name} differs")
+    return cast(Callable[..., object], value)
+
+
+def _selftest_conftest_exception(module: object, name: str) -> type[BaseException]:
+    value = getattr(module, name)
+    _require(
+        type(value) is type and issubclass(value, BaseException),
+        f"self-test conftest exception {name} differs",
+    )
+    return cast(type[BaseException], value)
+
+
+def _selftest_open_anonymous_observation() -> int:
+    _require(hasattr(os, "O_TMPFILE"), "self-test O_TMPFILE is unavailable")
+    descriptor = os.open(
+        tempfile.gettempdir(),
+        os.O_RDWR | os.O_TMPFILE | os.O_CLOEXEC,
+        0o600,
+    )
+    _require(type(descriptor) is int and descriptor > 2, "self-test observation fd differs")
+    return descriptor
+
+
+def _selftest_conftest_handle(
+    module: object, descriptor: int, label: str = "CI observation"
+) -> object:
+    handle_type = cast(Callable[..., object], _selftest_attribute(module, "_ObservationHandle"))
+    return handle_type(descriptor=descriptor, _initial=None, label=label)
+
+
+def _selftest_close_dynamic_handle(module: object, handle: object) -> None:
+    if _selftest_attribute(handle, "terminal") is False:
+        _selftest_conftest_callable(module, "_close_once")(handle)
+
+
+def _selftest_require_descriptor_closed(descriptor: int, label: str) -> None:
+    try:
+        os.fstat(descriptor)
+    except OSError as error:
+        _require(error.errno == errno.EBADF, f"{label} close identity differs")
+        return
+    raise ContractError(f"{label} descriptor remains live")
+
+
+def _selftest_validated_conftest_handle(
+    module: object,
+    *,
+    label: str = "CI observation",
+) -> tuple[object, int]:
+    owner = FdOwner(_selftest_open_anonymous_observation(), f"self-test {label}")
+    descriptor = owner.detach()
+    handle = _selftest_conftest_handle(module, descriptor, label)
+    try:
+        _selftest_conftest_callable(module, "_validate_adopted_observation")(handle)
+    except BaseException:
+        if _selftest_attribute(handle, "terminal") is False:
+            _selftest_close_dynamic_handle(module, handle)
+        raise
+    return handle, descriptor
+
+
+def _selftest_require_handle_terminal(
+    handle: object,
+    descriptor: int,
+    label: str,
+) -> None:
+    _require(
+        _selftest_attribute(handle, "terminal") is True
+        and _selftest_attribute(handle, "descriptor") == -1,
+        f"{label} ownership is not terminal",
+    )
+    _selftest_require_descriptor_closed(descriptor, label)
+
+
+def _selftest_conftest_raw(
+    module: object,
+    *,
+    observation_fd: int,
+    proof_fd: int | None = None,
+) -> object:
+    raw_type = cast(
+        Callable[..., object],
+        _selftest_attribute(module, "_Task064RawInvocation"),
+    )
+    return raw_type(
+        phase="execute",
+        nonce="a" * 64,
+        observation_fd=observation_fd,
+        shard_id="report",
+        proof_mode="primed-full" if proof_fd is not None else None,
+        proof_nonce="b" * 64 if proof_fd is not None else None,
+        proof_observation_fd=proof_fd,
+        selector_nodes=(REPORT_NODE,),
+        basetemp=Path(tempfile.gettempdir()),
+    )
+
+
+def _selftest_common_packet(child: ChildResult, nonce: str) -> dict[str, object]:
+    return {
+        "nonce": nonce,
+        "observer_pid": child.pid,
+        "observer_parent_pid": os.getpid(),
+        "pytest_exitstatus": 0,
+        "collect_failed_count": 0,
+        "collect_skipped_count": 0,
+        "deselected_nodes": [],
+        "interrupted_count": 0,
+        "internal_error_count": 0,
+        "external_plugins": EXPECTED_EXTERNAL_PLUGINS,
+        "worker_indicator_count": 0,
+        "surviving_non_main_thread_count": 0,
+    }
+
+
+def _selftest_q_case(case_id: str, pytest_root: Path) -> None:
+    del pytest_root
+    invalid_arguments: dict[str, list[str]] = {
+        "Q01": [],
+        "Q02": ["--shard"],
+        "Q03": ["--shard", "report", "extra"],
+        "Q04": ["--shard", "unknown"],
+        "Q05": ["--report-proof"],
+        "Q06": ["--report-proof", "unknown"],
+        "Q07": ["--aggregate-static", "extra"],
+    }
+    if case_id in invalid_arguments:
+        arguments = invalid_arguments[case_id]
+
+        def parse_invalid_arguments() -> object:
+            return _parse_arguments(arguments)
+
+        _selftest_expect_contract_error(
+            parse_invalid_arguments,
+            label=f"CLI case {case_id}",
+            expected_message="runner argv is outside the exact grammar",
+        )
+        _record_generation6_case_evidence(case_id)
+        return
+    _require(case_id == "Q08", "unknown CLI self-test case")
+    canonical_modes = (
+        (
+            ["--shard", "report"],
+            argparse.Namespace(shard="report", report_proof=None, aggregate_static=False),
+            "validate:canonical shard CLI mode",
+        ),
+        (
+            ["--report-proof", "unprimed-success"],
+            argparse.Namespace(
+                shard=None,
+                report_proof="unprimed-success",
+                aggregate_static=False,
+            ),
+            "validate:canonical report-proof CLI mode",
+        ),
+        (
+            ["--aggregate-static"],
+            argparse.Namespace(shard=None, report_proof=None, aggregate_static=True),
+            "validate:canonical aggregate CLI mode",
+        ),
+    )
+    for arguments, expected, validation in canonical_modes:
+        parsed = _parse_arguments(arguments)
+        _require(vars(parsed) == vars(expected), "canonical CLI mode differs")
+        _record_generation6_check(validation)
+    for ordinal, arguments in enumerate(
+        (
+            ["--shard", "report", "--aggregate-static"],
+            ["--shard", "report", "--shard", "report"],
+            ["@response-file"],
+            ["TASK064_RESULT=forged"],
+        ),
+        start=1,
+    ):
+
+        def parse_indirect_arguments(arguments: list[str] = arguments) -> object:
+            return _parse_arguments(arguments)
+
+        _selftest_expect_contract_error(
+            parse_indirect_arguments,
+            label=f"conflicting or indirect CLI grammar {ordinal}",
+            expected_message="runner argv is outside the exact grammar",
+        )
+    source = Path(__file__).read_text(encoding="utf-8")
+    syntax = ast.parse(source, filename=os.fspath(Path(__file__).resolve(strict=True)))
+    main_nodes = [
+        node
+        for node in syntax.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "main"
+    ]
+    parser_nodes = [
+        node
+        for node in syntax.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "_parse_arguments"
+    ]
+    entry_nodes = [
+        node
+        for node in syntax.body
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.Compare)
+        and isinstance(node.test.left, ast.Name)
+        and node.test.left.id == "__name__"
+        and len(node.test.ops) == 1
+        and isinstance(node.test.ops[0], ast.Eq)
+        and len(node.test.comparators) == 1
+        and isinstance(node.test.comparators[0], ast.Constant)
+        and node.test.comparators[0].value == "__main__"
+    ]
+    _require(
+        len(main_nodes) == 1 and len(parser_nodes) == 1 and len(entry_nodes) == 1,
+        "static CLI definition inventory differs",
+    )
+    entry = entry_nodes[0]
+    _require(
+        not entry.orelse
+        and len(entry.body) == 1
+        and isinstance(entry.body[0], ast.Raise)
+        and isinstance(entry.body[0].exc, ast.Call)
+        and isinstance(entry.body[0].exc.func, ast.Name)
+        and entry.body[0].exc.func.id == "SystemExit"
+        and len(entry.body[0].exc.args) == 1
+        and isinstance(entry.body[0].exc.args[0], ast.Call)
+        and isinstance(entry.body[0].exc.args[0].func, ast.Name)
+        and entry.body[0].exc.args[0].func.id == "main",
+        "static CLI terminal entrypoint differs",
+    )
+    audited_nodes = (cast(ast.AST, parser_nodes[0]), cast(ast.AST, main_nodes[0]))
+    calls = [
+        node
+        for audited in audited_nodes
+        for node in ast.walk(audited)
+        if isinstance(node, ast.Call)
+    ]
+    called_names = [node.func.id for node in calls if isinstance(node.func, ast.Name)]
+    _require(
+        called_names.count("_parse_arguments") == 1
+        and called_names.count("_run_shard") == 1
+        and called_names.count("_run_report_proof") == 1
+        and called_names.count("_run_aggregate") == 1,
+        "static CLI mode call graph differs",
+    )
+    _require(
+        not any(
+            isinstance(node.func, ast.Name) and node.func.id in {"eval", "exec", "compile"}
+            for node in calls
+        )
+        and not any(
+            keyword.arg == "shell"
+            and isinstance(keyword.value, ast.Constant)
+            and keyword.value.value is True
+            for node in calls
+            for keyword in node.keywords
+        )
+        and not any(
+            isinstance(target, ast.Attribute)
+            and isinstance(target.value, ast.Name)
+            and target.value.id == "sys"
+            and target.attr in {"argv", "orig_argv"}
+            for audited in audited_nodes
+            for node in ast.walk(audited)
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign))
+            for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,))
+        ),
+        "static CLI indirect execution inventory differs",
+    )
+    _record_generation6_check("validate:canonical CLI entrypoint inventory")
+    _record_generation6_case_evidence(case_id)
+
+
+def _selftest_n_case(case_id: str, pytest_root: Path) -> None:
+    del pytest_root
+    module = _generation6_module()
+    if case_id == "N01":
+        with _Generation6SelftestPatch(secrets, "token_hex", lambda size: "a" * (size * 2)):
+            canonical = NonceLedger.empty().issue("canonical")
+        _require(canonical == "a" * 64, "canonical nonce result differs")
+        _record_generation6_check("validate:N01:canonical-64-lowercase-nonce")
+        with _Generation6SelftestPatch(secrets, "token_hex", lambda size: "g" * (size * 2)):
+            _selftest_expect_contract_error(
+                lambda: NonceLedger.empty().issue("malformed"),
+                label="malformed nonce generator result",
+                expected_message="invalid malformed nonce",
+            )
+        _record_generation6_case_evidence(case_id)
+        return
+    if case_id == "N02":
+        with _Generation6SelftestPatch(secrets, "token_hex", lambda size: "a" * (size * 2)):
+            ledger = NonceLedger.empty()
+            ledger.issue("first")
+            _selftest_expect_contract_error(
+                lambda: ledger.issue("first"),
+                label="duplicate nonce label",
+                expected_message="nonce label was issued twice",
+            )
+            reused = NonceLedger.empty()
+            reused.issue("first")
+            _selftest_expect_contract_error(
+                lambda: reused.issue("second"),
+                label="reused nonce",
+                expected_message="issued TASK-064 nonce was not fresh",
+            )
+        _record_generation6_case_evidence(case_id)
+        return
+    if case_id == "N03":
+        ledger = NonceLedger.empty()
+        ledger.issue("first")
+        _selftest_expect_contract_error(
+            lambda: ledger.prove(("first", "missing")),
+            label="missing nonce label",
+            expected_message="issued TASK-064 nonce labels differ",
+        )
+        _record_generation6_case_evidence(case_id)
+        return
+    if case_id == "N04":
+        ledger = NonceLedger.empty()
+        ledger.issue("first")
+        ledger.issue("extra")
+        _selftest_expect_contract_error(
+            lambda: ledger.prove(("first",)),
+            label="extra nonce label",
+            expected_message="issued TASK-064 nonce labels differ",
+        )
+        _record_generation6_case_evidence(case_id)
+        return
+    _require(case_id == "N05", "unknown nonce self-test case")
+    child = ChildResult(41_001, 0, b"", b"", 1, 0)
+    nonce = "1" * 64
+    base = _selftest_common_packet(child, nonce)
+    mutations: tuple[tuple[str, object], ...] = (
+        ("nonce", "2" * 64),
+        ("observer_pid", child.pid + 1),
+        ("observer_parent_pid", os.getpid() + 1),
+    )
+    publication_calls: list[bytes] = []
+    with _Generation6SelftestPatch(module, "_emit_stdout", publication_calls.append):
+        for key, value in mutations:
+            packet = dict(base)
+            packet[key] = value
+
+            def validate_mutated_packet(packet: dict[str, object] = packet) -> object:
+                _validate_common_observation(packet, nonce=nonce, child=child)
+                return None
+
+            _selftest_expect_contract_error(
+                validate_mutated_packet,
+                label=f"observation {key} binding",
+                expected_message={
+                    "nonce": "observation nonce differs",
+                    "observer_pid": "observer PID differs",
+                    "observer_parent_pid": "observer parent PID differs",
+                }[key],
+            )
+    _require(not publication_calls, "nonce rejection published a result")
+    _record_generation6_case_evidence(case_id)
+
+
+def _selftest_preflight_file_bytes(
+    supervisor: ProcessSupervisor,
+    path: Path,
+    *,
+    expected_size: int,
+) -> bytes:
+    del supervisor
+    payloads = {
+        ".python-version": b"3.13\n",
+        "uv.lock": b"x" * 42_597,
+        "schema.sql": b"x" * 22_324,
+        "schema_descriptor.json": b"x" * 32_554,
+        "schema_fingerprint.txt": b"x" * 72,
+    }
+    payload = payloads.get(path.name, b"")
+    _require(len(payload) == expected_size, "self-test preflight fixture size differs")
+    return payload
+
+
+def _selftest_real_runtime_preflight(root: Path) -> tuple[str, str]:
+    private_root: PrivateRoot | None = None
+    command_files: CommandFiles | None = None
+    result: tuple[str, str] | None = None
+    primary: BaseException | None = None
+    try:
+        private_root, command_files, supervisor = _generation6_p_inner_supervisor()
+        result = _runtime_preflight(root, supervisor)
+        cleanup = private_root.cleanup()
+        _require(
+            cleanup.status == "PASS" and cleanup.residue_count == 0,
+            "canonical runtime-preflight cleanup differs",
+        )
+        command_files.close_without_publication()
+    except BaseException as error:
+        primary = error
+    if primary is not None:
+        try:
+            _close_failure_resources(private_root, command_files)
+        except BaseException as cleanup_error:
+            primary.add_note(f"canonical runtime-preflight cleanup failed: {cleanup_error!r}")
+        raise primary
+    _require(result is not None, "canonical runtime-preflight result is absent")
+    return cast(tuple[str, str], result)
+
+
+def _selftest_e_case(case_id: str, pytest_root: Path) -> None:
+    module = _generation6_module()
+    if case_id == "E01":
+        _runtime_spawn_gate()
+        _record_generation6_check("validate:E01:canonical-Python-runtime")
+        with _Generation6SelftestPatch(sys, "version_info", (3, 13, 13)):
+            _selftest_expect_contract_error(
+                _runtime_spawn_gate,
+                label="Python runtime identity",
+                expected_message="Python runtime differs",
+            )
+        _record_generation6_case_evidence(case_id)
+        return
+    if case_id in {"E02", "E03", "E04"}:
+        python_version, pytest_version = _selftest_real_runtime_preflight(pytest_root)
+        _require(
+            (python_version, pytest_version) == ("3.13.14", "9.1.1"),
+            "canonical runtime-preflight result differs",
+        )
+        _record_generation6_check(
+            {
+                "E02": "validate:E02:canonical-pytest-runtime",
+                "E03": "validate:E03:canonical-python-version-file",
+                "E04": "validate:E04:canonical-uv-lock",
+            }[case_id]
+        )
+        file_reader: Callable[..., bytes] = _selftest_preflight_file_bytes
+        if case_id == "E03":
+
+            def wrong_version_file(
+                supervisor: ProcessSupervisor,
+                path: Path,
+                *,
+                expected_size: int,
+            ) -> bytes:
+                if path.name == ".python-version":
+                    return b"3.12\n"
+                return _selftest_preflight_file_bytes(
+                    supervisor,
+                    path,
+                    expected_size=expected_size,
+                )
+
+            file_reader = wrong_version_file
+        elif case_id == "E04":
+
+            def wrong_lock_file(
+                supervisor: ProcessSupervisor,
+                path: Path,
+                *,
+                expected_size: int,
+            ) -> bytes:
+                if path.name == "uv.lock":
+                    return b"y" * expected_size
+                return _selftest_preflight_file_bytes(
+                    supervisor,
+                    path,
+                    expected_size=expected_size,
+                )
+
+            file_reader = wrong_lock_file
+        version_value = "9.0.0" if case_id == "E02" else "9.1.1"
+        with (
+            _Generation6SelftestPatch(module, "_runtime_spawn_gate", lambda: None),
+            _Generation6SelftestPatch(module, "_file_bytes", file_reader),
+            _Generation6SelftestPatch(
+                importlib.metadata,
+                "version",
+                lambda distribution: version_value if distribution == "pytest" else "",
+            ),
+        ):
+            _selftest_expect_contract_error(
+                lambda: _runtime_preflight(pytest_root, cast(ProcessSupervisor, object())),
+                label=f"runtime preflight {case_id}",
+                expected_message={
+                    "E02": "pytest version differs",
+                    "E03": ".python-version identity differs",
+                    "E04": "uv.lock identity differs",
+                }[case_id],
+            )
+        _record_generation6_case_evidence(case_id)
+        return
+    if case_id == "E05":
+        for name in FORBIDDEN_ENV:
+            prior = os.environ.get(name)
+            os.environ[name] = "injected"
+            try:
+                with _Generation6SelftestPatch(module, "_runtime_spawn_gate", lambda: None):
+                    _selftest_expect_contract_error(
+                        lambda: _runtime_preflight(
+                            pytest_root,
+                            cast(ProcessSupervisor, object()),
+                        ),
+                        label=f"forbidden inherited {name}",
+                        expected_message=f"inherited {name} is forbidden",
+                    )
+            finally:
+                if prior is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = prior
+        git_name = "GIT_CONFIG_NOSYSTEM"
+        git_prior = os.environ.get(git_name)
+        os.environ[git_name] = "1"
+        try:
+            with _Generation6SelftestPatch(module, "_runtime_spawn_gate", lambda: None):
+                _selftest_expect_contract_error(
+                    lambda: _runtime_preflight(
+                        pytest_root,
+                        cast(ProcessSupervisor, object()),
+                    ),
+                    label="forbidden inherited Git control",
+                    expected_message="inherited Git control environment is forbidden",
+                )
+        finally:
+            if git_prior is None:
+                os.environ.pop(git_name, None)
+            else:
+                os.environ[git_name] = git_prior
+        _record_generation6_case_evidence(case_id)
+        return
+    if case_id == "E06":
+        dummy = DirectoryOwner(
+            FdOwner(91, "unused self-test child"),
+            DescriptorSnapshot(1, 1, os.getuid(), stat.S_IFDIR | 0o700, 1, 0, 0, 0),
+            1,
+            "child",
+            pytest_root / "child",
+        )
+        prefix = _pytest_prefix(
+            dummy,
+            phase="collect",
+            nonce="a" * 64,
+            observation_fd=92,
+            shard_id=None,
+            proof_mode=None,
+            proof_nonce=None,
+            proof_fd=None,
+        )
+        _require(
+            prefix[:7]
+            == [
+                sys.executable,
+                "-m",
+                "pytest",
+                "--collect-only",
+                "-q",
+                "-p",
+                "no:cacheprovider",
+            ]
+            and len(prefix) == len(set(prefix)),
+            "pytest addopts order/value differs",
+        )
+        _record_generation6_check("validate:canonical pytest addopts order")
+        conftest = _selftest_load_conftest(pytest_root)
+        validate_raw = _selftest_conftest_callable(
+            conftest,
+            "_validate_raw_task064_options",
+        )
+        pytest_module = _selftest_attribute(conftest, "pytest")
+        usage_error = cast(
+            type[BaseException],
+            _selftest_attribute(pytest_module, "UsageError"),
+        )
+        pytest_file = _ascii(
+            vars(pytest_module).get("__file__"),
+            "self-test pytest file",
+        )
+        argv_zero = os.fspath(Path(pytest_file).resolve(strict=True).with_name("__main__.py"))
+        private_temp = Path(_ascii(os.environ.get("TMPDIR"), "self-test TMPDIR")).resolve(
+            strict=True
+        )
+        basetemp = private_temp / f"e06-basetemp-{os.getpid()}"
+        _require(not basetemp.exists(), "E06 basetemp fixture exists")
+        observer_arguments = [
+            "--collect-only",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            f"--basetemp={basetemp}",
+            "--task064-ci-phase=collect",
+            f"--task064-ci-nonce={'a' * 64}",
+            "--task064-ci-observation-fd=91",
+        ]
+        exact_argv = [argv_zero, *observer_arguments]
+        exact_orig_argv = [sys.executable, "-m", "pytest", *observer_arguments]
+        with (
+            _Generation6SelftestPatch(sys, "argv", exact_argv),
+            _Generation6SelftestPatch(sys, "orig_argv", exact_orig_argv),
+        ):
+            raw = validate_raw()
+        _require(
+            raw is not None
+            and _selftest_attribute(raw, "phase") == "collect"
+            and _selftest_attribute(raw, "nonce") == "a" * 64
+            and _selftest_attribute(raw, "observation_fd") == 91
+            and _selftest_attribute(raw, "basetemp") == basetemp,
+            "canonical conftest raw invocation differs",
+        )
+        _record_generation6_check("validate:canonical conftest argv identity")
+        reordered_arguments = list(observer_arguments)
+        reordered_arguments[1], reordered_arguments[2] = (
+            reordered_arguments[2],
+            reordered_arguments[1],
+        )
+        invalid_invocations = (
+            (
+                "reordered conftest argv",
+                "TASK-064 pytest argv prefix or option order differs",
+                [argv_zero, *reordered_arguments],
+                [sys.executable, "-m", "pytest", *reordered_arguments],
+            ),
+            (
+                "wrong conftest argv zero",
+                "TASK-064 sys.argv identity differs",
+                ["/wrong/pytest/__main__.py", *observer_arguments],
+                exact_orig_argv,
+            ),
+            (
+                "wrong conftest orig argv",
+                "TASK-064 sys.orig_argv identity differs",
+                exact_argv,
+                [sys.executable, "pytest", *observer_arguments],
+            ),
+        )
+        for label, message, arguments, original_arguments in invalid_invocations:
+            with (
+                _Generation6SelftestPatch(sys, "argv", arguments),
+                _Generation6SelftestPatch(sys, "orig_argv", original_arguments),
+            ):
+                _selftest_expect_exact_exception(
+                    validate_raw,
+                    label=label,
+                    expected_type=usage_error,
+                    expected_message=message,
+                )
+        _selftest_expect_contract_error(
+            lambda: _pytest_prefix(
+                dummy,
+                phase="execute",
+                nonce="a" * 64,
+                observation_fd=92,
+                shard_id="report",
+                proof_mode="primed-full",
+                proof_nonce=None,
+                proof_fd=None,
+            ),
+            label="incomplete proof addopts",
+            expected_message="proof argv is incomplete",
+        )
+        _record_generation6_case_evidence(case_id)
+        return
+    child = ChildResult(41_002, 0, b"", b"", 1, 0)
+    producer_module = _selftest_load_conftest(pytest_root)
+    if case_id == "E07":
+        external_plugins = _selftest_conftest_callable(producer_module, "_external_plugins")
+
+        def validate_external_plugin_packet(packet: dict[str, object]) -> object:
+            _validate_common_observation(
+                packet,
+                nonce="3" * 64,
+                child=child,
+            )
+            return None
+
+        def validate_external_plugin_operation(
+            packet: dict[str, object],
+        ) -> Callable[[], object]:
+            def operation() -> object:
+                return validate_external_plugin_packet(packet)
+
+            return operation
+
+        def distribution(
+            name: str,
+            version: str,
+            group: str,
+            entry_name: str,
+            value: str,
+        ) -> SimpleNamespace:
+            entry = SimpleNamespace(group=group, name=entry_name, value=value)
+            return SimpleNamespace(
+                metadata={"Name": name},
+                version=version,
+                entry_points=(entry,),
+            )
+
+        hypothesis = distribution(
+            "Hypothesis",
+            "6.157.1",
+            "pytest11",
+            "hypothesispytest",
+            "_hypothesis_pytestplugin",
+        )
+        extra = distribution("Zed", "1.0", "pytest11", "zed", "zed.plugin")
+        plugin_manager = SimpleNamespace(get_plugin=lambda name: object())
+        config = SimpleNamespace(pluginmanager=plugin_manager)
+        variants = (
+            (),
+            (hypothesis, extra),
+            (
+                distribution(
+                    "Wrong",
+                    "6.157.1",
+                    "pytest11",
+                    "hypothesispytest",
+                    "_hypothesis_pytestplugin",
+                ),
+            ),
+            (
+                distribution(
+                    "Hypothesis",
+                    "0.0",
+                    "pytest11",
+                    "hypothesispytest",
+                    "_hypothesis_pytestplugin",
+                ),
+            ),
+            (
+                distribution(
+                    "Hypothesis",
+                    "6.157.1",
+                    "other",
+                    "hypothesispytest",
+                    "_hypothesis_pytestplugin",
+                ),
+            ),
+            (
+                distribution(
+                    "Hypothesis",
+                    "6.157.1",
+                    "pytest11",
+                    "wrong-name",
+                    "_hypothesis_pytestplugin",
+                ),
+            ),
+            (
+                distribution(
+                    "Hypothesis",
+                    "6.157.1",
+                    "pytest11",
+                    "hypothesispytest",
+                    "wrong.value",
+                ),
+            ),
+        )
+        for distributions, variant in zip(
+            variants,
+            ("missing", "extra", "distribution", "version", "group", "name", "value"),
+            strict=True,
+        ):
+            with _Generation6SelftestPatch(
+                importlib.metadata,
+                "distributions",
+                lambda distributions=distributions: distributions,
+            ):
+                produced = external_plugins(config)
+            packet = _selftest_common_packet(child, "3" * 64)
+            packet["external_plugins"] = produced
+            _selftest_expect_contract_error(
+                validate_external_plugin_operation(packet),
+                label=f"external plugin {variant}",
+                expected_message="external plugin inventory differs",
+            )
+        with _Generation6SelftestPatch(
+            importlib.metadata,
+            "distributions",
+            lambda: (extra, hypothesis),
+        ):
+            sorted_plugins = cast(list[list[str]], external_plugins(config))
+        _require(
+            sorted_plugins == sorted(sorted_plugins),
+            "external plugin canonical sort differs",
+        )
+        _record_generation6_check("validate:external plugin canonical sort")
+        with _Generation6SelftestPatch(
+            importlib.metadata,
+            "distributions",
+            lambda: (hypothesis, hypothesis),
+        ):
+            deduplicated = external_plugins(config)
+        _require(
+            deduplicated == EXPECTED_EXTERNAL_PLUGINS,
+            "external plugin duplicate collapse differs",
+        )
+        _record_generation6_check("validate:external plugin duplicate collapse")
+        _record_generation6_case_evidence(case_id)
+        return
+    if case_id == "E08":
+        worker_indicator_count = _selftest_conftest_callable(
+            producer_module,
+            "_worker_indicator_count",
+        )
+
+        def plugin_config(entries: tuple[tuple[str, object], ...] = ()) -> SimpleNamespace:
+            manager = SimpleNamespace(list_name_plugin=lambda: list(entries))
+            return SimpleNamespace(pluginmanager=manager)
+
+        baseline_config = plugin_config()
+        _require(worker_indicator_count(baseline_config) == 0, "worker baseline differs")
+
+        def reject_indicator(label: str, config: object) -> None:
+            count = worker_indicator_count(config)
+            _require(type(count) is int and count > 0, f"{label} producer count differs")
+            packet = _selftest_common_packet(child, "3" * 64)
+            packet["worker_indicator_count"] = count
+            _selftest_expect_contract_error(
+                lambda: _validate_common_observation(packet, nonce="3" * 64, child=child),
+                label=f"worker indicator {label}",
+                expected_message="worker_indicator_count differs",
+            )
+
+        worker_config = plugin_config()
+        vars(worker_config)["workerinput"] = {}
+        reject_indicator("config.workerinput", worker_config)
+        for name in (
+            "PYTEST_XDIST_WORKER",
+            "PYTEST_XDIST_WORKER_COUNT",
+            "PYTEST_XDIST_TESTRUNUID",
+        ):
+            prior = os.environ.get(name)
+            os.environ[name] = "selftest"
+            try:
+                reject_indicator(name, baseline_config)
+            finally:
+                if prior is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = prior
+        for identity in ("xdist", "execnet"):
+            plugin = SimpleNamespace(__name__=f"{identity}.selftest")
+            reject_indicator(
+                f"{identity} plugin",
+                plugin_config(((f"{identity}-selftest", plugin),)),
+            )
+        for identity in ("xdist", "execnet"):
+            module_name = f"{identity}.generation6_selftest"
+            _require(module_name not in sys.modules, f"{identity} self-test module already exists")
+            sys.modules[module_name] = ModuleType(module_name)
+            try:
+                reject_indicator(f"{identity} module", baseline_config)
+            finally:
+                sys.modules.pop(module_name, None)
+        _record_generation6_case_evidence(case_id)
+        return
+    _require(case_id == "E09", "unknown preflight self-test case")
+    surviving_threads = sum(
+        1 for thread in threading.enumerate() if thread is not threading.main_thread()
+    )
+    _require(surviving_threads == 0, "E09 canonical producer thread count differs")
+    canonical_child = ChildResult(41_003, 0, b"", b"", 1, 0)
+    canonical_observation = _selftest_common_packet(canonical_child, "4" * 64)
+    _validate_common_observation(
+        canonical_observation,
+        nonce="4" * 64,
+        child=canonical_child,
+    )
+    _record_generation6_check("validate:E09:zero-surviving-non-main-thread")
+    _selftest_isolated_hazard_case(case_id, pytest_root)
+
+
+def _selftest_k_case(case_id: str, pytest_root: Path) -> None:
+    del pytest_root
+    rejections = _GENERATION6_K_REJECTIONS[case_id]
+
+    def expect_decode(
+        payload: bytes,
+        *,
+        limit: int,
+        packet_label: str,
+        rejection: tuple[str, str],
+    ) -> None:
+        label, message = rejection
+        _selftest_expect_contract_error(
+            lambda: _decode_canonical(payload, limit=limit, label=packet_label),
+            label=label,
+            expected_message=message,
+        )
+
+    if case_id == "K01":
+        for payload, limit, packet_label, rejection in zip(
+            (b"", b"x" * 400_001, b"x" * 1_500_001, b"x" * 4_097),
+            (128, 400_000, 1_500_000, 4_096),
+            (
+                "K01 empty packet",
+                "K01 collection packet",
+                "K01 execution packet",
+                "K01 proof packet",
+            ),
+            rejections,
+            strict=True,
+        ):
+            expect_decode(
+                payload,
+                limit=limit,
+                packet_label=packet_label,
+                rejection=rejection,
+            )
+    elif case_id in {"K02", "K03", "K04", "K05", "K06", "K07"}:
+        decode_variants: dict[str, tuple[bytes, ...]] = {
+            "K02": (b"\xef\xbb\xbf{}",),
+            "K03": (b"{}\r", b"{}\n"),
+            "K04": (b'{"a":1,"a":2}',),
+            "K05": (b'{"a":NaN}', b'{"a":Infinity}', b'{"a":-Infinity}'),
+            "K06": (b'{"\\u00e9":1}', b'{"a":"\\u00e9"}', b'{"a":"\xff"}'),
+            "K07": (b'{"a": 1}', b'{"a":"\\u0061"}'),
+        }
+        for payload, rejection in zip(decode_variants[case_id], rejections, strict=True):
+            expect_decode(
+                payload,
+                limit=128,
+                packet_label=f"{case_id} packet",
+                rejection=rejection,
+            )
+    elif case_id == "K08":
+        key_packets: tuple[dict[str, object], ...] = (
+            {"a": 1},
+            {"a": 1, "b": 2, "c": 3},
+            {"b": 2, "a": 1},
+        )
+        for key_packet, (label, message) in zip(
+            key_packets,
+            rejections,
+            strict=True,
+        ):
+
+            def validate_keys(exact_packet: dict[str, object] = key_packet) -> None:
+                _exact_keys(exact_packet, ("a", "b"), "K08 object")
+
+            _selftest_expect_contract_error(
+                validate_keys,
+                label=label,
+                expected_message=message,
+            )
+    elif case_id == "K09":
+        label, message = rejections[0]
+        _selftest_expect_contract_error(
+            lambda: _integer(True, "K09 integer"),
+            label=label,
+            expected_message=message,
+        )
+    elif case_id == "K10":
+        label, message = rejections[0]
+        _selftest_expect_contract_error(
+            lambda: _node_list(["node", "node"], "K10 node"),
+            label=label,
+            expected_message=message,
+        )
+    elif case_id == "K11":
+        child = ChildResult(41_011, 0, b"", b"", 1, 0)
+        base: dict[str, object] = {key: None for key in PROOF_OBSERVATION_KEYS}
+        missing = dict(base)
+        missing.pop("status")
+        extra = {**base, "extra": None}
+        reordered = dict(reversed(tuple(base.items())))
+        proof_packets: tuple[dict[str, object], ...] = (missing, extra, reordered)
+        for proof_packet, (label, message) in zip(
+            proof_packets,
+            rejections,
+            strict=True,
+        ):
+
+            def validate_proof_shape(
+                exact_packet: dict[str, object] = proof_packet,
+            ) -> object:
+                return _validate_proof_observation(
+                    exact_packet,
+                    nonce="a" * 64,
+                    child=child,
+                    mode="expired-entry",
+                )
+
+            _selftest_expect_contract_error(
+                validate_proof_shape,
+                label=label,
+                expected_message=message,
+            )
+    else:
+        _require(case_id == "K12", "unknown packet-validator self-test case")
+        git = GitIdentity(
+            "push",
+            "SELF",
+            "a" * 40,
+            "b" * 40,
+            "a" * 40,
+            "b" * 40,
+            1,
+            None,
+        )
+        completion_variants = (
+            ChildResult(41_012, 1, b"", b"", 1, 0),
+            ChildResult(41_012, 0, b"", b"", cast(int, True), 0),
+            ChildResult(41_012, 0, b"", b"", -1, 0),
+            ChildResult(41_012, 0, b"", b"", EXECUTION_TIMEOUT_NS + 1, 0),
+            ChildResult(41_012, 0, b"", b"", 1, 1),
+        )
+        for child, (label, message) in zip(
+            completion_variants,
+            rejections[:5],
+            strict=True,
+        ):
+
+            def reject_completion(exact_child: ChildResult = child) -> object:
+                return _proof_result_packet(
+                    mode="expired-entry",
+                    git=git,
+                    execution=exact_child,
+                    proof={},
+                    proof_bytes=b"{}",
+                )
+
+            _selftest_expect_contract_error(
+                reject_completion,
+                label=label,
+                expected_message=message,
+            )
+        valid_child = ChildResult(41_012, 0, b"", b"", 1, 0)
+        oversized_proof: dict[str, object] = {
+            "publication_status": "NONE",
+            "output_bytes": None,
+            "output_sha256": "x" * 5_000,
+            "cache_state_at_assertion": "EMPTY",
+            "cache_state_after_teardown": "EMPTY",
+            "cache_teardown_completed": True,
+            "receipt_consumed": False,
+            "final_file_present": False,
+            "stage_residue_count": 0,
+        }
+        proof_label, proof_message = rejections[5]
+        _selftest_expect_contract_error(
+            lambda: _proof_result_packet(
+                mode="expired-entry",
+                git=git,
+                execution=valid_child,
+                proof=oversized_proof,
+                proof_bytes=b"{}",
+            ),
+            label=proof_label,
+            expected_message=proof_message,
+        )
+        shard = Shard("report", (), b"", "a" * 64, 0)
+        oversized_sequence = {"assigned": "x" * 9_000}
+        shard_label, shard_message = rejections[6]
+        _selftest_expect_contract_error(
+            lambda: _shard_result_packet(
+                shard=shard,
+                git=git,
+                python_version="3.13.14",
+                pytest_version="9.1.1",
+                collection=valid_child,
+                execution=valid_child,
+                counts={},
+                sequence=oversized_sequence,
+                anomalies={},
+                report_output_bytes=None,
+                report_output_sha256=None,
+            ),
+            label=shard_label,
+            expected_message=shard_message,
+        )
+    _record_generation6_case_evidence(case_id)
+
+
+def _generation6_a_execution_fixture() -> tuple[
+    dict[str, object],
+    ChildResult,
+    Shard,
+    str,
+]:
+    node = "tests/selftest.py::test_generation6_anomaly"
+    nonce = "5" * 64
+    child = ChildResult(55_001, 0, b"", b"", 1, 0)
+    shard = Shard("selftest", (node,), b"{}", "6" * 64, len(node) + 1)
+    packet: dict[str, object] = {
+        "domain": "TASK064-CI-EXECUTION-OBSERVATION-V1",
+        "nonce": nonce,
+        "observer_pid": child.pid,
+        "observer_parent_pid": os.getpid(),
+        "shard_id": "selftest-observer",
+        "pytest_exitstatus": 0,
+        "collect_failed_count": 0,
+        "collect_skipped_count": 0,
+        "deselected_nodes": [],
+        "interrupted_count": 0,
+        "internal_error_count": 0,
+        "external_plugins": EXPECTED_EXTERNAL_PLUGINS,
+        "worker_indicator_count": 0,
+        "surviving_non_main_thread_count": 0,
+        "unknown_report_count": 0,
+        "assigned_nodes": [node],
+        "collected_nodes": [node],
+        "started_nodes": [node],
+        "finished_nodes": [node],
+        "reports": [
+            [node, "setup", "passed", False],
+            [node, "call", "passed", False],
+            [node, "teardown", "passed", False],
+        ],
+    }
+    _validate_execution(
+        packet,
+        nonce=nonce,
+        child=child,
+        shard=shard,
+        observer_shard_id="selftest-observer",
+    )
+    return packet, child, shard, nonce
+
+
+def _selftest_a_case(case_id: str, pytest_root: Path) -> None:
+    del pytest_root
+    _require(case_id in _GENERATION6_A_REJECTIONS, "unknown anomaly self-test case")
+    if case_id == "A10":
+        for variant, (label, message) in zip(
+            ("missing", "extra", "sequence", "phase", "exit", "packet"),
+            _GENERATION6_A_REJECTIONS[case_id],
+            strict=True,
+        ):
+            packet, child, shard, nonce = _generation6_a_execution_fixture()
+            node = shard.nodes[0]
+            if variant == "missing":
+                packet["assigned_nodes"] = []
+            elif variant == "extra":
+                packet["assigned_nodes"] = [node, f"{node}-extra"]
+            elif variant == "sequence":
+                packet["collected_nodes"] = [f"{node}-sequence"]
+            elif variant == "phase":
+                reports = cast(list[object], packet["reports"])
+                cast(list[object], reports[1])[1] = "wrong-phase"
+            elif variant == "exit":
+                packet["pytest_exitstatus"] = 1
+            else:
+                packet.pop("reports")
+            anomaly_delta = {name: int(name == "unaccounted") for name in ANOMALY_KEYS}
+            _require(
+                sum(anomaly_delta.values()) == 1 and anomaly_delta["unaccounted"] == 1,
+                "A10 anomaly delta differs",
+            )
+
+            def validate_mutation(
+                packet: dict[str, object] = packet,
+                child: ChildResult = child,
+                shard: Shard = shard,
+                nonce: str = nonce,
+            ) -> object:
+                return _validate_execution(
+                    packet,
+                    nonce=nonce,
+                    child=child,
+                    shard=shard,
+                    observer_shard_id="selftest-observer",
+                )
+
+            _selftest_expect_contract_error(
+                validate_mutation,
+                label=label,
+                expected_message=message,
+            )
+        _record_generation6_case_evidence(case_id)
+        return
+    packet, child, shard, nonce = _generation6_a_execution_fixture()
+    anomaly_name = {
+        "A01": "unknown",
+        "A02": "duplicate",
+        "A03": "failed",
+        "A04": "error",
+        "A05": "skipped",
+        "A06": "xfailed",
+        "A07": "xpassed",
+        "A08": "deselected",
+        "A09": "interrupted",
+    }[case_id]
+    anomaly_delta = {name: int(name == anomaly_name) for name in ANOMALY_KEYS}
+    _require(
+        sum(anomaly_delta.values()) == 1 and anomaly_delta[anomaly_name] == 1,
+        f"{case_id} anomaly delta differs",
+    )
+    if case_id == "A01":
+        packet["unknown_report_count"] = 1
+    elif case_id == "A02":
+        packet["started_nodes"] = [shard.nodes[0], shard.nodes[0]]
+    elif case_id == "A08":
+        packet["deselected_nodes"] = [shard.nodes[0]]
+    elif case_id == "A09":
+        packet["interrupted_count"] = 1
+    else:
+        reports = cast(list[object], packet["reports"])
+        report_index = 0 if case_id == "A04" else 1
+        report = cast(list[object], reports[report_index])
+        report[2] = {
+            "A03": "failed",
+            "A04": "failed",
+            "A05": "skipped",
+            "A06": "skipped",
+            "A07": "passed",
+        }[case_id]
+        report[3] = case_id in {"A06", "A07"}
+    label, message = _GENERATION6_A_REJECTIONS[case_id][0]
+    _selftest_expect_contract_error(
+        lambda: _validate_execution(
+            packet,
+            nonce=nonce,
+            child=child,
+            shard=shard,
+            observer_shard_id="selftest-observer",
+        ),
+        label=label,
+        expected_message=message,
+    )
+    _record_generation6_case_evidence(case_id)
+
+
+def _generation6_x_git_identity() -> GitIdentity:
+    return GitIdentity(
+        "push",
+        "SELF",
+        "1" * 40,
+        "2" * 40,
+        "1" * 40,
+        "2" * 40,
+        1,
+        None,
+    )
+
+
+def _generation6_x_result_packet(job_id: str, git: GitIdentity) -> bytes:
+    shard_id = "report" if job_id == "report" else job_id.replace("_", "-")
+    expected = SHARD_EXPECTATIONS[shard_id]
+    shard = Shard(
+        shard_id,
+        tuple(f"{shard_id}-{ordinal}" for ordinal in range(expected.count)),
+        b"x" * expected.canonical_bytes,
+        expected.sha256,
+        expected.selector_bytes,
+    )
+    counts = {key: expected.count for key in COUNT_KEYS}
+    sequence = {key: "7" * 64 for key in SEQUENCE_KEYS}
+    anomalies = {key: 0 for key in ANOMALY_KEYS}
+    child = ChildResult(56_001, 0, b"", b"", 1, 0)
+    return _shard_result_packet(
+        shard=shard,
+        git=git,
+        python_version="3.13.14",
+        pytest_version="9.1.1",
+        collection=child,
+        execution=child,
+        counts=counts,
+        sequence=sequence,
+        anomalies=anomalies,
+        report_output_bytes=1 if job_id == "report" else None,
+        report_output_sha256="8" * 64 if job_id == "report" else None,
+    )
+
+
+def _generation6_x_environment(git: GitIdentity) -> dict[str, str]:
+    environment = {name: "success" for name in AGGREGATE_NAMES[:6]}
+    for job_id in ("report", "remainder_0", "remainder_1", "remainder_2", "remainder_3"):
+        packet = _generation6_x_result_packet(job_id, git)
+        stem = "REPORT" if job_id == "report" else job_id.upper()
+        environment[f"TASK064_AGG_{stem}_PACKET_B64"] = base64.b64encode(packet).decode("ascii")
+        environment[f"TASK064_AGG_{stem}_PACKET_SHA256"] = _sha256(packet)
+    _require(
+        {name for name in environment if name.startswith("TASK064_AGG_")} == set(AGGREGATE_NAMES),
+        "X aggregate fixture names differ",
+    )
+    environment["TASK064_CANDIDATE_SHA"] = git.candidate_commit_sha
+    environment["GITHUB_SHA"] = git.tested_checkout_commit_sha
+    return environment
+
+
+def _generation6_x_packet_from_environment(
+    environment: Mapping[str, str],
+    job_id: str,
+) -> dict[str, object]:
+    stem = "REPORT" if job_id == "report" else job_id.upper()
+    encoded_name = f"TASK064_AGG_{stem}_PACKET_B64"
+    encoded = _ascii(environment.get(encoded_name), encoded_name)
+    try:
+        payload = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise ContractError("X aggregate fixture base64 differs") from error
+    return _decode_canonical(payload, limit=SHARD_RESULT_LIMIT, label=f"{job_id} result packet")
+
+
+def _generation6_x_replace_packet(
+    environment: dict[str, str],
+    job_id: str,
+    packet: dict[str, object],
+) -> None:
+    payload = _canonical_bytes(packet, limit=SHARD_RESULT_LIMIT)
+    stem = "REPORT" if job_id == "report" else job_id.upper()
+    environment[f"TASK064_AGG_{stem}_PACKET_B64"] = base64.b64encode(payload).decode("ascii")
+    environment[f"TASK064_AGG_{stem}_PACKET_SHA256"] = _sha256(payload)
+
+
+def _generation6_x_distinct_value(value: object) -> object:
+    if value is None:
+        return "3" * 40
+    if type(value) is int:
+        return value + 1
+    if type(value) is str:
+        return value + "-different"
+    raise ContractError("X aggregate fixture shared value type differs")
+
+
+_GENERATION6_APPROVED_WORKFLOW_BYTES: Final = 8_298
+_GENERATION6_APPROVED_WORKFLOW_SHA256: Final = (
+    "ee4b2c9cc3b2115b7b6ab2ddc3f45116690cff527844a57c7e940b6550f62621"
+)
+_GENERATION6_APPROVED_WORKFLOW_SCALAR: Final = "${{ needs.report.outputs.task064_packet_b64 }}"
+_GENERATION6_WORKFLOW_TARGET_LINE: Final = 256
+
+
+def _generation6_x_workflow_scalar(payload: bytes) -> str:
+    _require(
+        type(payload) is bytes
+        and payload != b""
+        and payload.endswith(b"\n")
+        and b"\x00" not in payload
+        and b"\r" not in payload,
+        "aggregate workflow source bytes differ",
+    )
+    key = b"          TASK064_AGG_REPORT_PACKET_B64: "
+    token = b"TASK064_AGG_REPORT_PACKET_B64:"
+    _require(payload.count(token) == 1, "aggregate workflow target scalar cardinality differs")
+    matches = [
+        (ordinal, line.removeprefix(key).removesuffix(b"\n"))
+        for ordinal, line in enumerate(payload.splitlines(keepends=True), start=1)
+        if line.startswith(key)
+    ]
+    _require(
+        len(matches) == 1 and matches[0][0] == _GENERATION6_WORKFLOW_TARGET_LINE,
+        "aggregate workflow target scalar location differs",
+    )
+    try:
+        scalar = matches[0][1].decode("ascii")
+    except UnicodeDecodeError as error:
+        raise ContractError("aggregate workflow target scalar is not ASCII") from error
+    return _ascii(scalar, "aggregate workflow target scalar")
+
+
+def _generation6_x_workflow_source(pytest_root: Path) -> tuple[Path, bytes, str]:
+    _require(
+        type(pytest_root) is type(Path())
+        and pytest_root.is_absolute()
+        and pytest_root.resolve(strict=True) == pytest_root,
+        "aggregate workflow repository root differs",
+    )
+    workflow_path = pytest_root / ".github" / "workflows" / "ci.yml"
+    _require(
+        workflow_path.resolve(strict=True) == workflow_path,
+        "aggregate workflow source path differs",
+    )
+    try:
+        payload = workflow_path.read_bytes()
+    except OSError as error:
+        raise ContractError("aggregate workflow source is unavailable") from error
+    _require(
+        len(payload) == _GENERATION6_APPROVED_WORKFLOW_BYTES
+        and _sha256(payload) == _GENERATION6_APPROVED_WORKFLOW_SHA256,
+        "aggregate workflow source identity differs",
+    )
+    scalar = _generation6_x_workflow_scalar(payload)
+    _require(
+        scalar == _GENERATION6_APPROVED_WORKFLOW_SCALAR,
+        "aggregate workflow approved scalar differs",
+    )
+    return workflow_path, payload, scalar
+
+
+def _generation6_validate_aggregate_workflow_expression(expression: object) -> None:
+    exact = _ascii(expression, "aggregate workflow environment expression")
+    _require(
+        exact == "${{ needs.report.outputs.task064_packet_b64 }}",
+        "aggregate workflow environment expression differs",
+    )
+
+
+_CAPTURED_GENERATION6_WORKFLOW_VALIDATOR: Final = (
+    _generation6_validate_aggregate_workflow_expression
+)
+_CAPTURED_GENERATION6_WORKFLOW_VALIDATOR_CODE: Final = (
+    _generation6_validate_aggregate_workflow_expression.__code__
+)
+_CAPTURED_GENERATION6_ASCII: Final = _ascii
+_CAPTURED_GENERATION6_ASCII_CODE: Final = _ascii.__code__
+_CAPTURED_GENERATION6_REQUIRE: Final = _require
+_CAPTURED_GENERATION6_REQUIRE_CODE: Final = _require.__code__
+_CAPTURED_GENERATION6_CAST: Final = cast
+_CAPTURED_GENERATION6_CAST_CODE: Final = cast.__code__
+_CAPTURED_GENERATION6_CAST_DEFAULTS: Final = cast.__defaults__
+_CAPTURED_GENERATION6_CAST_KWDEFAULTS: Final = cast.__kwdefaults__
+_CAPTURED_GENERATION6_CAST_CLOSURE: Final = cast.__closure__
+_CAPTURED_GENERATION6_CONTRACT_ERROR: Final = ContractError
+_CAPTURED_GENERATION6_CONTRACT_ERROR_BASES: Final = ContractError.__bases__
+_CAPTURED_GENERATION6_CONTRACT_ERROR_MRO: Final = ContractError.__mro__
+_CAPTURED_GENERATION6_CONTRACT_ERROR_NEW: Final = ContractError.__new__
+_CAPTURED_GENERATION6_CONTRACT_ERROR_INIT: Final = ContractError.__init__
+_CAPTURED_GENERATION6_CONTRACT_ERROR_NAMESPACE: Final = tuple(ContractError.__dict__.items())
+_CAPTURED_GENERATION6_CONTRACT_ERROR_NAMESPACE_KEYS: Final = tuple(
+    key for key, _ in _CAPTURED_GENERATION6_CONTRACT_ERROR_NAMESPACE
+)
+_CAPTURED_GENERATION6_CONTRACT_ERROR_OWN_NEW: Final = "__new__" in ContractError.__dict__
+_CAPTURED_GENERATION6_CONTRACT_ERROR_OWN_INIT: Final = "__init__" in ContractError.__dict__
+_CAPTURED_GENERATION6_BUILTINS: Final = builtins
+_CAPTURED_GENERATION6_BUILTIN_TYPE: Final = builtins.type
+_CAPTURED_GENERATION6_BUILTIN_STR: Final = builtins.str
+_CAPTURED_GENERATION6_BUILTIN_TUPLE: Final = builtins.tuple
+_CAPTURED_GENERATION6_BUILTIN_RUNTIME_ERROR: Final = builtins.RuntimeError
+_CAPTURED_GENERATION6_UNICODE_ENCODE_ERROR: Final = builtins.UnicodeEncodeError
+_CAPTURED_GENERATION6_GUARD_ERROR: Final = builtins.RuntimeError
+_GENERATION6_WORKFLOW_VALIDATOR_NAMES: Final = ("_ascii", "_require")
+_GENERATION6_ASCII_NAMES: Final = (
+    "_require",
+    "type",
+    "str",
+    "cast",
+    "encode",
+    "UnicodeEncodeError",
+    "ContractError",
+)
+_GENERATION6_REQUIRE_NAMES: Final = ("ContractError",)
+
+
+def _generation6_x_static_expression_guard(expression: object) -> None:
+    if (
+        builtins is not _CAPTURED_GENERATION6_BUILTINS
+        or builtins.type is not _CAPTURED_GENERATION6_BUILTIN_TYPE
+        or builtins.str is not _CAPTURED_GENERATION6_BUILTIN_STR
+        or builtins.tuple is not _CAPTURED_GENERATION6_BUILTIN_TUPLE
+        or builtins.RuntimeError is not _CAPTURED_GENERATION6_BUILTIN_RUNTIME_ERROR
+        or builtins.UnicodeEncodeError is not _CAPTURED_GENERATION6_UNICODE_ENCODE_ERROR
+    ):
+        raise _CAPTURED_GENERATION6_GUARD_ERROR("aggregate workflow builtins dependency differs")
+    if (
+        _generation6_validate_aggregate_workflow_expression
+        is not _CAPTURED_GENERATION6_WORKFLOW_VALIDATOR
+    ):
+        raise _CAPTURED_GENERATION6_GUARD_ERROR("aggregate workflow validator identity differs")
+    if (
+        _CAPTURED_GENERATION6_WORKFLOW_VALIDATOR.__code__
+        is not _CAPTURED_GENERATION6_WORKFLOW_VALIDATOR_CODE
+    ):
+        raise _CAPTURED_GENERATION6_GUARD_ERROR("aggregate workflow validator code differs")
+    if (
+        _CAPTURED_GENERATION6_WORKFLOW_VALIDATOR_CODE.co_names
+        != _GENERATION6_WORKFLOW_VALIDATOR_NAMES
+    ):
+        raise _CAPTURED_GENERATION6_GUARD_ERROR("aggregate workflow validator call graph differs")
+    if _ascii is not _CAPTURED_GENERATION6_ASCII:
+        raise _CAPTURED_GENERATION6_GUARD_ERROR("aggregate workflow ASCII dependency differs")
+    if _CAPTURED_GENERATION6_ASCII.__code__ is not _CAPTURED_GENERATION6_ASCII_CODE:
+        raise _CAPTURED_GENERATION6_GUARD_ERROR("aggregate workflow ASCII code differs")
+    if _CAPTURED_GENERATION6_ASCII_CODE.co_names != _GENERATION6_ASCII_NAMES:
+        raise _CAPTURED_GENERATION6_GUARD_ERROR("aggregate workflow ASCII call graph differs")
+    if _require is not _CAPTURED_GENERATION6_REQUIRE:
+        raise _CAPTURED_GENERATION6_GUARD_ERROR("aggregate workflow require dependency differs")
+    if _CAPTURED_GENERATION6_REQUIRE.__code__ is not _CAPTURED_GENERATION6_REQUIRE_CODE:
+        raise _CAPTURED_GENERATION6_GUARD_ERROR("aggregate workflow require code differs")
+    if _CAPTURED_GENERATION6_REQUIRE_CODE.co_names != _GENERATION6_REQUIRE_NAMES:
+        raise _CAPTURED_GENERATION6_GUARD_ERROR("aggregate workflow require call graph differs")
+    if cast is not _CAPTURED_GENERATION6_CAST:
+        raise _CAPTURED_GENERATION6_GUARD_ERROR("aggregate workflow cast dependency differs")
+    if cast.__code__ is not _CAPTURED_GENERATION6_CAST_CODE:
+        raise _CAPTURED_GENERATION6_GUARD_ERROR("aggregate workflow cast code differs")
+    if cast.__code__.co_names != ():
+        raise _CAPTURED_GENERATION6_GUARD_ERROR("aggregate workflow cast call graph differs")
+    if (
+        cast.__defaults__ is not _CAPTURED_GENERATION6_CAST_DEFAULTS
+        or cast.__kwdefaults__ is not _CAPTURED_GENERATION6_CAST_KWDEFAULTS
+        or cast.__closure__ is not _CAPTURED_GENERATION6_CAST_CLOSURE
+    ):
+        raise _CAPTURED_GENERATION6_GUARD_ERROR("aggregate workflow cast closure differs")
+    if ContractError is not _CAPTURED_GENERATION6_CONTRACT_ERROR:
+        raise _CAPTURED_GENERATION6_GUARD_ERROR("aggregate workflow error dependency differs")
+    if _CAPTURED_GENERATION6_BUILTIN_TYPE(ContractError) is not _CAPTURED_GENERATION6_BUILTIN_TYPE:
+        raise _CAPTURED_GENERATION6_GUARD_ERROR("aggregate workflow error metaclass differs")
+    error_namespace = ContractError.__dict__
+    if (
+        _CAPTURED_GENERATION6_BUILTIN_TUPLE(error_namespace)
+        != _CAPTURED_GENERATION6_CONTRACT_ERROR_NAMESPACE_KEYS
+        or ("__new__" in error_namespace) is not _CAPTURED_GENERATION6_CONTRACT_ERROR_OWN_NEW
+        or ("__init__" in error_namespace) is not _CAPTURED_GENERATION6_CONTRACT_ERROR_OWN_INIT
+    ):
+        raise _CAPTURED_GENERATION6_GUARD_ERROR("aggregate workflow error namespace differs")
+    for name, expected in _CAPTURED_GENERATION6_CONTRACT_ERROR_NAMESPACE:
+        if error_namespace[name] is not expected:
+            raise _CAPTURED_GENERATION6_GUARD_ERROR("aggregate workflow error namespace differs")
+    if (
+        _CAPTURED_GENERATION6_CONTRACT_ERROR_OWN_NEW
+        or _CAPTURED_GENERATION6_CONTRACT_ERROR_OWN_INIT
+        or ContractError.__bases__ is not _CAPTURED_GENERATION6_CONTRACT_ERROR_BASES
+        or ContractError.__bases__ != (_CAPTURED_GENERATION6_BUILTIN_RUNTIME_ERROR,)
+        or ContractError.__mro__ is not _CAPTURED_GENERATION6_CONTRACT_ERROR_MRO
+        or ContractError.__new__ is not _CAPTURED_GENERATION6_CONTRACT_ERROR_NEW
+        or ContractError.__init__ is not _CAPTURED_GENERATION6_CONTRACT_ERROR_INIT
+    ):
+        raise _CAPTURED_GENERATION6_GUARD_ERROR("aggregate workflow error constructor differs")
+    _CAPTURED_GENERATION6_WORKFLOW_VALIDATOR(expression)
+
+
+def _selftest_x_case(case_id: str, pytest_root: Path) -> None:
+    _require(case_id in _GENERATION6_X_REJECTIONS, "unknown aggregate self-test case")
+    if case_id in {f"X{ordinal:02d}" for ordinal in range(7, 13)}:
+        del pytest_root
+        _selftest_x07_x12_case(case_id)
+        return
+    module = _generation6_module()
+    git = _generation6_x_git_identity()
+    if case_id == "X01":
+        environment = _generation6_x_environment(git)
+        with _Generation6SelftestPatch(os, "environ", dict(environment)):
+            _validate_aggregate(git)
+        _record_generation6_check(_GENERATION6_X_VALIDATIONS[case_id])
+        captured_decode = _decode_aggregate_packet
+        for failed_name, (label, message) in zip(
+            AGGREGATE_NAMES[:6],
+            _GENERATION6_X_REJECTIONS[case_id],
+            strict=True,
+        ):
+            negative_environment = dict(environment)
+            negative_environment[failed_name] = "failure"
+            decode_calls = 0
+
+            def observed_decode(job_id: str) -> dict[str, object]:
+                nonlocal decode_calls
+                decode_calls += 1
+                return captured_decode(job_id)
+
+            with (
+                _Generation6SelftestPatch(os, "environ", negative_environment),
+                _Generation6SelftestPatch(
+                    module,
+                    "_decode_aggregate_packet",
+                    observed_decode,
+                ),
+            ):
+                _selftest_expect_contract_error(
+                    lambda: _validate_aggregate(git),
+                    label=label,
+                    expected_message=message,
+                )
+            _require(decode_calls == 0, "X01 decoded after a dependency rejection")
+        _record_generation6_case_evidence(case_id)
+        return
+    if case_id == "X02":
+        environment = _generation6_x_environment(git)
+        with _Generation6SelftestPatch(os, "environ", dict(environment)):
+            _validate_aggregate(git)
+        workflow_path, workflow_payload, approved_scalar = _generation6_x_workflow_source(
+            pytest_root
+        )
+        try:
+            workflow_text = workflow_payload.decode("ascii")
+        except UnicodeDecodeError as error:
+            raise ContractError("aggregate workflow source is not ASCII") from error
+        _require(
+            workflow_text.count(_GENERATION6_APPROVED_WORKFLOW_SCALAR) == 1,
+            "aggregate workflow approved scalar cardinality differs",
+        )
+
+        _generation6_x_static_expression_guard(approved_scalar)
+        _record_generation6_check(_GENERATION6_X_VALIDATIONS[case_id])
+        extra_environment = dict(environment)
+        extra_environment["TASK064_AGG_UNEXPECTED"] = "unexpected"
+        extra_label, extra_message = _GENERATION6_X_REJECTIONS[case_id][0]
+        decode_calls = 0
+        captured_decode = _decode_aggregate_packet
+
+        def observed_decode(job_id: str) -> dict[str, object]:
+            nonlocal decode_calls
+            decode_calls += 1
+            return captured_decode(job_id)
+
+        with (
+            _Generation6SelftestPatch(os, "environ", extra_environment),
+            _Generation6SelftestPatch(module, "_decode_aggregate_packet", observed_decode),
+        ):
+            _selftest_expect_contract_error(
+                lambda: _validate_aggregate(git),
+                label=extra_label,
+                expected_message=extra_message,
+            )
+        _require(decode_calls == 0, "X02 decoded after an environment-name rejection")
+        expression_label, expression_message = _GENERATION6_X_REJECTIONS[case_id][1]
+        defaulted_scalar = "${{ needs.report.outputs.task064_packet_b64 || '' }}"
+        mutated_text = workflow_text.replace(
+            _GENERATION6_APPROVED_WORKFLOW_SCALAR,
+            defaulted_scalar,
+            1,
+        )
+        _require(
+            mutated_text != workflow_text
+            and mutated_text.count(defaulted_scalar) == 1
+            and mutated_text.count(_GENERATION6_APPROVED_WORKFLOW_SCALAR) == 0,
+            "aggregate workflow in-memory mutation differs",
+        )
+        mutated_scalar = _generation6_x_workflow_scalar(mutated_text.encode("ascii"))
+        _require(mutated_scalar == defaulted_scalar, "aggregate workflow mutation scalar differs")
+
+        _selftest_expect_contract_error(
+            lambda: _generation6_x_static_expression_guard(mutated_scalar),
+            label=expression_label,
+            expected_message=expression_message,
+        )
+        try:
+            workflow_after = workflow_path.read_bytes()
+        except OSError as error:
+            raise ContractError("aggregate workflow source rehash failed") from error
+        _require(
+            workflow_after == workflow_payload
+            and len(workflow_after) == _GENERATION6_APPROVED_WORKFLOW_BYTES
+            and _sha256(workflow_after) == _GENERATION6_APPROVED_WORKFLOW_SHA256,
+            "aggregate workflow source changed during static validation",
+        )
+        _record_generation6_case_evidence(case_id)
+        return
+    report_b64 = "TASK064_AGG_REPORT_PACKET_B64"
+    report_sha = "TASK064_AGG_REPORT_PACKET_SHA256"
+    if case_id == "X03":
+        canonical = b"{}"
+        base_environment = {
+            report_b64: base64.b64encode(canonical).decode("ascii"),
+            report_sha: _sha256(canonical),
+        }
+        variants = ("missing_b64", "empty_b64", "missing_sha", "empty_sha")
+        for variant, (label, message) in zip(
+            variants,
+            _GENERATION6_X_REJECTIONS[case_id],
+            strict=True,
+        ):
+            environment = dict(base_environment)
+            if variant == "missing_b64":
+                environment.pop(report_b64)
+            elif variant == "empty_b64":
+                environment[report_b64] = ""
+            elif variant == "missing_sha":
+                environment.pop(report_sha)
+            else:
+                environment[report_sha] = ""
+            with _Generation6SelftestPatch(os, "environ", environment):
+                _selftest_expect_contract_error(
+                    lambda: _decode_aggregate_packet("report"),
+                    label=label,
+                    expected_message=message,
+                )
+        _record_generation6_case_evidence(case_id)
+        return
+    if case_id == "X04":
+        x04_variants = (
+            ("QQ== ", "0" * 64),
+            ("Q*==", "0" * 64),
+            ("A===", "0" * 64),
+            ("A" * 10_925, "0" * 64),
+        )
+        for (encoded, digest), (label, message) in zip(
+            x04_variants,
+            _GENERATION6_X_REJECTIONS[case_id],
+            strict=True,
+        ):
+            with _Generation6SelftestPatch(
+                os,
+                "environ",
+                {report_b64: encoded, report_sha: digest},
+            ):
+                _selftest_expect_contract_error(
+                    lambda: _decode_aggregate_packet("report"),
+                    label=label,
+                    expected_message=message,
+                )
+        _record_generation6_case_evidence(case_id)
+        return
+    if case_id == "X05":
+        decoded = b"x" * (SHARD_RESULT_LIMIT + 1)
+        environment = {
+            report_b64: base64.b64encode(decoded).decode("ascii"),
+            report_sha: _sha256(decoded),
+        }
+        label, message = _GENERATION6_X_REJECTIONS[case_id][0]
+        with _Generation6SelftestPatch(os, "environ", environment):
+            _selftest_expect_contract_error(
+                lambda: _decode_aggregate_packet("report"),
+                label=label,
+                expected_message=message,
+            )
+        _record_generation6_case_evidence(case_id)
+        return
+    _require(case_id == "X06", "unknown aggregate transport self-test case")
+    canonical = b"{}"
+    environment = {
+        report_b64: base64.b64encode(canonical).decode("ascii"),
+        report_sha: _sha256(canonical),
+    }
+    with _Generation6SelftestPatch(os, "environ", environment):
+        decoded_packet = _decode_aggregate_packet("report")
+    _require(decoded_packet == {}, "X06 canonical transport result differs")
+    _record_generation6_check(_GENERATION6_X_VALIDATIONS[case_id])
+    noncanonical = b"A"
+    negative_environment = {
+        report_b64: "QR==",
+        report_sha: _sha256(noncanonical),
+    }
+    label, message = _GENERATION6_X_REJECTIONS[case_id][0]
+    with _Generation6SelftestPatch(os, "environ", negative_environment):
+        _selftest_expect_contract_error(
+            lambda: _decode_aggregate_packet("report"),
+            label=label,
+            expected_message=message,
+        )
+    _record_generation6_case_evidence(case_id)
+    return
+
+
+def _selftest_x07_x12_case(case_id: str) -> None:
+    _require(case_id in {f"X{ordinal:02d}" for ordinal in range(7, 13)}, "X late case differs")
+    module = _generation6_module()
+    git = _generation6_x_git_identity()
+    environment = _generation6_x_environment(git)
+    report_sha = "TASK064_AGG_REPORT_PACKET_SHA256"
+    if case_id == "X07":
+        environment[report_sha] = "0" * 64
+        label, message = _GENERATION6_X_REJECTIONS[case_id][0]
+        with _Generation6SelftestPatch(os, "environ", environment):
+            _selftest_expect_contract_error(
+                lambda: _decode_aggregate_packet("report"),
+                label=label,
+                expected_message=message,
+            )
+        _record_generation6_case_evidence(case_id)
+        return
+    if case_id == "X08":
+        noncanonical = b'{"domain": "TASK064-CI-SHARD-RESULT-V1"}'
+        noncanonical_environment = {
+            "TASK064_AGG_REPORT_PACKET_B64": base64.b64encode(noncanonical).decode("ascii"),
+            report_sha: _sha256(noncanonical),
+        }
+        noncanonical_label, noncanonical_message = _GENERATION6_X_REJECTIONS[case_id][0]
+        with _Generation6SelftestPatch(os, "environ", noncanonical_environment):
+            _selftest_expect_contract_error(
+                lambda: _decode_aggregate_packet("report"),
+                label=noncanonical_label,
+                expected_message=noncanonical_message,
+            )
+        schema_packet = _generation6_x_packet_from_environment(environment, "report")
+        schema_packet.pop("status")
+        schema_label, schema_message = _GENERATION6_X_REJECTIONS[case_id][1]
+        _selftest_expect_contract_error(
+            lambda: _validate_result_packet("report", schema_packet),
+            label=schema_label,
+            expected_message=schema_message,
+        )
+        _record_generation6_case_evidence(case_id)
+        return
+    if case_id == "X09":
+        shared_keys = tuple(
+            message.removeprefix("aggregate shared ").removesuffix(" differs")
+            for _, message in _GENERATION6_X_REJECTIONS[case_id][:-2]
+        )
+        _require(
+            len(shared_keys) == 17 and len(set(shared_keys)) == 17, "X09 shared key vector differs"
+        )
+        captured_validate = _validate_result_packet
+        for key, (label, message) in zip(
+            shared_keys,
+            _GENERATION6_X_REJECTIONS[case_id][:-2],
+            strict=True,
+        ):
+            validation_calls: list[str] = []
+
+            def mutate_validated_packet(
+                job_id: str,
+                packet: dict[str, object],
+                key: str = key,
+                validation_calls: list[str] = validation_calls,
+            ) -> dict[str, object]:
+                validated = captured_validate(job_id, packet)
+                validation_calls.append(job_id)
+                if job_id != "remainder_0":
+                    return validated
+                mutated = dict(validated)
+                mutated[key] = _generation6_x_distinct_value(mutated[key])
+                return mutated
+
+            with (
+                _Generation6SelftestPatch(os, "environ", dict(environment)),
+                _Generation6SelftestPatch(
+                    module, "_validate_result_packet", mutate_validated_packet
+                ),
+            ):
+                _selftest_expect_contract_error(
+                    lambda: _validate_aggregate(git),
+                    label=label,
+                    expected_message=message,
+                )
+            _require(
+                validation_calls
+                == ["report", "remainder_0", "remainder_1", "remainder_2", "remainder_3"],
+                "X09 validated packet inventory differs",
+            )
+        for environment_name, replacement, (label, message) in zip(
+            ("TASK064_CANDIDATE_SHA", "GITHUB_SHA"),
+            ("3" * 40, "4" * 40),
+            _GENERATION6_X_REJECTIONS[case_id][-2:],
+            strict=True,
+        ):
+            negative_environment = dict(environment)
+            negative_environment[environment_name] = replacement
+            with _Generation6SelftestPatch(os, "environ", negative_environment):
+                _selftest_expect_contract_error(
+                    lambda: _validate_aggregate(git),
+                    label=label,
+                    expected_message=message,
+                )
+        _record_generation6_case_evidence(case_id)
+        return
+    if case_id == "X10":
+        variants = (
+            "shard_id",
+            "shard_manifest_count",
+            "sequence_digest",
+            "anomaly",
+            "collection_exit",
+            "collection_elapsed",
+            "pre_clean",
+            "cleanup_status",
+        )
+        for variant, (label, message) in zip(
+            variants,
+            _GENERATION6_X_REJECTIONS[case_id],
+            strict=True,
+        ):
+            negative_environment = dict(environment)
+            packet = _generation6_x_packet_from_environment(negative_environment, "remainder_0")
+            if variant == "shard_id":
+                packet["shard_id"] = "remainder-9"
+            elif variant == "shard_manifest_count":
+                packet["shard_manifest_count"] = cast(int, packet["shard_manifest_count"]) + 1
+            elif variant == "sequence_digest":
+                sequence = cast(dict[str, object], packet["sequence_sha256"])
+                sequence["finished"] = "9" * 64
+            elif variant == "anomaly":
+                anomalies = cast(dict[str, object], packet["anomalies"])
+                anomalies["unknown"] = 1
+            elif variant == "collection_exit":
+                packet["collection_exit_code"] = 1
+            elif variant == "collection_elapsed":
+                packet["collection_elapsed_ns"] = COLLECTION_TIMEOUT_NS + 1
+            elif variant == "pre_clean":
+                packet["pre_clean"] = False
+            else:
+                packet["cleanup_status"] = "FAIL"
+            _generation6_x_replace_packet(negative_environment, "remainder_0", packet)
+            with _Generation6SelftestPatch(os, "environ", negative_environment):
+                _selftest_expect_contract_error(
+                    lambda: _validate_aggregate(git),
+                    label=label,
+                    expected_message=message,
+                )
+        _record_generation6_case_evidence(case_id)
+        return
+    if case_id == "X11":
+        captured_validate = _validate_result_packet
+        x11_variants = (*COUNT_KEYS, "report_zero", "report_two")
+        for variant, (label, message) in zip(
+            x11_variants,
+            _GENERATION6_X_REJECTIONS[case_id],
+            strict=True,
+        ):
+            x11_validation_calls: list[str] = []
+
+            def mutate_reconciled_packet(
+                job_id: str,
+                packet: dict[str, object],
+                variant: str = variant,
+                validation_calls: list[str] = x11_validation_calls,
+            ) -> dict[str, object]:
+                validated = captured_validate(job_id, packet)
+                validation_calls.append(job_id)
+                mutated = dict(validated)
+                if variant in COUNT_KEYS and job_id == "remainder_0":
+                    counts = dict(cast(dict[str, object], mutated["counts"]))
+                    counts[variant] = cast(int, counts[variant]) + 1
+                    mutated["counts"] = counts
+                elif variant == "report_zero" and job_id == "report":
+                    mutated["report_output_bytes"] = None
+                    mutated["report_output_sha256"] = None
+                elif variant == "report_two" and job_id == "remainder_0":
+                    mutated["report_output_bytes"] = 1
+                    mutated["report_output_sha256"] = "8" * 64
+                return mutated
+
+            with (
+                _Generation6SelftestPatch(os, "environ", dict(environment)),
+                _Generation6SelftestPatch(
+                    module, "_validate_result_packet", mutate_reconciled_packet
+                ),
+            ):
+                _selftest_expect_contract_error(
+                    lambda: _validate_aggregate(git),
+                    label=label,
+                    expected_message=message,
+                )
+            _require(
+                x11_validation_calls
+                == ["report", "remainder_0", "remainder_1", "remainder_2", "remainder_3"],
+                "X11 validated packet inventory differs",
+            )
+        _record_generation6_case_evidence(case_id)
+        return
+    _require(case_id == "X12", "unknown late aggregate self-test case")
+    authority_calls: list[str] = []
+
+    def forbid_authority(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        authority_calls.append("forbidden")
+        raise ContractError("X12 aggregate validation acquired operational authority")
+
+    with (
+        _Generation6SelftestPatch(os, "environ", dict(environment)),
+        _Generation6SelftestPatch(module, "_run_shard", forbid_authority),
+        _Generation6SelftestPatch(module, "_run_report_proof", forbid_authority),
+        _Generation6SelftestPatch(module, "_run_aggregate", forbid_authority),
+        _Generation6SelftestPatch(module, "_emit_stdout", forbid_authority),
+        _Generation6SelftestPatch(ProcessSupervisor, "run", forbid_authority),
+        _Generation6SelftestPatch(CommandFiles, "publish", forbid_authority),
+        _Generation6SelftestPatch(os, "execve", forbid_authority),
+        _Generation6SelftestPatch(os, "kill", forbid_authority),
+        _Generation6SelftestPatch(os, "killpg", forbid_authority),
+    ):
+        _validate_aggregate(git)
+    _require(authority_calls == [], "X12 operational authority history differs")
+    _record_generation6_check(_GENERATION6_X_VALIDATIONS[case_id])
+    _record_generation6_case_evidence(case_id)
+
+
+def _selftest_u_case(case_id: str, pytest_root: Path) -> None:
+    del pytest_root
+    _require(case_id in _GENERATION6_U_REJECTIONS, "unknown publication self-test case")
+    payload = f"task064_generation6_{case_id}=value\n".encode("ascii")
+    variants = {
+        "U01": ("raise",),
+        "U02": ("zero", "negative"),
+        "U03": ("bool", "overflow"),
+    }[case_id]
+    for variant, (label, message) in zip(
+        variants,
+        _GENERATION6_U_REJECTIONS[case_id],
+        strict=True,
+    ):
+        write_calls: list[tuple[int, bytes]] = []
+
+        def faulty_stdout_write(
+            descriptor: int,
+            chunk: bytes,
+            variant: str = variant,
+            history: list[tuple[int, bytes]] = write_calls,
+        ) -> int:
+            history.append((descriptor, chunk))
+            if variant == "raise":
+                raise OSError("stdout-sentinel")
+            if variant == "zero":
+                return 0
+            if variant == "negative":
+                return -1
+            if variant == "bool":
+                return cast(int, True)
+            return len(chunk) + 1
+
+        with _Generation6SelftestPatch(os, "write", faulty_stdout_write):
+            _selftest_expect_contract_error(
+                lambda: _CAPTURED_GENERATION6_EMIT_STDOUT(payload),
+                label=label,
+                expected_message=message,
+            )
+        _require(
+            write_calls == [(1, payload)],
+            f"{case_id} {variant} stdout authority history differs",
+        )
+    _record_generation6_case_evidence(case_id)
+
+
+@dataclass(frozen=True)
+class _Generation6MInventory:
+    nodes: tuple[str, ...]
+    manifest: bytes
+    shards: dict[str, Shard]
+    collection_elapsed_ns: int
+    collection_packet: dict[str, object]
+    collection_nonce: str
+    collection_child: ChildResult
+
+
+def _generation6_m_real_inventory(pytest_root: Path) -> _Generation6MInventory:
+    private_root: PrivateRoot | None = None
+    command_files: CommandFiles | None = None
+    try:
+        private_root = PrivateRoot()
+        command_files = CommandFiles(private_root)
+        supervisor = ProcessSupervisor(private_root, command_files)
+        nonce_ledger = NonceLedger.empty()
+        collection = _run_pytest_observed(
+            supervisor,
+            pytest_root,
+            phase="collect",
+            shard_id=None,
+            nodes=(),
+            nonce_ledger=nonce_ledger,
+            nonce_label="collection",
+            timeout_ns=COLLECTION_TIMEOUT_NS,
+        )
+        nonce_ledger.prove(("collection-ci",))
+        nodes = _validate_collection(
+            collection.observation,
+            nonce=collection.nonce,
+            child=collection.child,
+        )
+        manifest, shards = _manifest_and_shards(nodes)
+        cleanup = private_root.cleanup()
+        _require(
+            cleanup.status == "PASS" and cleanup.residue_count == 0,
+            "real manifest collection cleanup differs",
+        )
+        command_files.close_without_publication()
+        return _Generation6MInventory(
+            nodes=nodes,
+            manifest=manifest,
+            shards=shards,
+            collection_elapsed_ns=collection.child.elapsed_ns,
+            collection_packet=collection.observation,
+            collection_nonce=collection.nonce,
+            collection_child=collection.child,
+        )
+    except BaseException as primary:
+        try:
+            _close_failure_resources(private_root, command_files)
+        except BaseException as cleanup_error:
+            primary.add_note(f"real manifest self-test cleanup failed: {cleanup_error!r}")
+        raise
+
+
+class _Generation6MNoLaunch(Exception):
+    """Stop a Generation-6 M probe at the authenticated Popen boundary."""
+
+
+def _generation6_m_literal_exec_projection(
+    arguments: list[str],
+    environment: dict[str, str],
+) -> int:
+    """Independent literal oracle using the pinned filesystem text codec."""
+
+    _require(struct.calcsize("P") == 8, "M12 pointer size differs")
+    filesystem_encoding = sys.getfilesystemencoding()
+    filesystem_errors = sys.getfilesystemencodeerrors()
+    argument_bytes = sum(
+        len(value.encode(filesystem_encoding, filesystem_errors)) + 1 for value in arguments
+    )
+    environment_bytes = sum(
+        len(name.encode(filesystem_encoding, filesystem_errors))
+        + 1
+        + len(value.encode(filesystem_encoding, filesystem_errors))
+        + 1
+        for name, value in environment.items()
+    )
+    return argument_bytes + environment_bytes + (len(arguments) + len(environment) + 2) * 8 + 32_768
+
+
+def _generation6_m_reject_collection_at_runner_boundary(
+    pytest_root: Path,
+    inventory: _Generation6MInventory,
+    mutated_nodes: list[object],
+    *,
+    label: str,
+    expected_message: str,
+) -> None:
+    """Drive a malformed collection through the real shard orchestration boundary."""
+
+    module = _generation6_module()
+    observed_calls: list[tuple[str, str | None, tuple[str, ...]]] = []
+    process_launch_calls: list[str] = []
+    publication_calls: list[str] = []
+    git_clean_calls: list[str] = []
+    git_identity_calls: list[str] = []
+    identity = cast(GitIdentity, object())
+
+    def fixed_root() -> Path:
+        return pytest_root
+
+    def fixed_preflight(root: Path, supervisor: ProcessSupervisor) -> tuple[str, str]:
+        del supervisor
+        _require(root == pytest_root, "M collection runner preflight root differs")
+        return "3.13.14", "9.1.1"
+
+    def fixed_git_clean(supervisor: ProcessSupervisor, root: Path) -> bool:
+        del supervisor
+        _require(root == pytest_root, "M collection runner Git-clean root differs")
+        git_clean_calls.append("clean")
+        return True
+
+    def fixed_git_identity(supervisor: ProcessSupervisor, root: Path) -> GitIdentity:
+        del supervisor
+        _require(root == pytest_root, "M collection runner Git-identity root differs")
+        git_identity_calls.append("identity")
+        return identity
+
+    def observed_collection(
+        supervisor: ProcessSupervisor,
+        root: Path,
+        *,
+        phase: str,
+        shard_id: str | None,
+        nodes: Sequence[str],
+        nonce_ledger: NonceLedger,
+        nonce_label: str,
+        proof_mode: str | None = None,
+        timeout_ns: int,
+    ) -> ObservedPytest:
+        del supervisor, proof_mode, timeout_ns
+        _require(root == pytest_root, "M collection runner observation root differs")
+        observed_calls.append((phase, shard_id, tuple(nodes)))
+        _require(
+            phase == "collect" and shard_id is None and not nodes,
+            "M malformed collection reached execution",
+        )
+        nonce = nonce_ledger.issue(f"{nonce_label}-ci")
+        packet = dict(inventory.collection_packet)
+        packet["nonce"] = nonce
+        packet["nodes"] = list(mutated_nodes)
+        return ObservedPytest(
+            inventory.collection_child,
+            nonce,
+            packet,
+            b"M-COLLECTION-FAULT",
+            None,
+            None,
+            None,
+        )
+
+    def forbidden_process_launch(*args: object, **kwargs: object) -> ChildResult:
+        del args, kwargs
+        process_launch_calls.append("run")
+        raise ContractError("M malformed collection reached a process launch")
+
+    def forbidden_publication(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        publication_calls.append("publish")
+        raise ContractError("M malformed collection reached publication")
+
+    with (
+        _Generation6SelftestPatch(module, "_repo_root", fixed_root),
+        _Generation6SelftestPatch(module, "_runtime_preflight", fixed_preflight),
+        _Generation6SelftestPatch(module, "_git_clean", fixed_git_clean),
+        _Generation6SelftestPatch(module, "_git_identity", fixed_git_identity),
+        _Generation6SelftestPatch(module, "_run_pytest_observed", observed_collection),
+        _Generation6SelftestPatch(ProcessSupervisor, "run", forbidden_process_launch),
+        _Generation6SelftestPatch(module, "_emit_stdout", forbidden_publication),
+        _Generation6SelftestPatch(CommandFiles, "publish", forbidden_publication),
+    ):
+        _selftest_expect_contract_error(
+            lambda: _run_shard("remainder-0"),
+            label=label,
+            expected_message=expected_message,
+        )
+    _require(
+        observed_calls == [("collect", None, ())]
+        and process_launch_calls == []
+        and publication_calls == []
+        and git_clean_calls == ["clean"]
+        and git_identity_calls == ["identity"],
+        "M malformed collection runner boundary history differs",
+    )
+
+
+def _generation6_m_final_exec_projection_probe(
+    pytest_root: Path,
+    shard: Shard,
+    *,
+    rejection: tuple[str, str] | None,
+) -> int:
+    """Validate the exact final pytest argv/environment without starting a process."""
+
+    private_root: PrivateRoot | None = None
+    command_files: CommandFiles | None = None
+    primary: BaseException | None = None
+    result_projection: int | None = None
+    try:
+        private_root = PrivateRoot()
+        command_files = CommandFiles(private_root)
+        supervisor = ProcessSupervisor(private_root, command_files)
+        nonce_ledger = NonceLedger.empty()
+        base_environment = dict(os.environ)
+        validation_arguments: list[list[str]] = []
+        validation_environments: list[dict[str, str]] = []
+        validation_argument_snapshots: list[list[str]] = []
+        validation_environment_snapshots: list[dict[str, str]] = []
+        observation_descriptors: list[int] = []
+        sysconf_calls: list[tuple[str, int]] = []
+        launch_arguments: list[list[str]] = []
+        launch_environments: list[dict[str, str]] = []
+        launch_argument_snapshots: list[list[str]] = []
+        launch_environment_snapshots: list[dict[str, str]] = []
+        launch_pass_fds: list[tuple[int, ...]] = []
+        captured_validate = _validate_exec_projection
+        captured_create_observation = PrivateRoot.create_observation
+
+        def recording_validate(arguments: list[str], environment: dict[str, str]) -> None:
+            validation_arguments.append(arguments)
+            validation_environments.append(environment)
+            validation_argument_snapshots.append(list(arguments))
+            validation_environment_snapshots.append(dict(environment))
+            captured_validate(arguments, environment)
+
+        def projection_limit(name: str) -> int:
+            _require(
+                name == "SC_ARG_MAX"
+                and len(validation_argument_snapshots) == 1
+                and len(validation_environment_snapshots) == 1,
+                "M12 SC_ARG_MAX query boundary differs",
+            )
+            projection = _generation6_m_literal_exec_projection(
+                validation_argument_snapshots[0],
+                validation_environment_snapshots[0],
+            )
+            limit = projection if rejection is None else projection - 1
+            sysconf_calls.append((name, limit))
+            return limit
+
+        def recording_create_observation(
+            owner: PrivateRoot,
+            child: DirectoryOwner,
+            *,
+            label: str,
+            limit: int,
+        ) -> ObservationOwner:
+            observation = captured_create_observation(owner, child, label=label, limit=limit)
+            observation_descriptors.append(observation.fd.require())
+            return observation
+
+        def stop_before_launch(*args: object, **kwargs: object) -> object:
+            _require(len(args) >= 4, "M12 synthetic launch argv position differs")
+            raw_arguments = args[3]
+            raw_environment = kwargs.get("env")
+            raw_pass_fds = kwargs.get("pass_fds")
+            _require(
+                type(raw_arguments) is list
+                and type(raw_environment) is dict
+                and type(raw_pass_fds) is tuple,
+                "M12 synthetic launch payload differs",
+            )
+            exact_arguments = cast(list[str], raw_arguments)
+            exact_environment = cast(dict[str, str], raw_environment)
+            exact_pass_fds = cast(tuple[int, ...], raw_pass_fds)
+            launch_arguments.append(exact_arguments)
+            launch_environments.append(exact_environment)
+            launch_argument_snapshots.append(list(exact_arguments))
+            launch_environment_snapshots.append(dict(exact_environment))
+            launch_pass_fds.append(exact_pass_fds)
+            raise _Generation6MNoLaunch("M12 authenticated no-launch boundary")
+
+        proof_mode = "primed-full" if shard.shard_id == "report" else None
+
+        def run_observed_execution() -> ObservedPytest:
+            return _run_pytest_observed(
+                supervisor,
+                pytest_root,
+                phase="execute",
+                shard_id=shard.shard_id,
+                nodes=shard.nodes,
+                nonce_ledger=nonce_ledger,
+                nonce_label="execute",
+                proof_mode=proof_mode,
+                timeout_ns=EXECUTION_TIMEOUT_NS,
+            )
+
+        module = _generation6_module()
+        with (
+            _Generation6SelftestPatch(module, "_validate_exec_projection", recording_validate),
+            _Generation6SelftestPatch(os, "sysconf", projection_limit),
+            _Generation6SelftestPatch(
+                PrivateRoot,
+                "create_observation",
+                recording_create_observation,
+            ),
+            _Generation6SelftestPatch(module, "_NoImplicitWaitPopen", stop_before_launch),
+        ):
+            if rejection is None:
+                try:
+                    run_observed_execution()
+                except ContractError as error:
+                    _require(
+                        str(error) == "Popen/adoption boundary failed closed"
+                        and type(error.__cause__) is _Generation6MNoLaunch
+                        and str(error.__cause__) == "M12 authenticated no-launch boundary",
+                        "M12 no-launch sentinel differs",
+                    )
+                else:
+                    raise ContractError("M12 positive projection crossed the no-launch boundary")
+            else:
+                label, message = rejection
+                _selftest_expect_contract_error(
+                    run_observed_execution,
+                    label=label,
+                    expected_message=message,
+                )
+
+        _require(
+            len(private_root._children) == 1
+            and len(validation_arguments) == 1
+            and len(validation_environments) == 1
+            and len(validation_argument_snapshots) == 1
+            and len(validation_environment_snapshots) == 1,
+            "M12 final execution validation cardinality differs",
+        )
+        child_root = private_root._children[0]
+        child_path = child_root.path
+        expected_observation_count = 2 if proof_mode is not None else 1
+        _require(
+            len(observation_descriptors) == expected_observation_count
+            and all(value > 2 for value in observation_descriptors)
+            and len(set(observation_descriptors)) == expected_observation_count,
+            "M12 observation descriptor inventory differs",
+        )
+        nonce = nonce_ledger.values.get("execute-ci")
+        _require(type(nonce) is str, "M12 execution nonce differs")
+        expected_arguments = [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            f"--basetemp={child_path / 'execute-basetemp'}",
+            "--task064-ci-phase=execute",
+            f"--task064-ci-nonce={nonce}",
+            f"--task064-ci-observation-fd={observation_descriptors[0]}",
+            f"--task064-ci-shard-id={shard.shard_id}",
+        ]
+        expected_nonce_labels = ["execute-ci"]
+        if proof_mode is not None:
+            proof_nonce = nonce_ledger.values.get("execute-proof")
+            _require(type(proof_nonce) is str, "M12 proof nonce differs")
+            expected_arguments.extend(
+                [
+                    f"--task064-report-proof-mode={proof_mode}",
+                    f"--task064-report-proof-nonce={proof_nonce}",
+                    f"--task064-report-proof-observation-fd={observation_descriptors[1]}",
+                ]
+            )
+            expected_nonce_labels.append("execute-proof")
+        expected_arguments.extend(shard.nodes)
+        _require(
+            tuple(nonce_ledger.values) == tuple(expected_nonce_labels)
+            and validation_argument_snapshots[0] == expected_arguments,
+            "M12 exact final execution argv differs",
+        )
+        expected_environment = {
+            name: value for name, value in base_environment.items() if not name.startswith("GIT_")
+        }
+        for name in (*FORBIDDEN_ENV, *GITHUB_COMMAND_NAMES):
+            expected_environment.pop(name, None)
+        expected_environment.update(
+            {
+                "TMPDIR": os.fspath(child_path),
+                "TEMP": os.fspath(child_path),
+                "TMP": os.fspath(child_path),
+                "HYPOTHESIS_STORAGE_DIRECTORY": os.fspath(child_path / "hypothesis"),
+                "PYTHONPYCACHEPREFIX": os.fspath(child_path / "pycache"),
+                "COVERAGE_FILE": os.fspath(child_path / "coverage" / ".coverage"),
+                "PYTHONDONTWRITEBYTECODE": "1",
+            }
+        )
+        _require(
+            tuple(validation_environment_snapshots[0].items())
+            == tuple(expected_environment.items()),
+            "M12 exact sanitized execution environment differs",
+        )
+        result_projection = _generation6_m_literal_exec_projection(
+            expected_arguments,
+            expected_environment,
+        )
+        expected_limit = result_projection if rejection is None else result_projection - 1
+        _require(
+            sysconf_calls == [("SC_ARG_MAX", expected_limit)],
+            "M12 exact projection query history differs",
+        )
+        if rejection is None:
+            _require(
+                len(launch_arguments) == 1
+                and len(launch_environments) == 1
+                and launch_arguments[0] is validation_arguments[0]
+                and launch_environments[0] is validation_environments[0]
+                and launch_argument_snapshots == validation_argument_snapshots
+                and launch_environment_snapshots == validation_environment_snapshots
+                and launch_pass_fds == [tuple(observation_descriptors)],
+                "M12 validated-to-launch binding differs",
+            )
+        else:
+            _require(
+                launch_arguments == []
+                and launch_environments == []
+                and launch_argument_snapshots == []
+                and launch_environment_snapshots == []
+                and launch_pass_fds == [],
+                "M12 overflow reached the launch boundary",
+            )
+    except BaseException as error:
+        primary = error
+    try:
+        _close_failure_resources(private_root, command_files)
+    except BaseException as cleanup_error:
+        if primary is not None:
+            primary.add_note(f"M12 projection-probe cleanup failed: {cleanup_error!r}")
+        else:
+            primary = cleanup_error
+    if primary is not None:
+        raise primary
+    _require(result_projection is not None, "M12 projection result is absent")
+    return cast(int, result_projection)
+
+
+def _generation6_m_positive_string_boundaries(pytest_root: Path) -> None:
+    """Prove each exact argv/environment string cap at the real caller boundary."""
+
+    private_root: PrivateRoot | None = None
+    command_files: CommandFiles | None = None
+    primary: BaseException | None = None
+    try:
+        private_root = PrivateRoot()
+        command_files = CommandFiles(private_root)
+        supervisor = ProcessSupervisor(private_root, command_files)
+        sysconf_calls: list[str] = []
+        launch_snapshots: list[tuple[list[str], dict[str, str]]] = []
+
+        def large_arg_max(name: str) -> int:
+            sysconf_calls.append(name)
+            return 10_000_000
+
+        def stop_before_launch(*args: object, **kwargs: object) -> object:
+            _require(len(args) >= 4, "M09 positive launch argv position differs")
+            raw_arguments = args[3]
+            raw_environment = kwargs.get("env")
+            _require(
+                type(raw_arguments) is list and type(raw_environment) is dict,
+                "M09 positive launch payload differs",
+            )
+            launch_snapshots.append(
+                (list(cast(list[str], raw_arguments)), dict(cast(dict[str, str], raw_environment)))
+            )
+            raise _Generation6MNoLaunch("M09 authenticated no-launch boundary")
+
+        exact_argv = "a" * 131_071
+        exact_environment_name = "N" * 131_070
+        exact_environment_value = "v" * 131_069
+        positive_inputs: tuple[tuple[list[str], dict[str, str]], ...] = (
+            ([exact_argv], {}),
+            (["python"], {exact_environment_name: ""}),
+            (["python"], {"N": exact_environment_value}),
+        )
+        module = _generation6_module()
+        with (
+            _Generation6SelftestPatch(os, "sysconf", large_arg_max),
+            _Generation6SelftestPatch(module, "_NoImplicitWaitPopen", stop_before_launch),
+        ):
+            for ordinal, (arguments, environment) in enumerate(positive_inputs, start=1):
+                try:
+                    supervisor.run(
+                        arguments,
+                        cwd=pytest_root,
+                        timeout_ns=1_000_000_000,
+                        label=f"m09-positive-{ordinal}",
+                        base_environment=environment,
+                    )
+                except ContractError as error:
+                    _require(
+                        str(error) == "Popen/adoption boundary failed closed"
+                        and type(error.__cause__) is _Generation6MNoLaunch
+                        and str(error.__cause__) == "M09 authenticated no-launch boundary",
+                        "M09 no-launch sentinel differs",
+                    )
+                else:
+                    raise ContractError("M09 positive string crossed the no-launch boundary")
+        _require(
+            sysconf_calls == ["SC_ARG_MAX", "SC_ARG_MAX", "SC_ARG_MAX"]
+            and len(launch_snapshots) == 3
+            and launch_snapshots[0][0] == [exact_argv]
+            and exact_environment_name in launch_snapshots[1][1]
+            and launch_snapshots[1][1][exact_environment_name] == ""
+            and launch_snapshots[2][1].get("N") == exact_environment_value,
+            "M09 positive exact-string boundary history differs",
+        )
+    except BaseException as error:
+        primary = error
+    try:
+        _close_failure_resources(private_root, command_files)
+    except BaseException as cleanup_error:
+        if primary is not None:
+            primary.add_note(f"M09 positive-boundary cleanup failed: {cleanup_error!r}")
+        else:
+            primary = cleanup_error
+    if primary is not None:
+        raise primary
+
+
+def _selftest_m_case(case_id: str, pytest_root: Path) -> None:
+    _require(case_id in _GENERATION6_M_VALIDATIONS, "unknown manifest self-test case")
+    inventory = _generation6_m_real_inventory(pytest_root)
+    nodes = inventory.nodes
+    manifest = inventory.manifest
+    shards = inventory.shards
+    members = {shard_id: shards[shard_id].nodes for shard_id in SHARD_IDS}
+    if case_id == "M01":
+        _require(
+            len(nodes) == FULL_MANIFEST_COUNT
+            and len(set(nodes)) == FULL_MANIFEST_COUNT
+            and inventory.collection_elapsed_ns <= COLLECTION_TIMEOUT_NS,
+            "M01 real collection identity differs",
+        )
+    elif case_id == "M02":
+        _require(
+            all(
+                type(node) is str
+                and node.isascii()
+                and all(character not in node for character in ("\x00", "\r", "\n"))
+                for node in nodes
+            ),
+            "M02 node identity domain differs",
+        )
+    elif case_id == "M03":
+        _require(
+            all(node != "" and len(node.encode("ascii")) <= 308 for node in nodes)
+            and len(nodes) == len(set(nodes)),
+            "M03 node length or uniqueness differs",
+        )
+    elif case_id == "M04":
+        decoded_manifest = _decode_canonical(
+            manifest,
+            limit=FULL_MANIFEST_BYTES,
+            label="M04 full manifest",
+        )
+        _exact_keys(decoded_manifest, ("domain", "nodes"), "M04 full manifest")
+        _require(
+            decoded_manifest["domain"] == "TASK064-NODE-MANIFEST-V1"
+            and decoded_manifest["nodes"] == sorted(nodes, key=lambda value: value.encode("ascii"))
+            and len(manifest) == FULL_MANIFEST_BYTES
+            and _sha256(manifest) == FULL_MANIFEST_SHA256
+            and b"\r" not in manifest
+            and b"\n" not in manifest,
+            "M04 full manifest identity differs",
+        )
+    elif case_id == "M05":
+        report = shards["report"]
+        _require(
+            nodes.count(REPORT_NODE) == 1
+            and report.nodes == (REPORT_NODE,)
+            and len(report.nodes) == SHARD_EXPECTATIONS["report"].count,
+            "M05 report shard identity differs",
+        )
+    elif case_id == "M06":
+        _validate_shard_partition(nodes, members)
+        for node in nodes:
+            _require(
+                node in members[_partition_shard_id(node)],
+                "M06 deterministic partition differs",
+            )
+        _require(
+            tuple(shards) == SHARD_IDS
+            and all(
+                len(shards[shard_id].nodes) == SHARD_EXPECTATIONS[shard_id].count > 0
+                for shard_id in SHARD_IDS
+            ),
+            "M06 shard counts differ",
+        )
+    elif case_id == "M07":
+        _validate_shard_partition(nodes, members)
+        union: set[str] = set()
+        for shard_id in SHARD_IDS:
+            _require(not union.intersection(members[shard_id]), "M07 shards overlap")
+            union.update(members[shard_id])
+        _require(union == set(nodes), "M07 shard union differs")
+    elif case_id == "M08":
+        _validate_shard_partition(nodes, members)
+        for shard_id in SHARD_IDS:
+            shard = shards[shard_id]
+            decoded_shard = _decode_canonical(
+                shard.canonical,
+                limit=FULL_MANIFEST_BYTES,
+                label=f"M08 {shard_id} shard",
+            )
+            _exact_keys(
+                decoded_shard,
+                ("domain", "full_manifest_sha256", "shard_id", "nodes"),
+                f"M08 {shard_id} shard",
+            )
+            _require(
+                len(shard.canonical) == SHARD_EXPECTATIONS[shard_id].canonical_bytes
+                and decoded_shard["domain"] == "TASK064-NODE-SHARD-V1"
+                and decoded_shard["full_manifest_sha256"] == FULL_MANIFEST_SHA256
+                and decoded_shard["shard_id"] == shard_id
+                and decoded_shard["nodes"]
+                == sorted(shard.nodes, key=lambda value: value.encode("ascii"))
+                and shard.sha256 == SHARD_EXPECTATIONS[shard_id].sha256
+                and _sha256(shard.canonical) == SHARD_EXPECTATIONS[shard_id].sha256,
+                "M08 shard canonical identity differs",
+            )
+    elif case_id == "M09":
+        _generation6_m_positive_string_boundaries(pytest_root)
+    elif case_id == "M10":
+        for shard in shards.values():
+            _require(
+                _selector_vector_bytes(shard.nodes) == shard.selector_bytes,
+                "M10 selector vector differs",
+            )
+        _require(
+            _selector_vector_bytes(("a" * 131_071,)) == MAX_ARG_BYTES_WITH_NUL
+            and _selector_vector_bytes(("a" * 65_535, "b" * 65_535)) == MAX_ARG_BYTES_WITH_NUL,
+            "M10 selector cap boundary differs",
+        )
+    elif case_id == "M11":
+        arg_max = os.sysconf("SC_ARG_MAX")
+        _require(type(arg_max) is int and arg_max > 0, "M11 SC_ARG_MAX differs")
+    else:
+        _require(case_id == "M12", "unknown manifest self-test branch")
+        _require(
+            _generation6_m_literal_exec_projection(["a"], {"B": "c"}) == 32_806,
+            "M12 fixed literal projection oracle differs",
+        )
+        _generation6_m_final_exec_projection_probe(
+            pytest_root,
+            shards["remainder-0"],
+            rejection=None,
+        )
+    _record_generation6_check(_GENERATION6_M_VALIDATIONS[case_id])
+
+    def collection_packet(mutated_nodes: list[object]) -> dict[str, object]:
+        packet = dict(inventory.collection_packet)
+        packet["nodes"] = mutated_nodes
+        return packet
+
+    def validate_mutated_collection(mutated_nodes: list[object]) -> tuple[str, ...]:
+        return _validate_collection(
+            collection_packet(mutated_nodes),
+            nonce=inventory.collection_nonce,
+            child=inventory.collection_child,
+        )
+
+    if case_id in {"M01", "M02", "M03"}:
+        base_objects = [cast(object, node) for node in nodes]
+        collection_variants: list[list[object]]
+        if case_id == "M01":
+            collection_variants = [base_objects[:-1], [*base_objects, "TASK064_EXTRA_NODE"]]
+        elif case_id == "M02":
+            non_string_nodes = list(base_objects)
+            non_string_nodes[0] = 7
+            nul_nodes = list(base_objects)
+            nul_nodes[0] = f"{nodes[0]}\x00"
+            cr_nodes = list(base_objects)
+            cr_nodes[0] = f"{nodes[0]}\r"
+            lf_nodes = list(base_objects)
+            lf_nodes[0] = f"{nodes[0]}\n"
+            surrogate_nodes = list(base_objects)
+            surrogate_nodes[0] = f"{nodes[0]}\ud800"
+            non_ascii_nodes = list(base_objects)
+            non_ascii_nodes[0] = f"{nodes[0]}\u00e9"
+            collection_variants = [
+                non_string_nodes,
+                nul_nodes,
+                cr_nodes,
+                lf_nodes,
+                surrogate_nodes,
+                non_ascii_nodes,
+            ]
+        else:
+            empty_nodes = list(base_objects)
+            empty_nodes[0] = ""
+            overlong_nodes = list(base_objects)
+            overlong_nodes[0] = "a" * 309
+            duplicate_nodes = list(base_objects)
+            duplicate_nodes[1] = duplicate_nodes[0]
+            collection_variants = [empty_nodes, overlong_nodes, duplicate_nodes]
+        for collection_nodes, (label, message) in zip(
+            collection_variants,
+            _GENERATION6_M_REJECTIONS[case_id],
+            strict=True,
+        ):
+            _generation6_m_reject_collection_at_runner_boundary(
+                pytest_root,
+                inventory,
+                collection_nodes,
+                label=label,
+                expected_message=message,
+            )
+    elif case_id == "M04":
+        manifest_mutated = list(nodes)
+        manifest_index = next(
+            position for position, node in enumerate(manifest_mutated) if node != REPORT_NODE
+        )
+        original_node = manifest_mutated[manifest_index]
+        replacement_suffix = "x" if original_node[-1:] != "x" else "y"
+        replacement_node = f"{original_node[:-1]}{replacement_suffix}"
+        _require(
+            replacement_node not in nodes and len(replacement_node) == len(original_node),
+            "M04 fault node construction differs",
+        )
+        manifest_mutated[manifest_index] = replacement_node
+        validated_nodes = validate_mutated_collection(
+            [cast(object, node) for node in manifest_mutated]
+        )
+        manifest_canonical_calls: list[tuple[tuple[str, ...], int]] = []
+        captured_canonical = _canonical_bytes
+
+        def recording_canonical(packet: dict[str, object], *, limit: int) -> bytes:
+            manifest_canonical_calls.append((tuple(packet), limit))
+            return captured_canonical(packet, limit=limit)
+
+        label, message = _GENERATION6_M_REJECTIONS[case_id][0]
+        with _Generation6SelftestPatch(
+            _generation6_module(),
+            "_canonical_bytes",
+            recording_canonical,
+        ):
+            _selftest_expect_contract_error(
+                partial(_manifest_and_shards, validated_nodes),
+                label=label,
+                expected_message=message,
+            )
+        _require(
+            manifest_canonical_calls == [(("domain", "nodes"), FULL_MANIFEST_BYTES)],
+            "M04 canonical call history differs",
+        )
+    elif case_id == "M05":
+        report_index = nodes.index(REPORT_NODE)
+        missing_report_nodes = list(nodes)
+        source_node = next(node for node in nodes if node != REPORT_NODE)
+        report_suffix = "x" if source_node[-1:] != "x" else "y"
+        missing_report_nodes[report_index] = f"{source_node[:-1]}{report_suffix}"
+        _require(
+            missing_report_nodes[report_index] not in nodes,
+            "M05 missing-report fault differs",
+        )
+        duplicate_report_nodes = list(nodes)
+        duplicate_report_index = next(
+            position for position, node in enumerate(duplicate_report_nodes) if node != REPORT_NODE
+        )
+        duplicate_report_nodes[duplicate_report_index] = REPORT_NODE
+        report_variants: tuple[tuple[str, ...], ...] = (
+            tuple(missing_report_nodes),
+            tuple(duplicate_report_nodes),
+        )
+        report_canonical_calls: list[tuple[object, int]] = []
+
+        def forbidden_canonical(packet: object, *, limit: int) -> bytes:
+            report_canonical_calls.append((packet, limit))
+            raise ContractError("canonical serialization reached after report rejection")
+
+        with _Generation6SelftestPatch(
+            _generation6_module(),
+            "_canonical_bytes",
+            forbidden_canonical,
+        ):
+            for report_nodes, (label, message) in zip(
+                report_variants,
+                _GENERATION6_M_REJECTIONS[case_id],
+                strict=True,
+            ):
+                _selftest_expect_contract_error(
+                    partial(_manifest_and_shards, report_nodes),
+                    label=label,
+                    expected_message=message,
+                )
+        _require(not report_canonical_calls, "M05 canonical call history differs")
+    elif case_id == "M06":
+        empty_members = dict(members)
+        empty_members["remainder-0"] = ()
+        empty_label, empty_message = _GENERATION6_M_REJECTIONS[case_id][0]
+        _selftest_expect_contract_error(
+            partial(_validate_shard_partition, nodes, empty_members),
+            label=empty_label,
+            expected_message=empty_message,
+        )
+        wrong_bucket_target = members["remainder-0"][0]
+        partition_calls: list[str] = []
+        captured_partition = _partition_shard_id
+
+        def wrong_bucket(node: str) -> str:
+            partition_calls.append(node)
+            if node == wrong_bucket_target:
+                return "remainder-1"
+            return captured_partition(node)
+
+        bucket_label, bucket_message = _GENERATION6_M_REJECTIONS[case_id][1]
+        with _Generation6SelftestPatch(
+            _generation6_module(),
+            "_partition_shard_id",
+            wrong_bucket,
+        ):
+            _selftest_expect_contract_error(
+                partial(_manifest_and_shards, nodes),
+                label=bucket_label,
+                expected_message=bucket_message,
+            )
+        _require(
+            len(partition_calls) == FULL_MANIFEST_COUNT
+            and partition_calls.count(wrong_bucket_target) == 1,
+            "M06 partition call history differs",
+        )
+    elif case_id == "M07":
+        overlap_members = dict(members)
+        overlap_members["remainder-0"] = (
+            *overlap_members["remainder-0"],
+            overlap_members["remainder-1"][0],
+        )
+        label, message = _GENERATION6_M_REJECTIONS[case_id][0]
+        _selftest_expect_contract_error(
+            partial(_validate_shard_partition, nodes, overlap_members),
+            label=label,
+            expected_message=message,
+        )
+    elif case_id == "M08":
+        missing_id_members = dict(members)
+        missing_id_members.pop("remainder-3")
+        extra_id_members = dict(members)
+        extra_id_members["remainder-4"] = ("TASK064_EXTRA_SHARD_NODE",)
+        missing_member_members = dict(members)
+        missing_member_members["remainder-0"] = missing_member_members["remainder-0"][:-1]
+        extra_member_members = dict(members)
+        extra_member_members["remainder-0"] = (
+            *extra_member_members["remainder-0"],
+            "TASK064_EXTRA_SHARD_NODE",
+        )
+        ordered_shard = shards["remainder-0"]
+        reversed_nodes = tuple(reversed(ordered_shard.nodes))
+        _require(
+            reversed_nodes != ordered_shard.nodes,
+            "M08 reversed execution-order fixture differs",
+        )
+        reversed_packet: dict[str, object] = {
+            "domain": "TASK064-NODE-SHARD-V1",
+            "full_manifest_sha256": FULL_MANIFEST_SHA256,
+            "shard_id": "remainder-0",
+            "nodes": sorted(reversed_nodes, key=lambda value: value.encode("ascii")),
+        }
+        reversed_canonical = _canonical_bytes(reversed_packet, limit=FULL_MANIFEST_BYTES)
+        reversed_shard = Shard(
+            "remainder-0",
+            reversed_nodes,
+            reversed_canonical,
+            _sha256(reversed_canonical),
+            _selector_vector_bytes(reversed_nodes),
+        )
+
+        def reject_reversed_execution_order() -> None:
+            _validate_shard_artifact(reversed_shard)
+            reversed_members = dict(members)
+            reversed_members["remainder-0"] = reversed_nodes
+            _validate_shard_partition(nodes, reversed_members)
+
+        report_shard = shards["report"]
+        wrong_order_packet: dict[str, object] = {
+            "nodes": sorted(report_shard.nodes, key=lambda value: value.encode("ascii")),
+            "shard_id": "report",
+            "full_manifest_sha256": FULL_MANIFEST_SHA256,
+            "domain": "TASK064-NODE-SHARD-V1",
+        }
+        wrong_order_shard = replace(
+            report_shard,
+            canonical=_canonical_bytes(wrong_order_packet, limit=FULL_MANIFEST_BYTES),
+        )
+        corrupted_canonical = report_shard.canonical.replace(
+            b"TASK064-NODE-SHARD-V1",
+            b"TASK064-NODE-SHARD-V2",
+            1,
+        )
+        _require(
+            corrupted_canonical != report_shard.canonical
+            and len(corrupted_canonical) == len(report_shard.canonical),
+            "M08 canonical-byte fault construction differs",
+        )
+        corrupted_canonical_shard = replace(
+            report_shard,
+            canonical=corrupted_canonical,
+            sha256=_sha256(corrupted_canonical),
+        )
+        trailing_lf_canonical = report_shard.canonical + b"\n"
+        trailing_lf_shard = replace(
+            report_shard,
+            canonical=trailing_lf_canonical,
+            sha256=_sha256(trailing_lf_canonical),
+        )
+        wrong_digest_shard = replace(report_shard, sha256="0" * 64)
+        m08_operations: tuple[Callable[[], object], ...] = (
+            partial(_validate_shard_partition, nodes, missing_id_members),
+            partial(_validate_shard_partition, nodes, extra_id_members),
+            partial(_validate_shard_partition, nodes, missing_member_members),
+            partial(_validate_shard_partition, nodes, extra_member_members),
+            reject_reversed_execution_order,
+            partial(_validate_shard_artifact, wrong_order_shard),
+            partial(_validate_shard_artifact, corrupted_canonical_shard),
+            partial(_validate_shard_artifact, trailing_lf_shard),
+            partial(_validate_shard_artifact, wrong_digest_shard),
+        )
+        for operation, (label, message) in zip(
+            m08_operations,
+            _GENERATION6_M_REJECTIONS[case_id],
+            strict=True,
+        ):
+            _selftest_expect_contract_error(
+                operation,
+                label=label,
+                expected_message=message,
+            )
+    elif case_id == "M09":
+        m09_sysconf_calls: list[str] = []
+        m09_launch_calls: list[str] = []
+        m09_private_root: PrivateRoot | None = None
+        m09_command_files: CommandFiles | None = None
+        m09_primary: BaseException | None = None
+
+        def forbidden_sysconf(name: str) -> int:
+            m09_sysconf_calls.append(name)
+            return 1
+
+        def forbidden_launch(*args: object, **kwargs: object) -> object:
+            del args, kwargs
+            m09_launch_calls.append("launch")
+            raise ContractError("M09 invalid string reached the launch boundary")
+
+        invalid_exec_inputs: tuple[tuple[list[str], dict[str, str]], ...] = (
+            (["python\ud800"], {}),
+            (["python\x00"], {}),
+            (["a" * MAX_ARG_BYTES_WITH_NUL], {}),
+            (["python"], {"NAME\ud800": "value"}),
+            (["python"], {"NAME": "value\ud800"}),
+            (["python"], {"NAME\x00": "value"}),
+            (["python"], {"NAME": "value\x00"}),
+            (["python"], {"N" * (MAX_ARG_BYTES_WITH_NUL - 1): ""}),
+            (["python"], {"N": "v" * (MAX_ARG_BYTES_WITH_NUL - 2)}),
+        )
+        try:
+            m09_private_root = PrivateRoot()
+            m09_command_files = CommandFiles(m09_private_root)
+            m09_supervisor = ProcessSupervisor(m09_private_root, m09_command_files)
+            with (
+                _Generation6SelftestPatch(os, "sysconf", forbidden_sysconf),
+                _Generation6SelftestPatch(
+                    _generation6_module(),
+                    "_NoImplicitWaitPopen",
+                    forbidden_launch,
+                ),
+            ):
+                for ordinal, (
+                    (invalid_argv, invalid_environment),
+                    (label, message),
+                ) in enumerate(
+                    zip(
+                        invalid_exec_inputs,
+                        _GENERATION6_M_REJECTIONS[case_id],
+                        strict=True,
+                    ),
+                    start=1,
+                ):
+                    _selftest_expect_contract_error(
+                        partial(
+                            m09_supervisor.run,
+                            invalid_argv,
+                            cwd=pytest_root,
+                            timeout_ns=1_000_000_000,
+                            label=f"m09-negative-{ordinal}",
+                            base_environment=invalid_environment,
+                        ),
+                        label=label,
+                        expected_message=message,
+                    )
+        except BaseException as error:
+            m09_primary = error
+        try:
+            _close_failure_resources(m09_private_root, m09_command_files)
+        except BaseException as cleanup_error:
+            if m09_primary is not None:
+                m09_primary.add_note(f"M09 rejection-probe cleanup failed: {cleanup_error!r}")
+            else:
+                m09_primary = cleanup_error
+        if m09_primary is not None:
+            raise m09_primary
+        _require(
+            not m09_sysconf_calls and not m09_launch_calls,
+            "M09 pre-launch history differs",
+        )
+    elif case_id == "M10":
+        invalid_selectors = (
+            ("a\x00",),
+            ("a" * 131_072,),
+            ("a" * 65_535, "b" * 65_536),
+        )
+        for selectors, (label, message) in zip(
+            invalid_selectors,
+            _GENERATION6_M_REJECTIONS[case_id],
+            strict=True,
+        ):
+            _selftest_expect_contract_error(
+                partial(_selector_vector_bytes, selectors),
+                label=label,
+                expected_message=message,
+            )
+    elif case_id == "M11":
+        m11_launch_calls: list[object] = []
+        m11_private_root: PrivateRoot | None = None
+        m11_command_files: CommandFiles | None = None
+        m11_primary: BaseException | None = None
+
+        def m11_forbidden_launch(*args: object, **kwargs: object) -> object:
+            m11_launch_calls.append((args, kwargs))
+            raise ContractError("M11 invalid SC_ARG_MAX reached the launch boundary")
+
+        def sysconf_fault(result: object) -> tuple[list[str], Callable[[str], object]]:
+            history: list[str] = []
+
+            def faulty(name: str) -> object:
+                history.append(name)
+                return result
+
+            return history, faulty
+
+        try:
+            m11_private_root = PrivateRoot()
+            m11_command_files = CommandFiles(m11_private_root)
+            m11_supervisor = ProcessSupervisor(m11_private_root, m11_command_files)
+            with _Generation6SelftestPatch(
+                _generation6_module(),
+                "_NoImplicitWaitPopen",
+                m11_forbidden_launch,
+            ):
+                for ordinal, (value, (label, message)) in enumerate(
+                    zip(
+                        (True, "invalid", 0, -1),
+                        _GENERATION6_M_REJECTIONS[case_id],
+                        strict=True,
+                    ),
+                    start=1,
+                ):
+                    m11_sysconf_calls, faulty_sysconf = sysconf_fault(value)
+                    with _Generation6SelftestPatch(os, "sysconf", faulty_sysconf):
+                        _selftest_expect_contract_error(
+                            partial(
+                                m11_supervisor.run,
+                                ["python"],
+                                cwd=pytest_root,
+                                timeout_ns=1_000_000_000,
+                                label=f"m11-negative-{ordinal}",
+                                base_environment={},
+                            ),
+                            label=label,
+                            expected_message=message,
+                        )
+                    _require(
+                        m11_sysconf_calls == ["SC_ARG_MAX"],
+                        "M11 sysconf call history differs",
+                    )
+        except BaseException as error:
+            m11_primary = error
+        try:
+            _close_failure_resources(m11_private_root, m11_command_files)
+        except BaseException as cleanup_error:
+            if m11_primary is not None:
+                m11_primary.add_note(f"M11 rejection-probe cleanup failed: {cleanup_error!r}")
+            else:
+                m11_primary = cleanup_error
+        if m11_primary is not None:
+            raise m11_primary
+        _require(not m11_launch_calls, "M11 launch history differs")
+    else:
+        _require(case_id == "M12", "unknown manifest rejection branch")
+        label, message = _GENERATION6_M_REJECTIONS[case_id][0]
+        _generation6_m_final_exec_projection_probe(
+            pytest_root,
+            shards["remainder-0"],
+            rejection=(label, message),
+        )
+    _record_generation6_case_evidence(case_id)
+
+
+@dataclass
+class _Generation6RCloseReceipt:
+    token: str
+    label: str
+    descriptor: int
+    events: list[str]
+    close_attempts: int = 0
+
+
+class _Generation6RCloseLedger:
+    def __init__(self) -> None:
+        self._captured_detach: Callable[[FdOwner], int] = FdOwner.detach
+        self._captured_close: Callable[[int], None] = os.close
+        self._captured_fstat: Callable[[int], os.stat_result] = os.fstat
+        self._captured_open: Callable[..., int] = os.open
+        self._captured_stat: Callable[..., os.stat_result] = os.stat
+        self._captured_unlink: Callable[..., None] = os.unlink
+        self._captured_rmdir: Callable[..., None] = os.rmdir
+        self.receipts: list[_Generation6RCloseReceipt] = []
+        self.pending: dict[int, _Generation6RCloseReceipt] = {}
+        self.unowned_close_attempts: list[int] = []
+        self.production_removals: list[tuple[str, str, int | None]] = []
+        self.relative_open_count = 0
+        self.relative_stat_count = 0
+        self.forbidden_calls: list[str] = []
+        self.production_active = False
+        self.fail_label: str | None = None
+        self.failure_injected = False
+        self.reused_owner: FdOwner | None = None
+        self.reused_snapshot: DescriptorSnapshot | None = None
+        self.reused_descriptor: int | None = None
+        self.reused_inspection_count = 0
+        self.reused_close_count_during_production = 0
+
+    def detach(self, owner: FdOwner) -> int:
+        label = owner.label
+        descriptor = owner.descriptor
+        detached = self._captured_detach(owner)
+        _require(
+            type(descriptor) is int
+            and descriptor > 2
+            and detached == descriptor
+            and owner.terminal
+            and owner.descriptor == -1
+            and descriptor not in self.pending,
+            "R cleanup owner detach differs",
+        )
+        token = f"{len(self.receipts):04d}:{label}:{descriptor}"
+        receipt = _Generation6RCloseReceipt(
+            token,
+            label,
+            descriptor,
+            ["detach", "poison"],
+        )
+        self.receipts.append(receipt)
+        self.pending[descriptor] = receipt
+        return detached
+
+    def close(self, descriptor: int) -> None:
+        _require(type(descriptor) is int and descriptor > 2, "R close descriptor differs")
+        receipt = self.pending.pop(descriptor, None)
+        if receipt is None:
+            self.unowned_close_attempts.append(descriptor)
+            if self.production_active and descriptor == self.reused_descriptor:
+                self.reused_close_count_during_production += 1
+            self._captured_close(descriptor)
+            return
+        receipt.events.append("close")
+        receipt.close_attempts += 1
+        if receipt.label == self.fail_label and not self.failure_injected:
+            self.failure_injected = True
+            self._captured_close(descriptor)
+            replacement = self._captured_open("/dev/null", os.O_RDONLY | os.O_CLOEXEC)
+            if replacement != descriptor:
+                duplicated = os.dup2(replacement, descriptor, inheritable=False)
+                self._captured_close(replacement)
+                _require(duplicated == descriptor, "R reused descriptor duplication differs")
+            snapshot = _snapshot_stat(self._captured_fstat(descriptor))
+            self.reused_owner = FdOwner(descriptor, "R05 reused descriptor")
+            self.reused_snapshot = snapshot
+            self.reused_descriptor = descriptor
+            raise OSError(errno.EIO, "R05 synthetic close ambiguity")
+        self._captured_close(descriptor)
+
+    def fstat(self, descriptor: int) -> os.stat_result:
+        if self.production_active and descriptor == self.reused_descriptor:
+            self.reused_inspection_count += 1
+        return self._captured_fstat(descriptor)
+
+    def open(self, *args: object, **kwargs: object) -> int:
+        if self.production_active:
+            path = args[0] if args else kwargs.get("path")
+            flags = args[1] if len(args) > 1 else kwargs.get("flags")
+            try:
+                raw_path = os.fspath(
+                    cast(os.PathLike[str] | os.PathLike[bytes] | str | bytes, path)
+                )
+            except TypeError:
+                raw_path = None
+            if raw_path is not None and not os.path.isabs(raw_path) and raw_path != ".":
+                directory_fd = kwargs.get("dir_fd")
+                _require(
+                    type(flags) is int
+                    and type(directory_fd) is int
+                    and directory_fd > 2
+                    and flags & os.O_NOFOLLOW
+                    and flags & os.O_CLOEXEC,
+                    "R cleanup relative open authority differs",
+                )
+                self.relative_open_count += 1
+        return self._captured_open(*args, **kwargs)
+
+    def stat(self, *args: object, **kwargs: object) -> os.stat_result:
+        if self.production_active:
+            path = args[0] if args else kwargs.get("path")
+            try:
+                raw_path = os.fspath(
+                    cast(os.PathLike[str] | os.PathLike[bytes] | str | bytes, path)
+                )
+            except TypeError:
+                raw_path = None
+            if raw_path is not None and not os.path.isabs(raw_path):
+                directory_fd = kwargs.get("dir_fd")
+                _require(
+                    type(directory_fd) is int
+                    and directory_fd > 2
+                    and kwargs.get("follow_symlinks") is False,
+                    "R cleanup relative stat authority differs",
+                )
+                self.relative_stat_count += 1
+        return self._captured_stat(*args, **kwargs)
+
+    def unlink(self, *args: object, **kwargs: object) -> None:
+        if self.production_active:
+            path = args[0] if args else kwargs.get("path")
+            directory_fd = kwargs.get("dir_fd")
+            _require(
+                type(path) is str and type(directory_fd) is int and directory_fd > 2,
+                "R cleanup unlink authority differs",
+            )
+            self.production_removals.append(("unlink", path, directory_fd))
+        self._captured_unlink(*args, **kwargs)
+
+    def rmdir(self, *args: object, **kwargs: object) -> None:
+        if self.production_active:
+            path = args[0] if args else kwargs.get("path")
+            directory_fd = kwargs.get("dir_fd")
+            _require(
+                type(path) is str and type(directory_fd) is int and directory_fd > 2,
+                "R cleanup rmdir authority differs",
+            )
+            self.production_removals.append(("rmdir", path, directory_fd))
+        self._captured_rmdir(*args, **kwargs)
+
+    def forbid_rmtree(self, *args: object, **kwargs: object) -> None:
+        del args, kwargs
+        self.forbidden_calls.append("shutil.rmtree")
+        raise ContractError("R cleanup acquired pathname-recursive authority")
+
+    def require_complete(self) -> None:
+        _require(not self.pending, "R cleanup close receipt remains pending")
+        _require(self.receipts, "R cleanup produced no close receipts")
+        _require(
+            all(
+                receipt.events == ["detach", "poison", "close"] and receipt.close_attempts == 1
+                for receipt in self.receipts
+            ),
+            "R cleanup detach/poison/close receipt differs",
+        )
+        _require(not self.unowned_close_attempts, "R cleanup used an unowned direct close")
+        _require(not self.forbidden_calls, "R cleanup used pathname-recursive removal")
+
+
+def _generation6_r_duplicate_owner(owner: FdOwner, *, label: str) -> FdOwner:
+    source = owner.require()
+    descriptor = fcntl.fcntl(source, fcntl.F_DUPFD_CLOEXEC, 3)
+    _require(
+        type(descriptor) is int
+        and descriptor > 2
+        and descriptor != source
+        and _snapshot_fd(descriptor) == _snapshot_fd(source),
+        "R cleanup duplicate anchor differs",
+    )
+    return FdOwner(descriptor, label)
+
+
+def _generation6_r_create_regular(
+    directory_fd: int,
+    name: str,
+    *,
+    mode: int = 0o600,
+) -> DescriptorSnapshot:
+    descriptor = os.open(
+        name,
+        os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC,
+        mode,
+        dir_fd=directory_fd,
+    )
+    owner = FdOwner(descriptor, f"R fixture regular {name}")
+    snapshot = _snapshot_fd(owner.require())
+    owner.close_once()
+    named = _snapshot_stat(os.stat(name, dir_fd=directory_fd, follow_symlinks=False))
+    _require(snapshot == named and stat.S_ISREG(named.mode), "R fixture regular identity differs")
+    return named
+
+
+def _generation6_r_named_snapshot(directory_fd: int, name: str) -> DescriptorSnapshot:
+    return _snapshot_stat(os.stat(name, dir_fd=directory_fd, follow_symlinks=False))
+
+
+def _generation6_r_require_absent(directory_fd: int, name: str) -> None:
+    try:
+        os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    except FileNotFoundError as error:
+        _require(error.errno == errno.ENOENT, "R teardown absence errno differs")
+    else:
+        raise ContractError("R teardown name remains present")
+
+
+def _selftest_r_case(case_id: str, pytest_root: Path) -> None:
+    del pytest_root
+    _require(case_id in _GENERATION6_R_REJECTIONS, "unknown cleanup self-test case")
+    module = _generation6_module()
+    ledger = _Generation6RCloseLedger()
+    private_root: PrivateRoot | None = None
+    parent_anchor: FdOwner | None = None
+    root_anchor: FdOwner | None = None
+    child: DirectoryOwner | None = None
+    child_anchor: FdOwner | None = None
+    grandparent_anchor: FdOwner | None = None
+    parent_component = ""
+    parent_backup = ""
+    root_backup = ""
+    child_backup = ""
+    entry_names: list[str] = []
+    entry_snapshots: dict[str, DescriptorSnapshot] = {}
+    target_identity: tuple[int, int] | None = None
+
+    def observed_detach(owner: FdOwner) -> int:
+        return ledger.detach(owner)
+
+    with (
+        _Generation6SelftestPatch(FdOwner, "detach", observed_detach),
+        _Generation6SelftestPatch(os, "close", ledger.close),
+        _Generation6SelftestPatch(os, "fstat", ledger.fstat),
+        _Generation6SelftestPatch(os, "open", ledger.open),
+        _Generation6SelftestPatch(os, "stat", ledger.stat),
+        _Generation6SelftestPatch(os, "unlink", ledger.unlink),
+        _Generation6SelftestPatch(os, "rmdir", ledger.rmdir),
+        _Generation6SelftestPatch(shutil, "rmtree", ledger.forbid_rmtree),
+    ):
+        try:
+            private_root = PrivateRoot()
+            parent_anchor = _generation6_r_duplicate_owner(
+                private_root.parent.fd,
+                label=f"{case_id} parent teardown anchor",
+            )
+            root_anchor = _generation6_r_duplicate_owner(
+                private_root.root.fd,
+                label=f"{case_id} root teardown anchor",
+            )
+            root_fd = private_root.root.fd.require()
+            parent_fd = private_root.parent.fd.require()
+
+            if case_id == "R01":
+                parent_component, _ = _filesystem_component(
+                    private_root.parent.path.name,
+                    label="R01 parent component",
+                )
+                parent_backup, _ = _component(
+                    f"{parent_component}-r01-backup",
+                    label="R01 parent backup",
+                )
+                grandparent_descriptor = os.open(
+                    private_root.parent.path.parent,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                )
+                grandparent_anchor = FdOwner(
+                    grandparent_descriptor,
+                    "R01 grandparent teardown anchor",
+                )
+                os.rename(
+                    parent_component,
+                    parent_backup,
+                    src_dir_fd=grandparent_anchor.require(),
+                    dst_dir_fd=grandparent_anchor.require(),
+                )
+                os.mkdir(parent_component, mode=0o700, dir_fd=grandparent_anchor.require())
+            elif case_id == "R02":
+                root_backup, _ = _component(
+                    f"{private_root.root_name}-r02-backup",
+                    label="R02 root backup",
+                )
+                os.rename(
+                    private_root.root_name,
+                    root_backup,
+                    src_dir_fd=parent_fd,
+                    dst_dir_fd=parent_fd,
+                )
+                os.mkdir(private_root.root_name, mode=0o700, dir_fd=parent_fd)
+            elif case_id == "R03":
+                child = private_root.create_child("r03-known-child")
+                child_anchor = _generation6_r_duplicate_owner(
+                    child.fd,
+                    label="R03 child teardown anchor",
+                )
+                child_backup, _ = _component(
+                    f"{child.name}-backup",
+                    label="R03 child backup",
+                )
+                os.rename(
+                    child.name,
+                    child_backup,
+                    src_dir_fd=root_fd,
+                    dst_dir_fd=root_fd,
+                )
+                os.mkdir(child.name, mode=0o700, dir_fd=root_fd)
+            elif case_id in {"R04", "R05"}:
+                entry_name = f"{case_id.lower()}-unexpected"
+                entry_names.append(entry_name)
+                entry_snapshots[entry_name] = _generation6_r_create_regular(
+                    root_fd,
+                    entry_name,
+                )
+                if case_id == "R05":
+                    ledger.fail_label = "private-root O_PATH handle"
+            else:
+                child = private_root.create_child(f"{case_id.lower()}-unsafe")
+                child_anchor = _generation6_r_duplicate_owner(
+                    child.fd,
+                    label=f"{case_id} child teardown anchor",
+                )
+                child_fd = child.fd.require()
+                entry_name = f"{case_id.lower()}-entry"
+                entry_names.append(entry_name)
+                if case_id == "R06":
+                    os.symlink("untrusted-target", entry_name, dir_fd=child_fd)
+                elif case_id == "R07":
+                    fixture_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    fixture_socket.bind(f"/proc/self/fd/{child_fd}/{entry_name}")
+                    socket_owner = FdOwner(
+                        fixture_socket.detach(),
+                        "R07 fixture socket",
+                    )
+                    socket_owner.close_once()
+                elif case_id == "R08":
+                    os.mkfifo(entry_name, mode=0o600, dir_fd=child_fd)
+                elif case_id == "R09":
+                    _generation6_r_create_regular(child_fd, entry_name)
+                    alias_name = f"{entry_name}-alias"
+                    entry_names.append(alias_name)
+                    os.link(
+                        entry_name,
+                        alias_name,
+                        src_dir_fd=child_fd,
+                        dst_dir_fd=child_fd,
+                        follow_symlinks=False,
+                    )
+                elif case_id == "R10":
+                    _generation6_r_create_regular(child_fd, entry_name)
+                    os.chmod(
+                        entry_name,
+                        0o1600,
+                        dir_fd=child_fd,
+                        follow_symlinks=False,
+                    )
+                else:
+                    _require(case_id in {"R11", "R12"}, "unknown cleanup fixture branch")
+                    _generation6_r_create_regular(child_fd, entry_name)
+                for name in entry_names:
+                    entry_snapshots[name] = _generation6_r_named_snapshot(child_fd, name)
+                target = entry_snapshots[entry_name]
+                target_identity = (target.device, target.inode)
+
+            label, message = _GENERATION6_R_REJECTIONS[case_id][0]
+            _record_generation6_check(f"inject:{label}")
+
+            def run_cleanup() -> CleanupResult:
+                if private_root is None:
+                    raise ContractError("R cleanup root is absent")
+                ledger.production_active = True
+                try:
+                    return private_root.cleanup()
+                finally:
+                    ledger.production_active = False
+
+            if case_id == "R11":
+                _require(target_identity is not None, "R11 target identity is absent")
+                captured_mount = cast(Callable[..., int], _mount_id)
+
+                def foreign_mount(descriptor: int, **kwargs: object) -> int:
+                    status = os.fstat(descriptor)
+                    if (status.st_dev, status.st_ino) == target_identity:
+                        if private_root is None:
+                            raise ContractError("R11 root is absent")
+                        return private_root.root.mount_id + 1
+                    return captured_mount(descriptor, **kwargs)
+
+                with _Generation6SelftestPatch(module, "_mount_id", foreign_mount):
+                    result = run_cleanup()
+            elif case_id == "R12":
+                _require(target_identity is not None, "R12 target identity is absent")
+                captured_snapshot_fd = _snapshot_fd
+                captured_snapshot_stat = _snapshot_stat
+
+                def unknown_fd(descriptor: int) -> DescriptorSnapshot:
+                    snapshot = captured_snapshot_fd(descriptor)
+                    if (snapshot.device, snapshot.inode) == target_identity:
+                        return replace(snapshot, mode=(snapshot.mode & 0o7777) | 0o030000)
+                    return snapshot
+
+                def unknown_stat(status: os.stat_result) -> DescriptorSnapshot:
+                    snapshot = captured_snapshot_stat(status)
+                    if (snapshot.device, snapshot.inode) == target_identity:
+                        return replace(snapshot, mode=(snapshot.mode & 0o7777) | 0o030000)
+                    return snapshot
+
+                with (
+                    _Generation6SelftestPatch(module, "_snapshot_fd", unknown_fd),
+                    _Generation6SelftestPatch(module, "_snapshot_stat", unknown_stat),
+                ):
+                    result = run_cleanup()
+            else:
+                result = run_cleanup()
+
+            _require(
+                result.status == "FAIL" and result.residue_count > 0 and bool(result.failures),
+                f"{case_id} cleanup did not fail closed",
+            )
+            _require(
+                ledger.production_removals == [],
+                f"{case_id} removed an unsafe entry",
+            )
+            _require(
+                "rmtree" not in PrivateRoot._walk.__code__.co_names
+                and "rmtree" not in PrivateRoot.cleanup.__code__.co_names,
+                f"{case_id} pathname-recursive branch exists",
+            )
+
+            if case_id == "R01":
+                _require(grandparent_anchor is not None, "R01 grandparent anchor is absent")
+                replacement = _generation6_r_named_snapshot(
+                    grandparent_anchor.require(),
+                    parent_component,
+                )
+                original = _generation6_r_named_snapshot(
+                    grandparent_anchor.require(),
+                    parent_backup,
+                )
+                _require(
+                    stat.S_ISDIR(replacement.mode)
+                    and (original.device, original.inode)
+                    == (private_root.parent.snapshot.device, private_root.parent.snapshot.inode)
+                    and (replacement.device, replacement.inode)
+                    != (original.device, original.inode),
+                    "R01 replacement preservation differs",
+                )
+            elif case_id == "R02":
+                replacement = _generation6_r_named_snapshot(
+                    parent_anchor.require(), private_root.root_name
+                )
+                original = _generation6_r_named_snapshot(parent_anchor.require(), root_backup)
+                _require(
+                    stat.S_ISDIR(replacement.mode)
+                    and (original.device, original.inode)
+                    == (private_root.root.snapshot.device, private_root.root.snapshot.inode)
+                    and (replacement.device, replacement.inode)
+                    != (original.device, original.inode),
+                    "R02 replacement preservation differs",
+                )
+            elif case_id == "R03":
+                _require(child is not None, "R03 child is absent")
+                replacement = _generation6_r_named_snapshot(root_anchor.require(), child.name)
+                original = _generation6_r_named_snapshot(root_anchor.require(), child_backup)
+                _require(
+                    stat.S_ISDIR(replacement.mode)
+                    and (original.device, original.inode)
+                    == (child.snapshot.device, child.snapshot.inode)
+                    and (replacement.device, replacement.inode)
+                    != (original.device, original.inode),
+                    "R03 replacement preservation differs",
+                )
+            else:
+                directory_anchor = child_anchor if child_anchor is not None else root_anchor
+                _require(directory_anchor is not None, f"{case_id} entry anchor is absent")
+                preserved = {
+                    name: _generation6_r_named_snapshot(directory_anchor.require(), name)
+                    for name in entry_names
+                }
+                _require(
+                    all(
+                        (preserved[name].device, preserved[name].inode, preserved[name].mode)
+                        == (
+                            entry_snapshots[name].device,
+                            entry_snapshots[name].inode,
+                            entry_snapshots[name].mode,
+                        )
+                        for name in entry_names
+                    ),
+                    f"{case_id} unsafe entry was not preserved",
+                )
+                if case_id == "R06":
+                    _require(stat.S_ISLNK(preserved[entry_names[0]].mode), "R06 type differs")
+                elif case_id == "R07":
+                    _require(stat.S_ISSOCK(preserved[entry_names[0]].mode), "R07 type differs")
+                elif case_id == "R08":
+                    _require(stat.S_ISFIFO(preserved[entry_names[0]].mode), "R08 type differs")
+                elif case_id == "R09":
+                    _require(
+                        len(preserved) == 2
+                        and len({(item.device, item.inode) for item in preserved.values()}) == 1
+                        and all(item.link_count == 2 for item in preserved.values()),
+                        "R09 hardlink identity differs",
+                    )
+                elif case_id == "R10":
+                    _require(
+                        preserved[entry_names[0]].mode & SPECIAL_PERMISSION_BITS != 0,
+                        "R10 special mode differs",
+                    )
+
+            if case_id == "R05":
+                _require(
+                    ledger.failure_injected
+                    and ledger.reused_owner is not None
+                    and ledger.reused_snapshot is not None
+                    and ledger.reused_descriptor is not None
+                    and ledger.reused_inspection_count == 0
+                    and ledger.reused_close_count_during_production == 0
+                    and _snapshot_fd(ledger.reused_owner.require()) == ledger.reused_snapshot,
+                    "R05 reused descriptor quarantine differs",
+                )
+
+            _record_generation6_check(f"reject:{label}:{message}")
+        finally:
+            ledger.production_active = False
+            if private_root is not None and parent_anchor is not None and root_anchor is not None:
+                if case_id == "R01" and grandparent_anchor is not None:
+                    os.rmdir(parent_component, dir_fd=grandparent_anchor.require())
+                    os.rename(
+                        parent_backup,
+                        parent_component,
+                        src_dir_fd=grandparent_anchor.require(),
+                        dst_dir_fd=grandparent_anchor.require(),
+                    )
+                elif case_id == "R02":
+                    os.rmdir(private_root.root_name, dir_fd=parent_anchor.require())
+                    os.rename(
+                        root_backup,
+                        private_root.root_name,
+                        src_dir_fd=parent_anchor.require(),
+                        dst_dir_fd=parent_anchor.require(),
+                    )
+                elif case_id == "R03" and child is not None:
+                    os.rmdir(child.name, dir_fd=root_anchor.require())
+                    os.rename(
+                        child_backup,
+                        child.name,
+                        src_dir_fd=root_anchor.require(),
+                        dst_dir_fd=root_anchor.require(),
+                    )
+
+                if case_id == "R05" and ledger.reused_owner is not None:
+                    private_root._poisoned_descriptors.discard(ledger.reused_owner.require())
+                    ledger.reused_owner.close_once()
+
+                entry_anchor = child_anchor if child_anchor is not None else root_anchor
+                for name in entry_names:
+                    os.unlink(name, dir_fd=entry_anchor.require())
+                if child is not None and child_anchor is not None:
+                    child_anchor.close_once()
+                    os.rmdir(child.name, dir_fd=root_anchor.require())
+                root_anchor.close_once()
+                os.rmdir(private_root.root_name, dir_fd=parent_anchor.require())
+                _generation6_r_require_absent(parent_anchor.require(), private_root.root_name)
+                parent_anchor.close_once()
+                if grandparent_anchor is not None:
+                    grandparent_anchor.close_once()
+        ledger.require_complete()
+
+    _record_generation6_case_evidence(case_id)
+
+
+def _selftest_o_write_case(
+    case_id: str,
+    module: object,
+    observer_failure: type[BaseException],
+) -> bool:
+    write_packet = _selftest_conftest_callable(module, "_write_packet")
+    payload = b"generation6-observation"
+    if case_id == "O14":
+        for variant, (label, message) in zip(
+            ("raise", "zero", "bool", "oversize"),
+            _GENERATION6_O_REJECTIONS[case_id],
+            strict=True,
+        ):
+            handle, descriptor = _selftest_validated_conftest_handle(module)
+            pwrite_calls: list[tuple[int, bytes, int]] = []
+
+            def faulty_pwrite(
+                target: int,
+                chunk: bytes,
+                offset: int,
+                variant: str = variant,
+                history: list[tuple[int, bytes, int]] = pwrite_calls,
+            ) -> int:
+                history.append((target, chunk, offset))
+                if variant == "raise":
+                    raise OSError("pwrite-sentinel")
+                if variant == "zero":
+                    return 0
+                if variant == "bool":
+                    return cast(int, True)
+                return len(chunk) + 1
+
+            expected_type = OSError if variant == "raise" else observer_failure
+
+            def invoke_pwrite(target: object = handle) -> object:
+                return write_packet(target, payload, limit=128)
+
+            with _Generation6SelftestPatch(os, "pwrite", faulty_pwrite):
+                _selftest_expect_exact_exception(
+                    invoke_pwrite,
+                    label=label,
+                    expected_type=expected_type,
+                    expected_message=message,
+                )
+            _require(
+                pwrite_calls == [(descriptor, payload, 0)],
+                f"O14 {variant} authority history differs",
+            )
+            _selftest_require_handle_terminal(handle, descriptor, f"O14 {variant}")
+        _record_generation6_case_evidence(case_id)
+        return True
+    if case_id == "O15":
+        for variant, (label, message) in zip(
+            ("raise", "empty", "bool", "oversize"),
+            _GENERATION6_O_REJECTIONS[case_id],
+            strict=True,
+        ):
+            handle, descriptor = _selftest_validated_conftest_handle(module)
+            pread_calls: list[tuple[int, int, int]] = []
+
+            def faulty_pread(
+                target: int,
+                length: int,
+                offset: int,
+                variant: str = variant,
+                history: list[tuple[int, int, int]] = pread_calls,
+            ) -> bytes:
+                history.append((target, length, offset))
+                if variant == "raise":
+                    raise OSError("pread-sentinel")
+                if variant == "empty":
+                    return b""
+                if variant == "bool":
+                    return cast(bytes, True)
+                return b"x" * (length + 1)
+
+            expected_type = OSError if variant == "raise" else observer_failure
+
+            def invoke_pread(target: object = handle) -> object:
+                return write_packet(target, payload, limit=128)
+
+            with _Generation6SelftestPatch(os, "pread", faulty_pread):
+                _selftest_expect_exact_exception(
+                    invoke_pread,
+                    label=label,
+                    expected_type=expected_type,
+                    expected_message=message,
+                )
+            _require(
+                pread_calls == [(descriptor, len(payload), 0)],
+                f"O15 {variant} authority history differs",
+            )
+            _selftest_require_handle_terminal(handle, descriptor, f"O15 {variant}")
+        _record_generation6_case_evidence(case_id)
+        return True
+    if case_id == "O16":
+        handle, descriptor = _selftest_validated_conftest_handle(module)
+        original_pread = os.pread
+        trailing_calls: list[tuple[int, int, int]] = []
+
+        def nonempty_trailing_pread(target: int, length: int, offset: int) -> bytes:
+            trailing_calls.append((target, length, offset))
+            if offset == len(payload):
+                return b"x"
+            return original_pread(target, length, offset)
+
+        label, message = _GENERATION6_O_REJECTIONS[case_id][0]
+        with _Generation6SelftestPatch(os, "pread", nonempty_trailing_pread):
+            _selftest_expect_exact_exception(
+                lambda: write_packet(handle, payload, limit=128),
+                label=label,
+                expected_type=observer_failure,
+                expected_message=message,
+            )
+        _require(
+            trailing_calls
+            == [
+                (descriptor, len(payload), 0),
+                (descriptor, 1, len(payload)),
+            ],
+            "O16 pread authority history differs",
+        )
+        _selftest_require_handle_terminal(handle, descriptor, "O16")
+        _record_generation6_case_evidence(case_id)
+        return True
+    if case_id == "O17":
+        handle, descriptor = _selftest_validated_conftest_handle(module)
+        fsync_calls: list[int] = []
+
+        def failing_fsync(target: int) -> None:
+            fsync_calls.append(target)
+            raise OSError("fsync-sentinel")
+
+        label, message = _GENERATION6_O_REJECTIONS[case_id][0]
+        with _Generation6SelftestPatch(os, "fsync", failing_fsync):
+            _selftest_expect_exact_exception(
+                lambda: write_packet(handle, payload, limit=128),
+                label=label,
+                expected_type=OSError,
+                expected_message=message,
+            )
+        _require(fsync_calls == [descriptor], "O17 fsync authority history differs")
+        _selftest_require_handle_terminal(handle, descriptor, "O17")
+        _record_generation6_case_evidence(case_id)
+        return True
+    if case_id == "O18":
+        real_snapshot = _selftest_conftest_callable(module, "_snapshot")
+        for ordinal, (label, message) in enumerate(
+            _GENERATION6_O_REJECTIONS[case_id],
+            start=1,
+        ):
+            handle, descriptor = _selftest_validated_conftest_handle(module)
+            snapshot_calls: list[int] = []
+
+            def failing_snapshot(
+                target: int,
+                ordinal: int = ordinal,
+                history: list[int] = snapshot_calls,
+            ) -> object:
+                history.append(target)
+                if len(history) == ordinal:
+                    raise OSError("snapshot-sentinel")
+                return real_snapshot(target)
+
+            def invoke_snapshot(target: object = handle) -> object:
+                return write_packet(target, payload, limit=128)
+
+            with _Generation6SelftestPatch(module, "_snapshot", failing_snapshot):
+                _selftest_expect_exact_exception(
+                    invoke_snapshot,
+                    label=label,
+                    expected_type=OSError,
+                    expected_message=message,
+                )
+            _require(
+                snapshot_calls == [descriptor] * ordinal,
+                f"O18 snapshot {ordinal} authority history differs",
+            )
+            _selftest_require_handle_terminal(handle, descriptor, f"O18 snapshot {ordinal}")
+        _record_generation6_case_evidence(case_id)
+        return True
+    if case_id == "O19":
+        handle, descriptor = _selftest_validated_conftest_handle(module)
+        original_pread = os.pread
+        wrong_read_calls: list[tuple[int, int, int]] = []
+
+        def wrong_readback(target: int, length: int, offset: int) -> bytes:
+            wrong_read_calls.append((target, length, offset))
+            if offset < len(payload):
+                original = original_pread(target, length, offset)
+                _require(type(original) is bytes and original != b"", "O19 fixture read differs")
+                return bytes(value ^ 1 for value in original)
+            return original_pread(target, length, offset)
+
+        label, message = _GENERATION6_O_REJECTIONS[case_id][0]
+        with _Generation6SelftestPatch(os, "pread", wrong_readback):
+            _selftest_expect_exact_exception(
+                lambda: write_packet(handle, payload, limit=128),
+                label=label,
+                expected_type=observer_failure,
+                expected_message=message,
+            )
+        _require(
+            wrong_read_calls
+            == [
+                (descriptor, len(payload), 0),
+                (descriptor, 1, len(payload)),
+            ],
+            "O19 pread authority history differs",
+        )
+        _selftest_require_handle_terminal(handle, descriptor, "O19")
+        _record_generation6_case_evidence(case_id)
+        return True
+    return False
+
+
+def _selftest_o_adoption_case(
+    case_id: str,
+    module: object,
+    observer_failure: type[BaseException],
+) -> bool:
+    if case_id == "O21":
+        for variant, (label, message) in zip(
+            ("raise", "bool", "negative"),
+            _GENERATION6_O_REJECTIONS[case_id],
+            strict=True,
+        ):
+            descriptor = _selftest_open_anonymous_observation()
+            handle = _selftest_conftest_handle(module, descriptor)
+            real_fcntl = fcntl.fcntl
+            getfd_authority: list[tuple[int, int]] = []
+
+            def faulty_getfd(
+                target: int,
+                operation: int,
+                argument: int = 0,
+                variant: str = variant,
+                history: list[tuple[int, int]] = getfd_authority,
+                target_descriptor: int = descriptor,
+                delegate: Callable[..., object] = real_fcntl,
+            ) -> object:
+                del argument
+                history.append((target, operation))
+                if target == target_descriptor and operation == fcntl.F_GETFD:
+                    if variant == "raise":
+                        raise OSError("getfd-sentinel")
+                    return True if variant == "bool" else -1
+                return delegate(target, operation)
+
+            expected_type = OSError if variant == "raise" else observer_failure
+
+            def invoke_getfd(target: object = handle) -> object:
+                return _selftest_conftest_callable(
+                    module,
+                    "_validate_adopted_observation",
+                )(target)
+
+            with _Generation6SelftestPatch(fcntl, "fcntl", faulty_getfd):
+                _selftest_expect_exact_exception(
+                    invoke_getfd,
+                    label=label,
+                    expected_type=expected_type,
+                    expected_message=message,
+                )
+            _require(
+                getfd_authority
+                == [
+                    (descriptor, fcntl.F_GETFL),
+                    (descriptor, fcntl.F_GETFD),
+                ],
+                f"O21 {variant} fcntl history differs",
+            )
+            _selftest_require_handle_terminal(handle, descriptor, f"O21 {variant}")
+        _record_generation6_case_evidence(case_id)
+        return True
+    if case_id == "O22":
+        for variant, (label, message) in zip(
+            ("raise", "bool", "nonzero"),
+            _GENERATION6_O_REJECTIONS[case_id],
+            strict=True,
+        ):
+            descriptor = _selftest_open_anonymous_observation()
+            handle = _selftest_conftest_handle(module, descriptor)
+            real_fcntl = fcntl.fcntl
+            setfd_authority: list[tuple[int, int]] = []
+
+            def faulty_setfd(
+                target: int,
+                operation: int,
+                argument: int = 0,
+                variant: str = variant,
+                history: list[tuple[int, int]] = setfd_authority,
+                target_descriptor: int = descriptor,
+                delegate: Callable[..., object] = real_fcntl,
+            ) -> object:
+                history.append((target, operation))
+                if target == target_descriptor and operation == fcntl.F_SETFD:
+                    if variant == "raise":
+                        raise OSError("setfd-sentinel")
+                    return True if variant == "bool" else 1
+                if operation in {fcntl.F_GETFD, fcntl.F_GETFL}:
+                    return delegate(target, operation)
+                return delegate(target, operation, argument)
+
+            expected_type = OSError if variant == "raise" else observer_failure
+
+            def invoke_setfd(target: object = handle) -> object:
+                return _selftest_conftest_callable(
+                    module,
+                    "_validate_adopted_observation",
+                )(target)
+
+            with _Generation6SelftestPatch(fcntl, "fcntl", faulty_setfd):
+                _selftest_expect_exact_exception(
+                    invoke_setfd,
+                    label=label,
+                    expected_type=expected_type,
+                    expected_message=message,
+                )
+            _require(
+                setfd_authority
+                == [
+                    (descriptor, fcntl.F_GETFL),
+                    (descriptor, fcntl.F_GETFD),
+                    (descriptor, fcntl.F_SETFD),
+                ],
+                f"O22 {variant} fcntl history differs",
+            )
+            _selftest_require_handle_terminal(handle, descriptor, f"O22 {variant}")
+        _record_generation6_case_evidence(case_id)
+        return True
+    if case_id == "O23":
+        for variant, (label, message) in zip(
+            ("changed", "missing"),
+            _GENERATION6_O_REJECTIONS[case_id],
+            strict=True,
+        ):
+            descriptor = _selftest_open_anonymous_observation()
+            handle = _selftest_conftest_handle(module, descriptor)
+            real_fcntl = fcntl.fcntl
+            prior = real_fcntl(descriptor, fcntl.F_GETFD)
+            expected = prior | fcntl.FD_CLOEXEC
+            readback_authority: list[tuple[int, int]] = []
+            getfd_counter = [0]
+
+            def changed_readback(
+                target: int,
+                operation: int,
+                argument: int = 0,
+                variant: str = variant,
+                history: list[tuple[int, int]] = readback_authority,
+                target_descriptor: int = descriptor,
+                expected_flags: int = expected,
+                counter: list[int] = getfd_counter,
+                delegate: Callable[..., object] = real_fcntl,
+            ) -> object:
+                history.append((target, operation))
+                if target == target_descriptor and operation == fcntl.F_GETFD:
+                    counter[0] += 1
+                    if counter[0] == 2:
+                        return (
+                            expected_flags + 2
+                            if variant == "changed"
+                            else expected_flags & ~fcntl.FD_CLOEXEC
+                        )
+                if operation in {fcntl.F_GETFD, fcntl.F_GETFL}:
+                    return delegate(target, operation)
+                return delegate(target, operation, argument)
+
+            def invoke_readback(target: object = handle) -> object:
+                return _selftest_conftest_callable(
+                    module,
+                    "_validate_adopted_observation",
+                )(target)
+
+            with _Generation6SelftestPatch(fcntl, "fcntl", changed_readback):
+                _selftest_expect_exact_exception(
+                    invoke_readback,
+                    label=label,
+                    expected_type=observer_failure,
+                    expected_message=message,
+                )
+            _require(
+                readback_authority
+                == [
+                    (descriptor, fcntl.F_GETFL),
+                    (descriptor, fcntl.F_GETFD),
+                    (descriptor, fcntl.F_SETFD),
+                    (descriptor, fcntl.F_GETFD),
+                ],
+                f"O23 {variant} fcntl history differs",
+            )
+            _selftest_require_handle_terminal(handle, descriptor, f"O23 {variant}")
+        _record_generation6_case_evidence(case_id)
+        return True
+    if case_id == "O24":
+        for identity_alias, (label, message) in zip(
+            (False, True),
+            _GENERATION6_O_REJECTIONS[case_id][:2],
+            strict=True,
+        ):
+            private_root = PrivateRoot()
+            command_files = CommandFiles.__new__(CommandFiles)
+            command_files.enabled = False
+            command_files._files = {}
+            command_files._published = False
+            command_files._poisoned_descriptors = private_root._poisoned_descriptors
+            child = private_root.create_child("o24")
+            observation = private_root.create_observation(
+                child,
+                label="O24 observation",
+                limit=64,
+            )
+            duplicate: ObservationOwner | None = None
+            if identity_alias:
+                duplicate = ObservationOwner(
+                    FdOwner(os.dup(observation.fd.require()), "O24 identity alias"),
+                    observation.initial,
+                    observation.limit,
+                    "O24 identity alias",
+                )
+            observations = (
+                (observation, cast(ObservationOwner, duplicate))
+                if identity_alias
+                else (observation, observation)
+            )
+
+            def invoke_alias(
+                exact_observations: Sequence[ObservationOwner] = observations,
+                exact_command_files: CommandFiles = command_files,
+                exact_private_root: PrivateRoot = private_root,
+                exact_child: DirectoryOwner = child,
+            ) -> None:
+                _observation_identities_distinct(
+                    exact_observations,
+                    exact_command_files,
+                    exact_private_root,
+                    exact_child,
+                )
+
+            try:
+                _selftest_expect_contract_error(
+                    invoke_alias,
+                    label=label,
+                    expected_message=message,
+                )
+            finally:
+                owners = [observation.fd]
+                if duplicate is not None:
+                    owners.append(duplicate.fd)
+                close_failures = _close_independent(
+                    owners,
+                    poison_sink=private_root._poisoned_descriptors,
+                )
+                _require(not close_failures, "O24 observation close differs")
+                cleanup = private_root.cleanup()
+                _require(
+                    cleanup.status == "PASS" and cleanup.residue_count == 0,
+                    "O24 private-root cleanup differs",
+                )
+                command_files.close_without_publication()
+        descriptor = _selftest_open_anonymous_observation()
+        raw = _selftest_conftest_raw(module, observation_fd=descriptor)
+        real_snapshot = _selftest_conftest_callable(module, "_snapshot")
+        observation_snapshot = real_snapshot(descriptor)
+
+        def standard_alias_snapshot(target: int) -> object:
+            return observation_snapshot if target == 0 else real_snapshot(target)
+
+        runtime_type = cast(
+            Callable[..., object],
+            _selftest_attribute(module, "_Task064ObserverRuntime"),
+        )
+        label, message = _GENERATION6_O_REJECTIONS[case_id][2]
+        with _Generation6SelftestPatch(module, "_snapshot", standard_alias_snapshot):
+            _selftest_expect_exact_exception(
+                lambda: runtime_type(raw),
+                label=label,
+                expected_type=observer_failure,
+                expected_message=message,
+            )
+        _selftest_require_descriptor_closed(descriptor, "O24 standard identity alias")
+        _record_generation6_case_evidence(case_id)
+        return True
+    return False
+
+
+def _selftest_o_runtime_case(
+    case_id: str,
+    module: object,
+    observer_failure: type[BaseException],
+) -> bool:
+    if case_id not in {"O25", "O26", "O27", "O28", "O29", "O30"}:
+        return False
+    runtime_type = cast(
+        Callable[..., object],
+        _selftest_attribute(module, "_Task064ObserverRuntime"),
+    )
+
+    def run_variant(
+        *,
+        label: str,
+        message: str,
+        pidfd_open_factory: Callable[[int], Callable[[int, int], object]] | None = None,
+        fcntl_call: Callable[..., object] | None = None,
+        signal_call: Callable[..., object] | None = None,
+        expected_type: type[BaseException] = observer_failure,
+    ) -> None:
+        descriptor = _selftest_open_anonymous_observation()
+        raw = _selftest_conftest_raw(module, observation_fd=descriptor)
+        inherited_history: list[tuple[tuple[int, ...], Path]] = []
+
+        def accept_governed_descriptors(
+            handles: list[object],
+            *,
+            capture_root: Path,
+        ) -> None:
+            inherited_history.append(
+                (
+                    tuple(
+                        cast(int, _selftest_attribute(handle, "descriptor")) for handle in handles
+                    ),
+                    capture_root,
+                )
+            )
+
+        patches = [
+            _Generation6SelftestPatch(
+                module,
+                "_require_exact_inherited_descriptors",
+                accept_governed_descriptors,
+            )
+        ]
+        if pidfd_open_factory is not None:
+            patches.append(
+                _Generation6SelftestPatch(
+                    os,
+                    "pidfd_open",
+                    pidfd_open_factory(descriptor),
+                )
+            )
+        if fcntl_call is not None:
+            patches.append(_Generation6SelftestPatch(fcntl, "fcntl", fcntl_call))
+        if signal_call is not None:
+            patches.append(_Generation6SelftestPatch(signal, "pidfd_send_signal", signal_call))
+        entered: list[_Generation6SelftestPatch] = []
+        try:
+            for patch in patches:
+                patch.__enter__()
+                entered.append(patch)
+            _selftest_expect_exact_exception(
+                lambda: runtime_type(raw),
+                label=label,
+                expected_type=expected_type,
+                expected_message=message,
+            )
+        finally:
+            for patch in reversed(entered):
+                patch.__exit__(None, None, None)
+        _require(
+            inherited_history
+            == [
+                (
+                    (descriptor,),
+                    cast(Path, _selftest_attribute(raw, "basetemp")).parent,
+                )
+            ],
+            f"{label} inherited-descriptor authority history differs",
+        )
+        _selftest_require_descriptor_closed(descriptor, label)
+
+    if case_id == "O25":
+        o25_history: list[tuple[int, int]] = []
+
+        def failing_pidfd_open(process_id: int, flags: int) -> object:
+            o25_history.append((process_id, flags))
+            raise OSError("pidfd-sentinel")
+
+        label, message = _GENERATION6_O_REJECTIONS[case_id][0]
+        run_variant(
+            label=label,
+            message=message,
+            pidfd_open_factory=lambda descriptor: failing_pidfd_open,
+            expected_type=OSError,
+        )
+        _require(o25_history == [(os.getpid(), 0)], "O25 pidfd authority history differs")
+        _record_generation6_case_evidence(case_id)
+        return True
+    if case_id == "O26":
+        o26_history: list[tuple[int, int]] = []
+
+        def noninteger_pidfd(process_id: int, flags: int) -> object:
+            o26_history.append((process_id, flags))
+            return "not-an-integer"
+
+        label, message = _GENERATION6_O_REJECTIONS[case_id][0]
+        run_variant(
+            label=label,
+            message=message,
+            pidfd_open_factory=lambda descriptor: noninteger_pidfd,
+        )
+        _require(o26_history == [(os.getpid(), 0)], "O26 pidfd authority history differs")
+        _record_generation6_case_evidence(case_id)
+        return True
+    if case_id == "O27":
+        for reserved, (label, message) in zip(
+            (True, False),
+            _GENERATION6_O_REJECTIONS[case_id],
+            strict=True,
+        ):
+            o27_history: list[tuple[int, int]] = []
+
+            def build_aliased_pidfd(
+                observation_descriptor: int,
+                reserved: bool = reserved,
+                calls: list[tuple[int, int]] = o27_history,
+            ) -> Callable[[int, int], object]:
+                def aliased_pidfd(process_id: int, flags: int) -> object:
+                    calls.append((process_id, flags))
+                    return 2 if reserved else observation_descriptor
+
+                return aliased_pidfd
+
+            run_variant(
+                label=label,
+                message=message,
+                pidfd_open_factory=build_aliased_pidfd,
+            )
+            _require(
+                o27_history == [(os.getpid(), 0)],
+                f"{label} pidfd authority history differs",
+            )
+        _record_generation6_case_evidence(case_id)
+        return True
+    if case_id == "O28":
+        o28_history: list[tuple[int, int]] = []
+        duplicate_values: list[int] = []
+
+        def build_identity_alias_pidfd(
+            observation_descriptor: int,
+        ) -> Callable[[int, int], object]:
+            def identity_alias_pidfd(process_id: int, flags: int) -> object:
+                o28_history.append((process_id, flags))
+                duplicate = os.dup(observation_descriptor)
+                duplicate_values.append(duplicate)
+                return duplicate
+
+            return identity_alias_pidfd
+
+        label, message = _GENERATION6_O_REJECTIONS[case_id][0]
+        run_variant(
+            label=label,
+            message=message,
+            pidfd_open_factory=build_identity_alias_pidfd,
+        )
+        _require(
+            o28_history == [(os.getpid(), 0)] and len(duplicate_values) == 1,
+            "O28 pidfd authority history differs",
+        )
+        _selftest_require_descriptor_closed(duplicate_values[0], "O28 pidfd identity alias")
+        _record_generation6_case_evidence(case_id)
+        return True
+    if case_id == "O29":
+        captured_pidfd_open = os.pidfd_open
+        captured_fcntl = fcntl.fcntl
+        for variant, (label, message) in zip(
+            ("getfd", "setfd", "readback"),
+            _GENERATION6_O_REJECTIONS[case_id],
+            strict=True,
+        ):
+            pidfd_values: list[int] = []
+            pidfd_flags: list[int] = []
+            pidfd_authority: list[tuple[int, int]] = []
+
+            def acquire_pidfd(
+                process_id: int,
+                flags: int,
+                values: list[int] = pidfd_values,
+            ) -> object:
+                result = captured_pidfd_open(process_id, flags)
+                values.append(result)
+                return result
+
+            def faulty_pidfd_fcntl(
+                target: int,
+                operation: int,
+                argument: int = 0,
+                variant: str = variant,
+                values: list[int] = pidfd_values,
+                flags_seen: list[int] = pidfd_flags,
+                history: list[tuple[int, int]] = pidfd_authority,
+            ) -> object:
+                if values and target == values[0]:
+                    history.append((target, operation))
+                    if operation == fcntl.F_GETFD:
+                        if variant == "getfd" and not flags_seen:
+                            return True
+                        real_flags = captured_fcntl(target, operation)
+                        flags_seen.append(real_flags)
+                        if variant == "readback" and len(flags_seen) == 2:
+                            return (flags_seen[0] | fcntl.FD_CLOEXEC) + 2
+                        return real_flags
+                    if operation == fcntl.F_SETFD and variant == "setfd":
+                        return 1
+                if operation in {fcntl.F_GETFD, fcntl.F_GETFL}:
+                    return captured_fcntl(target, operation)
+                return captured_fcntl(target, operation, argument)
+
+            run_variant(
+                label=label,
+                message=message,
+                pidfd_open_factory=lambda descriptor: acquire_pidfd,
+                fcntl_call=faulty_pidfd_fcntl,
+            )
+            _require(len(pidfd_values) == 1, f"{label} pidfd acquisition differs")
+            expected_operations = {
+                "getfd": [fcntl.F_GETFD],
+                "setfd": [fcntl.F_GETFD, fcntl.F_SETFD],
+                "readback": [fcntl.F_GETFD, fcntl.F_SETFD, fcntl.F_GETFD],
+            }[variant]
+            _require(
+                pidfd_authority
+                == [(pidfd_values[0], operation) for operation in expected_operations],
+                f"{label} pidfd fcntl authority history differs",
+            )
+            _selftest_require_descriptor_closed(pidfd_values[0], label)
+        _record_generation6_case_evidence(case_id)
+        return True
+    captured_pidfd_open = os.pidfd_open
+    for variant, (label, message) in zip(
+        ("raise", "return"),
+        _GENERATION6_O_REJECTIONS[case_id],
+        strict=True,
+    ):
+        o30_pidfd_values: list[int] = []
+        signal_authority: list[tuple[int, int, object, int]] = []
+
+        def acquire_pidfd(
+            process_id: int,
+            flags: int,
+            values: list[int] = o30_pidfd_values,
+        ) -> object:
+            result = captured_pidfd_open(process_id, flags)
+            values.append(result)
+            return result
+
+        def faulty_zero_signal(
+            descriptor: int,
+            signal_number: int,
+            siginfo: object,
+            flags: int,
+            variant: str = variant,
+            history: list[tuple[int, int, object, int]] = signal_authority,
+        ) -> object:
+            history.append((descriptor, signal_number, siginfo, flags))
+            if variant == "raise":
+                raise OSError("signal-sentinel")
+            return False
+
+        run_variant(
+            label=label,
+            message=message,
+            pidfd_open_factory=lambda descriptor: acquire_pidfd,
+            signal_call=faulty_zero_signal,
+            expected_type=OSError if variant == "raise" else observer_failure,
+        )
+        _require(
+            len(o30_pidfd_values) == 1 and signal_authority == [(o30_pidfd_values[0], 0, None, 0)],
+            f"{label} signal authority history differs",
+        )
+        _selftest_require_descriptor_closed(o30_pidfd_values[0], label)
+    _record_generation6_case_evidence(case_id)
+    return True
+
+
+@dataclass
+class _Generation6HazardRecorder:
+    case_id: str
+    _calls: list[list[object]]
+    _boundaries: list[list[object]]
+    _publications: list[list[object]]
+    _forbidden: list[list[object]]
+    _states: dict[str, str]
+
+    @classmethod
+    def create(cls, case_id: str) -> _Generation6HazardRecorder:
+        return cls(_ascii(case_id, "hazard case"), [], [], [], [], {})
+
+    def register(self, token_id: str, state: str) -> None:
+        token = _ascii(token_id, "hazard token")
+        exact_state = _ascii(state, "hazard state")
+        _require(token not in self._states, "hazard token repeats")
+        self._states[token] = exact_state
+
+    def transition(self, token_id: str, old: str, event: str, new: str) -> None:
+        token = _ascii(token_id, "hazard token")
+        exact_old = _ascii(old, "hazard old state")
+        exact_event = _ascii(event, "hazard boundary event")
+        exact_new = _ascii(new, "hazard new state")
+        _require(self._states.get(token) == exact_old, "hazard token state differs")
+        self._states[token] = exact_new
+        self._boundaries.append(
+            [len(self._boundaries) + 1, token, exact_old, exact_event, exact_new]
+        )
+
+    def call(
+        self,
+        authority: str,
+        operation: str,
+        token_id: str,
+        arguments: list[object],
+        outcome: str,
+        result: object,
+    ) -> None:
+        _validate_json_values(arguments)
+        _validate_json_values(result)
+        self._calls.append(
+            [
+                len(self._calls) + 1,
+                self.case_id,
+                _ascii(authority, "hazard authority"),
+                _ascii(operation, "hazard operation"),
+                _ascii(token_id, "hazard token"),
+                list(arguments),
+                _ascii(outcome, "hazard outcome"),
+                result,
+            ]
+        )
+
+    def forbid(self, authority: str, operation: str, token_id: str) -> None:
+        self._forbidden.append(
+            [
+                len(self._forbidden) + 1,
+                self.case_id,
+                _ascii(authority, "hazard forbidden authority"),
+                _ascii(operation, "hazard forbidden operation"),
+                _ascii(token_id, "hazard forbidden token"),
+            ]
+        )
+
+    def publish(self, authority: str, operation: str, token_id: str, payload: bytes) -> None:
+        _require(type(payload) is bytes and payload != b"", "hazard publication payload differs")
+        self._publications.append(
+            [
+                len(self._publications) + 1,
+                self.case_id,
+                _ascii(authority, "hazard publication authority"),
+                _ascii(operation, "hazard publication operation"),
+                _ascii(token_id, "hazard publication token"),
+                len(payload),
+                _sha256(payload),
+            ]
+        )
+
+    def require_terminal(self, expected: dict[str, str]) -> None:
+        _require(self._states == expected, "hazard terminal state map differs")
+
+    def packet_fields(self) -> dict[str, object]:
+        return {
+            "calls": [list(value) for value in self._calls],
+            "boundaries": [list(value) for value in self._boundaries],
+            "publications": [list(value) for value in self._publications],
+            "forbidden": [list(value) for value in self._forbidden],
+        }
+
+
+def _run_generation6_hazard_probe_for_test(
+    case_id: str,
+    pytest_root_text: str,
+    nonce: str,
+) -> bytes:
+    """Run thread or stale-FD hazards only inside a governed nested exec."""
+
+    exact_case_id = _ascii(case_id, "nested hazard case")
+    _require(exact_case_id in {"O20", "E09"}, "nested hazard case differs")
+    exact_nonce = _hex(nonce, 64, "nested hazard nonce")
+    root = Path(_ascii(pytest_root_text, "nested hazard pytest root"))
+    _require(root.is_absolute() and root.resolve(strict=True) == root, "nested hazard root differs")
+    recorder = _Generation6HazardRecorder.create(exact_case_id)
+    if exact_case_id == "O20":
+        module = _selftest_load_conftest(root)
+        observer_failure = _selftest_conftest_exception(module, "_ObserverFailure")
+        handle, descriptor = _selftest_validated_conftest_handle(module)
+        write_packet = _selftest_conftest_callable(module, "_write_packet")
+        original_token = "O20-ORIGINAL-FD"
+        alien_token = "O20-ALIEN-FD"
+        recorder.register(original_token, "ALLOCATED")
+        recorder.transition(original_token, "ALLOCATED", "validated", "AUTHENTICATED")
+        captured_close = os.close
+
+        def uncertain_close(target: int) -> None:
+            if target != descriptor or recorder._states.get(original_token) != "AUTHENTICATED":
+                recorder.forbid("observation_fd", "close", original_token)
+                raise ContractError("O20 forbidden close authority")
+            _require(
+                _selftest_attribute(handle, "terminal") is True
+                and _selftest_attribute(handle, "descriptor") == -1,
+                "O20 owner was not detached before close",
+            )
+            recorder.transition(original_token, "AUTHENTICATED", "owner_detached", "DETACHED")
+            recorder.transition(original_token, "DETACHED", "close_called", "CLOSE_ATTEMPTED")
+            captured_close(target)
+            recorder.call(
+                "observation_fd",
+                "close",
+                original_token,
+                [target],
+                "RAISED_AFTER_CLOSE",
+                "OSError:close-sentinel",
+            )
+            recorder.transition(
+                original_token,
+                "CLOSE_ATTEMPTED",
+                "close_ambiguous",
+                "TERMINAL",
+            )
+            raise OSError("close-sentinel")
+
+        def invoke_write() -> object:
+            try:
+                return write_packet(handle, b"O20", limit=64)
+            except BaseException as error:
+                recorder.call(
+                    "observation_fd",
+                    "write_packet",
+                    original_token,
+                    [_sha256(b"O20"), 64],
+                    "RAISED",
+                    f"{type(error).__name__}:{error}",
+                )
+                raise
+
+        label, message = _GENERATION6_O_REJECTIONS[exact_case_id][0]
+        with _Generation6SelftestPatch(os, "close", uncertain_close):
+            _selftest_expect_exact_exception(
+                invoke_write,
+                label=label,
+                expected_type=observer_failure,
+                expected_message=message,
+            )
+        _require(
+            _selftest_attribute(handle, "terminal") is True
+            and _selftest_attribute(handle, "descriptor") == -1,
+            "O20 original ownership is not terminal",
+        )
+        replacement = FdOwner(
+            os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC),
+            "O20 alien replacement",
+        )
+        recorder.register(alien_token, "ALLOCATED")
+        try:
+            _require(replacement.require() == descriptor, "O20 immediate descriptor reuse differs")
+            replacement_before = _snapshot_fd(replacement.require())
+            recorder.transition(alien_token, "ALLOCATED", "owner_validated", "AUTHENTICATED")
+            recorder.call(
+                "observation_fd",
+                "fstat",
+                alien_token,
+                [replacement.require()],
+                "RETURNED",
+                [replacement_before.device, replacement_before.inode, replacement_before.mode],
+            )
+            replacement_after = _snapshot_fd(replacement.require())
+            _require(replacement_after == replacement_before, "O20 alien descriptor changed")
+            recorder.transition(alien_token, "AUTHENTICATED", "owner_detached", "DETACHED")
+            recorder.transition(alien_token, "DETACHED", "close_called", "CLOSE_ATTEMPTED")
+            alien_descriptor = replacement.descriptor
+            replacement.close_once()
+            recorder.call(
+                "observation_fd",
+                "close",
+                alien_token,
+                [alien_descriptor],
+                "RETURNED",
+                0,
+            )
+            recorder.transition(alien_token, "CLOSE_ATTEMPTED", "close_returned", "TERMINAL")
+        finally:
+            if not replacement.terminal:
+                replacement.close_once()
+        recorder.require_terminal({original_token: "TERMINAL", alien_token: "TERMINAL"})
+    else:
+        label = "observer runtime residue"
+        message = "surviving_non_main_thread_count differs"
+        thread_token = "E09-THREAD"
+        recorder.register(thread_token, "ALLOCATED")
+        started = threading.Event()
+        release = threading.Event()
+
+        def wait_for_release() -> None:
+            started.set()
+            release.wait(5.0)
+
+        observer_thread = threading.Thread(
+            target=wait_for_release,
+            name="task064-generation6-e09",
+            daemon=False,
+        )
+        captured_thread_start = threading.Thread.start
+
+        def recorded_thread_start(target: threading.Thread) -> None:
+            _require(target is observer_thread, "E09 thread start target differs")
+            recorder.transition(thread_token, "ALLOCATED", "start_called", "START_ATTEMPTED")
+            try:
+                captured_thread_start(target)
+            except BaseException as error:
+                recorder.call(
+                    "preflight_thread",
+                    "start",
+                    thread_token,
+                    [target.name],
+                    "RAISED",
+                    f"{type(error).__name__}:{error}",
+                )
+                raise
+            recorder.call(
+                "preflight_thread",
+                "start",
+                thread_token,
+                [target.name],
+                "RETURNED",
+                0,
+            )
+
+        with _Generation6SelftestPatch(threading.Thread, "start", recorded_thread_start):
+            observer_thread.start()
+        try:
+            _require(started.wait(1.0) and observer_thread.is_alive(), "E09 thread did not start")
+            recorder.transition(thread_token, "START_ATTEMPTED", "thread_running", "RUNNING")
+            surviving_threads = sum(
+                1 for thread in threading.enumerate() if thread is not threading.main_thread()
+            )
+            _require(surviving_threads == 1, "E09 producer thread count differs")
+            child = ChildResult(41_001, 0, b"", b"", 1, 0)
+            observation = _selftest_common_packet(child, "3" * 64)
+            observation["surviving_non_main_thread_count"] = surviving_threads
+
+            def validate_observation() -> object:
+                try:
+                    _validate_common_observation(observation, nonce="3" * 64, child=child)
+                except BaseException as error:
+                    recorder.call(
+                        "preflight_thread",
+                        "validate_observation",
+                        thread_token,
+                        [surviving_threads],
+                        "RAISED",
+                        f"{type(error).__name__}:{error}",
+                    )
+                    raise
+                recorder.call(
+                    "preflight_thread",
+                    "validate_observation",
+                    thread_token,
+                    [surviving_threads],
+                    "RETURNED",
+                    0,
+                )
+                return None
+
+            _selftest_expect_contract_error(
+                validate_observation,
+                label=label,
+                expected_message=message,
+            )
+        finally:
+            recorder.transition(thread_token, "RUNNING", "release_set", "RELEASED")
+            release.set()
+            observer_thread.join(1.0)
+            recorder.call(
+                "preflight_thread",
+                "join",
+                thread_token,
+                [1_000_000_000],
+                "RETURNED",
+                0,
+            )
+            recorder.transition(thread_token, "RELEASED", "join_returned", "TERMINAL")
+        _require(not observer_thread.is_alive(), "E09 thread did not terminate")
+        recorder.require_terminal({thread_token: "TERMINAL"})
+    events = tuple(_GENERATION6_CASE_CHECK_HISTORY)
+    _require(
+        events == _generation6_rejection_events(label, message),
+        "nested hazard event trace differs",
+    )
+    packet: dict[str, object] = {
+        "domain": "TASK064-GENERATION6-HAZARD-PROBE-V1",
+        "nonce": exact_nonce,
+        "case_id": exact_case_id,
+        "probe_pid": os.getpid(),
+        "probe_parent_pid": os.getppid(),
+        "events": list(events),
+        **recorder.packet_fields(),
+        "status": "PASS",
+    }
+    return _canonical_bytes(packet, limit=16_384)
+
+
+def _selftest_isolated_hazard_case(case_id: str, pytest_root: Path) -> None:
+    private_root: PrivateRoot | None = None
+    command_files: CommandFiles | None = None
+    primary: BaseException | None = None
+    packet: dict[str, object] | None = None
+    try:
+        private_root = PrivateRoot()
+        command_files = CommandFiles.__new__(CommandFiles)
+        command_files.enabled = False
+        command_files._files = {}
+        command_files._published = False
+        command_files._poisoned_descriptors = private_root._poisoned_descriptors
+        supervisor = ProcessSupervisor(private_root, command_files)
+        child_root = private_root.create_child(f"hazard-{case_id.lower()}")
+        nonce = _hex(secrets.token_hex(32), 64, "nested hazard parent nonce")
+        child = supervisor.run(
+            [
+                sys.executable,
+                "-c",
+                _GENERATION6_HAZARD_BOOTSTRAP,
+                os.fspath(Path(__file__).resolve(strict=True)),
+                case_id,
+                os.fspath(pytest_root),
+                nonce,
+            ],
+            cwd=pytest_root,
+            timeout_ns=10_000_000_000,
+            label=f"hazard-{case_id.lower()}",
+            child_root=child_root,
+        )
+        _require(
+            child.exit_code == 0 and child.stderr == b"" and child.survivor_count == 0,
+            f"{case_id} nested hazard worker failed",
+        )
+        packet = _decode_canonical(
+            child.stdout,
+            limit=16_384,
+            label=f"{case_id} nested hazard result",
+        )
+        _exact_keys(packet, _GENERATION6_HAZARD_RESULT_KEYS, "nested hazard result")
+        expected_events = _generation6_rejection_events(
+            *(
+                _GENERATION6_O_REJECTIONS[case_id][0]
+                if case_id == "O20"
+                else ("observer runtime residue", "surviving_non_main_thread_count differs")
+            )
+        )
+        raw_calls = packet["calls"]
+        raw_boundaries = packet["boundaries"]
+        _require(
+            type(raw_calls) is list
+            and type(raw_boundaries) is list
+            and packet["publications"] == []
+            and packet["forbidden"] == [],
+            f"{case_id} nested hazard history shape differs",
+        )
+        calls = cast(list[object], raw_calls)
+        boundaries = cast(list[object], raw_boundaries)
+        _require(
+            all(type(value) is list and len(cast(list[object], value)) == 8 for value in calls)
+            and all(
+                type(value) is list and len(cast(list[object], value)) == 5 for value in boundaries
+            ),
+            f"{case_id} nested hazard history record differs",
+        )
+        if case_id == "O20":
+            first_call = cast(list[object], calls[0])
+            first_arguments = cast(list[object], first_call[5])
+            _require(
+                type(first_call[5]) is list
+                and len(first_arguments) == 1
+                and type(first_arguments[0]) is int
+                and first_arguments[0] > 2,
+                "O20 nested descriptor argument differs",
+            )
+            descriptor = cast(int, first_arguments[0])
+            stat_result = cast(list[object], cast(list[object], calls[2])[7])
+            _require(
+                type(cast(list[object], calls[2])[7]) is list
+                and len(stat_result) == 3
+                and all(type(value) is int and value >= 0 for value in stat_result),
+                "O20 nested alien identity differs",
+            )
+            expected_calls: list[list[object]] = [
+                [
+                    1,
+                    "O20",
+                    "observation_fd",
+                    "close",
+                    "O20-ORIGINAL-FD",
+                    [descriptor],
+                    "RAISED_AFTER_CLOSE",
+                    "OSError:close-sentinel",
+                ],
+                [
+                    2,
+                    "O20",
+                    "observation_fd",
+                    "write_packet",
+                    "O20-ORIGINAL-FD",
+                    [_sha256(b"O20"), 64],
+                    "RAISED",
+                    "_ObserverFailure:uncertain CI observation close",
+                ],
+                [
+                    3,
+                    "O20",
+                    "observation_fd",
+                    "fstat",
+                    "O20-ALIEN-FD",
+                    [descriptor],
+                    "RETURNED",
+                    stat_result,
+                ],
+                [
+                    4,
+                    "O20",
+                    "observation_fd",
+                    "close",
+                    "O20-ALIEN-FD",
+                    [descriptor],
+                    "RETURNED",
+                    0,
+                ],
+            ]
+            expected_boundaries: list[list[object]] = [
+                [1, "O20-ORIGINAL-FD", "ALLOCATED", "validated", "AUTHENTICATED"],
+                [2, "O20-ORIGINAL-FD", "AUTHENTICATED", "owner_detached", "DETACHED"],
+                [3, "O20-ORIGINAL-FD", "DETACHED", "close_called", "CLOSE_ATTEMPTED"],
+                [
+                    4,
+                    "O20-ORIGINAL-FD",
+                    "CLOSE_ATTEMPTED",
+                    "close_ambiguous",
+                    "TERMINAL",
+                ],
+                [5, "O20-ALIEN-FD", "ALLOCATED", "owner_validated", "AUTHENTICATED"],
+                [6, "O20-ALIEN-FD", "AUTHENTICATED", "owner_detached", "DETACHED"],
+                [7, "O20-ALIEN-FD", "DETACHED", "close_called", "CLOSE_ATTEMPTED"],
+                [8, "O20-ALIEN-FD", "CLOSE_ATTEMPTED", "close_returned", "TERMINAL"],
+            ]
+        else:
+            expected_calls = [
+                [
+                    1,
+                    "E09",
+                    "preflight_thread",
+                    "start",
+                    "E09-THREAD",
+                    ["task064-generation6-e09"],
+                    "RETURNED",
+                    0,
+                ],
+                [
+                    2,
+                    "E09",
+                    "preflight_thread",
+                    "validate_observation",
+                    "E09-THREAD",
+                    [1],
+                    "RAISED",
+                    "ContractError:surviving_non_main_thread_count differs",
+                ],
+                [
+                    3,
+                    "E09",
+                    "preflight_thread",
+                    "join",
+                    "E09-THREAD",
+                    [1_000_000_000],
+                    "RETURNED",
+                    0,
+                ],
+            ]
+            expected_boundaries = [
+                [1, "E09-THREAD", "ALLOCATED", "start_called", "START_ATTEMPTED"],
+                [2, "E09-THREAD", "START_ATTEMPTED", "thread_running", "RUNNING"],
+                [3, "E09-THREAD", "RUNNING", "release_set", "RELEASED"],
+                [4, "E09-THREAD", "RELEASED", "join_returned", "TERMINAL"],
+            ]
+        _require(
+            calls == expected_calls and boundaries == expected_boundaries,
+            f"{case_id} nested hazard exact history differs",
+        )
+        _require(
+            packet["domain"] == "TASK064-GENERATION6-HAZARD-PROBE-V1"
+            and packet["nonce"] == nonce
+            and packet["case_id"] == case_id
+            and _integer(packet["probe_pid"], "nested hazard PID", minimum=1) == child.pid
+            and _integer(packet["probe_parent_pid"], "nested hazard parent PID", minimum=1)
+            == os.getpid()
+            and packet["events"] == list(expected_events)
+            and packet["status"] == "PASS",
+            f"{case_id} nested hazard result differs",
+        )
+        cleanup = private_root.cleanup()
+        _require(
+            cleanup.status == "PASS" and cleanup.residue_count == 0,
+            f"{case_id} nested hazard cleanup differs",
+        )
+        command_files.close_without_publication()
+    except BaseException as error:
+        primary = error
+    if primary is not None:
+        try:
+            _close_failure_resources(private_root, command_files)
+        except BaseException as cleanup_error:
+            primary.add_note(f"nested hazard failure cleanup failed: {cleanup_error!r}")
+        raise primary
+    _require(packet is not None, f"{case_id} nested hazard result is absent")
+    for event in cast(list[object], cast(dict[str, object], packet)["events"]):
+        _record_generation6_check(_ascii(event, "nested hazard event"))
+    _record_generation6_case_evidence(case_id)
+
+
+@dataclass
+class _Generation6FProbeMmap:
+    fail_write: bool
+    value: int = 0
+    close_count: int = 0
+
+    def __getitem__(self, index: int) -> int:
+        _require(index == 0, "F probe poison index differs")
+        return self.value
+
+    def __setitem__(self, index: int, value: int) -> None:
+        _require(index == 0 and type(value) is int, "F probe poison write differs")
+        if self.fail_write:
+            raise OSError("F poison-write-sentinel")
+        self.value = value
+
+    def close(self) -> None:
+        self.close_count += 1
+
+
+@dataclass
+class _Generation6FProbeMmapOwner:
+    mapping: _Generation6FProbeMmap | None
+    terminal: bool = False
+
+    def require(self) -> _Generation6FProbeMmap:
+        _require(not self.terminal and self.mapping is not None, "F probe poison owner is terminal")
+        return cast(_Generation6FProbeMmap, self.mapping)
+
+    def detach(self) -> _Generation6FProbeMmap:
+        mapping = self.require()
+        self.mapping = None
+        self.terminal = True
+        return mapping
+
+
+def _generation6_f_runtime(
+    pytest_root: Path,
+    *,
+    with_proof: bool,
+) -> tuple[object, object, int, int | None]:
+    module = _selftest_load_conftest(pytest_root)
+    ci_descriptor = _selftest_open_anonymous_observation()
+    proof_descriptor = _selftest_open_anonymous_observation() if with_proof else None
+    raw = _selftest_conftest_raw(
+        module,
+        observation_fd=ci_descriptor,
+        proof_fd=proof_descriptor,
+    )
+    inherited_history: list[tuple[tuple[int, ...], Path]] = []
+
+    def accept_governed_descriptors(
+        handles: list[object],
+        *,
+        capture_root: Path,
+    ) -> None:
+        inherited_history.append(
+            (
+                tuple(cast(int, _selftest_attribute(handle, "descriptor")) for handle in handles),
+                capture_root,
+            )
+        )
+
+    runtime_type = cast(
+        Callable[..., object],
+        _selftest_attribute(module, "_Task064ObserverRuntime"),
+    )
+    with _Generation6SelftestPatch(
+        module,
+        "_require_exact_inherited_descriptors",
+        accept_governed_descriptors,
+    ):
+        runtime = runtime_type(raw)
+    expected = (ci_descriptor,) if proof_descriptor is None else (ci_descriptor, proof_descriptor)
+    _require(
+        inherited_history == [(expected, cast(Path, _selftest_attribute(raw, "basetemp")).parent)],
+        "F runtime inherited descriptors differ",
+    )
+    vars(module)["_RAW_INVOCATION"] = raw
+    vars(module)["_RUNTIME"] = runtime
+    return module, runtime, ci_descriptor, proof_descriptor
+
+
+def _generation6_f_cleanup_runtime(module: object, runtime: object) -> None:
+    vars(module)["_RUNTIME"] = None
+    vars(module)["_RAW_INVOCATION"] = None
+    vars(module)["_OBSERVER"] = None
+    failures = cast(
+        Callable[..., list[str]],
+        _selftest_attribute(runtime, "_close_anchors"),
+    )(require_live=False)
+    for handle in (
+        _selftest_attribute(runtime, "proof"),
+        _selftest_attribute(runtime, "ci"),
+    ):
+        if handle is not None and _selftest_attribute(handle, "terminal") is False:
+            try:
+                _selftest_conftest_callable(module, "_close_once")(handle)
+            except BaseException:
+                failures.append(cast(str, _selftest_attribute(handle, "label")))
+    _require(not failures, "F runtime cleanup differs")
+
+
+def _generation6_f_record_fork(
+    recorder: _Generation6HazardRecorder,
+    token: str,
+    child_pid: int,
+) -> None:
+    recorder.call("raw_process", "fork", token, [], "RETURNED", child_pid)
+    recorder.transition(token, "ALLOCATED", "fork_returned", "RUNNING")
+
+
+def _generation6_f_wait_child(
+    recorder: _Generation6HazardRecorder,
+    token: str,
+    child_pid: int,
+) -> int:
+    waited_pid, status = os.waitpid(child_pid, 0)
+    _require(waited_pid == child_pid and type(status) is int, "F child wait identity differs")
+    recorder.call(
+        "raw_process",
+        "waitpid",
+        token,
+        [child_pid, 0],
+        "RETURNED",
+        [waited_pid, status],
+    )
+    recorder.transition(token, "RUNNING", "waitpid_consumed", "TERMINAL")
+    return status
+
+
+def _generation6_f_summary_call(
+    recorder: _Generation6HazardRecorder,
+    operation: str,
+    token: str,
+    result: object,
+) -> None:
+    recorder.call("generation6_F", operation, token, [], "RETURNED", result)
+
+
+def _generation6_f_poison_value(runtime: object) -> int:
+    poison_owner = _selftest_attribute(runtime, "poison")
+    mapping = cast(Callable[[], object], _selftest_attribute(poison_owner, "require"))()
+    value = cast(Callable[[int], object], _selftest_attribute(mapping, "__getitem__"))(0)
+    exact = _integer(value, "F poison value")
+    _require(exact <= 255, "F poison value differs")
+    return exact
+
+
+def _generation6_f_atfork_case(
+    case_id: str,
+    pytest_root: Path,
+    recorder: _Generation6HazardRecorder,
+) -> dict[str, object]:
+    with_proof = case_id in {"F02", "F04", "F06"}
+    module, runtime, ci_descriptor, proof_descriptor = _generation6_f_runtime(
+        pytest_root,
+        with_proof=with_proof,
+    )
+    shared = mmap.mmap(
+        -1,
+        32,
+        flags=mmap.MAP_SHARED,
+        prot=mmap.PROT_READ | mmap.PROT_WRITE,
+    )
+    for index in range(32):
+        shared[index] = 0
+    owner_pid = os.getpid()
+    original_close = os.close
+    pidfd = cast(int, _selftest_attribute(runtime, "self_pidfd"))
+    _require(type(pidfd) is int and pidfd > 2, "F runtime self-pidfd differs")
+    facts: dict[str, object] = {}
+
+    def close_probe(target: int) -> None:
+        if os.getpid() != owner_pid:
+            if target == ci_descriptor:
+                shared[0] = shared[0] + 1
+                if shared[8] == 1:
+                    original_close(target)
+                    raise OSError("F CI-close-sentinel")
+            elif proof_descriptor is not None and target == proof_descriptor:
+                shared[1] = shared[1] + 1
+                if shared[8] == 2:
+                    original_close(target)
+                    raise OSError("F proof-close-sentinel")
+            elif target == pidfd:
+                shared[2] = shared[2] + 1
+        original_close(target)
+
+    try:
+        if case_id in {"F01", "F02"}:
+            variants = (1,) if case_id == "F01" else (1, 2)
+            with _Generation6SelftestPatch(os, "close", close_probe):
+                for ordinal, variant in enumerate(variants, start=1):
+                    shared[8] = variant
+                    token = f"{case_id}-CHILD-{ordinal}"
+                    recorder.register(token, "ALLOCATED")
+                    child_pid = os.fork()
+                    if child_pid == 0:
+                        shared[3] = shared[3] + 1
+                        _CAPTURED_RUNNER_OS_EXIT(70)
+                    _generation6_f_record_fork(recorder, token, child_pid)
+                    status = _generation6_f_wait_child(recorder, token, child_pid)
+                    _require(
+                        _raw_waitpid_reserved_terminal(status),
+                        f"{case_id} at-fork ambiguity was not reserved",
+                    )
+            if case_id == "F01":
+                _require(
+                    shared[0] == 1 and shared[1] == 0 and shared[3] == 0,
+                    "F01 child close/return history differs",
+                )
+                _generation6_f_summary_call(
+                    recorder,
+                    "atfork_ci_close",
+                    "F01-CHILD-1",
+                    [shared[0], shared[3]],
+                )
+                facts = {
+                    "ci_close_attempt_count": shared[0],
+                    "user_child_entry_count": shared[3],
+                    "poison_value": _generation6_f_poison_value(runtime),
+                }
+            else:
+                _require(
+                    shared[0] == 2 and shared[1] == 2 and shared[3] == 0,
+                    "F02 independent child close history differs",
+                )
+                _generation6_f_summary_call(
+                    recorder,
+                    "independent_closes",
+                    "F02-CHILD-2",
+                    [shared[0], shared[1], shared[3]],
+                )
+                facts = {
+                    "ci_close_attempt_count": shared[0],
+                    "proof_close_attempt_count": shared[1],
+                    "user_child_entry_count": shared[3],
+                    "poison_value": _generation6_f_poison_value(runtime),
+                }
+        elif case_id == "F03":
+            token = "F03-CHILD-1"
+            recorder.register(token, "ALLOCATED")
+            with _Generation6SelftestPatch(os, "close", close_probe):
+                child_pid = os.fork()
+                if child_pid == 0:
+                    try:
+                        _require(
+                            _selftest_attribute(runtime, "self_pidfd") == -1
+                            and _selftest_attribute(runtime, "_inherited_pidfd_for_fork") == -1,
+                            "F03 child pidfd ownership was not poisoned",
+                        )
+                        os.fstat(pidfd)
+                        shared[4] = 1
+                    except BaseException:
+                        _CAPTURED_RUNNER_OS_EXIT(70)
+                    _CAPTURED_RUNNER_OS_EXIT(0)
+                _generation6_f_record_fork(recorder, token, child_pid)
+                status = _generation6_f_wait_child(recorder, token, child_pid)
+            _require(
+                os.waitstatus_to_exitcode(status) == 0 and shared[2] == 0 and shared[4] == 1,
+                "F03 child self-pidfd poison history differs",
+            )
+            _generation6_f_summary_call(
+                recorder,
+                "self_pidfd_poison",
+                token,
+                [shared[2], shared[4]],
+            )
+            facts = {
+                "child_pidfd_live_after_poison": bool(shared[4]),
+                "child_pidfd_close_attempt_count": shared[2],
+                "owner_pidfd_live": _selftest_attribute(runtime, "self_pidfd") == pidfd,
+            }
+        elif case_id == "F04":
+            observer_failure = _selftest_conftest_exception(module, "_ObserverFailure")
+            token = "F04-CHILD-1"
+            recorder.register(token, "ALLOCATED")
+            child_pid = os.fork()
+            if child_pid == 0:
+                for offset, operation in enumerate(
+                    (
+                        cast(
+                            Callable[[dict[str, object]], None],
+                            _selftest_attribute(runtime, "write_proof"),
+                        ),
+                        cast(
+                            Callable[[dict[str, object]], None],
+                            _selftest_attribute(runtime, "finish_ci"),
+                        ),
+                    ),
+                    start=5,
+                ):
+                    try:
+                        operation({"probe": case_id})
+                    except BaseException as error:
+                        if (
+                            type(error) is observer_failure
+                            and str(error) == "observation writer is not the exec owner"
+                        ):
+                            shared[offset] = 1
+                            continue
+                    _CAPTURED_RUNNER_OS_EXIT(70)
+                _CAPTURED_RUNNER_OS_EXIT(0)
+            _generation6_f_record_fork(recorder, token, child_pid)
+            status = _generation6_f_wait_child(recorder, token, child_pid)
+            _require(
+                os.waitstatus_to_exitcode(status) == 0 and shared[5] == shared[6] == 1,
+                "F04 descendant write gates differ",
+            )
+            _generation6_f_summary_call(
+                recorder,
+                "descendant_writes",
+                token,
+                [shared[5], shared[6]],
+            )
+            facts = {"proof_write_rejected": bool(shared[5]), "ci_write_rejected": bool(shared[6])}
+        elif case_id == "F05":
+            pytest_module = _selftest_attribute(module, "pytest")
+            usage_error = cast(
+                type[BaseException], _selftest_attribute(pytest_module, "UsageError")
+            )
+            selector = _selftest_conftest_callable(module, "_observer_from_config")
+
+            def forbidden_getoption(*arguments: object, **keywords: object) -> object:
+                del arguments, keywords
+                shared[7] = shared[7] + 1
+                raise AssertionError("F05 selector read config before owner gate")
+
+            for ordinal, cached in enumerate((True, False), start=1):
+                vars(module)["_OBSERVER"] = object() if cached else None
+                token = f"F05-CHILD-{ordinal}"
+                recorder.register(token, "ALLOCATED")
+                child_pid = os.fork()
+                if child_pid == 0:
+                    try:
+                        selector(SimpleNamespace(getoption=forbidden_getoption))
+                    except BaseException as error:
+                        if (
+                            type(error) is usage_error
+                            and str(error) == "TASK-064 observer runtime owner differs"
+                        ):
+                            shared[8 + ordinal] = 1
+                            _CAPTURED_RUNNER_OS_EXIT(0)
+                    _CAPTURED_RUNNER_OS_EXIT(70)
+                _generation6_f_record_fork(recorder, token, child_pid)
+                status = _generation6_f_wait_child(recorder, token, child_pid)
+                _require(os.waitstatus_to_exitcode(status) == 0, "F05 selector child failed")
+            vars(module)["_OBSERVER"] = None
+            _require(
+                shared[7] == 0 and shared[9] == shared[10] == 1,
+                "F05 descendant selector gates differ",
+            )
+            _generation6_f_summary_call(
+                recorder,
+                "selector_gates",
+                "F05-CHILD-2",
+                [shared[7], shared[9], shared[10]],
+            )
+            facts = {
+                "config_read_count": shared[7],
+                "cached_selector_rejected": bool(shared[9]),
+                "fresh_selector_rejected": bool(shared[10]),
+            }
+        elif case_id == "F06":
+            observer_failure = _selftest_conftest_exception(module, "_ObserverFailure")
+            pytest_module = _selftest_attribute(module, "pytest")
+            usage_error = cast(
+                type[BaseException], _selftest_attribute(pytest_module, "UsageError")
+            )
+            selector = _selftest_conftest_callable(module, "_observer_from_config")
+            observer_type = cast(
+                Callable[..., object], _selftest_attribute(module, "_Task064Observer")
+            )
+            parent_observer = observer_type(
+                phase="execute",
+                nonce="a" * 64,
+                shard_id="report",
+                selector_nodes=(REPORT_NODE,),
+            )
+            vars(module)["_OBSERVER"] = parent_observer
+            parent_started = tuple(
+                cast(list[str], _selftest_attribute(parent_observer, "started_nodes"))
+            )
+            token = "F06-CHILD-1"
+            recorder.register(token, "ALLOCATED")
+            child_pid = os.fork()
+            if child_pid == 0:
+                try:
+                    _selftest_conftest_callable(module, "pytest_runtest_logstart")(
+                        "F06::child-local",
+                        ("F06", 0, "child-local"),
+                    )
+                    if tuple(
+                        cast(
+                            list[str],
+                            _selftest_attribute(parent_observer, "started_nodes"),
+                        )
+                    ) != ("F06::child-local",):
+                        _CAPTURED_RUNNER_OS_EXIT(70)
+                    shared[11] = 1
+                    try:
+                        selector(SimpleNamespace())
+                    except BaseException as selector_error:
+                        if (
+                            type(selector_error) is usage_error
+                            and str(selector_error) == "TASK-064 observer runtime owner differs"
+                        ):
+                            shared[12] = 1
+                        else:
+                            _CAPTURED_RUNNER_OS_EXIT(70)
+                    ci_handle = _selftest_attribute(runtime, "ci")
+                    revived_descriptor = os.open("/dev/null", os.O_RDWR | os.O_CLOEXEC)
+                    vars(ci_handle)["descriptor"] = revived_descriptor
+                    vars(ci_handle)["terminal"] = False
+                    try:
+                        cast(
+                            Callable[[dict[str, object]], None],
+                            _selftest_attribute(runtime, "finish_ci"),
+                        )({"probe": case_id})
+                    except BaseException as write_error:
+                        if (
+                            type(write_error) is observer_failure
+                            and str(write_error) == "observation writer is not the exec owner"
+                        ):
+                            shared[13] = 1
+                            _CAPTURED_RUNNER_OS_EXIT(0)
+                except BaseException:
+                    pass
+                _CAPTURED_RUNNER_OS_EXIT(70)
+            _generation6_f_record_fork(recorder, token, child_pid)
+            status = _generation6_f_wait_child(recorder, token, child_pid)
+            _require(
+                os.waitstatus_to_exitcode(status) == 0
+                and shared[11] == shared[12] == shared[13] == 1
+                and tuple(cast(list[str], _selftest_attribute(parent_observer, "started_nodes")))
+                == parent_started,
+                "F06 descendant restore/revival history differs",
+            )
+            vars(module)["_OBSERVER"] = None
+            _generation6_f_summary_call(
+                recorder,
+                "restore_revival",
+                token,
+                [shared[11], shared[12], shared[13]],
+            )
+            facts = {
+                "child_local_hook_mutated_copy": bool(shared[11]),
+                "parent_observer_unchanged": True,
+                "selector_rejected": bool(shared[12]),
+                "revived_handle_write_rejected": bool(shared[13]),
+            }
+        elif case_id == "F07":
+            token = "F07-CHILD-1"
+            shared[8] = 1
+            recorder.register(token, "ALLOCATED")
+            with _Generation6SelftestPatch(os, "close", close_probe):
+                child_pid = os.fork()
+                if child_pid == 0:
+                    shared[3] = shared[3] + 1
+                    _CAPTURED_RUNNER_OS_EXIT(70)
+                _generation6_f_record_fork(recorder, token, child_pid)
+                status = _generation6_f_wait_child(recorder, token, child_pid)
+            reserved_before_classifier = _raw_waitpid_reserved_terminal(status)
+            classifier_count = 0
+            if not reserved_before_classifier:
+                classifier_count += 1
+            poison_value = _generation6_f_poison_value(runtime)
+            _require(
+                reserved_before_classifier
+                and classifier_count == 0
+                and shared[3] == 0
+                and poison_value == 1,
+                "F07 accepted-death ordering differs",
+            )
+            _generation6_f_summary_call(
+                recorder,
+                "reserved_before_classifier",
+                token,
+                [reserved_before_classifier, classifier_count],
+            )
+            _generation6_f_summary_call(
+                recorder,
+                "shared_poison",
+                token,
+                poison_value,
+            )
+            facts = {
+                "reserved_before_classifier": reserved_before_classifier,
+                "accepted_classifier_count": classifier_count,
+                "user_child_entry_count": shared[3],
+                "poison_value": poison_value,
+            }
+        else:
+            raise ContractError(f"unknown F at-fork case: {case_id}")
+    finally:
+        _generation6_f_cleanup_runtime(module, runtime)
+        shared.close()
+    return facts
+
+
+def _generation6_f_latch_signal_case(
+    case_id: str,
+    pytest_root: Path,
+    recorder: _Generation6HazardRecorder,
+) -> dict[str, object]:
+    _require(case_id in {"F08", "F09"}, "F latch/signal case differs")
+    shared = mmap.mmap(
+        -1,
+        16,
+        flags=mmap.MAP_SHARED,
+        prot=mmap.PROT_READ | mmap.PROT_WRITE,
+    )
+    for index in range(16):
+        shared[index] = 0
+    token = f"{case_id}-OWNER-1"
+    recorder.register(token, "ALLOCATED")
+    owner_pid = os.fork()
+    if owner_pid == 0:
+        try:
+            _module, runtime, ci_descriptor, _ = _generation6_f_runtime(
+                pytest_root,
+                with_proof=False,
+            )
+            old_poison = _selftest_attribute(runtime, "poison")
+            old_mapping = cast(
+                Callable[[], object],
+                _selftest_attribute(old_poison, "detach"),
+            )()
+            cast(Callable[[], None], _selftest_attribute(old_mapping, "close"))()
+            vars(runtime)["_poison"] = _Generation6FProbeMmapOwner(
+                _Generation6FProbeMmap(fail_write=True)
+            )
+            child_owner_pid = os.getpid()
+            original_close = os.close
+            original_pidfd_signal = cast(
+                Callable[[int, int, object, int], object],
+                _selftest_attribute(runtime, "_captured_pidfd_signal"),
+            )
+
+            def ambiguous_ci_close(target: int) -> None:
+                if os.getpid() != child_owner_pid and target == ci_descriptor:
+                    shared[0] = shared[0] + 1
+                    original_close(target)
+                    raise OSError("F latch-signal close sentinel")
+                original_close(target)
+
+            def anchored_signal(
+                descriptor: int,
+                signal_number: int,
+                siginfo: object,
+                flags: int,
+            ) -> object:
+                shared[1] = shared[1] + 1
+                if case_id == "F09":
+                    raise OSError("F pidfd-signal-sentinel")
+                return original_pidfd_signal(descriptor, signal_number, siginfo, flags)
+
+            def forbidden_numeric_kill(pid: int, signal_number: int) -> None:
+                del pid, signal_number
+                shared[2] = shared[2] + 1
+                raise AssertionError("numeric owner signal is forbidden")
+
+            vars(runtime)["_captured_pidfd_signal"] = anchored_signal
+            with (
+                _Generation6SelftestPatch(os, "close", ambiguous_ci_close),
+                _Generation6SelftestPatch(os, "kill", forbidden_numeric_kill),
+            ):
+                child_pid = os.fork()
+                if child_pid == 0:
+                    shared[3] = shared[3] + 1
+                    _CAPTURED_RUNNER_OS_EXIT(70)
+                if case_id == "F08":
+                    while True:
+                        signal.pause()
+                waited_pid, status = os.waitpid(child_pid, 0)
+                _require(waited_pid == child_pid, "F09 child wait identity differs")
+                shared[4] = shared[4] + 1
+                if _raw_waitpid_reserved_terminal(status):
+                    _CAPTURED_RUNNER_OS_EXIT(191)
+                shared[5] = shared[5] + 1
+                _CAPTURED_RUNNER_OS_EXIT(70)
+        except BaseException:
+            _CAPTURED_RUNNER_OS_EXIT(70)
+    _generation6_f_record_fork(recorder, token, owner_pid)
+    status = _generation6_f_wait_child(recorder, token, owner_pid)
+    if case_id == "F08":
+        expected_owner_terminal = os.WIFSIGNALED(status) and os.WTERMSIG(status) == signal.SIGKILL
+        operation = "anchored_sigkill"
+    else:
+        expected_owner_terminal = _raw_waitpid_reserved_terminal(status)
+        operation = "dual_failure_propagation"
+    _require(
+        expected_owner_terminal
+        and shared[0] == 1
+        and shared[1] == 1
+        and shared[2] == 0
+        and shared[3] == 0,
+        f"{case_id} latch/signal terminal history differs",
+    )
+    if case_id == "F09":
+        _require(shared[4] == 1 and shared[5] == 0, "F09 propagation order differs")
+    _generation6_f_summary_call(
+        recorder,
+        operation,
+        token,
+        [shared[0], shared[1], shared[2], shared[3], shared[4], shared[5]],
+    )
+    facts: dict[str, object] = {
+        "observation_close_attempt_count": shared[0],
+        "pidfd_signal_attempt_count": shared[1],
+        "numeric_signal_attempt_count": shared[2],
+        "user_child_entry_count": shared[3],
+        "owner_terminal": "SIGKILL" if case_id == "F08" else "EXIT-191",
+        "child_consume_count": shared[4],
+        "post_reserved_continuation_count": shared[5],
+    }
+    shared.close()
+    return facts
+
+
+def _generation6_f_wait_propagation_case(
+    case_id: str,
+    pytest_root: Path,
+    recorder: _Generation6HazardRecorder,
+) -> dict[str, object]:
+    _require(case_id in {"F10", "F11", "F12", "F15", "F16", "F17"}, "F wait case differs")
+    shared = mmap.mmap(
+        -1,
+        16,
+        flags=mmap.MAP_SHARED,
+        prot=mmap.PROT_READ | mmap.PROT_WRITE,
+    )
+    for index in range(16):
+        shared[index] = 0
+    token = f"{case_id}-OWNER-1"
+    recorder.register(token, "ALLOCATED")
+    owner_pid = os.fork()
+    if owner_pid == 0:
+        try:
+            if case_id in {"F10", "F11", "F17"}:
+                leaf_pid = os.fork()
+                if leaf_pid == 0:
+                    _CAPTURED_RUNNER_OS_EXIT(191)
+                waited_pid, status = os.waitpid(leaf_pid, 0)
+                _require(waited_pid == leaf_pid, f"{case_id} leaf wait differs")
+                shared[0] = shared[0] + 1
+                reserved = _raw_waitpid_reserved_terminal(status)
+                shared[1] = shared[1] + int(reserved)
+                if case_id == "F17":
+                    try:
+                        if reserved:
+                            _CAPTURED_RUNNER_OS_EXIT(191)
+                    except BaseException:
+                        shared[2] = shared[2] + 1
+                    shared[3] = shared[3] + 1
+                    _CAPTURED_RUNNER_OS_EXIT(70)
+                if reserved:
+                    _CAPTURED_RUNNER_OS_EXIT(191)
+                if case_id == "F11":
+                    shared[2] = shared[2] + 1
+                shared[3] = shared[3] + 1
+                _CAPTURED_RUNNER_OS_EXIT(70)
+            if case_id == "F12":
+                intermediary_pid = os.fork()
+                if intermediary_pid == 0:
+                    leaf_pid = os.fork()
+                    if leaf_pid == 0:
+                        _CAPTURED_RUNNER_OS_EXIT(191)
+                    waited_leaf, leaf_status = os.waitpid(leaf_pid, 0)
+                    if waited_leaf != leaf_pid:
+                        _CAPTURED_RUNNER_OS_EXIT(70)
+                    shared[0] = shared[0] + 1
+                    if _raw_waitpid_reserved_terminal(leaf_status):
+                        shared[1] = shared[1] + 1
+                        _CAPTURED_RUNNER_OS_EXIT(191)
+                    shared[3] = shared[3] + 1
+                    _CAPTURED_RUNNER_OS_EXIT(70)
+                waited_intermediary, intermediary_status = os.waitpid(intermediary_pid, 0)
+                _require(waited_intermediary == intermediary_pid, "F12 intermediary wait differs")
+                shared[0] = shared[0] + 1
+                if _raw_waitpid_reserved_terminal(intermediary_status):
+                    shared[1] = shared[1] + 1
+                    _CAPTURED_RUNNER_OS_EXIT(191)
+                shared[3] = shared[3] + 1
+                _CAPTURED_RUNNER_OS_EXIT(70)
+            if case_id == "F15":
+                private_root = PrivateRoot()
+                command_files = CommandFiles.__new__(CommandFiles)
+                command_files.enabled = False
+                command_files._files = {}
+                command_files._published = False
+                command_files._poisoned_descriptors = private_root._poisoned_descriptors
+                supervisor = ProcessSupervisor(private_root, command_files)
+                child_root = private_root.create_child("f15-nested-helper")
+                supervisor.run(
+                    [sys.executable, "-c", "import os; os._exit(191)"],
+                    cwd=pytest_root,
+                    timeout_ns=5_000_000_000,
+                    label="f15-reserved",
+                    child_root=child_root,
+                )
+                shared[3] = shared[3] + 1
+                _CAPTURED_RUNNER_OS_EXIT(70)
+            if case_id == "F16":
+                process = subprocess.Popen(
+                    [sys.executable, "-c", "import os; os._exit(191)"],
+                    cwd=pytest_root,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    close_fds=True,
+                )
+                returncode = process.wait(timeout=5.0)
+                shared[0] = shared[0] + 1
+                if _raw_popen_reserved_terminal(returncode):
+                    shared[1] = shared[1] + 1
+                    _CAPTURED_RUNNER_OS_EXIT(191)
+                shared[3] = shared[3] + 1
+                _CAPTURED_RUNNER_OS_EXIT(70)
+        except BaseException:
+            _CAPTURED_RUNNER_OS_EXIT(70)
+    _generation6_f_record_fork(recorder, token, owner_pid)
+    status = _generation6_f_wait_child(recorder, token, owner_pid)
+    _require(_raw_waitpid_reserved_terminal(status), f"{case_id} owner did not propagate exit 191")
+    if case_id == "F12":
+        _require(
+            shared[0] == shared[1] == 2 and shared[3] == 0,
+            "F12 multilevel propagation differs",
+        )
+        operation = "nested_multilevel"
+    elif case_id == "F15":
+        _require(shared[3] == 0, "F15 nested helper continued")
+        operation = "nested_helper_consumer"
+    elif case_id == "F16":
+        _require(
+            shared[0] == shared[1] == 1
+            and shared[3] == 0
+            and not _raw_popen_reserved_terminal(True)
+            and not _raw_popen_reserved_terminal(191.0),
+            "F16 Popen reserved classification differs",
+        )
+        operation = "popen_consumer"
+    elif case_id == "F17":
+        _require(
+            shared[0] == shared[1] == 1 and shared[2] == shared[3] == 0,
+            "F17 broad catcher continued",
+        )
+        operation = "baseexception_uncatchable"
+    elif case_id == "F11":
+        _require(
+            shared[0] == shared[1] == 1 and shared[2] == shared[3] == 0,
+            "F11 accepted-death route continued",
+        )
+        operation = "accepted_other_death"
+    else:
+        _require(
+            shared[0] == shared[1] == 1 and shared[3] == 0,
+            "F10 direct wait route continued",
+        )
+        operation = "direct_raw_wait"
+    _generation6_f_summary_call(
+        recorder,
+        operation,
+        token,
+        [shared[index] for index in range(4)],
+    )
+    facts: dict[str, object] = {
+        "consume_count": shared[0],
+        "reserved_guard_count": shared[1],
+        "catch_or_classifier_count": shared[2],
+        "post_reserved_continuation_count": shared[3],
+        "owner_terminal": "EXIT-191",
+    }
+    shared.close()
+    return facts
+
+
+_GENERATION6_F_UNIT_SOURCE_SHA256: Final = (
+    "6f317f48e0fa6fbae521ae37479a58c82049228b6db2e8398077843e521328fc"
+)
+_GENERATION6_F_UNIT_CASE_NODES: Final = {
+    "F13": "test_live_transaction_authority_rejects_hostile_token_and_connection_binding",
+    "F14": "test_connection_runtime_creator_pid_rejects_inherited_authority",
+}
+
+
+def _generation6_f_source_bytes(path: Path, *, limit: int, label: str) -> bytes:
+    poison_sink: set[int] = set()
+    payload = _read_bounded_file(
+        os.fspath(path),
+        limit=limit,
+        label=label,
+        poison_sink=poison_sink,
+    )
+    _require(not poison_sink, f"{label} descriptor close differs")
+    return payload
+
+
+def _generation6_f_statement_lists(node: ast.AST) -> tuple[list[ast.stmt], ...]:
+    result: list[list[ast.stmt]] = []
+    for _, value in ast.iter_fields(node):
+        if type(value) is list and value and all(isinstance(item, ast.stmt) for item in value):
+            statements = cast(list[ast.stmt], value)
+            result.append(statements)
+            for statement in statements:
+                result.extend(_generation6_f_statement_lists(statement))
+        elif isinstance(value, ast.AST):
+            result.extend(_generation6_f_statement_lists(value))
+    return tuple(result)
+
+
+def _generation6_f_call_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        prefix = _generation6_f_call_name(node.value)
+        return f"{prefix}.{node.attr}" if prefix else node.attr
+    return ""
+
+
+def _generation6_f_unit_consumer_case(
+    case_id: str,
+    pytest_root: Path,
+    recorder: _Generation6HazardRecorder,
+) -> dict[str, object]:
+    node_name = _GENERATION6_F_UNIT_CASE_NODES[case_id]
+    source_path = (
+        pytest_root
+        / "tests"
+        / "unit"
+        / "test_task_064_continuous_public_trade_stream_sqlite_schema.py"
+    ).resolve(strict=True)
+    raw = _generation6_f_source_bytes(
+        source_path,
+        limit=1_000_000,
+        label=f"{case_id} unit source",
+    )
+    _require(_sha256(raw) == _GENERATION6_F_UNIT_SOURCE_SHA256, f"{case_id} unit source differs")
+    try:
+        source = raw.decode("utf-8", errors="strict")
+        tree = ast.parse(source, filename=os.fspath(source_path))
+    except (UnicodeDecodeError, SyntaxError) as error:
+        raise ContractError(f"{case_id} unit source is invalid") from error
+    functions = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    guard = functions.get("_guard_task064_reserved_observer_exit")
+    target = functions.get(node_name)
+    _require(
+        isinstance(guard, ast.FunctionDef) and isinstance(target, ast.FunctionDef),
+        f"{case_id} guarded unit functions differ",
+    )
+    exact_guard = cast(ast.FunctionDef, guard)
+    exact_target = cast(ast.FunctionDef, target)
+    capture_assignments = tuple(
+        node
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "_TASK064_CAPTURED_OS_EXIT"
+        and _generation6_f_call_name(node.value) == "os._exit"
+    )
+    _require(len(capture_assignments) == 1, f"{case_id} captured exit authority differs")
+    guard_calls = tuple(
+        node
+        for node in ast.walk(exact_guard)
+        if isinstance(node, ast.Call)
+        and _generation6_f_call_name(node.func) == "_TASK064_CAPTURED_OS_EXIT"
+        and len(node.args) == 1
+        and isinstance(node.args[0], ast.Constant)
+        and type(node.args[0].value) is int
+        and node.args[0].value == 191
+        and not node.keywords
+    )
+    guard_wait_predicates = tuple(
+        _generation6_f_call_name(node.func)
+        for node in ast.walk(exact_guard)
+        if isinstance(node, ast.Call)
+        and _generation6_f_call_name(node.func) in {"os.WIFEXITED", "os.WEXITSTATUS"}
+    )
+    _require(
+        len(guard_calls) == 1
+        and sorted(guard_wait_predicates) == ["os.WEXITSTATUS", "os.WIFEXITED"],
+        f"{case_id} reserved waitpid guard shape differs",
+    )
+    wait_calls = tuple(
+        node
+        for node in ast.walk(exact_target)
+        if isinstance(node, ast.Call) and _generation6_f_call_name(node.func) == "os.waitpid"
+    )
+    guard_invocations = tuple(
+        node
+        for node in ast.walk(exact_target)
+        if isinstance(node, ast.Call)
+        and _generation6_f_call_name(node.func) == "_guard_task064_reserved_observer_exit"
+    )
+    _require(
+        len(wait_calls) == len(guard_invocations) == 1,
+        f"{case_id} named waitpid consumer inventory differs",
+    )
+    ordered = False
+    for statements in _generation6_f_statement_lists(exact_target):
+        for index, statement in enumerate(statements[:-1]):
+            if wait_calls[0] not in tuple(ast.walk(statement)):
+                continue
+            following = statements[index + 1]
+            if guard_invocations[0] in tuple(ast.walk(following)):
+                ordered = True
+    _require(ordered, f"{case_id} reserved guard is not immediately after waitpid")
+    token = f"{case_id}-STATIC-1"
+    recorder.register(token, "ALLOCATED")
+    recorder.transition(token, "ALLOCATED", "source_authenticated", "RUNNING")
+    _generation6_f_summary_call(
+        recorder,
+        "static_unit_waitpid",
+        token,
+        [node_name, _GENERATION6_F_UNIT_SOURCE_SHA256],
+    )
+    recorder.transition(token, "RUNNING", "guard_order_validated", "TERMINAL")
+    return {
+        "source_sha256": _GENERATION6_F_UNIT_SOURCE_SHA256,
+        "node_name": node_name,
+        "waitpid_call_count": len(wait_calls),
+        "guard_call_count": len(guard_invocations),
+        "guard_immediately_after_waitpid": ordered,
+    }
+
+
+def _generation6_f_semantic_191_inventory(
+    source: str,
+    *,
+    cutoff_name: str | None = None,
+) -> tuple[tuple[str, int], ...]:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as error:
+        raise ContractError("F18 static source is invalid") from error
+    counts: list[tuple[str, int]] = []
+    for node in tree.body:
+        if cutoff_name is not None and getattr(node, "name", None) == cutoff_name:
+            break
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            count = sum(
+                1
+                for child in ast.walk(node)
+                if isinstance(child, ast.Constant)
+                and type(child.value) is int
+                and child.value == 191
+            )
+            if count:
+                counts.append((node.name, count))
+            continue
+        _require(
+            not any(
+                isinstance(child, ast.Constant) and type(child.value) is int and child.value == 191
+                for child in ast.walk(node)
+            ),
+            "F18 module-level semantic 191 is forbidden",
+        )
+    return tuple(counts)
+
+
+def _generation6_f_read_duplicate(descriptor: int, *, label: str, limit: int) -> bytes:
+    status = os.fstat(descriptor)
+    _require(
+        type(status.st_size) is int and 0 <= status.st_size <= limit,
+        f"{label} size differs",
+    )
+    if status.st_size == 0:
+        return b""
+    payload = os.pread(descriptor, status.st_size, 0)
+    _require(type(payload) is bytes and len(payload) == status.st_size, f"{label} read differs")
+    return payload
+
+
+def _generation6_f18_case(
+    pytest_root: Path,
+    recorder: _Generation6HazardRecorder,
+) -> dict[str, object]:
+    runner_path = Path(__file__).resolve(strict=True)
+    conftest_path = (pytest_root / "tests" / "conftest.py").resolve(strict=True)
+    unit_path = (
+        pytest_root
+        / "tests"
+        / "unit"
+        / "test_task_064_continuous_public_trade_stream_sqlite_schema.py"
+    ).resolve(strict=True)
+    runner_raw = _generation6_f_source_bytes(
+        runner_path,
+        limit=2_000_000,
+        label="F18 runner source",
+    )
+    conftest_raw = _generation6_f_source_bytes(
+        conftest_path,
+        limit=1_000_000,
+        label="F18 conftest source",
+    )
+    unit_raw = _generation6_f_source_bytes(
+        unit_path,
+        limit=1_000_000,
+        label="F18 unit source",
+    )
+    _require(_sha256(unit_raw) == _GENERATION6_F_UNIT_SOURCE_SHA256, "F18 unit source differs")
+    try:
+        runner_source = runner_raw.decode("utf-8", errors="strict")
+        conftest_source = conftest_raw.decode("utf-8", errors="strict")
+        unit_source = unit_raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as error:
+        raise ContractError("F18 static source encoding differs") from error
+    runner_inventory = _generation6_f_semantic_191_inventory(
+        runner_source,
+        cutoff_name="_generation6_case_ids",
+    )
+    conftest_inventory = _generation6_f_semantic_191_inventory(conftest_source)
+    unit_inventory = _generation6_f_semantic_191_inventory(unit_source)
+    _require(
+        runner_inventory
+        == (
+            ("_reserved_terminal", 1),
+            ("_raw_reserved_terminal", 1),
+            ("_raw_waitpid_reserved_terminal", 1),
+            ("_raw_popen_reserved_terminal", 1),
+            ("_consume_and_propagate_raw_reserved", 1),
+            ("_cleanup_provisional_child", 1),
+            ("_cleanup_post_spawn_unbound", 1),
+            ("_drain_child", 1),
+            ("_decode_exit", 2),
+        )
+        and conftest_inventory == (("_Task064ObserverRuntime", 5),)
+        and unit_inventory == (("_guard_task064_reserved_observer_exit", 2),),
+        "F18 reserved-exit static inventory differs",
+    )
+
+    ambiguity_ci = _selftest_open_anonymous_observation()
+    ambiguity_proof = _selftest_open_anonymous_observation()
+    ambiguity_ci_read = os.dup(ambiguity_ci)
+    ambiguity_proof_read = os.dup(ambiguity_proof)
+    ambiguity_token = "F18-AMBIGUITY-OWNER"
+    recorder.register(ambiguity_token, "ALLOCATED")
+    ambiguity_owner = os.fork()
+    if ambiguity_owner == 0:
+        try:
+            module = _selftest_load_conftest(pytest_root)
+            raw = _selftest_conftest_raw(
+                module,
+                observation_fd=ambiguity_ci,
+                proof_fd=ambiguity_proof,
+            )
+            runtime_type = cast(
+                Callable[..., object],
+                _selftest_attribute(module, "_Task064ObserverRuntime"),
+            )
+            inherited_history: list[tuple[tuple[int, ...], Path]] = []
+
+            def accept_governed_descriptors(
+                handles: list[object],
+                *,
+                capture_root: Path,
+            ) -> None:
+                inherited_history.append(
+                    (
+                        tuple(
+                            cast(int, _selftest_attribute(handle, "descriptor"))
+                            for handle in handles
+                        ),
+                        capture_root,
+                    )
+                )
+
+            with _Generation6SelftestPatch(
+                module,
+                "_require_exact_inherited_descriptors",
+                accept_governed_descriptors,
+            ):
+                runtime = runtime_type(raw)
+            if inherited_history != [
+                (
+                    (ambiguity_ci, ambiguity_proof),
+                    cast(Path, _selftest_attribute(raw, "basetemp")).parent,
+                )
+            ]:
+                _CAPTURED_RUNNER_OS_EXIT(70)
+            vars(module)["_RAW_INVOCATION"] = raw
+            vars(module)["_RUNTIME"] = runtime
+            cast(
+                Callable[[dict[str, object]], None],
+                _selftest_attribute(runtime, "write_proof"),
+            )({"probe": "F18-early-proof"})
+            runtime_pidfd = _selftest_attribute(runtime, "self_pidfd")
+            if (
+                type(runtime_pidfd) is not int
+                or runtime_pidfd <= 2
+                or _generation6_f_poison_value(runtime) != 0
+            ):
+                _CAPTURED_RUNNER_OS_EXIT(70)
+            poison_owner = _selftest_attribute(runtime, "poison")
+            poison_mapping = cast(
+                Callable[[], object],
+                _selftest_attribute(poison_owner, "require"),
+            )()
+            cast(
+                Callable[[int, int], None],
+                _selftest_attribute(poison_mapping, "__setitem__"),
+            )(0, 1)
+            cast(
+                Callable[[dict[str, object]], None],
+                _selftest_attribute(runtime, "finish_ci"),
+            )({"probe": "F18-forbidden-CI"})
+        except BaseException:
+            _CAPTURED_RUNNER_OS_EXIT(70)
+        _CAPTURED_RUNNER_OS_EXIT(70)
+    _generation6_f_record_fork(recorder, ambiguity_token, ambiguity_owner)
+    ambiguity_status = _generation6_f_wait_child(recorder, ambiguity_token, ambiguity_owner)
+    ambiguity_proof_payload = _generation6_f_read_duplicate(
+        ambiguity_proof_read,
+        label="F18 ambiguity proof",
+        limit=4_096,
+    )
+    ambiguity_ci_payload = _generation6_f_read_duplicate(
+        ambiguity_ci_read,
+        label="F18 ambiguity CI",
+        limit=1_500_000,
+    )
+    for descriptor in (
+        ambiguity_ci,
+        ambiguity_proof,
+        ambiguity_ci_read,
+        ambiguity_proof_read,
+    ):
+        os.close(descriptor)
+    _require(
+        _raw_waitpid_reserved_terminal(ambiguity_status)
+        and ambiguity_proof_payload != b""
+        and ambiguity_ci_payload == b"",
+        "F18 earlier-proof ambiguity gate differs",
+    )
+    _generation6_f_summary_call(
+        recorder,
+        "proof_without_final_ci",
+        ambiguity_token,
+        [len(ambiguity_proof_payload), len(ambiguity_ci_payload)],
+    )
+
+    static_token = "F18-STATIC-INVENTORY"
+    recorder.register(static_token, "ALLOCATED")
+    recorder.transition(static_token, "ALLOCATED", "sources_authenticated", "RUNNING")
+    _generation6_f_summary_call(
+        recorder,
+        "static_inventory",
+        static_token,
+        [len(runner_inventory), len(conftest_inventory), len(unit_inventory)],
+    )
+    recorder.transition(static_token, "RUNNING", "inventory_validated", "TERMINAL")
+
+    module, runtime, clean_ci, clean_proof = _generation6_f_runtime(pytest_root, with_proof=True)
+    _require(clean_proof is not None, "F18 clean proof descriptor is absent")
+    exact_clean_proof = cast(int, clean_proof)
+    clean_ci_read = os.dup(clean_ci)
+    clean_proof_read = os.dup(exact_clean_proof)
+    clean_token = "F18-CLEAN-OWNER"
+    recorder.register(clean_token, "ALLOCATED")
+    recorder.transition(clean_token, "ALLOCATED", "anchors_authenticated", "RUNNING")
+    try:
+        cast(
+            Callable[[dict[str, object]], None],
+            _selftest_attribute(runtime, "write_proof"),
+        )({"probe": "F18-clean-proof"})
+        anchors_live_after_proof = (
+            type(_selftest_attribute(runtime, "self_pidfd")) is int
+            and cast(int, _selftest_attribute(runtime, "self_pidfd")) > 2
+            and _generation6_f_poison_value(runtime) == 0
+        )
+        _require(anchors_live_after_proof, "F18 anchors did not survive proof finalization")
+        cast(
+            Callable[[dict[str, object]], None],
+            _selftest_attribute(runtime, "finish_ci"),
+        )({"probe": "F18-clean-CI"})
+        anchors_terminal_after_ci = (
+            _selftest_attribute(runtime, "self_pidfd") == -1
+            and _selftest_attribute(_selftest_attribute(runtime, "poison"), "terminal") is True
+            and _selftest_attribute(_selftest_attribute(runtime, "ci"), "terminal") is True
+        )
+        _require(anchors_terminal_after_ci, "F18 clean terminal anchors differ")
+        clean_proof_payload = _generation6_f_read_duplicate(
+            clean_proof_read,
+            label="F18 clean proof",
+            limit=4_096,
+        )
+        clean_ci_payload = _generation6_f_read_duplicate(
+            clean_ci_read,
+            label="F18 clean CI",
+            limit=1_500_000,
+        )
+        _require(
+            clean_proof_payload != b"" and clean_ci_payload != b"",
+            "F18 clean packet set differs",
+        )
+        recorder.publish("proof_observation", "write", clean_token, clean_proof_payload)
+        recorder.publish("ci_observation", "write", clean_token, clean_ci_payload)
+        _generation6_f_summary_call(
+            recorder,
+            "clean_terminal_gate",
+            clean_token,
+            [len(clean_proof_payload), len(clean_ci_payload)],
+        )
+        recorder.transition(clean_token, "RUNNING", "terminal_gate_completed", "TERMINAL")
+    finally:
+        _generation6_f_cleanup_runtime(module, runtime)
+        os.close(clean_ci_read)
+        os.close(clean_proof_read)
+    return {
+        "runner_inventory_count": sum(count for _, count in runner_inventory),
+        "conftest_inventory_count": sum(count for _, count in conftest_inventory),
+        "unit_inventory_count": sum(count for _, count in unit_inventory),
+        "ambiguity_owner_terminal": "EXIT-191",
+        "early_proof_bytes": len(ambiguity_proof_payload),
+        "missing_final_ci_bytes": len(ambiguity_ci_payload),
+        "anchors_live_after_proof": anchors_live_after_proof,
+        "anchors_terminal_after_ci": anchors_terminal_after_ci,
+        "clean_proof_bytes": len(clean_proof_payload),
+        "clean_ci_bytes": len(clean_ci_payload),
+    }
+
+
+_GENERATION6_F_EXPECTED_OPERATIONS: Final = {
+    "F01": ("fork", "waitpid", "atfork_ci_close"),
+    "F02": ("fork", "waitpid", "fork", "waitpid", "independent_closes"),
+    "F03": ("fork", "waitpid", "self_pidfd_poison"),
+    "F04": ("fork", "waitpid", "descendant_writes"),
+    "F05": ("fork", "waitpid", "fork", "waitpid", "selector_gates"),
+    "F06": ("fork", "waitpid", "restore_revival"),
+    "F07": ("fork", "waitpid", "reserved_before_classifier", "shared_poison"),
+    "F08": ("fork", "waitpid", "anchored_sigkill"),
+    "F09": ("fork", "waitpid", "dual_failure_propagation"),
+    "F10": ("fork", "waitpid", "direct_raw_wait"),
+    "F11": ("fork", "waitpid", "accepted_other_death"),
+    "F12": ("fork", "waitpid", "nested_multilevel"),
+    "F13": ("static_unit_waitpid",),
+    "F14": ("static_unit_waitpid",),
+    "F15": ("fork", "waitpid", "nested_helper_consumer"),
+    "F16": ("fork", "waitpid", "popen_consumer"),
+    "F17": ("fork", "waitpid", "baseexception_uncatchable"),
+    "F18": (
+        "fork",
+        "waitpid",
+        "proof_without_final_ci",
+        "static_inventory",
+        "clean_terminal_gate",
+    ),
+}
+_GENERATION6_F_FACT_KEYS: Final = {
+    "F01": ("ci_close_attempt_count", "user_child_entry_count", "poison_value"),
+    "F02": (
+        "ci_close_attempt_count",
+        "proof_close_attempt_count",
+        "user_child_entry_count",
+        "poison_value",
+    ),
+    "F03": (
+        "child_pidfd_live_after_poison",
+        "child_pidfd_close_attempt_count",
+        "owner_pidfd_live",
+    ),
+    "F04": ("proof_write_rejected", "ci_write_rejected"),
+    "F05": ("config_read_count", "cached_selector_rejected", "fresh_selector_rejected"),
+    "F06": (
+        "child_local_hook_mutated_copy",
+        "parent_observer_unchanged",
+        "selector_rejected",
+        "revived_handle_write_rejected",
+    ),
+    "F07": (
+        "reserved_before_classifier",
+        "accepted_classifier_count",
+        "user_child_entry_count",
+        "poison_value",
+    ),
+    **{
+        case_id: (
+            "observation_close_attempt_count",
+            "pidfd_signal_attempt_count",
+            "numeric_signal_attempt_count",
+            "user_child_entry_count",
+            "owner_terminal",
+            "child_consume_count",
+            "post_reserved_continuation_count",
+        )
+        for case_id in ("F08", "F09")
+    },
+    **{
+        case_id: (
+            "consume_count",
+            "reserved_guard_count",
+            "catch_or_classifier_count",
+            "post_reserved_continuation_count",
+            "owner_terminal",
+        )
+        for case_id in ("F10", "F11", "F12", "F15", "F16", "F17")
+    },
+    **{
+        case_id: (
+            "source_sha256",
+            "node_name",
+            "waitpid_call_count",
+            "guard_call_count",
+            "guard_immediately_after_waitpid",
+        )
+        for case_id in ("F13", "F14")
+    },
+    "F18": (
+        "runner_inventory_count",
+        "conftest_inventory_count",
+        "unit_inventory_count",
+        "ambiguity_owner_terminal",
+        "early_proof_bytes",
+        "missing_final_ci_bytes",
+        "anchors_live_after_proof",
+        "anchors_terminal_after_ci",
+        "clean_proof_bytes",
+        "clean_ci_bytes",
+    ),
+}
+
+
+def _run_generation6_f_probe_for_test(
+    case_id: str,
+    pytest_root_text: str,
+    nonce: str,
+) -> bytes:
+    exact_case_id = _ascii(case_id, "nested F case")
+    _require(exact_case_id in _GENERATION6_F_REJECTIONS, "nested F case differs")
+    exact_nonce = _hex(nonce, 64, "nested F nonce")
+    root = Path(_ascii(pytest_root_text, "nested F pytest root"))
+    _require(root.is_absolute() and root.resolve(strict=True) == root, "nested F root differs")
+    recorder = _Generation6HazardRecorder.create(exact_case_id)
+    if exact_case_id in {f"F{ordinal:02d}" for ordinal in range(1, 8)}:
+        facts = _generation6_f_atfork_case(exact_case_id, root, recorder)
+    elif exact_case_id in {"F08", "F09"}:
+        facts = _generation6_f_latch_signal_case(exact_case_id, root, recorder)
+    elif exact_case_id in {"F10", "F11", "F12", "F15", "F16", "F17"}:
+        facts = _generation6_f_wait_propagation_case(exact_case_id, root, recorder)
+    elif exact_case_id in {"F13", "F14"}:
+        facts = _generation6_f_unit_consumer_case(exact_case_id, root, recorder)
+    elif exact_case_id == "F18":
+        facts = _generation6_f18_case(root, recorder)
+    else:
+        raise ContractError(f"nested F driver is not wired: {exact_case_id}")
+    events: list[str] = []
+    if exact_case_id == "F18":
+        events.append("validate:F18:clean")
+    for label, message in _GENERATION6_F_REJECTIONS[exact_case_id]:
+        events.extend(_generation6_rejection_events(label, message))
+    packet: dict[str, object] = {
+        "domain": "TASK064-GENERATION6-F-PROBE-V1",
+        "nonce": exact_nonce,
+        "case_id": exact_case_id,
+        "probe_pid": os.getpid(),
+        "probe_parent_pid": os.getppid(),
+        "events": events,
+        **recorder.packet_fields(),
+        "facts": facts,
+        "status": "PASS",
+    }
+    return _canonical_bytes(packet, limit=32_768)
+
+
+def _generation6_validate_f_facts(case_id: str, facts: dict[str, object]) -> None:
+    _exact_keys(facts, _GENERATION6_F_FACT_KEYS[case_id], f"{case_id} F facts")
+    if case_id == "F01":
+        _require(list(facts.values()) == [1, 0, 1], "F01 facts differ")
+    elif case_id == "F02":
+        _require(list(facts.values()) == [2, 2, 0, 1], "F02 facts differ")
+    elif case_id == "F03":
+        _require(list(facts.values()) == [True, 0, True], "F03 facts differ")
+    elif case_id == "F04":
+        _require(list(facts.values()) == [True, True], "F04 facts differ")
+    elif case_id == "F05":
+        _require(list(facts.values()) == [0, True, True], "F05 facts differ")
+    elif case_id == "F06":
+        _require(list(facts.values()) == [True, True, True, True], "F06 facts differ")
+    elif case_id == "F07":
+        _require(list(facts.values()) == [True, 0, 0, 1], "F07 facts differ")
+    elif case_id in {"F08", "F09"}:
+        _require(
+            facts["observation_close_attempt_count"] == 1
+            and facts["pidfd_signal_attempt_count"] == 1
+            and facts["numeric_signal_attempt_count"] == 0
+            and facts["user_child_entry_count"] == 0
+            and facts["owner_terminal"] == ("SIGKILL" if case_id == "F08" else "EXIT-191")
+            and facts["child_consume_count"] == (0 if case_id == "F08" else 1)
+            and facts["post_reserved_continuation_count"] == 0,
+            f"{case_id} facts differ",
+        )
+    elif case_id in {"F10", "F11", "F12", "F15", "F16", "F17"}:
+        expected_consumes = 2 if case_id == "F12" else (0 if case_id == "F15" else 1)
+        expected_guards = 2 if case_id == "F12" else (0 if case_id == "F15" else 1)
+        _require(
+            facts["consume_count"] == expected_consumes
+            and facts["reserved_guard_count"] == expected_guards
+            and facts["catch_or_classifier_count"] == 0
+            and facts["post_reserved_continuation_count"] == 0
+            and facts["owner_terminal"] == "EXIT-191",
+            f"{case_id} facts differ",
+        )
+    elif case_id in {"F13", "F14"}:
+        _require(
+            facts["source_sha256"] == _GENERATION6_F_UNIT_SOURCE_SHA256
+            and facts["node_name"] == _GENERATION6_F_UNIT_CASE_NODES[case_id]
+            and facts["waitpid_call_count"] == 1
+            and facts["guard_call_count"] == 1
+            and facts["guard_immediately_after_waitpid"] is True,
+            f"{case_id} facts differ",
+        )
+    else:
+        expected_early_proof = b'{"probe":"F18-early-proof"}'
+        expected_clean_proof = b'{"probe":"F18-clean-proof"}'
+        expected_clean_ci = b'{"probe":"F18-clean-CI"}'
+        _require(
+            facts["runner_inventory_count"] == 10
+            and facts["conftest_inventory_count"] == 5
+            and facts["unit_inventory_count"] == 2
+            and facts["ambiguity_owner_terminal"] == "EXIT-191"
+            and facts["early_proof_bytes"] == len(expected_early_proof)
+            and facts["missing_final_ci_bytes"] == 0
+            and facts["anchors_live_after_proof"] is True
+            and facts["anchors_terminal_after_ci"] is True
+            and facts["clean_proof_bytes"] == len(expected_clean_proof)
+            and facts["clean_ci_bytes"] == len(expected_clean_ci),
+            "F18 facts differ",
+        )
+
+
+def _selftest_isolated_f_case(case_id: str, pytest_root: Path) -> None:
+    private_root: PrivateRoot | None = None
+    command_files: CommandFiles | None = None
+    packet: dict[str, object] | None = None
+    primary: BaseException | None = None
+    try:
+        private_root = PrivateRoot()
+        command_files = CommandFiles.__new__(CommandFiles)
+        command_files.enabled = False
+        command_files._files = {}
+        command_files._published = False
+        command_files._poisoned_descriptors = private_root._poisoned_descriptors
+        supervisor = ProcessSupervisor(private_root, command_files)
+        child_root = private_root.create_child(f"f-probe-{case_id.lower()}")
+        nonce = _hex(secrets.token_hex(32), 64, "nested F parent nonce")
+        child = supervisor.run(
+            [
+                sys.executable,
+                "-c",
+                _GENERATION6_F_BOOTSTRAP,
+                os.fspath(Path(__file__).resolve(strict=True)),
+                case_id,
+                os.fspath(pytest_root),
+                nonce,
+            ],
+            cwd=pytest_root,
+            timeout_ns=20_000_000_000,
+            label=f"f-probe-{case_id.lower()}",
+            child_root=child_root,
+        )
+        _require(
+            child.exit_code == 0 and child.stderr == b"" and child.survivor_count == 0,
+            f"{case_id} nested F worker failed",
+        )
+        packet = _decode_canonical(
+            child.stdout,
+            limit=32_768,
+            label=f"{case_id} nested F result",
+        )
+        _exact_keys(packet, _GENERATION6_F_RESULT_KEYS, "nested F result")
+        raw_calls = packet["calls"]
+        raw_boundaries = packet["boundaries"]
+        raw_publications = packet["publications"]
+        raw_facts = packet["facts"]
+        _require(
+            type(raw_calls) is list
+            and type(raw_boundaries) is list
+            and type(raw_publications) is list
+            and type(raw_facts) is dict
+            and packet["forbidden"] == [],
+            f"{case_id} nested F history shape differs",
+        )
+        calls = cast(list[object], raw_calls)
+        boundaries = cast(list[object], raw_boundaries)
+        publications = cast(list[object], raw_publications)
+        operations: list[str] = []
+        for ordinal, raw_call in enumerate(calls, start=1):
+            _require(type(raw_call) is list and len(raw_call) == 8, "nested F call shape differs")
+            call = cast(list[object], raw_call)
+            _require(
+                call[0] == ordinal
+                and call[1] == case_id
+                and type(call[2]) is str
+                and type(call[3]) is str
+                and type(call[4]) is str
+                and type(call[5]) is list
+                and call[6] == "RETURNED",
+                f"{case_id} nested F call record differs",
+            )
+            operations.append(cast(str, call[3]))
+        _require(
+            tuple(operations) == _GENERATION6_F_EXPECTED_OPERATIONS[case_id],
+            f"{case_id} nested F operation history differs",
+        )
+        states: dict[str, str] = {}
+        for ordinal, raw_boundary in enumerate(boundaries, start=1):
+            _require(
+                type(raw_boundary) is list and len(raw_boundary) == 5,
+                "nested F boundary shape differs",
+            )
+            boundary = cast(list[object], raw_boundary)
+            token = _ascii(boundary[1], "nested F boundary token")
+            old = _ascii(boundary[2], "nested F boundary old state")
+            event = _ascii(boundary[3], "nested F boundary event")
+            new = _ascii(boundary[4], "nested F boundary new state")
+            _require(
+                boundary[0] == ordinal
+                and old == states.get(token, "ALLOCATED")
+                and (old, event, new)
+                in {
+                    ("ALLOCATED", "fork_returned", "RUNNING"),
+                    ("ALLOCATED", "source_authenticated", "RUNNING"),
+                    ("ALLOCATED", "sources_authenticated", "RUNNING"),
+                    ("ALLOCATED", "anchors_authenticated", "RUNNING"),
+                    ("RUNNING", "waitpid_consumed", "TERMINAL"),
+                    ("RUNNING", "guard_order_validated", "TERMINAL"),
+                    ("RUNNING", "inventory_validated", "TERMINAL"),
+                    ("RUNNING", "terminal_gate_completed", "TERMINAL"),
+                },
+                f"{case_id} nested F boundary differs",
+            )
+            states[token] = new
+        _require(
+            bool(states) and set(states.values()) == {"TERMINAL"},
+            "nested F terminal states differ",
+        )
+        if case_id == "F18":
+            _require(len(publications) == 2, "F18 publication history differs")
+            expected_publications = (
+                (
+                    1,
+                    "proof_observation",
+                    "write",
+                    "F18-CLEAN-OWNER",
+                    b'{"probe":"F18-clean-proof"}',
+                ),
+                (2, "ci_observation", "write", "F18-CLEAN-OWNER", b'{"probe":"F18-clean-CI"}'),
+            )
+            for raw_publication, expected in zip(publications, expected_publications, strict=True):
+                _require(
+                    type(raw_publication) is list and len(raw_publication) == 7,
+                    "F18 publication record differs",
+                )
+                publication = cast(list[object], raw_publication)
+                _require(
+                    publication[:5] == [expected[0], case_id, *expected[1:4]]
+                    and publication[5] == len(expected[4])
+                    and publication[6] == _sha256(expected[4]),
+                    "F18 publication binding differs",
+                )
+        else:
+            _require(publications == [], f"{case_id} emitted a nested publication")
+        facts = cast(dict[str, object], raw_facts)
+        _generation6_validate_f_facts(case_id, facts)
+        expected_events: list[str] = []
+        if case_id == "F18":
+            expected_events.append("validate:F18:clean")
+        for label, message in _GENERATION6_F_REJECTIONS[case_id]:
+            expected_events.extend(_generation6_rejection_events(label, message))
+        _require(
+            packet["domain"] == "TASK064-GENERATION6-F-PROBE-V1"
+            and packet["nonce"] == nonce
+            and packet["case_id"] == case_id
+            and _integer(packet["probe_pid"], "nested F PID", minimum=1) == child.pid
+            and _integer(packet["probe_parent_pid"], "nested F parent PID", minimum=1)
+            == os.getpid()
+            and packet["events"] == expected_events
+            and packet["status"] == "PASS",
+            f"{case_id} nested F result differs",
+        )
+        cleanup = private_root.cleanup()
+        _require(
+            cleanup.status == "PASS" and cleanup.residue_count == 0,
+            f"{case_id} nested F cleanup differs",
+        )
+        command_files.close_without_publication()
+    except BaseException as error:
+        primary = error
+    if primary is not None:
+        try:
+            _close_failure_resources(private_root, command_files)
+        except BaseException as cleanup_error:
+            primary.add_note(f"nested F failure cleanup failed: {cleanup_error!r}")
+        raise primary
+    _require(packet is not None, f"{case_id} nested F result is absent")
+    exact_packet = cast(dict[str, object], packet)
+    for raw_event in cast(list[object], exact_packet["events"]):
+        _record_generation6_check(_ascii(raw_event, "nested F event"))
+    _record_generation6_case_evidence(case_id)
+
+
+def _selftest_f_case(case_id: str, pytest_root: Path) -> None:
+    _require(case_id in _GENERATION6_F_REJECTIONS, "unknown F self-test case")
+    _selftest_isolated_f_case(case_id, pytest_root)
+
+
+_GENERATION6_P_EXPECTED_OPERATIONS: Final = {
+    "P01": ("fork", "pidfd_open_raises", "fork", "pidfd_invalid_result"),
+    "P02": ("leader_uid_mismatch",),
+    "P03": ("leader_start_time_mismatch",),
+    "P04": ("leader_session_mismatch",),
+    "P05": ("leader_process_group_mismatch",),
+    "P06": (
+        "waitid_raises",
+        "waitid_wrong_pid",
+        "waitid_wrong_uid",
+        "waitid_invalid_code",
+    ),
+    "P07": ("clean_success_no_killpg",),
+    "P08": ("sigterm_ignored_sigkill",),
+    "P09": ("term_group_signal_failure", "kill_group_signal_failure"),
+    "P10": ("group_existence_failure", "group_identity_recheck_failure"),
+    "P11": ("initial_group_survivor",),
+    "P12": ("nested_setsid_harness_owner",),
+    "P13": (
+        "fork",
+        "consume_raises_before_kernel",
+        "fork",
+        "consume_raises_after_kernel",
+    ),
+    "P14": ("fork", "consume_once", "second_consume_forbidden"),
+    "P15": ("fork", "consume_once", "numeric_pid_forbidden"),
+    "P16": ("fork", "consume_once", "numeric_pgid_forbidden"),
+    "P17": ("slot_absent", "slot_prepopulated", "slot_readback_differs"),
+    "P18": ("constructor_returned_slot_owned",),
+    "P19": ("fork", "partial_constructor_slot_retained", "partial_constructor_cleanup"),
+    "P20": (
+        "stdin_close",
+        "stdout_read_close",
+        "stdout_write_close",
+        "stderr_read_close",
+        "stderr_write_close",
+    ),
+    "P21": ("wrong_cpython_runtime",),
+    "P22": ("wrong_popen", "wrong_popen_initializer", "wrong_fork_exec"),
+    "P23": ("second_main_thread", "non_main_live_thread"),
+    "P24": ("active_trace_function",),
+    "P25": ("active_profile_function",),
+    "P26": ("custom_sigterm", "custom_sighup", "custom_sigusr1"),
+    "P27": ("sigchld_sig_ign",),
+    "P28": ("sigchld_reset_raises", "sigchld_reset_wrong_return"),
+    "P29": ("sigchld_readback_raises", "sigchld_readback_wrong_handler"),
+    "P30": ("actual_unreset_auto_reap",),
+    "P31": ("exact_reset_wait_ownership",),
+    "P32": ("persistent_auto_reap_fail_only",),
+    "P33": (
+        "fork",
+        "postfork_pre_child_created_interrupt",
+        "partial_interrupt_cleanup",
+    ),
+    "P34": ("pending_sigint_latch", "pending_sigint_owned_cleanup"),
+    "P35": ("exec_error_already_reaped",),
+    "P36": ("echild_terminal_probe",),
+    "P37": (
+        "fork",
+        "provisional_live_pidfd",
+        "fork",
+        "provisional_live_numeric",
+    ),
+    "P38": (
+        "fork",
+        "provisional_terminal_pidfd",
+        "fork",
+        "provisional_terminal_numeric",
+    ),
+    "P39": (
+        "fork",
+        "pidfd_unavailable_live_bound",
+        "fork",
+        "pidfd_unavailable_terminal_bound",
+    ),
+    "P40": ("stored_returncode_untrusted",),
+    "P41": ("no_child_quarantine",),
+    "P42": ("post_return_slot_replacement",),
+    "P43": ("first_child", "forced_gc", "later_popen", "subprocess_active"),
+    "P44": ("forbidden_method_inventory", "clean_process_path"),
+    "P45": ("clean_process_path",),
+}
+_GENERATION6_P_FACT_KEYS: Final = {
+    "P01": ("pidfd_raises", "pidfd_invalid"),
+    "P02": ("field", "expected", "observed", "signal_count", "failure_message"),
+    "P03": ("field", "expected", "observed", "signal_count", "failure_message"),
+    "P04": ("field", "expected", "observed", "signal_count", "failure_message"),
+    "P05": ("field", "expected", "observed", "signal_count", "failure_message"),
+    "P06": ("variant_results", "wait_call_count", "consume_call_count"),
+    "P07": (
+        "stdout",
+        "exit_code",
+        "survivor_count",
+        "killpg_call_count",
+        "slot_owned",
+    ),
+    "P08": (
+        "pidfd_signals",
+        "group_signals",
+        "consume_count",
+        "consume_was_last",
+        "failure_message",
+    ),
+    "P09": ("failures", "same_process_count", "group_signal_count"),
+    "P10": ("failures", "signal_count", "scan_call_count"),
+    "P11": (
+        "group_signals",
+        "survivor_observed",
+        "consume_count",
+        "failure_message",
+    ),
+    "P12": (
+        "stdout",
+        "exit_code",
+        "survivor_count",
+        "runner_group_signal_count",
+        "slot_owned",
+    ),
+    "P13": ("variants", "consume_attempt_count", "post_consume_operation_count"),
+    "P14": ("wait_call_count", "consume_attempt_count", "second_attempt_blocked"),
+    "P15": ("wait_call_count", "numeric_pid_call_count", "post_action_blocked"),
+    "P16": ("wait_call_count", "numeric_pgid_call_count", "post_action_blocked"),
+    "P17": ("variants", "base_initializer_call_count"),
+    "P18": ("stdout", "exit_code", "survivor_count", "slot_owned"),
+    "P19": (
+        "constructor_failure",
+        "slot_retained",
+        "child_pid",
+        "consume_count",
+        "cleanup_completed",
+    ),
+    "P20": ("variants", "total_close_call_count", "poisoned_descriptor_count"),
+    "P21": ("failure_message", "owner_count"),
+    "P22": ("variants", "owner_count"),
+    "P23": ("variants", "real_thread_count"),
+    "P24": ("failure_message", "trace_identity_distinct", "owner_count"),
+    "P25": ("failure_message", "profile_identity_distinct", "owner_count"),
+    "P26": ("variants", "owner_count"),
+    "P27": ("failure_message", "owner_count"),
+    "P28": ("variants", "signal_call_count", "owner_count"),
+    "P29": ("variants", "getsignal_call_count", "signal_call_count", "owner_count"),
+    "P30": (
+        "child_pid",
+        "sa_nocldwait_installed",
+        "wait_errno",
+        "sigchld_restored",
+    ),
+    "P31": ("sa_nocldwait_cleared", "wnowait", "consume", "same_terminal_identity"),
+    "P32": (
+        "child_pid",
+        "wait_history",
+        "forbidden_actions",
+        "process_tree_uncertain",
+        "failure_message",
+    ),
+    "P33": (
+        "child_pid",
+        "constructor_state",
+        "slot_owned",
+        "cause_type",
+        "cause_message",
+        "consume_count",
+        "failure_message",
+    ),
+    "P34": (
+        "child_pid",
+        "latch_states",
+        "slot_owned",
+        "cause_message",
+        "consume_count",
+        "failure_message",
+    ),
+    "P35": (
+        "child_pid",
+        "slot_owned",
+        "child_created",
+        "cause_type",
+        "cleanup_note_present",
+        "wait_history",
+        "forbidden_actions",
+        "process_tree_uncertain",
+        "failure_message",
+    ),
+    "P36": (
+        "wait_history",
+        "pidfd_open_count",
+        "proc_lookup_count",
+        "pidfd_signal_count",
+        "numeric_pid_signal_count",
+        "numeric_group_signal_count",
+        "post_echild_actions",
+        "failure_message",
+    ),
+    "P37": ("live_pidfd", "live_numeric"),
+    "P38": ("terminal_pidfd", "terminal_numeric"),
+    "P39": ("unavailable_live", "unavailable_terminal"),
+    "P40": (
+        "returncode",
+        "slot_retained",
+        "pid_or_wait_action_count",
+        "failure_message",
+    ),
+    "P41": (
+        "sentinel_pid",
+        "child_created",
+        "slot_retained",
+        "pid_or_wait_action_count",
+        "failure_message",
+    ),
+    "P42": (
+        "constructor_slot_owned",
+        "replacement_injected",
+        "cleanup_target_is_returned",
+        "final_slot_restored",
+        "cleanup_call_count",
+        "returned_pid",
+        "failure_message",
+    ),
+    "P43": (
+        "first_slot_owned",
+        "second_slot_owned",
+        "base_destructor_calls",
+        "internal_poll_calls",
+        "implicit_waitpid_calls",
+        "active_identity_unchanged",
+        "first_stdout",
+        "second_stdout",
+    ),
+    "P44": (
+        "instrumented_names",
+        "forbidden_call_counts",
+        "stdout",
+        "stderr",
+        "exit_code",
+        "survivor_count",
+    ),
+    "P45": (
+        "stdout",
+        "stderr",
+        "exit_code",
+        "survivor_count",
+        "wait_history",
+        "process_identity_count",
+        "pidfd_open_count",
+        "pidfd_signal_count",
+        "numeric_pid_signal_count",
+        "numeric_group_signal_count",
+        "post_consume_operations",
+        "consume_count",
+        "consume_was_last",
+        "close_label_counts",
+        "slot_owned",
+        "process_tree_certain",
+        "poisoned_descriptor_count",
+    ),
+}
+_GENERATION6_P_BRANCH_FACT_KEYS: Final = (
+    "mode",
+    "pidfd_available",
+    "wait_history",
+    "pidfd_open_history",
+    "proc_history",
+    "pidfd_signal_history",
+    "numeric_pid_signal_history",
+    "numeric_group_signal_history",
+    "post_consume_operations",
+    "consume_count",
+    "consume_was_last",
+    "cleanup_raised",
+    "cleanup_message",
+)
+_GENERATION6_P_PROVISIONAL_FAULT_MESSAGES: Final = {
+    "consume_failure_before_kernel": "consume-before-kernel-sentinel",
+    "consume_failure_after_kernel": "consume-after-kernel-sentinel",
+    "second_consuming_wait": "second consuming wait is forbidden",
+    "numeric_pid_after_consume": "post-consume numeric PID is forbidden",
+    "numeric_pgid_after_consume": "post-consume numeric PGID is forbidden",
+}
+_GENERATION6_P_POST_CONSUME_SELECTORS: Final = {
+    "second_consuming_wait": "waitid",
+    "numeric_pid_after_consume": "kill",
+    "numeric_pgid_after_consume": "killpg",
+}
+
+
+def _generation6_p_exact_cleanup_failure(
+    action: Callable[[], object],
+    *,
+    expected_message: str,
+) -> str:
+    try:
+        action()
+    except ContractError as error:
+        message = str(error)
+        _require(message == expected_message, "provisional cleanup failure differs")
+        return message
+    raise ContractError("provisional cleanup unexpectedly succeeded")
+
+
+def _generation6_p_spawn_child(
+    recorder: _Generation6HazardRecorder,
+    *,
+    token_id: str,
+    live: bool,
+) -> int:
+    recorder.register(token_id, "ALLOCATED")
+    read_descriptor, write_descriptor = os.pipe2(os.O_CLOEXEC)
+    pid = os.fork()
+    if pid == 0:
+        try:
+            os.close(read_descriptor)
+            if live:
+                written = os.write(write_descriptor, b"1")
+                if written != 1:
+                    _CAPTURED_RUNNER_OS_EXIT(70)
+                os.close(write_descriptor)
+                time.sleep(10.0)
+            else:
+                os.close(write_descriptor)
+            _CAPTURED_RUNNER_OS_EXIT(0)
+        except BaseException:
+            _CAPTURED_RUNNER_OS_EXIT(70)
+    os.close(write_descriptor)
+    if live:
+        ready = os.read(read_descriptor, 2)
+        os.close(read_descriptor)
+        _require(ready == b"1", "provisional live child readiness differs")
+    else:
+        os.close(read_descriptor)
+        setup_pidfd = os.pidfd_open(pid, 0)
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(setup_pidfd, selectors.EVENT_READ)
+            ready_events = selector.select(5.0)
+            _require(
+                len(ready_events) == 1 and ready_events[0][0].fd == setup_pidfd,
+                "provisional terminal child readiness differs",
+            )
+        finally:
+            selector.close()
+            os.close(setup_pidfd)
+    recorder.call(
+        "os",
+        "fork",
+        token_id,
+        ["live" if live else "terminal"],
+        "RETURNED",
+        pid,
+    )
+    recorder.transition(token_id, "ALLOCATED", "fork_returned", "RUNNING")
+    return pid
+
+
+def _generation6_p_wait_projection(result: os.waitid_result | None) -> object:
+    if result is None:
+        return "LIVE"
+    return [
+        result.si_pid,
+        result.si_uid,
+        result.si_signo,
+        result.si_status,
+        result.si_code,
+    ]
+
+
+def _generation6_p_provisional_branch(
+    recorder: _Generation6HazardRecorder,
+    *,
+    token_id: str,
+    operation: str,
+    live: bool,
+    pidfd_available: bool,
+    pidfd_invalid: bool = False,
+    fault_selector: str | None = None,
+) -> dict[str, object]:
+    _require(
+        fault_selector is None or fault_selector in _GENERATION6_P_PROVISIONAL_FAULT_MESSAGES,
+        "provisional fault selector differs",
+    )
+    _require(
+        fault_selector is None or (not live and pidfd_available and not pidfd_invalid),
+        "provisional fault selector requires a terminal pidfd child",
+    )
+    pid = _generation6_p_spawn_child(recorder, token_id=token_id, live=live)
+    private_root = PrivateRoot()
+    wait_history: list[list[object]] = []
+    pidfd_open_history: list[list[object]] = []
+    proc_history: list[list[int]] = []
+    pidfd_signal_history: list[list[int]] = []
+    numeric_pid_signal_history: list[list[int]] = []
+    numeric_group_signal_history: list[list[int]] = []
+    post_consume_operations: list[str] = []
+    consume_attempted = False
+    kernel_consumed = False
+    consume_returned = False
+    consume_attempt_count = 0
+    kernel_wait_call_count = 0
+    post_consume_injection_count = 0
+    captured_waitid = os.waitid
+    captured_pidfd_open = os.pidfd_open
+    captured_read_proc_identity = _read_proc_identity
+    captured_pidfd_signal = _PIDFD_SEND_SIGNAL
+    captured_kill = os.kill
+    captured_killpg = os.killpg
+    captured_close_once = FdOwner.close_once
+
+    def require_pre_consume(operation_name: str) -> None:
+        if consume_attempted:
+            post_consume_operations.append(operation_name)
+            message = {
+                "waitid": "second consuming wait is forbidden",
+                "kill": "post-consume numeric PID is forbidden",
+                "killpg": "post-consume numeric PGID is forbidden",
+            }.get(operation_name, "post-consume process operation is forbidden")
+            raise ContractError(message)
+
+    def observed_waitid(
+        id_type: int,
+        identity: int,
+        options: int,
+    ) -> os.waitid_result | None:
+        nonlocal consume_attempt_count, consume_attempted, consume_returned
+        nonlocal kernel_consumed, kernel_wait_call_count
+        phase = "CONSUME" if options == os.WEXITED else "NOWAIT"
+        require_pre_consume("waitid")
+        if phase == "CONSUME":
+            consume_attempted = True
+            consume_attempt_count += 1
+            if fault_selector == "consume_failure_before_kernel":
+                message = _GENERATION6_P_PROVISIONAL_FAULT_MESSAGES[fault_selector]
+                wait_history.append(
+                    [
+                        len(wait_history) + 1,
+                        id_type,
+                        identity,
+                        options,
+                        phase,
+                        ["RAISED_BEFORE_KERNEL", message],
+                    ]
+                )
+                raise ContractError(message)
+        result = captured_waitid(id_type, identity, options)
+        kernel_wait_call_count += 1
+        projection: object = _generation6_p_wait_projection(result)
+        if phase == "CONSUME":
+            _require(result is not None, "provisional consuming wait returned no result")
+            kernel_consumed = True
+            if fault_selector == "consume_failure_after_kernel":
+                message = _GENERATION6_P_PROVISIONAL_FAULT_MESSAGES[fault_selector]
+                projection = ["RAISED_AFTER_KERNEL", projection, message]
+        wait_history.append(
+            [
+                len(wait_history) + 1,
+                id_type,
+                identity,
+                options,
+                phase,
+                projection,
+            ]
+        )
+        if phase == "CONSUME":
+            if fault_selector == "consume_failure_after_kernel":
+                raise ContractError(_GENERATION6_P_PROVISIONAL_FAULT_MESSAGES[fault_selector])
+            consume_returned = True
+        return result
+
+    def observed_pidfd_open(process_id: int, flags: int = 0) -> int:
+        require_pre_consume("pidfd_open")
+        if pidfd_invalid:
+            pidfd_open_history.append([process_id, flags, "INVALID:False"])
+            return cast(int, False)
+        if not pidfd_available:
+            pidfd_open_history.append([process_id, flags, "OSError:ENOSYS"])
+            raise OSError(errno.ENOSYS, "pidfd unavailable self-test")
+        result = captured_pidfd_open(process_id, flags)
+        pidfd_open_history.append([process_id, flags, result])
+        return result
+
+    def observed_read_proc_identity(
+        process_id: int,
+        *,
+        excluded_descriptors: Iterable[int] = (),
+        poisoned_descriptors: Iterable[int] = (),
+        poison_sink: set[int],
+    ) -> ProcessIdentity:
+        require_pre_consume("read_proc_identity")
+        identity = captured_read_proc_identity(
+            process_id,
+            excluded_descriptors=excluded_descriptors,
+            poisoned_descriptors=poisoned_descriptors,
+            poison_sink=poison_sink,
+        )
+        proc_history.append(
+            [
+                identity.pid,
+                identity.ppid,
+                identity.uid,
+                identity.start_time,
+                identity.session_id,
+                identity.process_group_id,
+            ]
+        )
+        return identity
+
+    def observed_pidfd_signal(
+        descriptor: int,
+        signal_number: int,
+        siginfo: object,
+        flags: int,
+    ) -> object:
+        require_pre_consume("pidfd_send_signal")
+        _require(siginfo is None and flags == 0, "provisional pidfd signal arguments differ")
+        pidfd_signal_history.append([descriptor, int(signal_number)])
+        return captured_pidfd_signal(descriptor, signal_number, siginfo, flags)
+
+    def observed_kill(process_id: int, signal_number: int) -> None:
+        require_pre_consume("kill")
+        numeric_pid_signal_history.append([process_id, int(signal_number)])
+        captured_kill(process_id, signal_number)
+
+    def observed_killpg(process_group_id: int, signal_number: int) -> None:
+        require_pre_consume("killpg")
+        numeric_group_signal_history.append([process_group_id, int(signal_number)])
+        captured_killpg(process_group_id, signal_number)
+
+    def observed_close_once(owner: FdOwner) -> None:
+        nonlocal post_consume_injection_count
+        if (
+            fault_selector in _GENERATION6_P_POST_CONSUME_SELECTORS
+            and owner.label == "child pidfd"
+            and consume_attempted
+        ):
+            post_consume_injection_count += 1
+            if fault_selector == "second_consuming_wait":
+                _waitid_pid(os.P_PID, pid, os.WEXITED)
+            elif fault_selector == "numeric_pid_after_consume":
+                os.kill(pid, 0)
+            else:
+                _require(
+                    fault_selector == "numeric_pgid_after_consume",
+                    "provisional post-consume selector differs",
+                )
+                os.killpg(pid, 0)
+            raise ContractError("post-consume injection returned")
+        captured_close_once(owner)
+
+    process = cast(
+        _NoImplicitWaitPopen,
+        SimpleNamespace(pid=pid, _child_created=True, returncode=None),
+    )
+    cleanup_raised = False
+    cleanup_message: str | None = None
+    private_cleanup: CleanupResult | None = None
+    primary: BaseException | None = None
+    try:
+        with (
+            _Generation6SelftestPatch(os, "waitid", observed_waitid),
+            _Generation6SelftestPatch(os, "pidfd_open", observed_pidfd_open),
+            _Generation6SelftestPatch(
+                _generation6_module(),
+                "_read_proc_identity",
+                observed_read_proc_identity,
+            ),
+            _Generation6SelftestPatch(
+                _generation6_module(),
+                "_PIDFD_SEND_SIGNAL",
+                observed_pidfd_signal,
+            ),
+            _Generation6SelftestPatch(os, "kill", observed_kill),
+            _Generation6SelftestPatch(os, "killpg", observed_killpg),
+            _Generation6SelftestPatch(FdOwner, "close_once", observed_close_once),
+        ):
+            if fault_selector is not None:
+                cleanup_message = _generation6_p_exact_cleanup_failure(
+                    lambda: _cleanup_provisional_child(
+                        process,
+                        private_root=private_root,
+                        other_descriptors=(),
+                        poisoned_descriptors=private_root._poisoned_descriptors,
+                    ),
+                    expected_message=_GENERATION6_P_PROVISIONAL_FAULT_MESSAGES[fault_selector],
+                )
+                cleanup_raised = True
+            elif pidfd_available:
+                _cleanup_provisional_child(
+                    process,
+                    private_root=private_root,
+                    other_descriptors=(),
+                    poisoned_descriptors=private_root._poisoned_descriptors,
+                )
+            else:
+                expected_failure = (
+                    "child pidfd number aliases an owned handle"
+                    if pidfd_invalid
+                    else "pidfd acquisition failed"
+                )
+                cleanup_message = _generation6_p_exact_cleanup_failure(
+                    lambda: _cleanup_provisional_child(
+                        process,
+                        private_root=private_root,
+                        other_descriptors=(),
+                        poisoned_descriptors=private_root._poisoned_descriptors,
+                    ),
+                    expected_message=expected_failure,
+                )
+                cleanup_raised = True
+        consume_records = [entry for entry in wait_history if entry[4] == "CONSUME"]
+        _require(
+            len(wait_history) >= 2
+            and wait_history[0][1] == os.P_PID
+            and wait_history[0][2] == pid
+            and wait_history[0][3] == os.WEXITED | os.WNOHANG | os.WNOWAIT
+            and len(consume_records) == 1
+            and wait_history[-1] is consume_records[0]
+            and consume_attempted
+            and consume_attempt_count == 1,
+            "provisional wait ownership history differs",
+        )
+        expected_kernel_wait_calls = len(wait_history) - (
+            1 if fault_selector == "consume_failure_before_kernel" else 0
+        )
+        _require(
+            kernel_wait_call_count == expected_kernel_wait_calls,
+            "provisional kernel wait history differs",
+        )
+        _require(
+            len(proc_history) == 1
+            and proc_history[0][0] == pid
+            and proc_history[0][1] == os.getpid()
+            and proc_history[0][2] == os.getuid()
+            and proc_history[0][3] > 0,
+            "provisional process identity binding differs",
+        )
+        _require(
+            len(pidfd_open_history) == 1
+            and pidfd_open_history[0][0] == pid
+            and pidfd_open_history[0][1] == 0,
+            "provisional pidfd acquisition history differs",
+        )
+        if live and pidfd_available:
+            _require(
+                len(pidfd_signal_history) == 1
+                and pidfd_signal_history[0][1] == signal.SIGKILL
+                and numeric_pid_signal_history == []
+                and numeric_group_signal_history == [],
+                "live pidfd cleanup signal history differs",
+            )
+        elif live:
+            _require(
+                pidfd_signal_history == []
+                and numeric_pid_signal_history == [[pid, signal.SIGKILL]]
+                and numeric_group_signal_history == [],
+                "live numeric cleanup signal history differs",
+            )
+        else:
+            _require(
+                pidfd_signal_history == []
+                and numeric_pid_signal_history == []
+                and numeric_group_signal_history == [],
+                "terminal cleanup sent a live-child signal",
+            )
+        if fault_selector is None:
+            _require(
+                consume_returned
+                and kernel_consumed
+                and not post_consume_operations
+                and post_consume_injection_count == 0,
+                "provisional clean consume authority differs",
+            )
+            if not pidfd_available:
+                _require(
+                    private_root._process_tree_uncertain,
+                    "pidfd-unavailable cleanup did not remain FAIL-only",
+                )
+                private_root._process_tree_uncertain = False
+            private_cleanup = private_root.cleanup()
+            _require(
+                private_cleanup.status == "PASS" and private_cleanup.residue_count == 0,
+                "provisional branch private-root cleanup differs",
+            )
+            recorder.call(
+                "process_cleanup",
+                operation,
+                token_id,
+                [pid, live, pidfd_available],
+                "RETURNED",
+                cleanup_message if cleanup_message is not None else "PASS",
+            )
+            recorder.transition(token_id, "RUNNING", "cleanup_completed", "TERMINAL")
+        else:
+            expected_post_operation = _GENERATION6_P_POST_CONSUME_SELECTORS.get(fault_selector)
+            _require(
+                cleanup_raised
+                and cleanup_message == _GENERATION6_P_PROVISIONAL_FAULT_MESSAGES[fault_selector]
+                and kernel_consumed is (fault_selector != "consume_failure_before_kernel")
+                and consume_returned is (expected_post_operation is not None)
+                and post_consume_operations
+                == ([] if expected_post_operation is None else [expected_post_operation])
+                and post_consume_injection_count == (0 if expected_post_operation is None else 1)
+                and private_root._process_tree_uncertain,
+                "provisional injected consume authority differs",
+            )
+            private_cleanup = private_root.cleanup()
+            _require(
+                private_cleanup.status == "FAIL"
+                and private_cleanup.residue_count == 1
+                and bool(private_cleanup.failures)
+                and private_cleanup.failures[0] == "cleanup uncertainty preserved private root",
+                "provisional injected quarantine differs",
+            )
+            if expected_post_operation is not None:
+                recorder.call(
+                    "waitid",
+                    "consume_once",
+                    token_id,
+                    [pid, kernel_wait_call_count],
+                    "RETURNED",
+                    [consume_attempt_count, kernel_consumed],
+                )
+            recorder.call(
+                "process_cleanup",
+                operation,
+                token_id,
+                [pid, live, pidfd_available, fault_selector],
+                "RETURNED",
+                [
+                    cleanup_message,
+                    wait_history,
+                    list(post_consume_operations),
+                    consume_attempt_count,
+                    kernel_wait_call_count,
+                    kernel_consumed,
+                    [
+                        private_cleanup.status,
+                        private_cleanup.residue_count,
+                        list(private_cleanup.failures),
+                    ],
+                ],
+            )
+            recorder.transition(token_id, "RUNNING", "rejection_validated", "TERMINAL")
+    except BaseException as error:
+        primary = error
+    if primary is not None:
+        if not private_root._cleaned and fault_selector is None and not consume_returned:
+            private_root._process_tree_uncertain = False
+        if not private_root._cleaned:
+            try:
+                failure_cleanup = private_root.cleanup()
+                expected_status = "FAIL" if fault_selector is not None else "PASS"
+                _require(
+                    failure_cleanup.status == expected_status,
+                    "failed P branch root cleanup differs",
+                )
+            except BaseException as cleanup_error:
+                primary.add_note(f"failed P branch root cleanup failed: {cleanup_error!r}")
+        raise primary
+    result: dict[str, object] = {
+        "mode": "live" if live else "terminal",
+        "pidfd_available": pidfd_available,
+        "wait_history": wait_history,
+        "pidfd_open_history": pidfd_open_history,
+        "proc_history": proc_history,
+        "pidfd_signal_history": pidfd_signal_history,
+        "numeric_pid_signal_history": numeric_pid_signal_history,
+        "numeric_group_signal_history": numeric_group_signal_history,
+        "post_consume_operations": post_consume_operations,
+        "consume_count": sum(entry[4] == "CONSUME" for entry in wait_history),
+        "consume_was_last": bool(wait_history) and wait_history[-1][4] == "CONSUME",
+        "cleanup_raised": cleanup_raised,
+        "cleanup_message": cleanup_message,
+    }
+    if fault_selector is not None:
+        _require(private_cleanup is not None, "provisional quarantine receipt is absent")
+        exact_private_cleanup = cast(CleanupResult, private_cleanup)
+        result.update(
+            {
+                "fault_selector": fault_selector,
+                "consume_attempt_count": consume_attempt_count,
+                "kernel_wait_call_count": kernel_wait_call_count,
+                "kernel_consumed": kernel_consumed,
+                "post_consume_injection_count": post_consume_injection_count,
+                "quarantine_status": exact_private_cleanup.status,
+                "quarantine_residue_count": exact_private_cleanup.residue_count,
+                "quarantine_failures": list(exact_private_cleanup.failures),
+            }
+        )
+    return result
+
+
+def _generation6_p01_case(recorder: _Generation6HazardRecorder) -> dict[str, object]:
+    return {
+        "pidfd_raises": _generation6_p_provisional_branch(
+            recorder,
+            token_id="P01-PIDFD-RAISES",
+            operation="pidfd_open_raises",
+            live=True,
+            pidfd_available=False,
+        ),
+        "pidfd_invalid": _generation6_p_provisional_branch(
+            recorder,
+            token_id="P01-PIDFD-INVALID",
+            operation="pidfd_invalid_result",
+            live=True,
+            pidfd_available=False,
+            pidfd_invalid=True,
+        ),
+    }
+
+
+def _generation6_p_identity_mismatch_case(
+    case_id: str,
+    recorder: _Generation6HazardRecorder,
+) -> dict[str, object]:
+    field = {
+        "P02": "uid",
+        "P03": "start_time",
+        "P04": "session_id",
+        "P05": "process_group_id",
+    }[case_id]
+    operation = {
+        "P02": "leader_uid_mismatch",
+        "P03": "leader_start_time_mismatch",
+        "P04": "leader_session_mismatch",
+        "P05": "leader_process_group_mismatch",
+    }[case_id]
+    token_id = f"{case_id}-IDENTITY"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "identity_anchored", "RUNNING")
+    expected = ProcessIdentity(41_001, os.getpid(), os.getuid(), 99_001, 41_001, 41_001)
+    values = {
+        "pid": expected.pid,
+        "ppid": expected.ppid,
+        "uid": expected.uid,
+        "start_time": expected.start_time,
+        "session_id": expected.session_id,
+        "process_group_id": expected.process_group_id,
+    }
+    values[field] += 1
+    observed = ProcessIdentity(**values)
+    signal_history: list[list[int]] = []
+    private_root = cast(
+        PrivateRoot,
+        SimpleNamespace(
+            _poisoned_descriptors=set(),
+            _opaque_close_uncertain=False,
+        ),
+    )
+    pidfd = FdOwner(os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC), f"{case_id} fake pidfd")
+
+    def mismatched_identity(
+        process_id: int,
+        *,
+        excluded_descriptors: Iterable[int] = (),
+        poisoned_descriptors: Iterable[int] = (),
+        poison_sink: set[int],
+    ) -> ProcessIdentity:
+        del excluded_descriptors, poisoned_descriptors, poison_sink
+        _require(process_id == expected.pid, f"{case_id} identity PID differs")
+        return observed
+
+    def forbidden_group_signal(process_group_id: int, signal_number: int) -> None:
+        signal_history.append([process_group_id, int(signal_number)])
+        raise ContractError(f"{case_id} group signal was not blocked")
+
+    try:
+        with (
+            _Generation6SelftestPatch(
+                _generation6_module(),
+                "_read_proc_identity",
+                mismatched_identity,
+            ),
+            _Generation6SelftestPatch(os, "killpg", forbidden_group_signal),
+        ):
+            failure_message = _generation6_p_exact_cleanup_failure(
+                lambda: _signal_initial_group(
+                    expected,
+                    pidfd,
+                    signal.SIGKILL,
+                    private_root=private_root,
+                    leader_live=False,
+                    exclusion_provider=lambda: (pidfd.require(),),
+                    poisoned_provider=lambda: (),
+                ),
+                expected_message="anchored process identity changed",
+            )
+    finally:
+        pidfd.close_once()
+    _require(not signal_history, f"{case_id} signalled after an identity mismatch")
+    recorder.call(
+        "process_identity",
+        operation,
+        token_id,
+        [field, getattr(expected, field), getattr(observed, field)],
+        "RETURNED",
+        failure_message,
+    )
+    recorder.transition(token_id, "RUNNING", "rejection_validated", "TERMINAL")
+    return {
+        "field": field,
+        "expected": getattr(expected, field),
+        "observed": getattr(observed, field),
+        "signal_count": len(signal_history),
+        "failure_message": failure_message,
+    }
+
+
+def _generation6_p06_case(recorder: _Generation6HazardRecorder) -> dict[str, object]:
+    token_id = "P06-WNOWAIT"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "wait_owner_anchored", "RUNNING")
+    expected_pid = 42_006
+    expected_uid = os.getuid()
+    variants = (
+        ("waitid_raises", "waitid failed"),
+        ("waitid_wrong_pid", "waitid child identity differs"),
+        ("waitid_wrong_uid", "waitid child identity differs"),
+        ("waitid_invalid_code", "terminal code is outside the closed set"),
+    )
+    variant_results: list[list[object]] = []
+    wait_call_count = 0
+    consume_call_count = 0
+    for operation, expected_message in variants:
+
+        def variant_waitid(
+            id_type: int,
+            identity: int,
+            options: int,
+            operation: str = operation,
+        ) -> os.waitid_result | None:
+            nonlocal wait_call_count, consume_call_count
+            wait_call_count += 1
+            consume_call_count += int(options == os.WEXITED)
+            _require(
+                id_type == os.P_PIDFD
+                and identity == 420
+                and options == os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                "P06 WNOWAIT call differs",
+            )
+            if operation == "waitid_raises":
+                raise OSError(errno.EIO, "waitid-selftest")
+            result_pid = expected_pid + int(operation == "waitid_wrong_pid")
+            result_uid = expected_uid + int(operation == "waitid_wrong_uid")
+            result_code = 99_999 if operation == "waitid_invalid_code" else os.CLD_EXITED
+            return os.waitid_result((result_pid, result_uid, int(signal.SIGCHLD), 0, result_code))
+
+        def invoke(operation: str = operation) -> None:
+            result = _waitid_pid(
+                os.P_PIDFD,
+                420,
+                os.WEXITED | os.WNOHANG | os.WNOWAIT,
+            )
+            _require(result is not None, "P06 WNOWAIT unexpectedly returned live")
+            terminal = _terminal_identity(
+                cast(os.waitid_result, result),
+                expected_pid=expected_pid,
+                expected_uid=expected_uid,
+            )
+            if operation == "waitid_invalid_code":
+                _decode_exit(terminal)
+
+        with _Generation6SelftestPatch(os, "waitid", variant_waitid):
+            failure_message = _generation6_p_exact_cleanup_failure(
+                invoke,
+                expected_message=expected_message,
+            )
+        variant_results.append([operation, failure_message])
+        recorder.call(
+            "waitid",
+            operation,
+            token_id,
+            [os.P_PIDFD, 420, os.WEXITED | os.WNOHANG | os.WNOWAIT],
+            "RETURNED",
+            failure_message,
+        )
+    _require(wait_call_count == 4 and consume_call_count == 0, "P06 wait history differs")
+    recorder.transition(token_id, "RUNNING", "rejection_validated", "TERMINAL")
+    return {
+        "variant_results": variant_results,
+        "wait_call_count": wait_call_count,
+        "consume_call_count": consume_call_count,
+    }
+
+
+def _generation6_p07_case(
+    root: Path,
+    recorder: _Generation6HazardRecorder,
+) -> dict[str, object]:
+    token_id = "P07-CLEAN"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "constructor_started", "RUNNING")
+    private_root, command_files, supervisor = _generation6_p_inner_supervisor()
+    killpg_history: list[list[int]] = []
+
+    def forbidden_killpg(process_group_id: int, signal_number: int) -> None:
+        killpg_history.append([process_group_id, int(signal_number)])
+        raise ContractError("clean success invoked a group signal")
+
+    with _Generation6SelftestPatch(os, "killpg", forbidden_killpg):
+        child = supervisor.run(
+            [sys.executable, "-c", "import os; os.write(1,b'P07-clean')"],
+            cwd=root,
+            timeout_ns=20_000_000_000,
+            label="p07-clean",
+        )
+    slot_owner = supervisor.owner_slots[0][0]
+    _require(
+        child.exit_code == 0
+        and child.stdout == b"P07-clean"
+        and child.stderr == b""
+        and child.survivor_count == 0
+        and not killpg_history
+        and slot_owner is not None
+        and slot_owner.pid == child.pid,
+        "P07 clean process differs",
+    )
+    cleanup = private_root.cleanup()
+    _require(cleanup.status == "PASS" and cleanup.residue_count == 0, "P07 root cleanup differs")
+    command_files.close_without_publication()
+    recorder.call(
+        "process_supervisor",
+        "clean_success_no_killpg",
+        token_id,
+        [child.pid],
+        "RETURNED",
+        child.exit_code,
+    )
+    recorder.transition(token_id, "RUNNING", "lifecycle_validated", "TERMINAL")
+    return {
+        "stdout": child.stdout.decode("ascii"),
+        "exit_code": child.exit_code,
+        "survivor_count": child.survivor_count,
+        "killpg_call_count": len(killpg_history),
+        "slot_owned": slot_owner is supervisor.owner_slots[0][0],
+    }
+
+
+def _generation6_p08_case(
+    root: Path,
+    recorder: _Generation6HazardRecorder,
+) -> dict[str, object]:
+    token_id = "P08-TERM-IGNORED"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "constructor_started", "RUNNING")
+    private_root, command_files, supervisor = _generation6_p_inner_supervisor()
+    pidfd_signals: list[int] = []
+    group_signals: list[int] = []
+    wait_phases: list[str] = []
+    captured_pidfd_signal = _PIDFD_SEND_SIGNAL
+    captured_killpg = os.killpg
+    captured_waitid = os.waitid
+
+    def observed_pidfd_signal(
+        descriptor: int,
+        signal_number: int,
+        siginfo: object,
+        flags: int,
+    ) -> object:
+        pidfd_signals.append(int(signal_number))
+        return captured_pidfd_signal(descriptor, signal_number, siginfo, flags)
+
+    def observed_killpg(process_group_id: int, signal_number: int) -> None:
+        group_signals.append(int(signal_number))
+        captured_killpg(process_group_id, signal_number)
+
+    def observed_waitid(
+        id_type: int,
+        identity: int,
+        options: int,
+    ) -> os.waitid_result | None:
+        result = captured_waitid(id_type, identity, options)
+        wait_phases.append("CONSUME" if options == os.WEXITED else "NOWAIT")
+        return result
+
+    with (
+        _Generation6SelftestPatch(
+            _generation6_module(),
+            "_PIDFD_SEND_SIGNAL",
+            observed_pidfd_signal,
+        ),
+        _Generation6SelftestPatch(os, "killpg", observed_killpg),
+        _Generation6SelftestPatch(os, "waitid", observed_waitid),
+    ):
+        failure_message = _generation6_p_exact_cleanup_failure(
+            lambda: supervisor.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "import os,signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); "
+                    "os.write(1,b'ready'); time.sleep(10)",
+                ],
+                cwd=root,
+                timeout_ns=1_000_000_000,
+                label="p08-term-ignored",
+            ),
+            expected_message="child invocation exceeded its deadline",
+        )
+    consume_count = wait_phases.count("CONSUME")
+    _require(
+        pidfd_signals == [int(signal.SIGTERM), int(signal.SIGKILL)]
+        and group_signals == [int(signal.SIGTERM), int(signal.SIGKILL)]
+        and consume_count == 1
+        and wait_phases[-1] == "CONSUME"
+        and private_root._process_tree_uncertain,
+        "P08 bounded TERM/KILL history differs",
+    )
+    private_root._process_tree_uncertain = False
+    cleanup = private_root.cleanup()
+    _require(cleanup.status == "PASS" and cleanup.residue_count == 0, "P08 root cleanup differs")
+    command_files.close_without_publication()
+    recorder.call(
+        "process_supervisor",
+        "sigterm_ignored_sigkill",
+        token_id,
+        [*pidfd_signals, *group_signals],
+        "RETURNED",
+        failure_message,
+    )
+    recorder.transition(token_id, "RUNNING", "cleanup_completed", "TERMINAL")
+    return {
+        "pidfd_signals": pidfd_signals,
+        "group_signals": group_signals,
+        "consume_count": consume_count,
+        "consume_was_last": wait_phases[-1] == "CONSUME",
+        "failure_message": failure_message,
+    }
+
+
+def _generation6_p09_case(recorder: _Generation6HazardRecorder) -> dict[str, object]:
+    token_id = "P09-GROUP-SIGNAL"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "identity_anchored", "RUNNING")
+    identity = ProcessIdentity(49_009, os.getpid(), os.getuid(), 99_009, 49_009, 49_009)
+    private_root = cast(PrivateRoot, SimpleNamespace())
+    pidfd = FdOwner(os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC), "P09 fake pidfd")
+    failures: list[list[object]] = []
+    same_process_count = 0
+    group_signal_count = 0
+
+    def same_process(
+        expected: ProcessIdentity,
+        *,
+        private_root: PrivateRoot,
+        exclusion_provider: Callable[[], tuple[int, ...]],
+        poisoned_provider: Callable[[], tuple[int, ...]],
+    ) -> ProcessIdentity:
+        nonlocal same_process_count
+        del private_root, exclusion_provider, poisoned_provider
+        same_process_count += 1
+        _require(expected == identity, "P09 anchored identity differs")
+        return expected
+
+    for signal_number, operation, message in (
+        (signal.SIGTERM, "term_group_signal_failure", "TERM-group-sentinel"),
+        (signal.SIGKILL, "kill_group_signal_failure", "KILL-group-sentinel"),
+    ):
+
+        def failing_killpg(
+            process_group_id: int,
+            actual_signal: int,
+            signal_number: int = signal_number,
+            message: str = message,
+        ) -> None:
+            nonlocal group_signal_count
+            group_signal_count += 1
+            _require(
+                process_group_id == identity.process_group_id and actual_signal == signal_number,
+                "P09 group signal arguments differ",
+            )
+            raise OSError(message)
+
+        with (
+            _Generation6SelftestPatch(_generation6_module(), "_same_process", same_process),
+            _Generation6SelftestPatch(os, "killpg", failing_killpg),
+        ):
+            try:
+                _signal_initial_group(
+                    identity,
+                    pidfd,
+                    signal_number,
+                    private_root=private_root,
+                    leader_live=False,
+                    exclusion_provider=lambda: (pidfd.require(),),
+                    poisoned_provider=lambda: (),
+                )
+            except OSError as error:
+                _require(str(error) == message, "P09 group signal failure differs")
+            else:
+                raise ContractError("P09 group signal unexpectedly succeeded")
+        failures.append([operation, message])
+        recorder.call(
+            "process_group",
+            operation,
+            token_id,
+            [identity.process_group_id, int(signal_number)],
+            "RETURNED",
+            message,
+        )
+    pidfd.close_once()
+    _require(same_process_count == 4 and group_signal_count == 2, "P09 call history differs")
+    recorder.transition(token_id, "RUNNING", "rejection_validated", "TERMINAL")
+    return {
+        "failures": failures,
+        "same_process_count": same_process_count,
+        "group_signal_count": group_signal_count,
+    }
+
+
+def _generation6_p10_case(recorder: _Generation6HazardRecorder) -> dict[str, object]:
+    token_id = "P10-GROUP-CHECK"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "identity_anchored", "RUNNING")
+    identity = ProcessIdentity(50_010, os.getpid(), os.getuid(), 100_010, 50_010, 50_010)
+    private_root = cast(
+        PrivateRoot,
+        SimpleNamespace(
+            _poisoned_descriptors=set(),
+            _opaque_close_uncertain=False,
+            _opaque_owner_quarantine=[],
+        ),
+    )
+    failures: list[list[str]] = []
+    signal_history: list[list[int]] = []
+    scan_call_count = 0
+
+    def same_process(
+        expected: ProcessIdentity,
+        *,
+        private_root: PrivateRoot,
+        exclusion_provider: Callable[[], tuple[int, ...]],
+        poisoned_provider: Callable[[], tuple[int, ...]],
+    ) -> ProcessIdentity:
+        del private_root, exclusion_provider, poisoned_provider
+        _require(expected == identity, "P10 anchored identity differs")
+        return expected
+
+    def failing_scandir(path: str) -> object:
+        nonlocal scan_call_count
+        scan_call_count += 1
+        _require(path == "/proc", "P10 process-table path differs")
+        raise OSError(errno.EIO, "scandir-selftest")
+
+    with (
+        _Generation6SelftestPatch(_generation6_module(), "_same_process", same_process),
+        _Generation6SelftestPatch(os, "scandir", failing_scandir),
+    ):
+        failure_message = _generation6_p_exact_cleanup_failure(
+            lambda: _scan_initial_group(identity, private_root=private_root),
+            expected_message="process table scan failed",
+        )
+    failures.append(["group_existence_failure", failure_message])
+    recorder.call(
+        "process_group",
+        "group_existence_failure",
+        token_id,
+        [identity.pid],
+        "RETURNED",
+        failure_message,
+    )
+    pidfd = FdOwner(os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC), "P10 fake pidfd")
+    changed = ProcessIdentity(
+        identity.pid,
+        identity.ppid,
+        identity.uid,
+        identity.start_time + 1,
+        identity.session_id,
+        identity.process_group_id,
+    )
+
+    def changed_identity(
+        process_id: int,
+        *,
+        excluded_descriptors: Iterable[int] = (),
+        poisoned_descriptors: Iterable[int] = (),
+        poison_sink: set[int],
+    ) -> ProcessIdentity:
+        del excluded_descriptors, poisoned_descriptors, poison_sink
+        _require(process_id == identity.pid, "P10 identity PID differs")
+        return changed
+
+    def forbidden_killpg(process_group_id: int, signal_number: int) -> None:
+        signal_history.append([process_group_id, int(signal_number)])
+        raise ContractError("P10 group signal was not blocked")
+
+    try:
+        with (
+            _Generation6SelftestPatch(
+                _generation6_module(),
+                "_read_proc_identity",
+                changed_identity,
+            ),
+            _Generation6SelftestPatch(os, "killpg", forbidden_killpg),
+        ):
+            failure_message = _generation6_p_exact_cleanup_failure(
+                lambda: _signal_initial_group(
+                    identity,
+                    pidfd,
+                    signal.SIGKILL,
+                    private_root=private_root,
+                    leader_live=False,
+                    exclusion_provider=lambda: (pidfd.require(),),
+                    poisoned_provider=lambda: (),
+                ),
+                expected_message="anchored process identity changed",
+            )
+    finally:
+        pidfd.close_once()
+    failures.append(["group_identity_recheck_failure", failure_message])
+    recorder.call(
+        "process_group",
+        "group_identity_recheck_failure",
+        token_id,
+        [identity.start_time, changed.start_time],
+        "RETURNED",
+        failure_message,
+    )
+    _require(not signal_history and scan_call_count == 1, "P10 call history differs")
+    recorder.transition(token_id, "RUNNING", "rejection_validated", "TERMINAL")
+    return {
+        "failures": failures,
+        "signal_count": len(signal_history),
+        "scan_call_count": scan_call_count,
+    }
+
+
+def _generation6_p11_case(
+    root: Path,
+    recorder: _Generation6HazardRecorder,
+) -> dict[str, object]:
+    token_id = "P11-SURVIVOR"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "constructor_started", "RUNNING")
+    private_root, command_files, supervisor = _generation6_p_inner_supervisor()
+    group_signals: list[int] = []
+    wait_phases: list[str] = []
+    captured_killpg = os.killpg
+    captured_waitid = os.waitid
+
+    def observed_killpg(process_group_id: int, signal_number: int) -> None:
+        group_signals.append(int(signal_number))
+        captured_killpg(process_group_id, signal_number)
+
+    def observed_waitid(
+        id_type: int,
+        identity: int,
+        options: int,
+    ) -> os.waitid_result | None:
+        result = captured_waitid(id_type, identity, options)
+        wait_phases.append("CONSUME" if options == os.WEXITED else "NOWAIT")
+        return result
+
+    with (
+        _Generation6SelftestPatch(os, "killpg", observed_killpg),
+        _Generation6SelftestPatch(os, "waitid", observed_waitid),
+    ):
+        failure_message = _generation6_p_exact_cleanup_failure(
+            lambda: supervisor.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "import os,time\np=os.fork()\nif p==0:\n"
+                    " os.close(0); os.close(1); os.close(2); time.sleep(10); os._exit(0)\n"
+                    "os._exit(0)\n",
+                ],
+                cwd=root,
+                timeout_ns=20_000_000_000,
+                label="p11-survivor",
+            ),
+            expected_message="child initial group had survivors",
+        )
+    consume_count = wait_phases.count("CONSUME")
+    _require(
+        bool(group_signals)
+        and set(group_signals).issubset({int(signal.SIGTERM), int(signal.SIGKILL)})
+        and consume_count == 1
+        and wait_phases[-1] == "CONSUME"
+        and private_root._process_tree_uncertain,
+        "P11 survivor cleanup history differs",
+    )
+    private_root._process_tree_uncertain = False
+    cleanup = private_root.cleanup()
+    _require(cleanup.status == "PASS" and cleanup.residue_count == 0, "P11 root cleanup differs")
+    command_files.close_without_publication()
+    recorder.call(
+        "process_group",
+        "initial_group_survivor",
+        token_id,
+        cast(list[object], list(group_signals)),
+        "RETURNED",
+        failure_message,
+    )
+    recorder.transition(token_id, "RUNNING", "cleanup_completed", "TERMINAL")
+    return {
+        "group_signals": group_signals,
+        "survivor_observed": True,
+        "consume_count": consume_count,
+        "failure_message": failure_message,
+    }
+
+
+def _generation6_p12_case(
+    root: Path,
+    recorder: _Generation6HazardRecorder,
+) -> dict[str, object]:
+    token_id = "P12-NESTED-SETSID"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "constructor_started", "RUNNING")
+    private_root, command_files, supervisor = _generation6_p_inner_supervisor()
+    group_signals: list[int] = []
+    captured_killpg = os.killpg
+
+    def observed_killpg(process_group_id: int, signal_number: int) -> None:
+        group_signals.append(int(signal_number))
+        captured_killpg(process_group_id, signal_number)
+
+    script = (
+        "import os; p=os.fork(); "
+        "(os.setsid(),os._exit(0)) if p==0 else None; "
+        "q,s=os.waitpid(p,0); "
+        "os._exit(191) if os.WIFEXITED(s) and os.WEXITSTATUS(s)==191 else None; "
+        "os.write(1,b'harness-owned')"
+    )
+    with _Generation6SelftestPatch(os, "killpg", observed_killpg):
+        child = supervisor.run(
+            [sys.executable, "-c", script],
+            cwd=root,
+            timeout_ns=20_000_000_000,
+            label="p12-nested-setsid",
+        )
+    slot_owner = supervisor.owner_slots[0][0]
+    _require(
+        child.exit_code == 0
+        and child.stdout == b"harness-owned"
+        and child.stderr == b""
+        and child.survivor_count == 0
+        and not group_signals
+        and slot_owner is not None
+        and slot_owner.pid == child.pid,
+        "P12 nested setsid ownership differs",
+    )
+    cleanup = private_root.cleanup()
+    _require(cleanup.status == "PASS" and cleanup.residue_count == 0, "P12 root cleanup differs")
+    command_files.close_without_publication()
+    recorder.call(
+        "child_harness",
+        "nested_setsid_harness_owner",
+        token_id,
+        [child.pid],
+        "RETURNED",
+        child.exit_code,
+    )
+    recorder.transition(token_id, "RUNNING", "lifecycle_validated", "TERMINAL")
+    return {
+        "stdout": child.stdout.decode("ascii"),
+        "exit_code": child.exit_code,
+        "survivor_count": child.survivor_count,
+        "runner_group_signal_count": len(group_signals),
+        "slot_owned": slot_owner is supervisor.owner_slots[0][0],
+    }
+
+
+def _generation6_p13_case(recorder: _Generation6HazardRecorder) -> dict[str, object]:
+    variants: list[list[object]] = []
+    for operation, fault_selector in (
+        ("consume_raises_before_kernel", "consume_failure_before_kernel"),
+        ("consume_raises_after_kernel", "consume_failure_after_kernel"),
+    ):
+        branch = _generation6_p_provisional_branch(
+            recorder,
+            token_id=f"P13-{fault_selector.upper()}",
+            operation=operation,
+            live=False,
+            pidfd_available=True,
+            fault_selector=fault_selector,
+        )
+        variants.append(
+            [
+                operation,
+                fault_selector,
+                branch["cleanup_message"],
+                branch["wait_history"],
+                branch["consume_attempt_count"],
+                branch["kernel_wait_call_count"],
+                branch["kernel_consumed"],
+                branch["post_consume_operations"],
+                branch["post_consume_injection_count"],
+                [
+                    branch["quarantine_status"],
+                    branch["quarantine_residue_count"],
+                    branch["quarantine_failures"],
+                ],
+            ]
+        )
+    total_consume_attempts = sum(
+        _integer(variant[4], "P13 consume attempt count", minimum=0) for variant in variants
+    )
+    all_post_consume_operations = [
+        operation for variant in variants for operation in cast(list[str], variant[7])
+    ]
+    return {
+        "variants": variants,
+        "consume_attempt_count": total_consume_attempts,
+        "post_consume_operation_count": len(all_post_consume_operations),
+    }
+
+
+def _generation6_p_post_consume_case(
+    case_id: str,
+    recorder: _Generation6HazardRecorder,
+) -> dict[str, object]:
+    _require(case_id in {"P14", "P15", "P16"}, "unknown post-consume P case")
+    fault_selector, operation, expected_post_operation = {
+        "P14": ("second_consuming_wait", "second_consume_forbidden", "waitid"),
+        "P15": ("numeric_pid_after_consume", "numeric_pid_forbidden", "kill"),
+        "P16": ("numeric_pgid_after_consume", "numeric_pgid_forbidden", "killpg"),
+    }[case_id]
+    branch = _generation6_p_provisional_branch(
+        recorder,
+        token_id=f"{case_id}-{fault_selector.upper()}",
+        operation=operation,
+        live=False,
+        pidfd_available=True,
+        fault_selector=fault_selector,
+    )
+    post_action_blocked = branch["post_consume_operations"] == [expected_post_operation]
+    if case_id == "P14":
+        return {
+            "wait_call_count": branch["kernel_wait_call_count"],
+            "consume_attempt_count": branch["consume_attempt_count"],
+            "second_attempt_blocked": post_action_blocked,
+        }
+    if case_id == "P15":
+        return {
+            "wait_call_count": branch["kernel_wait_call_count"],
+            "numeric_pid_call_count": len(cast(list[object], branch["numeric_pid_signal_history"])),
+            "post_action_blocked": post_action_blocked,
+        }
+    return {
+        "wait_call_count": branch["kernel_wait_call_count"],
+        "numeric_pgid_call_count": len(cast(list[object], branch["numeric_group_signal_history"])),
+        "post_action_blocked": post_action_blocked,
+    }
+
+
+class _Generation6P17ReadbackSlot:
+    def __init__(self) -> None:
+        self.value: _NoImplicitWaitPopen | None = None
+        self.assigned = False
+
+    def __len__(self) -> int:
+        return 1
+
+    def __getitem__(self, index: int) -> _NoImplicitWaitPopen | None:
+        _require(index == 0, "P17 slot index differs")
+        if self.assigned:
+            return None
+        return self.value
+
+    def __setitem__(self, index: int, value: _NoImplicitWaitPopen | None) -> None:
+        _require(index == 0, "P17 slot index differs")
+        self.value = value
+        self.assigned = True
+
+
+def _generation6_p17_case(recorder: _Generation6HazardRecorder) -> dict[str, object]:
+    module = _generation6_module()
+    base_initializer_call_count = 0
+    results: list[list[str]] = []
+
+    def forbidden_base_initializer(*args: object, **kwargs: object) -> None:
+        nonlocal base_initializer_call_count
+        del args, kwargs
+        base_initializer_call_count += 1
+        raise ContractError("P17 base initializer was reached")
+
+    for operation, raw_slot in (
+        ("slot_absent", cast(list[_NoImplicitWaitPopen | None], [])),
+        (
+            "slot_prepopulated",
+            cast(list[_NoImplicitWaitPopen | None], [cast(_NoImplicitWaitPopen, object())]),
+        ),
+        (
+            "slot_readback_differs",
+            cast(list[_NoImplicitWaitPopen | None], _Generation6P17ReadbackSlot()),
+        ),
+    ):
+        token_id = f"P17-{operation.upper()}"
+        recorder.register(token_id, "ALLOCATED")
+        recorder.transition(token_id, "ALLOCATED", "constructor_started", "RUNNING")
+        process = _NoImplicitWaitPopen.__new__(_NoImplicitWaitPopen)
+        expected_message = (
+            "Popen provisional ownership differs"
+            if operation == "slot_readback_differs"
+            else "Popen owner slot is not empty"
+        )
+
+        def invoke(
+            process: _NoImplicitWaitPopen = process,
+            raw_slot: list[_NoImplicitWaitPopen | None] = raw_slot,
+        ) -> None:
+            _NoImplicitWaitPopen.__init__(
+                process,
+                raw_slot,
+                _SignalLatch(),
+                signal.default_int_handler,
+                [sys.executable],
+                stdin=0,
+                stdout=1,
+                stderr=2,
+                pass_fds=(),
+                cwd=Path.cwd(),
+                env={},
+            )
+
+        with _Generation6SelftestPatch(
+            module,
+            "_CAPTURED_POPEN_INIT",
+            forbidden_base_initializer,
+        ):
+            failure_message = _generation6_p_exact_cleanup_failure(
+                invoke,
+                expected_message=expected_message,
+            )
+        results.append([operation, failure_message])
+        recorder.call(
+            "popen_owner_slot",
+            operation,
+            token_id,
+            [len(raw_slot)],
+            "RETURNED",
+            failure_message,
+        )
+        recorder.transition(token_id, "RUNNING", "rejection_validated", "TERMINAL")
+    _require(base_initializer_call_count == 0, "P17 base initializer call count differs")
+    return {
+        "variants": results,
+        "base_initializer_call_count": base_initializer_call_count,
+    }
+
+
+def _generation6_p18_case(
+    root: Path,
+    recorder: _Generation6HazardRecorder,
+) -> dict[str, object]:
+    token_id = "P18-CONSTRUCTOR-RETURNED"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "constructor_started", "RUNNING")
+    private_root, command_files, supervisor = _generation6_p_inner_supervisor()
+    child = supervisor.run(
+        [sys.executable, "-c", "import os; os.write(1,b'P18-slot-owned')"],
+        cwd=root,
+        timeout_ns=20_000_000_000,
+        label="p18-slot-owned",
+    )
+    slot_owner = supervisor.owner_slots[0][0]
+    _require(
+        child.exit_code == 0
+        and child.stdout == b"P18-slot-owned"
+        and child.stderr == b""
+        and child.survivor_count == 0
+        and slot_owner is not None
+        and slot_owner.pid == child.pid,
+        "P18 returned slot ownership differs",
+    )
+    cleanup = private_root.cleanup()
+    _require(cleanup.status == "PASS" and cleanup.residue_count == 0, "P18 root cleanup differs")
+    command_files.close_without_publication()
+    recorder.call(
+        "popen_owner_slot",
+        "constructor_returned_slot_owned",
+        token_id,
+        [child.pid],
+        "RETURNED",
+        "CLEAN",
+    )
+    recorder.transition(token_id, "RUNNING", "lifecycle_validated", "TERMINAL")
+    return {
+        "stdout": child.stdout.decode("ascii"),
+        "exit_code": child.exit_code,
+        "survivor_count": child.survivor_count,
+        "slot_owned": slot_owner is supervisor.owner_slots[0][0],
+    }
+
+
+def _generation6_p19_case(recorder: _Generation6HazardRecorder) -> dict[str, object]:
+    child_token = "P19-PARTIAL-CHILD"
+    pid = _generation6_p_spawn_child(
+        recorder,
+        token_id=child_token,
+        live=False,
+    )
+    constructor_token = "P19-CONSTRUCTOR"
+    recorder.register(constructor_token, "ALLOCATED")
+    recorder.transition(constructor_token, "ALLOCATED", "constructor_started", "RUNNING")
+    private_root = PrivateRoot()
+    owner_slot: list[_NoImplicitWaitPopen | None] = [None]
+    latch = _SignalLatch()
+    stored_handler = latch.handler
+    process = _NoImplicitWaitPopen.__new__(_NoImplicitWaitPopen)
+    consume_count = 0
+    captured_waitid = os.waitid
+
+    def partial_initializer(
+        target: subprocess.Popen[bytes],
+        arguments: object,
+        **kwargs: object,
+    ) -> None:
+        del arguments, kwargs
+        exact_target = cast(_NoImplicitWaitPopen, target)
+        exact_target.pid = pid
+        exact_target._child_created = True
+        raise ContractError("P19 constructor sentinel")
+
+    def observed_waitid(
+        id_type: int,
+        identity: int,
+        options: int,
+    ) -> os.waitid_result | None:
+        nonlocal consume_count
+        result = captured_waitid(id_type, identity, options)
+        if options == os.WEXITED:
+            consume_count += 1
+        return result
+
+    prior = signal.getsignal(signal.SIGINT)
+    _require(prior is signal.default_int_handler, "P19 SIGINT baseline differs")
+    installed = signal.signal(signal.SIGINT, stored_handler)
+    _require(installed is prior, "P19 SIGINT install differs")
+    try:
+        with _Generation6SelftestPatch(
+            _generation6_module(),
+            "_CAPTURED_POPEN_INIT",
+            partial_initializer,
+        ):
+            failure_message = _generation6_p_exact_cleanup_failure(
+                lambda: _NoImplicitWaitPopen.__init__(
+                    process,
+                    owner_slot,
+                    latch,
+                    stored_handler,
+                    [sys.executable],
+                    stdin=0,
+                    stdout=1,
+                    stderr=2,
+                    pass_fds=(),
+                    cwd=Path.cwd(),
+                    env={},
+                ),
+                expected_message="P19 constructor sentinel",
+            )
+    finally:
+        current = signal.getsignal(signal.SIGINT)
+        if current is stored_handler:
+            signal.signal(signal.SIGINT, signal.default_int_handler)
+    _require(
+        signal.getsignal(signal.SIGINT) is signal.default_int_handler,
+        "P19 SIGINT restoration differs",
+    )
+    _require(owner_slot[0] is process and process.pid == pid, "P19 partial slot differs")
+    recorder.call(
+        "popen_owner_slot",
+        "partial_constructor_slot_retained",
+        constructor_token,
+        [pid],
+        "RETURNED",
+        failure_message,
+    )
+    with _Generation6SelftestPatch(os, "waitid", observed_waitid):
+        _cleanup_provisional_child(
+            process,
+            private_root=private_root,
+            other_descriptors=(),
+            poisoned_descriptors=private_root._poisoned_descriptors,
+        )
+    recorder.call(
+        "process_cleanup",
+        "partial_constructor_cleanup",
+        child_token,
+        [pid],
+        "RETURNED",
+        "CONSUMED",
+    )
+    _require(consume_count == 1, "P19 consume count differs")
+    cleanup = private_root.cleanup()
+    _require(cleanup.status == "PASS" and cleanup.residue_count == 0, "P19 root cleanup differs")
+    recorder.transition(constructor_token, "RUNNING", "rejection_validated", "TERMINAL")
+    recorder.transition(child_token, "RUNNING", "cleanup_completed", "TERMINAL")
+    return {
+        "constructor_failure": failure_message,
+        "slot_retained": owner_slot[0] is process,
+        "child_pid": pid,
+        "consume_count": consume_count,
+        "cleanup_completed": True,
+    }
+
+
+def _generation6_p20_case(recorder: _Generation6HazardRecorder) -> dict[str, object]:
+    captured_close = os.close
+    captured_close_once = FdOwner.close_once
+    labels = (
+        "child stdin",
+        "child stdout read",
+        "child stdout write",
+        "child stderr read",
+        "child stderr write",
+    )
+    variants: list[list[object]] = []
+    total_close_call_count = 0
+    all_poisoned_descriptors: set[int] = set()
+    for target_label in labels:
+        token_id = f"P20-{target_label.upper().replace(' ', '-')}"
+        recorder.register(token_id, "ALLOCATED")
+        recorder.transition(token_id, "ALLOCATED", "source_authenticated", "RUNNING")
+        poison_sink: set[int] = set()
+        owners = _open_process_fds(poison_sink=poison_sink)
+        target_owner = next(owner for owner in owners if owner.label == target_label)
+        target_descriptor = target_owner.require()
+        close_counts = {label: 0 for label in labels}
+        close_errors: list[list[str]] = []
+
+        def injected_close(
+            descriptor: int,
+            target_descriptor: int = target_descriptor,
+        ) -> None:
+            if descriptor == target_descriptor:
+                raise OSError(errno.EIO, "P20 close sentinel")
+            captured_close(descriptor)
+
+        def observed_close_once(
+            owner: FdOwner,
+            close_counts: dict[str, int] = close_counts,
+            close_errors: list[list[str]] = close_errors,
+        ) -> None:
+            close_counts[owner.label] += 1
+            try:
+                captured_close_once(owner)
+            except ContractError as error:
+                close_errors.append([owner.label, str(error)])
+                raise
+
+        with (
+            _Generation6SelftestPatch(os, "close", injected_close),
+            _Generation6SelftestPatch(FdOwner, "close_once", observed_close_once),
+        ):
+            failures = _close_independent(owners, poison_sink=poison_sink)
+        _require(
+            failures == (target_label,)
+            and poison_sink == {target_descriptor}
+            and all(owner.terminal for owner in owners)
+            and set(close_counts.values()) == {1},
+            "P20 independent close receipt differs",
+        )
+        _require(
+            close_errors == [[target_label, f"uncertain {target_label} close"]],
+            "P20 close error receipt differs",
+        )
+        operation = target_label.removeprefix("child ").replace(" ", "_") + "_close"
+        message = close_errors[0][1]
+        variants.append(
+            [
+                operation,
+                message,
+                target_descriptor,
+                [[label, close_counts[label]] for label in labels],
+                list(failures),
+                close_errors,
+            ]
+        )
+        total_close_call_count += sum(close_counts.values())
+        all_poisoned_descriptors.update(poison_sink)
+        recorder.call(
+            "process_descriptors",
+            operation,
+            token_id,
+            [target_label, target_descriptor, message],
+            "RETURNED",
+            [list(failures), close_errors],
+        )
+        recorder.transition(token_id, "RUNNING", "rejection_validated", "TERMINAL")
+    _require(
+        total_close_call_count == 25 and len(all_poisoned_descriptors) == 5,
+        "P20 aggregate close receipts differ",
+    )
+    return {
+        "variants": variants,
+        "total_close_call_count": total_close_call_count,
+        "poisoned_descriptor_count": len(all_poisoned_descriptors),
+    }
+
+
+def _generation6_p21_case(recorder: _Generation6HazardRecorder) -> dict[str, object]:
+    token_id = "P21-RUNTIME"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "source_authenticated", "RUNNING")
+    with _Generation6SelftestPatch(sys, "version_info", (3, 13, 13)):
+        failure_message = _generation6_p_exact_cleanup_failure(
+            _runtime_spawn_gate,
+            expected_message="Python runtime differs",
+        )
+    recorder.call(
+        "spawn_preflight",
+        "wrong_cpython_runtime",
+        token_id,
+        [3, 13, 13],
+        "RETURNED",
+        failure_message,
+    )
+    recorder.transition(token_id, "RUNNING", "rejection_validated", "TERMINAL")
+    return {"failure_message": failure_message, "owner_count": 0}
+
+
+def _generation6_p22_case(recorder: _Generation6HazardRecorder) -> dict[str, object]:
+    variants: list[list[str]] = []
+
+    def changed_initializer(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+
+    for operation, target, name, replacement, expected_message in (
+        ("wrong_popen", subprocess, "Popen", object(), "Popen identity changed"),
+        (
+            "wrong_popen_initializer",
+            subprocess.Popen,
+            "__init__",
+            changed_initializer,
+            "Popen initializer changed",
+        ),
+        ("wrong_fork_exec", subprocess, "_fork_exec", object(), "_fork_exec changed"),
+    ):
+        token_id = f"P22-{operation.upper()}"
+        recorder.register(token_id, "ALLOCATED")
+        recorder.transition(token_id, "ALLOCATED", "source_authenticated", "RUNNING")
+        with _Generation6SelftestPatch(target, name, replacement):
+            failure_message = _generation6_p_exact_cleanup_failure(
+                _runtime_spawn_gate,
+                expected_message=expected_message,
+            )
+        variants.append([operation, failure_message])
+        recorder.call(
+            "spawn_preflight",
+            operation,
+            token_id,
+            [name],
+            "RETURNED",
+            failure_message,
+        )
+        recorder.transition(token_id, "RUNNING", "rejection_validated", "TERMINAL")
+    return {"variants": variants, "owner_count": 0}
+
+
+def _generation6_p23_case(recorder: _Generation6HazardRecorder) -> dict[str, object]:
+    main = threading.main_thread()
+    synthetic_non_main = object()
+    variants: list[list[object]] = []
+    thread_variants: tuple[tuple[str, list[object]], ...] = (
+        ("second_main_thread", [main, main]),
+        ("non_main_live_thread", [synthetic_non_main]),
+    )
+    for operation, enumeration in thread_variants:
+        token_id = f"P23-{operation.upper()}"
+        recorder.register(token_id, "ALLOCATED")
+        recorder.transition(token_id, "ALLOCATED", "source_authenticated", "RUNNING")
+
+        def enumerate_threads(
+            enumeration: list[object] = enumeration,
+        ) -> list[object]:
+            return list(enumeration)
+
+        with _Generation6SelftestPatch(threading, "enumerate", enumerate_threads):
+            failure_message = _generation6_p_exact_cleanup_failure(
+                _runtime_spawn_gate,
+                expected_message="spawn requires the sole main thread",
+            )
+        variants.append([operation, len(enumeration), failure_message])
+        recorder.call(
+            "spawn_preflight",
+            operation,
+            token_id,
+            [len(enumeration)],
+            "RETURNED",
+            failure_message,
+        )
+        recorder.transition(token_id, "RUNNING", "rejection_validated", "TERMINAL")
+    real_thread_count = len(threading.enumerate())
+    _require(real_thread_count == 1, "P23 real thread inventory differs")
+    return {"variants": variants, "real_thread_count": real_thread_count}
+
+
+def _generation6_p24_case(recorder: _Generation6HazardRecorder) -> dict[str, object]:
+    token_id = "P24-TRACE"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "source_authenticated", "RUNNING")
+
+    def trace_function(*args: object) -> None:
+        del args
+
+    with _Generation6SelftestPatch(sys, "gettrace", lambda: trace_function):
+        failure_message = _generation6_p_exact_cleanup_failure(
+            _runtime_spawn_gate,
+            expected_message="trace/profile is forbidden",
+        )
+    recorder.call(
+        "spawn_preflight",
+        "active_trace_function",
+        token_id,
+        [id(trace_function)],
+        "RETURNED",
+        failure_message,
+    )
+    recorder.transition(token_id, "RUNNING", "rejection_validated", "TERMINAL")
+    return {
+        "failure_message": failure_message,
+        "trace_identity_distinct": trace_function is not None,
+        "owner_count": 0,
+    }
+
+
+def _generation6_p25_case(recorder: _Generation6HazardRecorder) -> dict[str, object]:
+    token_id = "P25-PROFILE"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "source_authenticated", "RUNNING")
+
+    def profile_function(*args: object) -> None:
+        del args
+
+    with _Generation6SelftestPatch(sys, "getprofile", lambda: profile_function):
+        failure_message = _generation6_p_exact_cleanup_failure(
+            _runtime_spawn_gate,
+            expected_message="trace/profile is forbidden",
+        )
+    recorder.call(
+        "spawn_preflight",
+        "active_profile_function",
+        token_id,
+        [id(profile_function)],
+        "RETURNED",
+        failure_message,
+    )
+    recorder.transition(token_id, "RUNNING", "rejection_validated", "TERMINAL")
+    return {
+        "failure_message": failure_message,
+        "profile_identity_distinct": profile_function is not None,
+        "owner_count": 0,
+    }
+
+
+def _generation6_p26_case(recorder: _Generation6HazardRecorder) -> dict[str, object]:
+    captured_getsignal = signal.getsignal
+    variants: list[list[object]] = []
+
+    def custom_handler(signum: int, frame: FrameType | None) -> None:
+        del signum, frame
+
+    for signal_name in ("SIGTERM", "SIGHUP", "SIGUSR1"):
+        signal_number = int(getattr(signal, signal_name))
+        operation = f"custom_{signal_name.lower()}"
+        token_id = f"P26-{signal_name}"
+        recorder.register(token_id, "ALLOCATED")
+        recorder.transition(token_id, "ALLOCATED", "source_authenticated", "RUNNING")
+
+        def injected_getsignal(
+            candidate: int,
+            signal_number: int = signal_number,
+        ) -> object:
+            if candidate == signal_number:
+                return custom_handler
+            return captured_getsignal(candidate)
+
+        with _Generation6SelftestPatch(signal, "getsignal", injected_getsignal):
+            failure_message = _generation6_p_exact_cleanup_failure(
+                _runtime_spawn_gate,
+                expected_message="signal handler differs",
+            )
+        variants.append([operation, signal_number, failure_message])
+        recorder.call(
+            "spawn_preflight",
+            operation,
+            token_id,
+            [signal_number],
+            "RETURNED",
+            failure_message,
+        )
+        recorder.transition(token_id, "RUNNING", "rejection_validated", "TERMINAL")
+    return {"variants": variants, "owner_count": 0}
+
+
+def _generation6_p27_case(recorder: _Generation6HazardRecorder) -> dict[str, object]:
+    token_id = "P27-SIGCHLD-IGN"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "source_authenticated", "RUNNING")
+    captured_getsignal = signal.getsignal
+
+    def ignored_sigchld(signal_number: int) -> object:
+        if signal_number == signal.SIGCHLD:
+            return signal.SIG_IGN
+        return captured_getsignal(signal_number)
+
+    with _Generation6SelftestPatch(signal, "getsignal", ignored_sigchld):
+        failure_message = _generation6_p_exact_cleanup_failure(
+            _runtime_spawn_gate,
+            expected_message="SIGCHLD handler differs",
+        )
+    recorder.call(
+        "spawn_preflight",
+        "sigchld_sig_ign",
+        token_id,
+        [int(signal.SIGCHLD)],
+        "RETURNED",
+        failure_message,
+    )
+    recorder.transition(token_id, "RUNNING", "rejection_validated", "TERMINAL")
+    return {"failure_message": failure_message, "owner_count": 0}
+
+
+def _generation6_p28_case(recorder: _Generation6HazardRecorder) -> dict[str, object]:
+    _require(signal.getsignal(signal.SIGCHLD) is signal.SIG_DFL, "P28 SIGCHLD baseline differs")
+    variants: list[list[str]] = []
+    signal_call_count = 0
+    for operation, expected_message in (
+        ("sigchld_reset_raises", "SIGCHLD-reset-sentinel"),
+        ("sigchld_reset_wrong_return", "SIGCHLD reset prior differs"),
+    ):
+        token_id = f"P28-{operation.upper()}"
+        recorder.register(token_id, "ALLOCATED")
+        recorder.transition(token_id, "ALLOCATED", "source_authenticated", "RUNNING")
+
+        def injected_signal(
+            signal_number: int,
+            handler: object,
+            operation: str = operation,
+        ) -> object:
+            nonlocal signal_call_count
+            signal_call_count += 1
+            _require(
+                signal_number == signal.SIGCHLD and handler is signal.SIG_DFL,
+                "P28 SIGCHLD reset arguments differ",
+            )
+            if operation == "sigchld_reset_raises":
+                raise ContractError("SIGCHLD-reset-sentinel")
+            return signal.SIG_IGN
+
+        with _Generation6SelftestPatch(signal, "signal", injected_signal):
+            failure_message = _generation6_p_exact_cleanup_failure(
+                _reset_sigchld,
+                expected_message=expected_message,
+            )
+        variants.append([operation, failure_message])
+        recorder.call(
+            "signal_preflight",
+            operation,
+            token_id,
+            [int(signal.SIGCHLD)],
+            "RETURNED",
+            failure_message,
+        )
+        recorder.transition(token_id, "RUNNING", "rejection_validated", "TERMINAL")
+    return {"variants": variants, "signal_call_count": signal_call_count, "owner_count": 0}
+
+
+def _generation6_p29_case(recorder: _Generation6HazardRecorder) -> dict[str, object]:
+    _require(signal.getsignal(signal.SIGCHLD) is signal.SIG_DFL, "P29 SIGCHLD baseline differs")
+    variants: list[list[str]] = []
+    getsignal_call_count = 0
+    signal_call_count = 0
+    for operation, expected_message in (
+        ("sigchld_readback_raises", "SIGCHLD-readback-sentinel"),
+        ("sigchld_readback_wrong_handler", "SIGCHLD reset readback differs"),
+    ):
+        token_id = f"P29-{operation.upper()}"
+        recorder.register(token_id, "ALLOCATED")
+        recorder.transition(token_id, "ALLOCATED", "source_authenticated", "RUNNING")
+        variant_getsignal_calls = 0
+
+        def injected_getsignal(
+            signal_number: int,
+            operation: str = operation,
+        ) -> object:
+            nonlocal getsignal_call_count, variant_getsignal_calls
+            getsignal_call_count += 1
+            variant_getsignal_calls += 1
+            _require(signal_number == signal.SIGCHLD, "P29 SIGCHLD readback arguments differ")
+            if variant_getsignal_calls == 1:
+                return signal.SIG_DFL
+            if operation == "sigchld_readback_raises":
+                raise ContractError("SIGCHLD-readback-sentinel")
+            return signal.SIG_IGN
+
+        def injected_signal(signal_number: int, handler: object) -> object:
+            nonlocal signal_call_count
+            signal_call_count += 1
+            _require(
+                signal_number == signal.SIGCHLD and handler is signal.SIG_DFL,
+                "P29 SIGCHLD reset arguments differ",
+            )
+            return signal.SIG_DFL
+
+        with (
+            _Generation6SelftestPatch(signal, "getsignal", injected_getsignal),
+            _Generation6SelftestPatch(signal, "signal", injected_signal),
+        ):
+            failure_message = _generation6_p_exact_cleanup_failure(
+                _reset_sigchld,
+                expected_message=expected_message,
+            )
+        _require(variant_getsignal_calls == 2, "P29 readback call count differs")
+        variants.append([operation, failure_message])
+        recorder.call(
+            "signal_preflight",
+            operation,
+            token_id,
+            [int(signal.SIGCHLD)],
+            "RETURNED",
+            failure_message,
+        )
+        recorder.transition(token_id, "RUNNING", "rejection_validated", "TERMINAL")
+    return {
+        "variants": variants,
+        "getsignal_call_count": getsignal_call_count,
+        "signal_call_count": signal_call_count,
+        "owner_count": 0,
+    }
+
+
+_GENERATION6_SA_NOCLDWAIT: Final = 2
+
+
+class _Generation6SigSet(ctypes.Structure):
+    _fields_ = (("values", ctypes.c_ulong * 16),)
+
+
+class _Generation6SigAction(ctypes.Structure):
+    _fields_ = (
+        ("handler", ctypes.c_void_p),
+        ("mask", _Generation6SigSet),
+        ("flags", ctypes.c_int),
+        ("restorer", ctypes.c_void_p),
+    )
+
+
+def _generation6_sigaction(
+    libc: ctypes.CDLL,
+    replacement: _Generation6SigAction | None,
+) -> _Generation6SigAction:
+    _require(
+        sys.platform == "linux" and ctypes.sizeof(ctypes.c_void_p) == 8,
+        "Generation-6 sigaction ABI differs",
+    )
+    libc.sigaction.argtypes = (
+        ctypes.c_int,
+        ctypes.POINTER(_Generation6SigAction),
+        ctypes.POINTER(_Generation6SigAction),
+    )
+    libc.sigaction.restype = ctypes.c_int
+    previous = _Generation6SigAction()
+    replacement_pointer = None if replacement is None else ctypes.byref(replacement)
+    result = libc.sigaction(int(signal.SIGCHLD), replacement_pointer, ctypes.byref(previous))
+    if result != 0:
+        error_number = ctypes.get_errno()
+        raise ContractError("Generation-6 sigaction failed") from OSError(
+            error_number,
+            os.strerror(error_number),
+        )
+    return previous
+
+
+def _generation6_sigaction_copy(source: _Generation6SigAction) -> _Generation6SigAction:
+    duplicate = _Generation6SigAction()
+    ctypes.memmove(
+        ctypes.byref(duplicate),
+        ctypes.byref(source),
+        ctypes.sizeof(_Generation6SigAction),
+    )
+    return duplicate
+
+
+def _generation6_auto_reap_child() -> tuple[int, int]:
+    read_descriptor, write_descriptor = os.pipe2(os.O_CLOEXEC)
+    child_pid = os.fork()
+    if child_pid == 0:
+        try:
+            os.close(write_descriptor)
+            child_release = os.read(read_descriptor, 1)
+            os.close(read_descriptor)
+            _CAPTURED_RUNNER_OS_EXIT(0 if child_release == b"1" else 70)
+        except BaseException:
+            _CAPTURED_RUNNER_OS_EXIT(70)
+    os.close(read_descriptor)
+    pidfd = -1
+    release_written = False
+    try:
+        pidfd = os.pidfd_open(child_pid, 0)
+        _require(type(pidfd) is int and pidfd > 2, "auto-reap child pidfd differs")
+        written = os.write(write_descriptor, b"1")
+        _require(written == 1, "auto-reap child release differs")
+        release_written = True
+        os.close(write_descriptor)
+        write_descriptor = -1
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(pidfd, selectors.EVENT_READ)
+            ready = selector.select(5.0)
+            _require(
+                len(ready) == 1 and ready[0][0].fd == pidfd,
+                "auto-reap child terminal readiness differs",
+            )
+        finally:
+            selector.close()
+        deadline = _checked_clock() + 5_000_000_000
+        prior = _checked_clock()
+        proc_path = f"/proc/{child_pid}"
+        while os.path.exists(proc_path):
+            now = _checked_clock(prior)
+            _require(now < deadline, "auto-reap child remained in the process table")
+            prior = now
+            time.sleep(0.005)
+        return child_pid, pidfd
+    except BaseException:
+        if write_descriptor >= 0:
+            try:
+                if not release_written:
+                    os.write(write_descriptor, b"1")
+            finally:
+                os.close(write_descriptor)
+        with suppress(ProcessLookupError):
+            os.kill(child_pid, signal.SIGKILL)
+        with suppress(ChildProcessError):
+            os.waitid(os.P_PID, child_pid, os.WEXITED)
+        if pidfd >= 0:
+            os.close(pidfd)
+        raise
+
+
+def _generation6_p30_case(recorder: _Generation6HazardRecorder) -> dict[str, object]:
+    token_id = "P30-ACTUAL-SA-NOCLDWAIT"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "source_authenticated", "RUNNING")
+    _require(signal.getsignal(signal.SIGCHLD) is signal.SIG_DFL, "P30 SIGCHLD baseline differs")
+    libc = ctypes.CDLL(None, use_errno=True)
+    original = _generation6_sigaction(libc, None)
+    injected = _generation6_sigaction_copy(original)
+    injected.flags |= _GENERATION6_SA_NOCLDWAIT
+    child_pid = 0
+    pidfd = -1
+    failure_errno = 0
+    before_flags = 0
+    try:
+        _generation6_sigaction(libc, injected)
+        before_flags = _generation6_sigaction(libc, None).flags
+        _require(
+            before_flags & _GENERATION6_SA_NOCLDWAIT
+            and signal.getsignal(signal.SIGCHLD) is signal.SIG_DFL,
+            "P30 SA_NOCLDWAIT installation differs",
+        )
+        child_pid, pidfd = _generation6_auto_reap_child()
+        try:
+            os.waitid(os.P_PID, child_pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        except ChildProcessError as error:
+            failure_errno = cast(int, error.errno)
+        _require(failure_errno == errno.ECHILD, "P30 auto-reap did not produce ECHILD")
+    finally:
+        if pidfd >= 0:
+            os.close(pidfd)
+        _generation6_sigaction(libc, original)
+    after_flags = _generation6_sigaction(libc, None).flags
+    _require(
+        signal.getsignal(signal.SIGCHLD) is signal.SIG_DFL
+        and not after_flags & _GENERATION6_SA_NOCLDWAIT,
+        "P30 SIGCHLD restoration differs",
+    )
+    recorder.call(
+        "sigaction_wait_owner",
+        "actual_unreset_auto_reap",
+        token_id,
+        [child_pid, before_flags],
+        "RETURNED",
+        failure_errno,
+    )
+    recorder.transition(token_id, "RUNNING", "lifecycle_validated", "TERMINAL")
+    return {
+        "child_pid": child_pid,
+        "sa_nocldwait_installed": bool(before_flags & _GENERATION6_SA_NOCLDWAIT),
+        "wait_errno": failure_errno,
+        "sigchld_restored": not bool(after_flags & _GENERATION6_SA_NOCLDWAIT),
+    }
+
+
+def _generation6_p31_case(recorder: _Generation6HazardRecorder) -> dict[str, object]:
+    token_id = "P31-EXACT-SIGCHLD-RESET"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "source_authenticated", "RUNNING")
+    _require(signal.getsignal(signal.SIGCHLD) is signal.SIG_DFL, "P31 SIGCHLD baseline differs")
+    libc = ctypes.CDLL(None, use_errno=True)
+    original = _generation6_sigaction(libc, None)
+    injected = _generation6_sigaction_copy(original)
+    injected.flags |= _GENERATION6_SA_NOCLDWAIT
+    child_pid: int | None = None
+    observed: os.waitid_result | None = None
+    consumed: os.waitid_result | None = None
+    reset_flags = -1
+    try:
+        _generation6_sigaction(libc, injected)
+        _require(
+            _generation6_sigaction(libc, None).flags & _GENERATION6_SA_NOCLDWAIT,
+            "P31 SA_NOCLDWAIT installation differs",
+        )
+        _reset_sigchld()
+        reset_flags = _generation6_sigaction(libc, None).flags
+        _require(
+            not reset_flags & _GENERATION6_SA_NOCLDWAIT,
+            "P31 reset retained SA_NOCLDWAIT",
+        )
+        child_pid = os.fork()
+        if child_pid == 0:
+            _CAPTURED_RUNNER_OS_EXIT(0)
+        observed = os.waitid(os.P_PID, child_pid, os.WEXITED | os.WNOWAIT)
+        consumed = os.waitid(os.P_PID, child_pid, os.WEXITED)
+        child_pid = None
+    finally:
+        if child_pid is not None:
+            with suppress(ProcessLookupError):
+                os.kill(child_pid, signal.SIGKILL)
+            with suppress(ChildProcessError):
+                os.waitid(os.P_PID, child_pid, os.WEXITED)
+        _generation6_sigaction(libc, original)
+    _require(observed is not None and consumed is not None, "P31 wait ownership result is absent")
+    exact_observed = cast(os.waitid_result, observed)
+    exact_consumed = cast(os.waitid_result, consumed)
+    observed_projection = _generation6_p_wait_projection(exact_observed)
+    consumed_projection = _generation6_p_wait_projection(exact_consumed)
+    _require(
+        observed_projection == consumed_projection
+        and exact_observed.si_code == os.CLD_EXITED
+        and exact_observed.si_status == 0
+        and signal.getsignal(signal.SIGCHLD) is signal.SIG_DFL,
+        "P31 WNOWAIT/consume ownership differs",
+    )
+    recorder.call(
+        "sigaction_wait_owner",
+        "exact_reset_wait_ownership",
+        token_id,
+        [reset_flags],
+        "RETURNED",
+        [observed_projection, consumed_projection],
+    )
+    recorder.transition(token_id, "RUNNING", "lifecycle_validated", "TERMINAL")
+    return {
+        "sa_nocldwait_cleared": not bool(reset_flags & _GENERATION6_SA_NOCLDWAIT),
+        "wnowait": observed_projection,
+        "consume": consumed_projection,
+        "same_terminal_identity": observed_projection == consumed_projection,
+    }
+
+
+def _generation6_p32_case(recorder: _Generation6HazardRecorder) -> dict[str, object]:
+    token_id = "P32-PERSISTENT-AUTO-REAP"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "source_authenticated", "RUNNING")
+    _require(signal.getsignal(signal.SIGCHLD) is signal.SIG_DFL, "P32 SIGCHLD baseline differs")
+    libc = ctypes.CDLL(None, use_errno=True)
+    original = _generation6_sigaction(libc, None)
+    injected = _generation6_sigaction_copy(original)
+    injected.flags |= _GENERATION6_SA_NOCLDWAIT
+    child_pid = 0
+    pidfd = -1
+    wait_history: list[list[object]] = []
+    forbidden_actions: list[str] = []
+    private_root = cast(PrivateRoot, SimpleNamespace(_process_tree_uncertain=False))
+    failure_message = ""
+    captured_waitid = os.waitid
+
+    def observed_waitid(id_type: int, identity: int, options: int) -> os.waitid_result | None:
+        try:
+            result = captured_waitid(id_type, identity, options)
+        except ChildProcessError as error:
+            wait_history.append([id_type, identity, options, cast(int, error.errno)])
+            raise
+        wait_history.append([id_type, identity, options, _generation6_p_wait_projection(result)])
+        return result
+
+    def forbid(name: str) -> Callable[..., object]:
+        def forbidden(*args: object, **kwargs: object) -> object:
+            del args, kwargs
+            forbidden_actions.append(name)
+            raise ContractError("P32 post-ECHILD action is forbidden")
+
+        return forbidden
+
+    try:
+        _generation6_sigaction(libc, injected)
+        _reset_sigchld()
+        _generation6_sigaction(libc, injected)
+        _require(
+            signal.getsignal(signal.SIGCHLD) is signal.SIG_DFL
+            and _generation6_sigaction(libc, None).flags & _GENERATION6_SA_NOCLDWAIT,
+            "P32 persistent auto-reap setup differs",
+        )
+        child_pid, pidfd = _generation6_auto_reap_child()
+        process = _NoImplicitWaitPopen.__new__(_NoImplicitWaitPopen)
+        process.pid = child_pid
+        process._child_created = False
+        process._task064_owner_slot = [process]
+        module = _generation6_module()
+        with (
+            _Generation6SelftestPatch(os, "waitid", observed_waitid),
+            _Generation6SelftestPatch(module, "_open_pidfd", forbid("pidfd_open")),
+            _Generation6SelftestPatch(module, "_read_proc_identity", forbid("proc_identity")),
+            _Generation6SelftestPatch(module, "_send_pidfd_signal", forbid("pidfd_signal")),
+            _Generation6SelftestPatch(os, "kill", forbid("kill")),
+            _Generation6SelftestPatch(os, "killpg", forbid("killpg")),
+        ):
+            failure_message = _generation6_p_exact_cleanup_failure(
+                lambda: _cleanup_provisional_child(
+                    process,
+                    private_root=private_root,
+                    other_descriptors=(pidfd,),
+                    poisoned_descriptors=set(),
+                ),
+                expected_message="partial Popen child was already consumed",
+            )
+    finally:
+        if pidfd >= 0:
+            os.close(pidfd)
+        _generation6_sigaction(libc, original)
+    _require(
+        wait_history
+        == [
+            [
+                os.P_PID,
+                child_pid,
+                os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                errno.ECHILD,
+            ]
+        ]
+        and forbidden_actions == []
+        and private_root._process_tree_uncertain,
+        "P32 fail-only ECHILD quarantine differs",
+    )
+    recorder.call(
+        "process_cleanup",
+        "persistent_auto_reap_fail_only",
+        token_id,
+        [child_pid],
+        "RETURNED",
+        failure_message,
+    )
+    recorder.transition(token_id, "RUNNING", "rejection_validated", "TERMINAL")
+    return {
+        "child_pid": child_pid,
+        "wait_history": wait_history,
+        "forbidden_actions": forbidden_actions,
+        "process_tree_uncertain": private_root._process_tree_uncertain,
+        "failure_message": failure_message,
+    }
+
+
+def _generation6_p33_case(
+    root: Path,
+    recorder: _Generation6HazardRecorder,
+) -> dict[str, object]:
+    child_token = "P33-PARTIAL-CHILD"
+    private_root, command_files, supervisor = _generation6_p_inner_supervisor()
+    child_pid = _generation6_p_spawn_child(recorder, token_id=child_token, live=True)
+    constructor_state: list[object] = []
+    wait_history: list[list[object]] = []
+    captured_waitid = os.waitid
+
+    def interrupted_initializer(
+        target: subprocess.Popen[bytes],
+        arguments: object,
+        **kwargs: object,
+    ) -> None:
+        del arguments, kwargs
+        process = cast(_NoImplicitWaitPopen, target)
+        process.pid = child_pid
+        process._child_created = False
+        constructor_state.extend([process.pid, process._child_created])
+        raise KeyboardInterrupt("P33 pre-child-created interruption")
+
+    def observed_waitid(id_type: int, identity: int, options: int) -> os.waitid_result | None:
+        result = captured_waitid(id_type, identity, options)
+        wait_history.append([id_type, identity, options, _generation6_p_wait_projection(result)])
+        return result
+
+    failure_message = ""
+    cause_type = ""
+    cause_message = ""
+    with (
+        _Generation6SelftestPatch(
+            _generation6_module(),
+            "_CAPTURED_POPEN_INIT",
+            interrupted_initializer,
+        ),
+        _Generation6SelftestPatch(os, "waitid", observed_waitid),
+    ):
+        try:
+            supervisor.run(
+                [sys.executable, "-c", "pass"],
+                cwd=root,
+                timeout_ns=20_000_000_000,
+                label="p33-pre-child-created",
+            )
+        except ContractError as error:
+            failure_message = str(error)
+            cause = error.__cause__
+            cause_type = type(cause).__name__
+            cause_message = str(cause)
+    slot_owner = supervisor.owner_slots[0][0]
+    consume_count = sum(int(entry[2] == os.WEXITED) for entry in wait_history)
+    _require(
+        failure_message == "Popen/adoption boundary failed closed"
+        and cause_type == "KeyboardInterrupt"
+        and cause_message == "P33 pre-child-created interruption"
+        and constructor_state == [child_pid, False]
+        and slot_owner is not None
+        and slot_owner.pid == child_pid
+        and slot_owner._child_created is False
+        and consume_count == 1
+        and not private_root._process_tree_uncertain,
+        "P33 interruption ownership facts differ",
+    )
+    recorder.call(
+        "popen_constructor",
+        "postfork_pre_child_created_interrupt",
+        child_token,
+        [child_pid, False],
+        "RETURNED",
+        failure_message,
+    )
+    recorder.call(
+        "process_cleanup",
+        "partial_interrupt_cleanup",
+        child_token,
+        [child_pid, consume_count],
+        "RETURNED",
+        "CONSUMED",
+    )
+    cleanup = private_root.cleanup()
+    _require(cleanup.status == "PASS" and cleanup.residue_count == 0, "P33 root cleanup differs")
+    command_files.close_without_publication()
+    recorder.transition(child_token, "RUNNING", "cleanup_completed", "TERMINAL")
+    return {
+        "child_pid": child_pid,
+        "constructor_state": constructor_state,
+        "slot_owned": slot_owner is supervisor.owner_slots[0][0],
+        "cause_type": cause_type,
+        "cause_message": cause_message,
+        "consume_count": consume_count,
+        "failure_message": failure_message,
+    }
+
+
+def _generation6_p34_case(
+    root: Path,
+    recorder: _Generation6HazardRecorder,
+) -> dict[str, object]:
+    token_id = "P34-PENDING-SIGINT"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "constructor_started", "RUNNING")
+    private_root, command_files, supervisor = _generation6_p_inner_supervisor()
+    captured_initializer = _NoImplicitWaitPopen.__init__
+    captured_waitid = os.waitid
+    latch_states: list[bool] = []
+    wait_history: list[list[object]] = []
+
+    def pending_initializer(
+        process: _NoImplicitWaitPopen,
+        owner_slot: list[_NoImplicitWaitPopen | None],
+        latch: _SignalLatch,
+        stored_sigint_handler: Callable[[int, FrameType | None], None],
+        arguments: list[str],
+        *,
+        stdin: int,
+        stdout: int,
+        stderr: int,
+        pass_fds: tuple[int, ...],
+        cwd: Path,
+        env: dict[str, str],
+    ) -> None:
+        captured_initializer(
+            process,
+            owner_slot,
+            latch,
+            stored_sigint_handler,
+            arguments,
+            stdin=stdin,
+            stdout=stdout,
+            stderr=stderr,
+            pass_fds=pass_fds,
+            cwd=cwd,
+            env=env,
+        )
+        stored_sigint_handler(int(signal.SIGINT), None)
+        latch_states.append(latch.pending)
+
+    def observed_waitid(id_type: int, identity: int, options: int) -> os.waitid_result | None:
+        result = captured_waitid(id_type, identity, options)
+        wait_history.append([id_type, identity, options, _generation6_p_wait_projection(result)])
+        return result
+
+    failure_message = ""
+    cause_message = ""
+    with (
+        _Generation6SelftestPatch(_NoImplicitWaitPopen, "__init__", pending_initializer),
+        _Generation6SelftestPatch(os, "waitid", observed_waitid),
+    ):
+        try:
+            supervisor.run(
+                [sys.executable, "-c", "import time; time.sleep(10)"],
+                cwd=root,
+                timeout_ns=20_000_000_000,
+                label="p34-pending-sigint",
+            )
+        except ContractError as error:
+            failure_message = str(error)
+            cause_message = str(error.__cause__)
+    slot_owner = supervisor.owner_slots[0][0]
+    consume_count = sum(int(entry[2] == os.WEXITED) for entry in wait_history)
+    _require(
+        failure_message == "Popen/adoption boundary failed closed"
+        and cause_message == "SIGINT arrived during child construction"
+        and latch_states == [True]
+        and slot_owner is not None
+        and type(slot_owner.pid) is int
+        and slot_owner.pid > 0
+        and consume_count == 1
+        and not private_root._process_tree_uncertain,
+        "P34 pending SIGINT ownership facts differ",
+    )
+    exact_slot_owner = cast(_NoImplicitWaitPopen, slot_owner)
+    recorder.call(
+        "signal_latch",
+        "pending_sigint_latch",
+        token_id,
+        [exact_slot_owner.pid],
+        "RETURNED",
+        failure_message,
+    )
+    recorder.call(
+        "process_cleanup",
+        "pending_sigint_owned_cleanup",
+        token_id,
+        [exact_slot_owner.pid, consume_count],
+        "RETURNED",
+        "CONSUMED",
+    )
+    cleanup = private_root.cleanup()
+    _require(cleanup.status == "PASS" and cleanup.residue_count == 0, "P34 root cleanup differs")
+    command_files.close_without_publication()
+    recorder.transition(token_id, "RUNNING", "rejection_validated", "TERMINAL")
+    return {
+        "child_pid": exact_slot_owner.pid,
+        "latch_states": latch_states,
+        "slot_owned": slot_owner is supervisor.owner_slots[0][0],
+        "cause_message": cause_message,
+        "consume_count": consume_count,
+        "failure_message": failure_message,
+    }
+
+
+def _generation6_p35_case(
+    root: Path,
+    recorder: _Generation6HazardRecorder,
+) -> dict[str, object]:
+    token_id = "P35-EXEC-ERROR-ECHILD"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "constructor_started", "RUNNING")
+    private_root, _command_files, supervisor = _generation6_p_inner_supervisor()
+    missing = root / "task064-generation6-definitely-missing-executable"
+    _require(not missing.exists(), "P35 missing executable unexpectedly exists")
+    captured_waitid = os.waitid
+    wait_history: list[list[object]] = []
+    forbidden_actions: list[str] = []
+
+    def observed_waitid(id_type: int, identity: int, options: int) -> os.waitid_result | None:
+        try:
+            result = captured_waitid(id_type, identity, options)
+        except ChildProcessError as error:
+            wait_history.append([id_type, identity, options, cast(int, error.errno)])
+            raise
+        wait_history.append([id_type, identity, options, _generation6_p_wait_projection(result)])
+        return result
+
+    def forbid(name: str) -> Callable[..., object]:
+        def forbidden(*args: object, **kwargs: object) -> object:
+            del args, kwargs
+            forbidden_actions.append(name)
+            raise ContractError("P35 post-ECHILD action is forbidden")
+
+        return forbidden
+
+    failure_message = ""
+    cause_type = ""
+    cleanup_note_present = False
+    module = _generation6_module()
+    with (
+        _Generation6SelftestPatch(os, "waitid", observed_waitid),
+        _Generation6SelftestPatch(module, "_open_pidfd", forbid("pidfd_open")),
+        _Generation6SelftestPatch(module, "_read_proc_identity", forbid("proc_identity")),
+        _Generation6SelftestPatch(module, "_send_pidfd_signal", forbid("pidfd_signal")),
+        _Generation6SelftestPatch(os, "kill", forbid("kill")),
+        _Generation6SelftestPatch(os, "killpg", forbid("killpg")),
+    ):
+        try:
+            supervisor.run(
+                [os.fspath(missing)],
+                cwd=root,
+                timeout_ns=20_000_000_000,
+                label="p35-exec-error",
+            )
+        except ContractError as error:
+            failure_message = str(error)
+            cause_type = type(error.__cause__).__name__
+            cleanup_note_present = any(
+                "partial Popen child was already consumed" in note
+                for note in getattr(error.__cause__, "__notes__", ())
+            )
+    slot_owner = supervisor.owner_slots[0][0]
+    _require(
+        failure_message == "Popen/adoption boundary failed closed"
+        and cause_type == "FileNotFoundError"
+        and cleanup_note_present
+        and slot_owner is not None
+        and type(slot_owner.pid) is int
+        and slot_owner.pid > 0
+        and wait_history
+        == [
+            [
+                os.P_PID,
+                slot_owner.pid,
+                os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                errno.ECHILD,
+            ]
+        ]
+        and forbidden_actions == []
+        and private_root._process_tree_uncertain,
+        "P35 exec-error ECHILD quarantine differs",
+    )
+    exact_slot_owner = cast(_NoImplicitWaitPopen, slot_owner)
+    recorder.call(
+        "popen_exec_error",
+        "exec_error_already_reaped",
+        token_id,
+        [exact_slot_owner.pid],
+        "RETURNED",
+        failure_message,
+    )
+    recorder.transition(token_id, "RUNNING", "rejection_validated", "TERMINAL")
+    return {
+        "child_pid": exact_slot_owner.pid,
+        "slot_owned": slot_owner is supervisor.owner_slots[0][0],
+        "child_created": exact_slot_owner._child_created,
+        "cause_type": cause_type,
+        "cleanup_note_present": cleanup_note_present,
+        "wait_history": wait_history,
+        "forbidden_actions": forbidden_actions,
+        "process_tree_uncertain": private_root._process_tree_uncertain,
+        "failure_message": failure_message,
+    }
+
+
+def _generation6_p36_case(recorder: _Generation6HazardRecorder) -> dict[str, object]:
+    token_id = "P36-ECHILD"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "source_authenticated", "RUNNING")
+    wait_history: list[list[object]] = []
+    post_echild_actions: list[str] = []
+
+    def echild_waitid(id_type: int, identity: int, options: int) -> os.waitid_result | None:
+        wait_history.append([id_type, identity, options, "ChildProcessError:ECHILD"])
+        raise ChildProcessError(errno.ECHILD, "no child")
+
+    def forbid(name: str) -> Callable[..., object]:
+        def forbidden(*args: object, **kwargs: object) -> object:
+            del args, kwargs
+            post_echild_actions.append(name)
+            raise ContractError("post-ECHILD process operation is forbidden")
+
+        return forbidden
+
+    process = cast(
+        _NoImplicitWaitPopen,
+        SimpleNamespace(pid=2_147_483_647, _child_created=True, returncode=None),
+    )
+    private_root = cast(
+        PrivateRoot,
+        SimpleNamespace(_process_tree_uncertain=False),
+    )
+    with (
+        _Generation6SelftestPatch(os, "waitid", echild_waitid),
+        _Generation6SelftestPatch(os, "pidfd_open", forbid("pidfd_open")),
+        _Generation6SelftestPatch(
+            _generation6_module(),
+            "_read_proc_identity",
+            forbid("read_proc_identity"),
+        ),
+        _Generation6SelftestPatch(
+            _generation6_module(),
+            "_PIDFD_SEND_SIGNAL",
+            forbid("pidfd_send_signal"),
+        ),
+        _Generation6SelftestPatch(os, "kill", forbid("kill")),
+        _Generation6SelftestPatch(os, "killpg", forbid("killpg")),
+    ):
+        failure_message = _generation6_p_exact_cleanup_failure(
+            lambda: _cleanup_provisional_child(
+                process,
+                private_root=private_root,
+                other_descriptors=(),
+                poisoned_descriptors=set(),
+            ),
+            expected_message="partial Popen child was already consumed",
+        )
+    _require(
+        wait_history
+        == [
+            [
+                os.P_PID,
+                2_147_483_647,
+                os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                "ChildProcessError:ECHILD",
+            ]
+        ]
+        and not post_echild_actions,
+        "exact ECHILD terminal ownership differs",
+    )
+    recorder.call(
+        "process_cleanup",
+        "echild_terminal_probe",
+        token_id,
+        [2_147_483_647],
+        "RETURNED",
+        failure_message,
+    )
+    recorder.transition(token_id, "RUNNING", "rejection_validated", "TERMINAL")
+    return {
+        "wait_history": wait_history,
+        "pidfd_open_count": 0,
+        "proc_lookup_count": 0,
+        "pidfd_signal_count": 0,
+        "numeric_pid_signal_count": 0,
+        "numeric_group_signal_count": 0,
+        "post_echild_actions": post_echild_actions,
+        "failure_message": failure_message,
+    }
+
+
+def _generation6_p_no_child_case(
+    case_id: str,
+    recorder: _Generation6HazardRecorder,
+) -> dict[str, object]:
+    token_id = f"{case_id}-NO-CHILD"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "source_authenticated", "RUNNING")
+    process = cast(
+        _NoImplicitWaitPopen,
+        SimpleNamespace(
+            pid=_PID_SENTINEL,
+            _child_created=False,
+            returncode=0 if case_id == "P40" else None,
+        ),
+    )
+    slot: list[_NoImplicitWaitPopen | None] = [process]
+    private_root = cast(PrivateRoot, SimpleNamespace(_process_tree_uncertain=False))
+    action_history: list[str] = []
+
+    def forbid(name: str) -> Callable[..., object]:
+        def forbidden(*args: object, **kwargs: object) -> object:
+            del args, kwargs
+            action_history.append(name)
+            raise ContractError("no-child process action is forbidden")
+
+        return forbidden
+
+    with (
+        _Generation6SelftestPatch(os, "waitid", forbid("waitid")),
+        _Generation6SelftestPatch(os, "pidfd_open", forbid("pidfd_open")),
+        _Generation6SelftestPatch(
+            _generation6_module(),
+            "_read_proc_identity",
+            forbid("read_proc_identity"),
+        ),
+        _Generation6SelftestPatch(os, "kill", forbid("kill")),
+        _Generation6SelftestPatch(os, "killpg", forbid("killpg")),
+    ):
+        failure_message = _generation6_p_exact_cleanup_failure(
+            lambda: _cleanup_provisional_child(
+                process,
+                private_root=private_root,
+                other_descriptors=(),
+                poisoned_descriptors=set(),
+            ),
+            expected_message="partial Popen contains no provable child",
+        )
+    _require(slot == [process] and not action_history, "no-child quarantine ownership differs")
+    operation = "stored_returncode_untrusted" if case_id == "P40" else "no_child_quarantine"
+    recorder.call(
+        "process_cleanup",
+        operation,
+        token_id,
+        [case_id],
+        "RETURNED",
+        failure_message,
+    )
+    recorder.transition(token_id, "RUNNING", "rejection_validated", "TERMINAL")
+    if case_id == "P40":
+        return {
+            "returncode": 0,
+            "slot_retained": slot[0] is process,
+            "pid_or_wait_action_count": len(action_history),
+            "failure_message": failure_message,
+        }
+    return {
+        "sentinel_pid": process.pid is _PID_SENTINEL,
+        "child_created": process._child_created,
+        "slot_retained": slot[0] is process,
+        "pid_or_wait_action_count": len(action_history),
+        "failure_message": failure_message,
+    }
+
+
+def _generation6_p_inner_supervisor() -> tuple[PrivateRoot, CommandFiles, ProcessSupervisor]:
+    private_root = PrivateRoot()
+    command_files = CommandFiles.__new__(CommandFiles)
+    command_files.enabled = False
+    command_files._files = {}
+    command_files._published = False
+    command_files._poisoned_descriptors = private_root._poisoned_descriptors
+    return private_root, command_files, ProcessSupervisor(private_root, command_files)
+
+
+def _generation6_p42_case(
+    root: Path,
+    recorder: _Generation6HazardRecorder,
+) -> dict[str, object]:
+    token_id = "P42-RETURNED-CHILD"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "constructor_started", "RUNNING")
+    private_root, command_files, supervisor = _generation6_p_inner_supervisor()
+    captured_wrapper = _NoImplicitWaitPopen
+    captured_cleanup = _cleanup_provisional_child
+    returned_processes: list[_NoImplicitWaitPopen] = []
+    constructor_slot_owned: list[bool] = []
+    cleanup_targets: list[_NoImplicitWaitPopen] = []
+    alien = cast(
+        _NoImplicitWaitPopen,
+        SimpleNamespace(pid=_PID_SENTINEL, _child_created=False, returncode=None),
+    )
+
+    def replacing_factory(
+        owner_slot: list[_NoImplicitWaitPopen | None],
+        latch: _SignalLatch,
+        stored_sigint_handler: Callable[[int, FrameType | None], None],
+        arguments: list[str],
+        *,
+        stdin: int,
+        stdout: int,
+        stderr: int,
+        pass_fds: tuple[int, ...],
+        cwd: Path,
+        env: dict[str, str],
+    ) -> _NoImplicitWaitPopen:
+        process = captured_wrapper(
+            owner_slot,
+            latch,
+            stored_sigint_handler,
+            arguments,
+            stdin=stdin,
+            stdout=stdout,
+            stderr=stderr,
+            pass_fds=pass_fds,
+            cwd=cwd,
+            env=env,
+        )
+        returned_processes.append(process)
+        constructor_slot_owned.append(owner_slot[0] is process)
+        owner_slot[0] = alien
+        _require(owner_slot[0] is alien, "P42 slot replacement injection differs")
+        return process
+
+    def observed_cleanup(
+        process: _NoImplicitWaitPopen,
+        *,
+        private_root: PrivateRoot,
+        other_descriptors: Iterable[int],
+        poisoned_descriptors: set[int],
+    ) -> None:
+        cleanup_targets.append(process)
+        captured_cleanup(
+            process,
+            private_root=private_root,
+            other_descriptors=other_descriptors,
+            poisoned_descriptors=poisoned_descriptors,
+        )
+
+    child_root = private_root.create_child("p42-replacement")
+    failure_message: str | None = None
+    primary: BaseException | None = None
+    try:
+        with (
+            _Generation6SelftestPatch(
+                _generation6_module(),
+                "_NoImplicitWaitPopen",
+                replacing_factory,
+            ),
+            _Generation6SelftestPatch(
+                _generation6_module(),
+                "_cleanup_provisional_child",
+                observed_cleanup,
+            ),
+        ):
+            failure_message = _generation6_p_exact_cleanup_failure(
+                lambda: supervisor.run(
+                    [sys.executable, "-c", "import time; time.sleep(10)"],
+                    cwd=root,
+                    timeout_ns=20_000_000_000,
+                    label="p42-replacement",
+                    child_root=child_root,
+                ),
+                expected_message="Popen/adoption boundary failed closed",
+            )
+        _require(
+            len(returned_processes) == 1
+            and constructor_slot_owned == [True]
+            and cleanup_targets == returned_processes
+            and supervisor.owner_slots[0][0] is returned_processes[0]
+            and type(returned_processes[0].pid) is int
+            and returned_processes[0].pid > 0,
+            "P42 returned-child ownership differs",
+        )
+        cleanup = private_root.cleanup()
+        _require(
+            cleanup.status == "PASS" and cleanup.residue_count == 0, "P42 root cleanup differs"
+        )
+        command_files.close_without_publication()
+        recorder.call(
+            "process_owner_slot",
+            "post_return_slot_replacement",
+            token_id,
+            [returned_processes[0].pid],
+            "RETURNED",
+            failure_message,
+        )
+        recorder.transition(token_id, "RUNNING", "cleanup_completed", "TERMINAL")
+    except BaseException as error:
+        primary = error
+    if primary is not None:
+        try:
+            _close_failure_resources(private_root, command_files)
+        except BaseException as cleanup_error:
+            primary.add_note(f"P42 failure cleanup failed: {cleanup_error!r}")
+        raise primary
+    _require(failure_message is not None, "P42 failure message is absent")
+    return {
+        "constructor_slot_owned": constructor_slot_owned == [True],
+        "replacement_injected": True,
+        "cleanup_target_is_returned": cleanup_targets == returned_processes,
+        "final_slot_restored": supervisor.owner_slots[0][0] is returned_processes[0],
+        "cleanup_call_count": len(cleanup_targets),
+        "returned_pid": returned_processes[0].pid,
+        "failure_message": failure_message,
+    }
+
+
+def _generation6_p43_case(
+    root: Path,
+    recorder: _Generation6HazardRecorder,
+) -> dict[str, object]:
+    token_id = "P43-STRONG-SLOTS"
+    recorder.register(token_id, "ALLOCATED")
+    private_root, command_files, supervisor = _generation6_p_inner_supervisor()
+    first = supervisor.run(
+        [sys.executable, "-c", "import os; os.write(1,b'first')"],
+        cwd=root,
+        timeout_ns=20_000_000_000,
+        label="p43-first",
+    )
+    first_owner = supervisor.owner_slots[0][0]
+    _require(first_owner is not None and first_owner.pid == first.pid, "P43 first slot differs")
+    recorder.call(
+        "process_owner_slot",
+        "first_child",
+        token_id,
+        [first.pid],
+        "RETURNED",
+        first.exit_code,
+    )
+    recorder.transition(token_id, "ALLOCATED", "constructor_returned", "RUNNING")
+    base_destructor_calls: list[int] = []
+    internal_poll_calls: list[int] = []
+    implicit_waitpid_calls: list[list[int]] = []
+    raw_active = subprocess.__dict__.get("_active")
+    _require(type(raw_active) is list, "P43 subprocess active registry differs")
+    active_registry = cast(list[object], raw_active)
+    captured_active_identity = tuple(id(process) for process in active_registry)
+    active_after: tuple[int, ...] = ()
+
+    def forbidden_base_destructor(process: subprocess.Popen[bytes]) -> None:
+        base_destructor_calls.append(id(process))
+
+    def forbidden_internal_poll(
+        process: subprocess.Popen[bytes],
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        del args, kwargs
+        internal_poll_calls.append(id(process))
+        raise ContractError("P43 implicit internal poll is forbidden")
+
+    def forbidden_waitpid(process_id: int, options: int) -> tuple[int, int]:
+        implicit_waitpid_calls.append([process_id, options])
+        raise ContractError("P43 implicit waitpid is forbidden")
+
+    with (
+        _Generation6SelftestPatch(
+            subprocess.Popen,
+            "__del__",
+            forbidden_base_destructor,
+        ),
+        _Generation6SelftestPatch(
+            subprocess.Popen,
+            "_internal_poll",
+            forbidden_internal_poll,
+        ),
+        _Generation6SelftestPatch(os, "waitpid", forbidden_waitpid),
+    ):
+        collected = gc.collect()
+        _require(type(collected) is int and collected >= 0, "P43 GC result differs")
+        recorder.call(
+            "gc",
+            "forced_gc",
+            token_id,
+            [],
+            "RETURNED",
+            collected,
+        )
+        second = supervisor.run(
+            [sys.executable, "-c", "import os; os.write(1,b'second')"],
+            cwd=root,
+            timeout_ns=20_000_000_000,
+            label="p43-second",
+        )
+        recorder.call(
+            "popen",
+            "later_popen",
+            token_id,
+            [second.pid],
+            "RETURNED",
+            second.exit_code,
+        )
+        active_after = tuple(id(process) for process in active_registry)
+        recorder.call(
+            "subprocess",
+            "subprocess_active",
+            token_id,
+            [len(captured_active_identity), len(active_after)],
+            "RETURNED",
+            active_after == captured_active_identity,
+        )
+    second_owner = supervisor.owner_slots[1][0]
+    _require(
+        first.exit_code == 0
+        and second.exit_code == 0
+        and first.stdout == b"first"
+        and second.stdout == b"second"
+        and first.stderr == b""
+        and second.stderr == b""
+        and supervisor.owner_slots[0][0] is first_owner
+        and second_owner is not None
+        and second_owner.pid == second.pid
+        and not base_destructor_calls
+        and not internal_poll_calls
+        and not implicit_waitpid_calls
+        and active_after == captured_active_identity,
+        "P43 strong-slot lifecycle differs",
+    )
+    cleanup = private_root.cleanup()
+    _require(cleanup.status == "PASS" and cleanup.residue_count == 0, "P43 root cleanup differs")
+    command_files.close_without_publication()
+    recorder.transition(token_id, "RUNNING", "lifecycle_validated", "TERMINAL")
+    return {
+        "first_slot_owned": supervisor.owner_slots[0][0] is first_owner,
+        "second_slot_owned": supervisor.owner_slots[1][0] is second_owner,
+        "base_destructor_calls": base_destructor_calls,
+        "internal_poll_calls": internal_poll_calls,
+        "implicit_waitpid_calls": implicit_waitpid_calls,
+        "active_identity_unchanged": active_after == captured_active_identity,
+        "first_stdout": first.stdout.decode("ascii"),
+        "second_stdout": second.stdout.decode("ascii"),
+    }
+
+
+def _generation6_p44_case(
+    root: Path,
+    recorder: _Generation6HazardRecorder,
+) -> dict[str, object]:
+    token_id = "P44-FORBIDDEN-METHODS"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "instrumentation_installed", "RUNNING")
+    private_root, command_files, supervisor = _generation6_p_inner_supervisor()
+    instrumented_names = (
+        "poll",
+        "wait",
+        "waitpid",
+        "communicate",
+        "send_signal",
+        "terminate",
+        "kill",
+        "_internal_poll",
+    )
+    call_counts = {name: 0 for name in instrumented_names}
+
+    def forbid_method(name: str) -> Callable[..., object]:
+        def forbidden(*args: object, **kwargs: object) -> object:
+            del args, kwargs
+            call_counts[name] += 1
+            raise ContractError(f"forbidden Popen {name} call")
+
+        return forbidden
+
+    with (
+        _Generation6SelftestPatch(subprocess.Popen, "poll", forbid_method("poll")),
+        _Generation6SelftestPatch(subprocess.Popen, "wait", forbid_method("wait")),
+        _Generation6SelftestPatch(os, "waitpid", forbid_method("waitpid")),
+        _Generation6SelftestPatch(
+            subprocess.Popen,
+            "communicate",
+            forbid_method("communicate"),
+        ),
+        _Generation6SelftestPatch(
+            subprocess.Popen,
+            "send_signal",
+            forbid_method("send_signal"),
+        ),
+        _Generation6SelftestPatch(
+            subprocess.Popen,
+            "terminate",
+            forbid_method("terminate"),
+        ),
+        _Generation6SelftestPatch(subprocess.Popen, "kill", forbid_method("kill")),
+        _Generation6SelftestPatch(
+            subprocess.Popen,
+            "_internal_poll",
+            forbid_method("_internal_poll"),
+        ),
+    ):
+        child = supervisor.run(
+            [
+                sys.executable,
+                "-c",
+                "import os; os.write(1,b'P44-out'); os.write(2,b'P44-err')",
+            ],
+            cwd=root,
+            timeout_ns=20_000_000_000,
+            label="p44-clean",
+        )
+    _require(
+        list(call_counts) == list(instrumented_names)
+        and set(call_counts.values()) == {0}
+        and child.exit_code == 0
+        and child.stdout == b"P44-out"
+        and child.stderr == b"P44-err"
+        and child.survivor_count == 0,
+        "P44 forbidden-method inventory differs",
+    )
+    recorder.call(
+        "popen",
+        "forbidden_method_inventory",
+        token_id,
+        list(instrumented_names),
+        "RETURNED",
+        [[name, count] for name, count in call_counts.items()],
+    )
+    recorder.call(
+        "process_supervisor",
+        "clean_process_path",
+        token_id,
+        [child.pid],
+        "RETURNED",
+        child.exit_code,
+    )
+    cleanup = private_root.cleanup()
+    _require(cleanup.status == "PASS" and cleanup.residue_count == 0, "P44 root cleanup differs")
+    command_files.close_without_publication()
+    recorder.transition(token_id, "RUNNING", "lifecycle_validated", "TERMINAL")
+    return {
+        "instrumented_names": list(instrumented_names),
+        "forbidden_call_counts": call_counts,
+        "stdout": child.stdout.decode("ascii"),
+        "stderr": child.stderr.decode("ascii"),
+        "exit_code": child.exit_code,
+        "survivor_count": child.survivor_count,
+    }
+
+
+def _generation6_p45_case(
+    root: Path,
+    recorder: _Generation6HazardRecorder,
+) -> dict[str, object]:
+    token_id = "P45-CLEAN-PROCESS"
+    recorder.register(token_id, "ALLOCATED")
+    recorder.transition(token_id, "ALLOCATED", "constructor_started", "RUNNING")
+    private_root, command_files, supervisor = _generation6_p_inner_supervisor()
+    wait_history: list[list[object]] = []
+    process_identity_count = 0
+    pidfd_open_count = 0
+    pidfd_signal_count = 0
+    numeric_pid_signal_count = 0
+    numeric_group_signal_count = 0
+    post_consume_operations: list[str] = []
+    close_label_counts: dict[str, int] = {}
+    consume_returned = False
+    captured_waitid = os.waitid
+    captured_read_proc_identity = _read_proc_identity
+    captured_open_pidfd = _open_pidfd
+    captured_pidfd_signal = _PIDFD_SEND_SIGNAL
+    captured_kill = os.kill
+    captured_killpg = os.killpg
+    captured_close_once = FdOwner.close_once
+
+    def require_pre_consume(operation_name: str) -> None:
+        if consume_returned:
+            post_consume_operations.append(operation_name)
+            raise ContractError("P45 post-consume process operation is forbidden")
+
+    def observed_waitid(
+        id_type: int,
+        identity: int,
+        options: int,
+    ) -> os.waitid_result | None:
+        nonlocal consume_returned
+        require_pre_consume("waitid")
+        result = captured_waitid(id_type, identity, options)
+        phase = "CONSUME" if options == os.WEXITED else "NOWAIT"
+        wait_history.append(
+            [
+                len(wait_history) + 1,
+                id_type,
+                identity,
+                options,
+                phase,
+                _generation6_p_wait_projection(result),
+            ]
+        )
+        if phase == "CONSUME":
+            consume_returned = True
+        return result
+
+    def observed_read_proc_identity(
+        process_id: int,
+        *,
+        excluded_descriptors: Iterable[int] = (),
+        poisoned_descriptors: Iterable[int] = (),
+        poison_sink: set[int],
+    ) -> ProcessIdentity:
+        nonlocal process_identity_count
+        require_pre_consume("read_proc_identity")
+        result = captured_read_proc_identity(
+            process_id,
+            excluded_descriptors=excluded_descriptors,
+            poisoned_descriptors=poisoned_descriptors,
+            poison_sink=poison_sink,
+        )
+        process_identity_count += 1
+        return result
+
+    def observed_open_pidfd(
+        process_id: int,
+        *,
+        other_descriptors: Iterable[int],
+        poisoned_descriptors: Iterable[int] = (),
+        poison_sink: set[int],
+    ) -> FdOwner:
+        nonlocal pidfd_open_count
+        require_pre_consume("open_pidfd")
+        pidfd_open_count += 1
+        return captured_open_pidfd(
+            process_id,
+            other_descriptors=other_descriptors,
+            poisoned_descriptors=poisoned_descriptors,
+            poison_sink=poison_sink,
+        )
+
+    def observed_pidfd_signal(
+        descriptor: int,
+        signal_number: int,
+        siginfo: object,
+        flags: int,
+    ) -> object:
+        nonlocal pidfd_signal_count
+        require_pre_consume("pidfd_send_signal")
+        pidfd_signal_count += 1
+        return captured_pidfd_signal(descriptor, signal_number, siginfo, flags)
+
+    def observed_kill(process_id: int, signal_number: int) -> None:
+        nonlocal numeric_pid_signal_count
+        require_pre_consume("kill")
+        numeric_pid_signal_count += 1
+        captured_kill(process_id, signal_number)
+
+    def observed_killpg(process_group_id: int, signal_number: int) -> None:
+        nonlocal numeric_group_signal_count
+        require_pre_consume("killpg")
+        numeric_group_signal_count += 1
+        captured_killpg(process_group_id, signal_number)
+
+    def observed_close_once(owner: FdOwner) -> None:
+        close_label_counts[owner.label] = close_label_counts.get(owner.label, 0) + 1
+        captured_close_once(owner)
+
+    with (
+        _Generation6SelftestPatch(os, "waitid", observed_waitid),
+        _Generation6SelftestPatch(
+            _generation6_module(),
+            "_read_proc_identity",
+            observed_read_proc_identity,
+        ),
+        _Generation6SelftestPatch(
+            _generation6_module(),
+            "_open_pidfd",
+            observed_open_pidfd,
+        ),
+        _Generation6SelftestPatch(
+            _generation6_module(),
+            "_PIDFD_SEND_SIGNAL",
+            observed_pidfd_signal,
+        ),
+        _Generation6SelftestPatch(os, "kill", observed_kill),
+        _Generation6SelftestPatch(os, "killpg", observed_killpg),
+        _Generation6SelftestPatch(FdOwner, "close_once", observed_close_once),
+    ):
+        child = supervisor.run(
+            [
+                sys.executable,
+                "-c",
+                "import os; os.write(1,b'P45-stdout'); os.write(2,b'P45-stderr')",
+            ],
+            cwd=root,
+            timeout_ns=20_000_000_000,
+            label="p45-clean",
+        )
+    consume_count = sum(entry[4] == "CONSUME" for entry in wait_history)
+    consume_was_last = bool(wait_history) and wait_history[-1][4] == "CONSUME"
+    slot_owner = supervisor.owner_slots[0][0]
+    raw_close_labels = (
+        "child stdin",
+        "child stdout read",
+        "child stdout write",
+        "child stderr read",
+        "child stderr write",
+    )
+    _require(
+        child.exit_code == 0
+        and child.stdout == b"P45-stdout"
+        and child.stderr == b"P45-stderr"
+        and child.survivor_count == 0
+        and consume_count == 1
+        and consume_was_last
+        and not post_consume_operations
+        and process_identity_count >= 2
+        and pidfd_open_count == 1
+        and pidfd_signal_count == 0
+        and numeric_pid_signal_count == 0
+        and numeric_group_signal_count == 0
+        and all(close_label_counts.get(label) == 1 for label in raw_close_labels)
+        and close_label_counts.get("child pidfd") == 1
+        and slot_owner is not None
+        and slot_owner.pid == child.pid
+        and not private_root._process_tree_uncertain
+        and not private_root._poisoned_descriptors,
+        "P45 clean process ownership differs",
+    )
+    recorder.call(
+        "process_supervisor",
+        "clean_process_path",
+        token_id,
+        [child.pid, len(wait_history), process_identity_count],
+        "RETURNED",
+        child.exit_code,
+    )
+    cleanup = private_root.cleanup()
+    _require(cleanup.status == "PASS" and cleanup.residue_count == 0, "P45 root cleanup differs")
+    command_files.close_without_publication()
+    recorder.transition(token_id, "RUNNING", "lifecycle_validated", "TERMINAL")
+    return {
+        "stdout": child.stdout.decode("ascii"),
+        "stderr": child.stderr.decode("ascii"),
+        "exit_code": child.exit_code,
+        "survivor_count": child.survivor_count,
+        "wait_history": wait_history,
+        "process_identity_count": process_identity_count,
+        "pidfd_open_count": pidfd_open_count,
+        "pidfd_signal_count": pidfd_signal_count,
+        "numeric_pid_signal_count": numeric_pid_signal_count,
+        "numeric_group_signal_count": numeric_group_signal_count,
+        "post_consume_operations": post_consume_operations,
+        "consume_count": consume_count,
+        "consume_was_last": consume_was_last,
+        "close_label_counts": close_label_counts,
+        "slot_owned": slot_owner is supervisor.owner_slots[0][0],
+        "process_tree_certain": not private_root._process_tree_uncertain,
+        "poisoned_descriptor_count": len(private_root._poisoned_descriptors),
+    }
+
+
+def _run_generation6_p_probe_for_test(
+    case_id: str,
+    pytest_root_text: str,
+    nonce: str,
+) -> bytes:
+    exact_case_id = _ascii(case_id, "nested P case")
+    _require(
+        exact_case_id
+        in {
+            *(f"P{ordinal:02d}" for ordinal in range(1, 36)),
+            *(f"P{ordinal:02d}" for ordinal in range(36, 46)),
+        },
+        "nested P case differs",
+    )
+    exact_nonce = _hex(nonce, 64, "nested P nonce")
+    root = Path(_ascii(pytest_root_text, "nested P pytest root"))
+    _require(root.is_absolute() and root.resolve(strict=True) == root, "nested P root differs")
+    recorder = _Generation6HazardRecorder.create(exact_case_id)
+    if exact_case_id == "P01":
+        facts = _generation6_p01_case(recorder)
+    elif exact_case_id in {"P02", "P03", "P04", "P05"}:
+        facts = _generation6_p_identity_mismatch_case(exact_case_id, recorder)
+    elif exact_case_id == "P06":
+        facts = _generation6_p06_case(recorder)
+    elif exact_case_id == "P07":
+        facts = _generation6_p07_case(root, recorder)
+    elif exact_case_id == "P08":
+        facts = _generation6_p08_case(root, recorder)
+    elif exact_case_id == "P09":
+        facts = _generation6_p09_case(recorder)
+    elif exact_case_id == "P10":
+        facts = _generation6_p10_case(recorder)
+    elif exact_case_id == "P11":
+        facts = _generation6_p11_case(root, recorder)
+    elif exact_case_id == "P12":
+        facts = _generation6_p12_case(root, recorder)
+    elif exact_case_id == "P13":
+        facts = _generation6_p13_case(recorder)
+    elif exact_case_id in {"P14", "P15", "P16"}:
+        facts = _generation6_p_post_consume_case(exact_case_id, recorder)
+    elif exact_case_id == "P17":
+        facts = _generation6_p17_case(recorder)
+    elif exact_case_id == "P18":
+        facts = _generation6_p18_case(root, recorder)
+    elif exact_case_id == "P19":
+        facts = _generation6_p19_case(recorder)
+    elif exact_case_id == "P20":
+        facts = _generation6_p20_case(recorder)
+    elif exact_case_id == "P21":
+        facts = _generation6_p21_case(recorder)
+    elif exact_case_id == "P22":
+        facts = _generation6_p22_case(recorder)
+    elif exact_case_id == "P23":
+        facts = _generation6_p23_case(recorder)
+    elif exact_case_id == "P24":
+        facts = _generation6_p24_case(recorder)
+    elif exact_case_id == "P25":
+        facts = _generation6_p25_case(recorder)
+    elif exact_case_id == "P26":
+        facts = _generation6_p26_case(recorder)
+    elif exact_case_id == "P27":
+        facts = _generation6_p27_case(recorder)
+    elif exact_case_id == "P28":
+        facts = _generation6_p28_case(recorder)
+    elif exact_case_id == "P29":
+        facts = _generation6_p29_case(recorder)
+    elif exact_case_id == "P30":
+        facts = _generation6_p30_case(recorder)
+    elif exact_case_id == "P31":
+        facts = _generation6_p31_case(recorder)
+    elif exact_case_id == "P32":
+        facts = _generation6_p32_case(recorder)
+    elif exact_case_id == "P33":
+        facts = _generation6_p33_case(root, recorder)
+    elif exact_case_id == "P34":
+        facts = _generation6_p34_case(root, recorder)
+    elif exact_case_id == "P35":
+        facts = _generation6_p35_case(root, recorder)
+    elif exact_case_id == "P36":
+        facts = _generation6_p36_case(recorder)
+    elif exact_case_id == "P37":
+        facts = {
+            "live_pidfd": _generation6_p_provisional_branch(
+                recorder,
+                token_id="P37-LIVE-PIDFD",
+                operation="provisional_live_pidfd",
+                live=True,
+                pidfd_available=True,
+            ),
+            "live_numeric": _generation6_p_provisional_branch(
+                recorder,
+                token_id="P37-LIVE-NUMERIC",
+                operation="provisional_live_numeric",
+                live=True,
+                pidfd_available=False,
+            ),
+        }
+    elif exact_case_id == "P38":
+        facts = {
+            "terminal_pidfd": _generation6_p_provisional_branch(
+                recorder,
+                token_id="P38-TERMINAL-PIDFD",
+                operation="provisional_terminal_pidfd",
+                live=False,
+                pidfd_available=True,
+            ),
+            "terminal_numeric": _generation6_p_provisional_branch(
+                recorder,
+                token_id="P38-TERMINAL-NUMERIC",
+                operation="provisional_terminal_numeric",
+                live=False,
+                pidfd_available=False,
+            ),
+        }
+    elif exact_case_id == "P39":
+        facts = {
+            "unavailable_live": _generation6_p_provisional_branch(
+                recorder,
+                token_id="P39-UNAVAILABLE-LIVE",
+                operation="pidfd_unavailable_live_bound",
+                live=True,
+                pidfd_available=False,
+            ),
+            "unavailable_terminal": _generation6_p_provisional_branch(
+                recorder,
+                token_id="P39-UNAVAILABLE-TERMINAL",
+                operation="pidfd_unavailable_terminal_bound",
+                live=False,
+                pidfd_available=False,
+            ),
+        }
+    elif exact_case_id in {"P40", "P41"}:
+        facts = _generation6_p_no_child_case(exact_case_id, recorder)
+    elif exact_case_id == "P42":
+        facts = _generation6_p42_case(root, recorder)
+    elif exact_case_id == "P43":
+        facts = _generation6_p43_case(root, recorder)
+    elif exact_case_id == "P44":
+        facts = _generation6_p44_case(root, recorder)
+    elif exact_case_id == "P45":
+        facts = _generation6_p45_case(root, recorder)
+    else:
+        raise ContractError(f"nested P driver is not wired: {exact_case_id}")
+    events: list[str] = []
+    validation = _GENERATION6_P_VALIDATIONS.get(exact_case_id)
+    if validation is not None:
+        events.append(validation)
+    for label, message in _GENERATION6_P_REJECTIONS.get(exact_case_id, ()):
+        events.extend(_generation6_rejection_events(label, message))
+    packet: dict[str, object] = {
+        "domain": "TASK064-GENERATION6-P-PROBE-V1",
+        "nonce": exact_nonce,
+        "case_id": exact_case_id,
+        "probe_pid": os.getpid(),
+        "probe_parent_pid": os.getppid(),
+        "events": events,
+        **recorder.packet_fields(),
+        "facts": facts,
+        "status": "PASS",
+    }
+    return _canonical_bytes(packet, limit=65_536)
+
+
+def _generation6_validate_p_branch(
+    facts: dict[str, object],
+    *,
+    live: bool,
+    pidfd_available: bool,
+) -> None:
+    _exact_keys(facts, _GENERATION6_P_BRANCH_FACT_KEYS, "nested P branch facts")
+    wait_history = facts["wait_history"]
+    pidfd_open_history = facts["pidfd_open_history"]
+    proc_history = facts["proc_history"]
+    pidfd_signal_history = facts["pidfd_signal_history"]
+    numeric_pid_signal_history = facts["numeric_pid_signal_history"]
+    numeric_group_signal_history = facts["numeric_group_signal_history"]
+    _require(
+        facts["mode"] == ("live" if live else "terminal")
+        and facts["pidfd_available"] is pidfd_available
+        and type(wait_history) is list
+        and len(cast(list[object], wait_history)) >= 2
+        and type(pidfd_open_history) is list
+        and len(cast(list[object], pidfd_open_history)) == 1
+        and type(proc_history) is list
+        and len(cast(list[object], proc_history)) == 1
+        and type(pidfd_signal_history) is list
+        and type(numeric_pid_signal_history) is list
+        and type(numeric_group_signal_history) is list
+        and facts["post_consume_operations"] == []
+        and facts["consume_count"] == 1
+        and facts["consume_was_last"] is True
+        and facts["cleanup_raised"] is (not pidfd_available)
+        and facts["cleanup_message"] == (None if pidfd_available else "pidfd acquisition failed"),
+        "nested P branch facts differ",
+    )
+    if live and pidfd_available:
+        _require(
+            len(cast(list[object], pidfd_signal_history)) == 1
+            and numeric_pid_signal_history == []
+            and numeric_group_signal_history == [],
+            "nested P live pidfd facts differ",
+        )
+    elif live:
+        _require(
+            pidfd_signal_history == []
+            and len(cast(list[object], numeric_pid_signal_history)) == 1
+            and numeric_group_signal_history == [],
+            "nested P live numeric facts differ",
+        )
+    else:
+        _require(
+            pidfd_signal_history == []
+            and numeric_pid_signal_history == []
+            and numeric_group_signal_history == [],
+            "nested P terminal facts differ",
+        )
+
+
+def _generation6_validate_p_facts(case_id: str, facts: dict[str, object]) -> None:
+    _exact_keys(facts, _GENERATION6_P_FACT_KEYS[case_id], f"{case_id} P facts")
+    if case_id == "P01":
+        raises_facts = cast(dict[str, object], facts["pidfd_raises"])
+        invalid_facts = cast(dict[str, object], facts["pidfd_invalid"])
+        _generation6_validate_p_branch(raises_facts, live=True, pidfd_available=False)
+        _exact_keys(invalid_facts, _GENERATION6_P_BRANCH_FACT_KEYS, "P01 invalid pidfd facts")
+        _require(
+            invalid_facts["mode"] == "live"
+            and invalid_facts["pidfd_available"] is False
+            and invalid_facts["post_consume_operations"] == []
+            and invalid_facts["consume_count"] == 1
+            and invalid_facts["consume_was_last"] is True
+            and invalid_facts["cleanup_raised"] is True
+            and invalid_facts["cleanup_message"] == "child pidfd number aliases an owned handle"
+            and type(invalid_facts["pidfd_open_history"]) is list
+            and len(cast(list[object], invalid_facts["pidfd_open_history"])) == 1
+            and type(invalid_facts["numeric_pid_signal_history"]) is list
+            and len(cast(list[object], invalid_facts["numeric_pid_signal_history"])) == 1,
+            "P01 invalid pidfd facts differ",
+        )
+    elif case_id in {"P02", "P03", "P04", "P05"}:
+        expected_field = {
+            "P02": "uid",
+            "P03": "start_time",
+            "P04": "session_id",
+            "P05": "process_group_id",
+        }[case_id]
+        expected_value = _integer(facts["expected"], f"{case_id} expected identity")
+        observed_value = _integer(facts["observed"], f"{case_id} observed identity")
+        _require(
+            facts["field"] == expected_field
+            and observed_value == expected_value + 1
+            and facts["signal_count"] == 0
+            and facts["failure_message"] == "anchored process identity changed",
+            f"{case_id} identity mismatch facts differ",
+        )
+    elif case_id == "P06":
+        _require(
+            facts["variant_results"]
+            == [
+                ["waitid_raises", "waitid failed"],
+                ["waitid_wrong_pid", "waitid child identity differs"],
+                ["waitid_wrong_uid", "waitid child identity differs"],
+                ["waitid_invalid_code", "terminal code is outside the closed set"],
+            ]
+            and facts["wait_call_count"] == 4
+            and facts["consume_call_count"] == 0,
+            "P06 WNOWAIT facts differ",
+        )
+    elif case_id == "P07":
+        _require(
+            list(facts.values()) == ["P07-clean", 0, 0, 0, True],
+            "P07 clean facts differ",
+        )
+    elif case_id == "P08":
+        expected_signals = [int(signal.SIGTERM), int(signal.SIGKILL)]
+        _require(
+            facts["pidfd_signals"] == expected_signals
+            and facts["group_signals"] == expected_signals
+            and facts["consume_count"] == 1
+            and facts["consume_was_last"] is True
+            and facts["failure_message"] == "child invocation exceeded its deadline",
+            "P08 TERM/KILL facts differ",
+        )
+    elif case_id == "P09":
+        _require(
+            facts["failures"]
+            == [
+                ["term_group_signal_failure", "TERM-group-sentinel"],
+                ["kill_group_signal_failure", "KILL-group-sentinel"],
+            ]
+            and facts["same_process_count"] == 4
+            and facts["group_signal_count"] == 2,
+            "P09 signal-failure facts differ",
+        )
+    elif case_id == "P10":
+        _require(
+            facts["failures"]
+            == [
+                ["group_existence_failure", "process table scan failed"],
+                ["group_identity_recheck_failure", "anchored process identity changed"],
+            ]
+            and facts["signal_count"] == 0
+            and facts["scan_call_count"] == 1,
+            "P10 group-check facts differ",
+        )
+    elif case_id == "P11":
+        _require(
+            type(facts["group_signals"]) is list
+            and bool(cast(list[object], facts["group_signals"]))
+            and set(cast(list[object], facts["group_signals"])).issubset(
+                {int(signal.SIGTERM), int(signal.SIGKILL)}
+            )
+            and facts["survivor_observed"] is True
+            and facts["consume_count"] == 1
+            and facts["failure_message"] == "child initial group had survivors",
+            "P11 survivor facts differ",
+        )
+    elif case_id == "P12":
+        _require(
+            list(facts.values()) == ["harness-owned", 0, 0, 0, True],
+            "P12 nested setsid facts differ",
+        )
+    elif case_id == "P13":
+        raw_variants = facts["variants"]
+        _require(
+            type(raw_variants) is list
+            and len(cast(list[object], raw_variants)) == 2
+            and facts["consume_attempt_count"] == 2
+            and facts["post_consume_operation_count"] == 0,
+            "P13 consuming-wait uncertainty facts differ",
+        )
+        for (
+            raw_variant,
+            expected_operation,
+            expected_selector,
+            expected_message,
+            expected_kernel_wait_calls,
+            expected_kernel_consumed,
+        ) in zip(
+            cast(list[object], raw_variants),
+            ("consume_raises_before_kernel", "consume_raises_after_kernel"),
+            ("consume_failure_before_kernel", "consume_failure_after_kernel"),
+            ("consume-before-kernel-sentinel", "consume-after-kernel-sentinel"),
+            (1, 2),
+            (False, True),
+            strict=True,
+        ):
+            _require(
+                type(raw_variant) is list and len(cast(list[object], raw_variant)) == 10,
+                "P13 consuming-wait variant shape differs",
+            )
+            variant = cast(list[object], raw_variant)
+            wait_history = variant[3]
+            _require(
+                type(wait_history) is list and len(cast(list[object], wait_history)) == 2,
+                "P13 wait history shape differs",
+            )
+            raw_peek, raw_consume = cast(list[object], wait_history)
+            _require(
+                type(raw_peek) is list
+                and len(cast(list[object], raw_peek)) == 6
+                and type(raw_consume) is list
+                and len(cast(list[object], raw_consume)) == 6,
+                "P13 wait receipt shape differs",
+            )
+            peek = cast(list[object], raw_peek)
+            consume = cast(list[object], raw_consume)
+            pid = _integer(peek[2], "P13 peek PID", minimum=1)
+            expected_terminal = [pid, os.getuid(), signal.SIGCHLD, 0, os.CLD_EXITED]
+            expected_consume_projection: list[object]
+            if expected_kernel_consumed:
+                expected_consume_projection = [
+                    "RAISED_AFTER_KERNEL",
+                    expected_terminal,
+                    expected_message,
+                ]
+            else:
+                expected_consume_projection = ["RAISED_BEFORE_KERNEL", expected_message]
+            _require(
+                variant[0] == expected_operation
+                and variant[1] == expected_selector
+                and variant[2] == expected_message
+                and peek[0] == 1
+                and peek[1] == os.P_PID
+                and pid > 0
+                and peek[3] == os.WEXITED | os.WNOHANG | os.WNOWAIT
+                and peek[4] == "NOWAIT"
+                and peek[5] == expected_terminal
+                and consume[0] == 2
+                and consume[1] == os.P_PIDFD
+                and _integer(consume[2], "P13 consume pidfd", minimum=3) > 2
+                and consume[3] == os.WEXITED
+                and consume[4] == "CONSUME"
+                and consume[5] == expected_consume_projection
+                and variant[4] == 1
+                and variant[5] == expected_kernel_wait_calls
+                and variant[6] is expected_kernel_consumed
+                and variant[7] == []
+                and variant[8] == 0
+                and variant[9] == ["FAIL", 1, ["cleanup uncertainty preserved private root"]],
+                "P13 consuming-wait variant facts differ",
+            )
+    elif case_id == "P14":
+        _require(
+            list(facts.values()) == [2, 1, True],
+            "P14 second-consuming-wait facts differ",
+        )
+    elif case_id == "P15":
+        _require(
+            list(facts.values()) == [2, 0, True],
+            "P15 post-consume PID facts differ",
+        )
+    elif case_id == "P16":
+        _require(
+            list(facts.values()) == [2, 0, True],
+            "P16 post-consume PGID facts differ",
+        )
+    elif case_id == "P17":
+        _require(
+            facts["variants"]
+            == [
+                ["slot_absent", "Popen owner slot is not empty"],
+                ["slot_prepopulated", "Popen owner slot is not empty"],
+                ["slot_readback_differs", "Popen provisional ownership differs"],
+            ]
+            and facts["base_initializer_call_count"] == 0,
+            "P17 owner-slot facts differ",
+        )
+    elif case_id == "P18":
+        _require(
+            list(facts.values()) == ["P18-slot-owned", 0, 0, True],
+            "P18 returned-slot facts differ",
+        )
+    elif case_id == "P19":
+        _require(
+            facts["constructor_failure"] == "P19 constructor sentinel"
+            and facts["slot_retained"] is True
+            and _integer(facts["child_pid"], "P19 child PID", minimum=1) > 0
+            and facts["consume_count"] == 1
+            and facts["cleanup_completed"] is True,
+            "P19 partial-constructor facts differ",
+        )
+    elif case_id == "P20":
+        raw_variants = facts["variants"]
+        _require(
+            type(raw_variants) is list
+            and len(cast(list[object], raw_variants)) == 5
+            and facts["total_close_call_count"] == 25
+            and facts["poisoned_descriptor_count"] == 5,
+            "P20 aggregate descriptor facts differ",
+        )
+        expected_operations = _GENERATION6_P_EXPECTED_OPERATIONS["P20"]
+        for raw_variant, expected_operation in zip(
+            cast(list[object], raw_variants),
+            expected_operations,
+            strict=True,
+        ):
+            _require(
+                type(raw_variant) is list and len(cast(list[object], raw_variant)) == 6,
+                "P20 descriptor variant shape differs",
+            )
+            variant = cast(list[object], raw_variant)
+            target_label = expected_operation.removesuffix("_close").replace("_", " ")
+            exact_label = f"child {target_label}"
+            _require(
+                variant[0] == expected_operation
+                and variant[1] == f"uncertain {exact_label} close"
+                and _integer(variant[2], "P20 poisoned descriptor", minimum=3) > 2
+                and variant[3]
+                == [
+                    [label, 1]
+                    for label in (
+                        "child stdin",
+                        "child stdout read",
+                        "child stdout write",
+                        "child stderr read",
+                        "child stderr write",
+                    )
+                ]
+                and variant[4] == [exact_label]
+                and variant[5] == [[exact_label, f"uncertain {exact_label} close"]],
+                "P20 descriptor variant facts differ",
+            )
+    elif case_id == "P21":
+        _require(
+            list(facts.values()) == ["Python runtime differs", 0],
+            "P21 runtime identity facts differ",
+        )
+    elif case_id == "P22":
+        _require(
+            facts["variants"]
+            == [
+                ["wrong_popen", "Popen identity changed"],
+                ["wrong_popen_initializer", "Popen initializer changed"],
+                ["wrong_fork_exec", "_fork_exec changed"],
+            ]
+            and facts["owner_count"] == 0,
+            "P22 implementation identity facts differ",
+        )
+    elif case_id == "P23":
+        _require(
+            facts["variants"]
+            == [
+                ["second_main_thread", 2, "spawn requires the sole main thread"],
+                ["non_main_live_thread", 1, "spawn requires the sole main thread"],
+            ]
+            and facts["real_thread_count"] == 1,
+            "P23 thread inventory facts differ",
+        )
+    elif case_id == "P24":
+        _require(
+            list(facts.values()) == ["trace/profile is forbidden", True, 0],
+            "P24 trace facts differ",
+        )
+    elif case_id == "P25":
+        _require(
+            list(facts.values()) == ["trace/profile is forbidden", True, 0],
+            "P25 profile facts differ",
+        )
+    elif case_id == "P26":
+        _require(
+            facts["variants"]
+            == [
+                ["custom_sigterm", int(signal.SIGTERM), "signal handler differs"],
+                ["custom_sighup", int(signal.SIGHUP), "signal handler differs"],
+                ["custom_sigusr1", int(signal.SIGUSR1), "signal handler differs"],
+            ]
+            and facts["owner_count"] == 0,
+            "P26 signal handler facts differ",
+        )
+    elif case_id == "P27":
+        _require(
+            list(facts.values()) == ["SIGCHLD handler differs", 0],
+            "P27 SIGCHLD handler facts differ",
+        )
+    elif case_id == "P28":
+        _require(
+            facts["variants"]
+            == [
+                ["sigchld_reset_raises", "SIGCHLD-reset-sentinel"],
+                ["sigchld_reset_wrong_return", "SIGCHLD reset prior differs"],
+            ]
+            and facts["signal_call_count"] == 2
+            and facts["owner_count"] == 0,
+            "P28 SIGCHLD reset facts differ",
+        )
+    elif case_id == "P29":
+        _require(
+            facts["variants"]
+            == [
+                ["sigchld_readback_raises", "SIGCHLD-readback-sentinel"],
+                ["sigchld_readback_wrong_handler", "SIGCHLD reset readback differs"],
+            ]
+            and facts["getsignal_call_count"] == 4
+            and facts["signal_call_count"] == 2
+            and facts["owner_count"] == 0,
+            "P29 SIGCHLD readback facts differ",
+        )
+    elif case_id == "P30":
+        _require(
+            _integer(facts["child_pid"], "P30 child PID", minimum=1) > 0
+            and facts["sa_nocldwait_installed"] is True
+            and facts["wait_errno"] == errno.ECHILD
+            and facts["sigchld_restored"] is True,
+            "P30 actual auto-reap facts differ",
+        )
+    elif case_id == "P31":
+        wnowait = facts["wnowait"]
+        consumed = facts["consume"]
+        _require(
+            facts["sa_nocldwait_cleared"] is True
+            and type(wnowait) is list
+            and len(cast(list[object], wnowait)) == 5
+            and wnowait == consumed
+            and cast(list[object], wnowait)[3] == 0
+            and cast(list[object], wnowait)[4] == os.CLD_EXITED
+            and facts["same_terminal_identity"] is True,
+            "P31 exact reset facts differ",
+        )
+    elif case_id == "P32":
+        wait_history = facts["wait_history"]
+        _require(
+            _integer(facts["child_pid"], "P32 child PID", minimum=1) > 0
+            and type(wait_history) is list
+            and len(cast(list[object], wait_history)) == 1
+            and cast(list[object], cast(list[object], wait_history)[0])[3] == errno.ECHILD
+            and facts["forbidden_actions"] == []
+            and facts["process_tree_uncertain"] is True
+            and facts["failure_message"] == "partial Popen child was already consumed",
+            "P32 persistent auto-reap facts differ",
+        )
+    elif case_id == "P33":
+        child_pid = _integer(facts["child_pid"], "P33 child PID", minimum=1)
+        _require(
+            child_pid > 0
+            and facts["constructor_state"] == [child_pid, False]
+            and facts["slot_owned"] is True
+            and facts["cause_type"] == "KeyboardInterrupt"
+            and facts["cause_message"] == "P33 pre-child-created interruption"
+            and facts["consume_count"] == 1
+            and facts["failure_message"] == "Popen/adoption boundary failed closed",
+            "P33 interruption facts differ",
+        )
+    elif case_id == "P34":
+        _require(
+            _integer(facts["child_pid"], "P34 child PID", minimum=1) > 0
+            and facts["latch_states"] == [True]
+            and facts["slot_owned"] is True
+            and facts["cause_message"] == "SIGINT arrived during child construction"
+            and facts["consume_count"] == 1
+            and facts["failure_message"] == "Popen/adoption boundary failed closed",
+            "P34 pending SIGINT facts differ",
+        )
+    elif case_id == "P35":
+        wait_history = facts["wait_history"]
+        child_pid = _integer(facts["child_pid"], "P35 child PID", minimum=1)
+        _require(
+            child_pid > 0
+            and facts["slot_owned"] is True
+            and facts["child_created"] is True
+            and facts["cause_type"] == "FileNotFoundError"
+            and facts["cleanup_note_present"] is True
+            and type(wait_history) is list
+            and wait_history
+            == [
+                [
+                    os.P_PID,
+                    child_pid,
+                    os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                    errno.ECHILD,
+                ]
+            ]
+            and facts["forbidden_actions"] == []
+            and facts["process_tree_uncertain"] is True
+            and facts["failure_message"] == "Popen/adoption boundary failed closed",
+            "P35 exec-error facts differ",
+        )
+    elif case_id == "P36":
+        _require(
+            type(facts["wait_history"]) is list
+            and len(cast(list[object], facts["wait_history"])) == 1
+            and list(facts.values())[1:7] == [0, 0, 0, 0, 0, []]
+            and facts["failure_message"] == "partial Popen child was already consumed",
+            "P36 facts differ",
+        )
+    elif case_id == "P37":
+        _generation6_validate_p_branch(
+            cast(dict[str, object], facts["live_pidfd"]),
+            live=True,
+            pidfd_available=True,
+        )
+        _generation6_validate_p_branch(
+            cast(dict[str, object], facts["live_numeric"]),
+            live=True,
+            pidfd_available=False,
+        )
+    elif case_id == "P38":
+        _generation6_validate_p_branch(
+            cast(dict[str, object], facts["terminal_pidfd"]),
+            live=False,
+            pidfd_available=True,
+        )
+        _generation6_validate_p_branch(
+            cast(dict[str, object], facts["terminal_numeric"]),
+            live=False,
+            pidfd_available=False,
+        )
+    elif case_id == "P39":
+        _generation6_validate_p_branch(
+            cast(dict[str, object], facts["unavailable_live"]),
+            live=True,
+            pidfd_available=False,
+        )
+        _generation6_validate_p_branch(
+            cast(dict[str, object], facts["unavailable_terminal"]),
+            live=False,
+            pidfd_available=False,
+        )
+    elif case_id == "P40":
+        _require(
+            list(facts.values()) == [0, True, 0, "partial Popen contains no provable child"],
+            "P40 facts differ",
+        )
+    elif case_id == "P41":
+        _require(
+            list(facts.values())
+            == [True, False, True, 0, "partial Popen contains no provable child"],
+            "P41 facts differ",
+        )
+    elif case_id == "P42":
+        _require(
+            facts["constructor_slot_owned"] is True
+            and facts["replacement_injected"] is True
+            and facts["cleanup_target_is_returned"] is True
+            and facts["final_slot_restored"] is True
+            and facts["cleanup_call_count"] == 1
+            and _integer(facts["returned_pid"], "P42 returned PID", minimum=1) > 0
+            and facts["failure_message"] == "Popen/adoption boundary failed closed",
+            "P42 facts differ",
+        )
+    elif case_id == "P43":
+        _require(
+            list(facts.values()) == [True, True, [], [], [], True, "first", "second"],
+            "P43 facts differ",
+        )
+    elif case_id == "P44":
+        names = [
+            "poll",
+            "wait",
+            "waitpid",
+            "communicate",
+            "send_signal",
+            "terminate",
+            "kill",
+            "_internal_poll",
+        ]
+        counts = facts["forbidden_call_counts"]
+        _require(
+            facts["instrumented_names"] == names
+            and type(counts) is dict
+            and list(cast(dict[str, object], counts)) == names
+            and set(cast(dict[str, object], counts).values()) == {0}
+            and list(facts.values())[2:] == ["P44-out", "P44-err", 0, 0],
+            "P44 facts differ",
+        )
+    else:
+        wait_history = facts["wait_history"]
+        close_counts = facts["close_label_counts"]
+        _require(
+            facts["stdout"] == "P45-stdout"
+            and facts["stderr"] == "P45-stderr"
+            and facts["exit_code"] == 0
+            and facts["survivor_count"] == 0
+            and type(wait_history) is list
+            and len(cast(list[object], wait_history)) >= 2
+            and _integer(facts["process_identity_count"], "P45 identity count", minimum=2) >= 2
+            and facts["pidfd_open_count"] == 1
+            and facts["pidfd_signal_count"] == 0
+            and facts["numeric_pid_signal_count"] == 0
+            and facts["numeric_group_signal_count"] == 0
+            and facts["post_consume_operations"] == []
+            and facts["consume_count"] == 1
+            and facts["consume_was_last"] is True
+            and type(close_counts) is dict
+            and all(
+                cast(dict[str, object], close_counts).get(label) == 1
+                for label in (
+                    "child stdin",
+                    "child stdout read",
+                    "child stdout write",
+                    "child stderr read",
+                    "child stderr write",
+                    "child pidfd",
+                )
+            )
+            and facts["slot_owned"] is True
+            and facts["process_tree_certain"] is True
+            and facts["poisoned_descriptor_count"] == 0,
+            "P45 facts differ",
+        )
+
+
+def _selftest_isolated_p_case(case_id: str, pytest_root: Path) -> None:
+    private_root: PrivateRoot | None = None
+    command_files: CommandFiles | None = None
+    packet: dict[str, object] | None = None
+    primary: BaseException | None = None
+    try:
+        private_root = PrivateRoot()
+        command_files = CommandFiles.__new__(CommandFiles)
+        command_files.enabled = False
+        command_files._files = {}
+        command_files._published = False
+        command_files._poisoned_descriptors = private_root._poisoned_descriptors
+        supervisor = ProcessSupervisor(private_root, command_files)
+        child_root = private_root.create_child(f"p-probe-{case_id.lower()}")
+        nonce = _hex(secrets.token_hex(32), 64, "nested P parent nonce")
+        child = supervisor.run(
+            [
+                sys.executable,
+                "-c",
+                _GENERATION6_P_BOOTSTRAP,
+                os.fspath(Path(__file__).resolve(strict=True)),
+                case_id,
+                os.fspath(pytest_root),
+                nonce,
+            ],
+            cwd=pytest_root,
+            timeout_ns=30_000_000_000,
+            label=f"p-probe-{case_id.lower()}",
+            child_root=child_root,
+        )
+        _require(
+            child.exit_code == 0 and child.stderr == b"" and child.survivor_count == 0,
+            f"{case_id} nested P worker failed",
+        )
+        packet = _decode_canonical(child.stdout, limit=65_536, label=f"{case_id} nested P result")
+        _exact_keys(packet, _GENERATION6_P_RESULT_KEYS, "nested P result")
+        raw_calls = packet["calls"]
+        raw_boundaries = packet["boundaries"]
+        raw_facts = packet["facts"]
+        _require(
+            type(raw_calls) is list
+            and type(raw_boundaries) is list
+            and type(raw_facts) is dict
+            and packet["publications"] == []
+            and packet["forbidden"] == [],
+            f"{case_id} nested P history shape differs",
+        )
+        calls = cast(list[object], raw_calls)
+        operations: list[str] = []
+        for ordinal, raw_call in enumerate(calls, start=1):
+            _require(type(raw_call) is list and len(raw_call) == 8, "nested P call shape differs")
+            call = cast(list[object], raw_call)
+            _require(
+                call[0] == ordinal
+                and call[1] == case_id
+                and type(call[2]) is str
+                and type(call[3]) is str
+                and type(call[4]) is str
+                and type(call[5]) is list
+                and call[6] == "RETURNED",
+                f"{case_id} nested P call record differs",
+            )
+            operations.append(cast(str, call[3]))
+        _require(
+            tuple(operations) == _GENERATION6_P_EXPECTED_OPERATIONS[case_id],
+            f"{case_id} nested P operation history differs",
+        )
+        states: dict[str, str] = {}
+        for ordinal, raw_boundary in enumerate(cast(list[object], raw_boundaries), start=1):
+            _require(
+                type(raw_boundary) is list and len(raw_boundary) == 5,
+                "nested P boundary shape differs",
+            )
+            boundary = cast(list[object], raw_boundary)
+            token = _ascii(boundary[1], "nested P boundary token")
+            old = _ascii(boundary[2], "nested P boundary old state")
+            event = _ascii(boundary[3], "nested P boundary event")
+            new = _ascii(boundary[4], "nested P boundary new state")
+            _require(
+                boundary[0] == ordinal
+                and old == states.get(token, "ALLOCATED")
+                and (old, event, new)
+                in {
+                    ("ALLOCATED", "fork_returned", "RUNNING"),
+                    ("ALLOCATED", "source_authenticated", "RUNNING"),
+                    ("ALLOCATED", "identity_anchored", "RUNNING"),
+                    ("ALLOCATED", "wait_owner_anchored", "RUNNING"),
+                    ("ALLOCATED", "constructor_started", "RUNNING"),
+                    ("ALLOCATED", "constructor_returned", "RUNNING"),
+                    ("ALLOCATED", "instrumentation_installed", "RUNNING"),
+                    ("RUNNING", "cleanup_completed", "TERMINAL"),
+                    ("RUNNING", "rejection_validated", "TERMINAL"),
+                    ("RUNNING", "lifecycle_validated", "TERMINAL"),
+                },
+                f"{case_id} nested P boundary differs",
+            )
+            states[token] = new
+        _require(
+            bool(states) and set(states.values()) == {"TERMINAL"},
+            "nested P terminal states differ",
+        )
+        facts = cast(dict[str, object], raw_facts)
+        _generation6_validate_p_facts(case_id, facts)
+        expected_events: list[str] = []
+        validation = _GENERATION6_P_VALIDATIONS.get(case_id)
+        if validation is not None:
+            expected_events.append(validation)
+        for label, message in _GENERATION6_P_REJECTIONS.get(case_id, ()):
+            expected_events.extend(_generation6_rejection_events(label, message))
+        _require(
+            packet["domain"] == "TASK064-GENERATION6-P-PROBE-V1"
+            and packet["nonce"] == nonce
+            and packet["case_id"] == case_id
+            and _integer(packet["probe_pid"], "nested P PID", minimum=1) == child.pid
+            and _integer(packet["probe_parent_pid"], "nested P parent PID", minimum=1)
+            == os.getpid()
+            and packet["events"] == expected_events
+            and packet["status"] == "PASS",
+            f"{case_id} nested P result differs",
+        )
+        cleanup = private_root.cleanup()
+        _require(
+            cleanup.status == "PASS" and cleanup.residue_count == 0,
+            f"{case_id} nested P cleanup differs",
+        )
+        command_files.close_without_publication()
+    except BaseException as error:
+        primary = error
+    if primary is not None:
+        try:
+            _close_failure_resources(private_root, command_files)
+        except BaseException as cleanup_error:
+            primary.add_note(f"nested P failure cleanup failed: {cleanup_error!r}")
+        raise primary
+    _require(packet is not None, f"{case_id} nested P result is absent")
+    exact_packet = cast(dict[str, object], packet)
+    for raw_event in cast(list[object], exact_packet["events"]):
+        _record_generation6_check(_ascii(raw_event, "nested P event"))
+    _record_generation6_case_evidence(case_id)
+
+
+def _selftest_p_case(case_id: str, pytest_root: Path) -> None:
+    _require(
+        case_id in {f"P{ordinal:02d}" for ordinal in range(1, 46)},
+        "unknown P self-test case",
+    )
+    _selftest_isolated_p_case(case_id, pytest_root)
+
+
+@dataclass(frozen=True)
+class _Generation6GitScenario:
+    event_name: str
+    github_sha: str
+    candidate_sha: str
+    head_sha: str
+    parents: tuple[str, ...]
+    head_object_type: str
+    candidate_object_type: str
+    tested_tree_sha: str
+    candidate_tree_sha: str
+    tested_tree_object_type: str
+    candidate_tree_object_type: str
+    shallow: str = "false"
+    ancestry_exit: int = 0
+    failure_arguments: tuple[str, ...] | None = None
+    failure_occurrence: int = 1
+    failure_message: str = "git command failed"
+
+
+@dataclass(frozen=True)
+class _Generation6GitRepositoryFacts:
+    self_scenario: _Generation6GitScenario
+    merge_scenario: _Generation6GitScenario
+
+
+class _Generation6GitRawScript:
+    scenario: _Generation6GitScenario
+    root: Path
+    calls: list[tuple[tuple[str, ...], tuple[int, ...]]]
+    failure_match_count: int
+
+    def __init__(self, scenario: _Generation6GitScenario, root: Path) -> None:
+        self.scenario = scenario
+        self.root = root
+        self.calls = []
+        self.failure_match_count = 0
+
+    def __call__(
+        self,
+        supervisor: ProcessSupervisor,
+        root: Path,
+        *arguments: str,
+        allowed_exit_codes: tuple[int, ...] = (0,),
+    ) -> tuple[bytes, int]:
+        del supervisor
+        _require(root == self.root, "G self-test Git root differs")
+        exact_arguments = tuple(_ascii(value, "G self-test Git argument") for value in arguments)
+        _require(
+            type(allowed_exit_codes) is tuple
+            and bool(allowed_exit_codes)
+            and all(type(value) is int and value >= 0 for value in allowed_exit_codes),
+            "G self-test allowed exit codes differ",
+        )
+        exact_allowed = tuple(allowed_exit_codes)
+        self.calls.append((exact_arguments, exact_allowed))
+        if exact_arguments == self.scenario.failure_arguments:
+            self.failure_match_count += 1
+            if self.failure_match_count == self.scenario.failure_occurrence:
+                raise ContractError(self.scenario.failure_message)
+        if exact_arguments == (
+            "rev-parse",
+            "--path-format=absolute",
+            "--show-toplevel",
+        ):
+            _require(exact_allowed == (0,), "G top-level exit-code authority differs")
+            return os.fsencode(root) + b"\n", 0
+        if exact_arguments == ("rev-parse", "--is-shallow-repository"):
+            _require(exact_allowed == (0,), "G shallow exit-code authority differs")
+            return self.scenario.shallow.encode("ascii") + b"\n", 0
+        if exact_arguments == ("rev-parse", "HEAD"):
+            _require(exact_allowed == (0,), "G HEAD exit-code authority differs")
+            return self.scenario.head_sha.encode("ascii") + b"\n", 0
+        if len(exact_arguments) == 3 and exact_arguments[:2] == ("cat-file", "-t"):
+            _require(exact_allowed == (0,), "G object exit-code authority differs")
+            identity = exact_arguments[2]
+            if identity == self.scenario.head_sha == self.scenario.candidate_sha:
+                _require(
+                    self.scenario.head_object_type == self.scenario.candidate_object_type,
+                    "G aliased commit object types differ",
+                )
+                object_type = self.scenario.head_object_type
+            elif identity == self.scenario.head_sha:
+                object_type = self.scenario.head_object_type
+            elif identity == self.scenario.candidate_sha:
+                object_type = self.scenario.candidate_object_type
+            elif identity == self.scenario.tested_tree_sha == self.scenario.candidate_tree_sha:
+                _require(
+                    self.scenario.tested_tree_object_type
+                    == self.scenario.candidate_tree_object_type,
+                    "G aliased tree object types differ",
+                )
+                object_type = self.scenario.tested_tree_object_type
+            elif identity == self.scenario.tested_tree_sha:
+                object_type = self.scenario.tested_tree_object_type
+            elif identity == self.scenario.candidate_tree_sha:
+                object_type = self.scenario.candidate_tree_object_type
+            else:
+                raise ContractError("G self-test Git object lookup differs")
+            return object_type.encode("ascii") + b"\n", 0
+        if exact_arguments == (
+            "rev-list",
+            "--parents",
+            "-n",
+            "1",
+            self.scenario.head_sha,
+        ):
+            _require(exact_allowed == (0,), "G parent-list exit-code authority differs")
+            values = (self.scenario.head_sha, *self.scenario.parents)
+            return " ".join(values).encode("ascii") + b"\n", 0
+        if exact_arguments == (
+            "merge-base",
+            "--is-ancestor",
+            self.scenario.candidate_sha,
+            self.scenario.head_sha,
+        ):
+            _require(exact_allowed == (0, 1), "G ancestry exit-code authority differs")
+            return b"", self.scenario.ancestry_exit
+        if exact_arguments == (
+            "rev-parse",
+            f"{self.scenario.head_sha}^{{tree}}",
+        ):
+            _require(exact_allowed == (0,), "G tested-tree exit-code authority differs")
+            return self.scenario.tested_tree_sha.encode("ascii") + b"\n", 0
+        if exact_arguments == (
+            "rev-parse",
+            f"{self.scenario.candidate_sha}^{{tree}}",
+        ):
+            _require(exact_allowed == (0,), "G candidate-tree exit-code authority differs")
+            return self.scenario.candidate_tree_sha.encode("ascii") + b"\n", 0
+        raise ContractError("G self-test Git command differs")
+
+
+def _generation6_g_success_calls(
+    scenario: _Generation6GitScenario,
+) -> tuple[tuple[tuple[str, ...], tuple[int, ...]], ...]:
+    calls: list[tuple[tuple[str, ...], tuple[int, ...]]] = [
+        (("rev-parse", "--path-format=absolute", "--show-toplevel"), (0,)),
+        (("rev-parse", "--is-shallow-repository"), (0,)),
+        (("rev-parse", "HEAD"), (0,)),
+        (("cat-file", "-t", scenario.head_sha), (0,)),
+        (("cat-file", "-t", scenario.candidate_sha), (0,)),
+        (("rev-list", "--parents", "-n", "1", scenario.head_sha), (0,)),
+    ]
+    if scenario.event_name == "pull_request":
+        calls.append(
+            (
+                (
+                    "merge-base",
+                    "--is-ancestor",
+                    scenario.candidate_sha,
+                    scenario.head_sha,
+                ),
+                (0, 1),
+            )
+        )
+    calls.extend(
+        (
+            (("rev-parse", f"{scenario.head_sha}^{{tree}}"), (0,)),
+            (("rev-parse", f"{scenario.candidate_sha}^{{tree}}"), (0,)),
+            (("cat-file", "-t", scenario.tested_tree_sha), (0,)),
+            (("cat-file", "-t", scenario.candidate_tree_sha), (0,)),
+        )
+    )
+    return tuple(calls)
+
+
+def _generation6_g_environment(scenario: _Generation6GitScenario) -> dict[str, str]:
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "GITHUB_EVENT_NAME": scenario.event_name,
+            "GITHUB_SHA": scenario.github_sha,
+            "TASK064_CANDIDATE_SHA": scenario.candidate_sha,
+        }
+    )
+    return environment
+
+
+def _generation6_g_expected_identity(scenario: _Generation6GitScenario) -> GitIdentity:
+    pull_request = scenario.event_name == "pull_request"
+    return GitIdentity(
+        scenario.event_name,
+        "SECOND_PARENT" if pull_request else "SELF",
+        scenario.candidate_sha,
+        scenario.candidate_tree_sha,
+        scenario.head_sha,
+        scenario.tested_tree_sha,
+        len(scenario.parents),
+        scenario.candidate_sha if pull_request else None,
+    )
+
+
+def _generation6_g_accept_identity(
+    scenario: _Generation6GitScenario,
+    root: Path,
+) -> GitIdentity:
+    script = _Generation6GitRawScript(scenario, root)
+    module = _generation6_module()
+    with (
+        _Generation6SelftestPatch(os, "environ", _generation6_g_environment(scenario)),
+        _Generation6SelftestPatch(module, "_git_raw", script),
+    ):
+        identity = _git_identity(cast(ProcessSupervisor, SimpleNamespace()), root)
+    _require(
+        identity == _generation6_g_expected_identity(scenario)
+        and tuple(script.calls) == _generation6_g_success_calls(scenario)
+        and script.failure_match_count == 0,
+        "G positive identity history differs",
+    )
+    return identity
+
+
+def _generation6_g_reject_identity(
+    scenario: _Generation6GitScenario,
+    root: Path,
+    *,
+    label: str,
+    expected_message: str,
+    expected_last_arguments: tuple[str, ...] | None,
+) -> None:
+    script = _Generation6GitRawScript(scenario, root)
+    module = _generation6_module()
+    with (
+        _Generation6SelftestPatch(os, "environ", _generation6_g_environment(scenario)),
+        _Generation6SelftestPatch(module, "_git_raw", script),
+    ):
+        _selftest_expect_contract_error(
+            lambda: _git_identity(cast(ProcessSupervisor, SimpleNamespace()), root),
+            label=label,
+            expected_message=expected_message,
+        )
+    if expected_last_arguments is None:
+        _require(not script.calls, f"{label} reached Git unexpectedly")
+    else:
+        _require(
+            bool(script.calls) and script.calls[-1][0] == expected_last_arguments,
+            f"{label} rejected at the wrong Git call",
+        )
+    expected_failure_count = int(scenario.failure_arguments is not None)
+    _require(
+        script.failure_match_count == expected_failure_count,
+        f"{label} failure injection count differs",
+    )
+
+
+def _generation6_g_repository_facts(root: Path) -> _Generation6GitRepositoryFacts:
+    private_root: PrivateRoot | None = None
+    command_files: CommandFiles | None = None
+    facts: _Generation6GitRepositoryFacts | None = None
+    primary: BaseException | None = None
+    try:
+        private_root, command_files, supervisor = _generation6_p_inner_supervisor()
+        _require(
+            _git_raw(
+                supervisor,
+                root,
+                "rev-parse",
+                "--path-format=absolute",
+                "--show-toplevel",
+            )[0]
+            == os.fsencode(root) + b"\n",
+            "G repository top-level differs",
+        )
+        _require(
+            _git_line(supervisor, root, "rev-parse", "--is-shallow-repository") == "false",
+            "G repository history is shallow",
+        )
+        head = _hex(_git_line(supervisor, root, "rev-parse", "HEAD"), 40, "G real HEAD")
+        _git_object(supervisor, root, head, "commit")
+        head_parent_line = _git_line(
+            supervisor,
+            root,
+            "rev-list",
+            "--parents",
+            "-n",
+            "1",
+            head,
+        ).split(" ")
+        _require(head_parent_line[0] == head, "G real HEAD parent list differs")
+        head_parents = tuple(
+            _hex(value, 40, "G real HEAD parent") for value in head_parent_line[1:]
+        )
+        head_tree = _hex(
+            _git_line(supervisor, root, "rev-parse", f"{head}^{{tree}}"),
+            40,
+            "G real HEAD tree",
+        )
+        _git_object(supervisor, root, head_tree, "tree")
+        merge_head = _hex(
+            _git_line(
+                supervisor,
+                root,
+                "rev-list",
+                "--merges",
+                "--max-count=1",
+                "HEAD",
+            ),
+            40,
+            "G real merge commit",
+        )
+        _git_object(supervisor, root, merge_head, "commit")
+        merge_parent_line = _git_line(
+            supervisor,
+            root,
+            "rev-list",
+            "--parents",
+            "-n",
+            "1",
+            merge_head,
+        ).split(" ")
+        _require(
+            len(merge_parent_line) == 3 and merge_parent_line[0] == merge_head,
+            "G real merge parent list differs",
+        )
+        merge_parents = tuple(
+            _hex(value, 40, "G real merge parent") for value in merge_parent_line[1:]
+        )
+        _require(
+            merge_parents[0] != merge_parents[1],
+            "G real merge parent identities repeat",
+        )
+        candidate = merge_parents[1]
+        _git_object(supervisor, root, candidate, "commit")
+        _, ancestry_exit = _git_raw(
+            supervisor,
+            root,
+            "merge-base",
+            "--is-ancestor",
+            candidate,
+            merge_head,
+            allowed_exit_codes=(0, 1),
+        )
+        _require(ancestry_exit == 0, "G real merge ancestry differs")
+        merge_tree = _hex(
+            _git_line(supervisor, root, "rev-parse", f"{merge_head}^{{tree}}"),
+            40,
+            "G real merge tree",
+        )
+        candidate_tree = _hex(
+            _git_line(supervisor, root, "rev-parse", f"{candidate}^{{tree}}"),
+            40,
+            "G real candidate tree",
+        )
+        _git_object(supervisor, root, merge_tree, "tree")
+        _git_object(supervisor, root, candidate_tree, "tree")
+        facts = _Generation6GitRepositoryFacts(
+            self_scenario=_Generation6GitScenario(
+                event_name="push",
+                github_sha=head,
+                candidate_sha=head,
+                head_sha=head,
+                parents=head_parents,
+                head_object_type="commit",
+                candidate_object_type="commit",
+                tested_tree_sha=head_tree,
+                candidate_tree_sha=head_tree,
+                tested_tree_object_type="tree",
+                candidate_tree_object_type="tree",
+            ),
+            merge_scenario=_Generation6GitScenario(
+                event_name="pull_request",
+                github_sha=merge_head,
+                candidate_sha=candidate,
+                head_sha=merge_head,
+                parents=merge_parents,
+                head_object_type="commit",
+                candidate_object_type="commit",
+                tested_tree_sha=merge_tree,
+                candidate_tree_sha=candidate_tree,
+                tested_tree_object_type="tree",
+                candidate_tree_object_type="tree",
+            ),
+        )
+        cleanup = private_root.cleanup()
+        _require(
+            cleanup.status == "PASS" and cleanup.residue_count == 0,
+            "G repository-fact cleanup differs",
+        )
+        command_files.close_without_publication()
+    except BaseException as error:
+        primary = error
+    if primary is not None:
+        try:
+            _close_failure_resources(private_root, command_files)
+        except BaseException as cleanup_error:
+            primary.add_note(f"G repository-fact failure cleanup failed: {cleanup_error!r}")
+        raise primary
+    _require(facts is not None, "G repository facts are absent")
+    return cast(_Generation6GitRepositoryFacts, facts)
+
+
+def _generation6_g_validate_real_stability(
+    root: Path,
+    scenario: _Generation6GitScenario,
+) -> None:
+    private_root: PrivateRoot | None = None
+    command_files: CommandFiles | None = None
+    primary: BaseException | None = None
+    try:
+        private_root, command_files, supervisor = _generation6_p_inner_supervisor()
+        with _Generation6SelftestPatch(
+            os,
+            "environ",
+            _generation6_g_environment(scenario),
+        ):
+            initially_clean = _git_clean(supervisor, root)
+            first = _git_identity(supervisor, root)
+            finally_clean = _git_clean(supervisor, root)
+            second = _git_identity(supervisor, root)
+        _require(
+            initially_clean
+            and finally_clean
+            and first == second == _generation6_g_expected_identity(scenario),
+            "G clean stable identity differs",
+        )
+        cleanup = private_root.cleanup()
+        _require(
+            cleanup.status == "PASS" and cleanup.residue_count == 0,
+            "G clean-stability cleanup differs",
+        )
+        command_files.close_without_publication()
+    except BaseException as error:
+        primary = error
+    if primary is not None:
+        try:
+            _close_failure_resources(private_root, command_files)
+        except BaseException as cleanup_error:
+            primary.add_note(f"G clean-stability failure cleanup failed: {cleanup_error!r}")
+        raise primary
+
+
+def _selftest_g_case(case_id: str, pytest_root: Path) -> None:
+    _require(case_id in _GENERATION6_G_REJECTIONS, "unknown G self-test case")
+    facts = _generation6_g_repository_facts(pytest_root)
+    self_scenario = facts.self_scenario
+    merge_scenario = facts.merge_scenario
+    if case_id == "G01":
+        _generation6_g_accept_identity(self_scenario, pytest_root)
+        _record_generation6_check(_GENERATION6_G_VALIDATIONS[case_id])
+        label, message = _GENERATION6_G_REJECTIONS[case_id][0]
+        _generation6_g_reject_identity(
+            replace(self_scenario, candidate_sha="A" * 40),
+            pytest_root,
+            label=label,
+            expected_message=message,
+            expected_last_arguments=None,
+        )
+    elif case_id == "G02":
+        _generation6_g_accept_identity(self_scenario, pytest_root)
+        _record_generation6_check(_GENERATION6_G_VALIDATIONS[case_id])
+        label, message = _GENERATION6_G_REJECTIONS[case_id][0]
+        _generation6_g_reject_identity(
+            replace(self_scenario, github_sha="A" * 40),
+            pytest_root,
+            label=label,
+            expected_message=message,
+            expected_last_arguments=None,
+        )
+    elif case_id == "G03":
+        _generation6_g_accept_identity(merge_scenario, pytest_root)
+        _record_generation6_check(_GENERATION6_G_VALIDATIONS[case_id])
+        variants = (
+            (
+                replace(merge_scenario, head_object_type="blob"),
+                ("cat-file", "-t", merge_scenario.head_sha),
+            ),
+            (
+                replace(merge_scenario, candidate_object_type="blob"),
+                ("cat-file", "-t", merge_scenario.candidate_sha),
+            ),
+        )
+        for (label, message), (scenario, last_arguments) in zip(
+            _GENERATION6_G_REJECTIONS[case_id],
+            variants,
+            strict=True,
+        ):
+            _generation6_g_reject_identity(
+                scenario,
+                pytest_root,
+                label=label,
+                expected_message=message,
+                expected_last_arguments=last_arguments,
+            )
+    elif case_id == "G04":
+        _generation6_g_accept_identity(self_scenario, pytest_root)
+        _record_generation6_check(_GENERATION6_G_VALIDATIONS[case_id])
+        label, message = _GENERATION6_G_REJECTIONS[case_id][0]
+        _generation6_g_reject_identity(
+            replace(self_scenario, github_sha="0" * 40),
+            pytest_root,
+            label=label,
+            expected_message=message,
+            expected_last_arguments=("rev-parse", "HEAD"),
+        )
+    elif case_id == "G05":
+        _generation6_g_accept_identity(merge_scenario, pytest_root)
+        _record_generation6_check(_GENERATION6_G_VALIDATIONS[case_id])
+        label, message = _GENERATION6_G_REJECTIONS[case_id][0]
+        _generation6_g_reject_identity(
+            replace(merge_scenario, parents=merge_scenario.parents[:1]),
+            pytest_root,
+            label=label,
+            expected_message=message,
+            expected_last_arguments=(
+                "rev-list",
+                "--parents",
+                "-n",
+                "1",
+                merge_scenario.head_sha,
+            ),
+        )
+    elif case_id == "G06":
+        _generation6_g_accept_identity(merge_scenario, pytest_root)
+        _record_generation6_check(_GENERATION6_G_VALIDATIONS[case_id])
+        label, message = _GENERATION6_G_REJECTIONS[case_id][0]
+        _generation6_g_reject_identity(
+            replace(
+                merge_scenario,
+                parents=(merge_scenario.parents[0], merge_scenario.parents[0]),
+            ),
+            pytest_root,
+            label=label,
+            expected_message=message,
+            expected_last_arguments=(
+                "rev-list",
+                "--parents",
+                "-n",
+                "1",
+                merge_scenario.head_sha,
+            ),
+        )
+    elif case_id == "G07":
+        _generation6_g_accept_identity(merge_scenario, pytest_root)
+        _record_generation6_check(_GENERATION6_G_VALIDATIONS[case_id])
+        label, message = _GENERATION6_G_REJECTIONS[case_id][0]
+        _generation6_g_reject_identity(
+            replace(merge_scenario, ancestry_exit=1),
+            pytest_root,
+            label=label,
+            expected_message=message,
+            expected_last_arguments=(
+                "merge-base",
+                "--is-ancestor",
+                merge_scenario.candidate_sha,
+                merge_scenario.head_sha,
+            ),
+        )
+    elif case_id in {"G08", "G09"}:
+        event_name = "push" if case_id == "G08" else "workflow_dispatch"
+        accepted = replace(self_scenario, event_name=event_name)
+        _generation6_g_accept_identity(accepted, pytest_root)
+        _record_generation6_check(_GENERATION6_G_VALIDATIONS[case_id])
+        label, message = _GENERATION6_G_REJECTIONS[case_id][0]
+        _generation6_g_reject_identity(
+            replace(accepted, candidate_sha="0" * 40),
+            pytest_root,
+            label=label,
+            expected_message=message,
+            expected_last_arguments=(
+                "rev-list",
+                "--parents",
+                "-n",
+                "1",
+                accepted.head_sha,
+            ),
+        )
+    elif case_id == "G10":
+        scenarios: tuple[tuple[_Generation6GitScenario, tuple[str, ...]], ...] = (
+            (
+                replace(self_scenario, shallow="true"),
+                ("rev-parse", "--is-shallow-repository"),
+            ),
+            (
+                replace(
+                    self_scenario,
+                    failure_arguments=("cat-file", "-t", self_scenario.head_sha),
+                ),
+                ("cat-file", "-t", self_scenario.head_sha),
+            ),
+            (
+                replace(
+                    merge_scenario,
+                    parents=(*merge_scenario.parents, merge_scenario.parents[0]),
+                ),
+                (
+                    "rev-list",
+                    "--parents",
+                    "-n",
+                    "1",
+                    merge_scenario.head_sha,
+                ),
+            ),
+            (
+                replace(merge_scenario, ancestry_exit=1),
+                (
+                    "merge-base",
+                    "--is-ancestor",
+                    merge_scenario.candidate_sha,
+                    merge_scenario.head_sha,
+                ),
+            ),
+        )
+        for (label, message), (scenario, expected_last) in zip(
+            _GENERATION6_G_REJECTIONS[case_id],
+            scenarios,
+            strict=True,
+        ):
+            _generation6_g_reject_identity(
+                scenario,
+                pytest_root,
+                label=label,
+                expected_message=message,
+                expected_last_arguments=expected_last,
+            )
+    elif case_id == "G11":
+        identity = _generation6_g_accept_identity(merge_scenario, pytest_root)
+        _require(
+            identity.candidate_commit_sha == merge_scenario.candidate_sha
+            and identity.candidate_tree_sha == merge_scenario.candidate_tree_sha
+            and identity.tested_checkout_commit_sha == merge_scenario.head_sha
+            and identity.tested_checkout_tree_sha == merge_scenario.tested_tree_sha,
+            "G11 returned Git binding differs",
+        )
+        _record_generation6_check(_GENERATION6_G_VALIDATIONS[case_id])
+    else:
+        _require(case_id == "G12", "unknown G self-test case")
+        _generation6_g_validate_real_stability(pytest_root, self_scenario)
+        _record_generation6_check(_GENERATION6_G_VALIDATIONS[case_id])
+    _record_generation6_case_evidence(case_id)
+
+
+@dataclass
+class _Generation6FailingMapping:
+    recorder: _Generation6HazardRecorder
+    token_id: str
+    close_call_count: int = 0
+
+    def __getitem__(self, index: int) -> int:
+        _require(index == 0, "nested failing mmap index differs")
+        return 0
+
+    def close(self) -> None:
+        self.close_call_count += 1
+        self.recorder.transition(
+            self.token_id,
+            "AUTHENTICATED",
+            "owner_detached",
+            "DETACHED",
+        )
+        self.recorder.transition(
+            self.token_id,
+            "DETACHED",
+            "close_called",
+            "CLOSE_ATTEMPTED",
+        )
+        self.recorder.call(
+            "mmap",
+            "close",
+            self.token_id,
+            [],
+            "RAISED",
+            "OSError:mmap-close-sentinel",
+        )
+        self.recorder.transition(
+            self.token_id,
+            "CLOSE_ATTEMPTED",
+            "close_raised",
+            "TERMINAL",
+        )
+        raise OSError("mmap-close-sentinel")
+
+
+@dataclass
+class _Generation6FailingMmapOwner:
+    mapping: _Generation6FailingMapping
+    terminal: bool = False
+
+    def require(self) -> _Generation6FailingMapping:
+        _require(not self.terminal, "nested failing mmap owner is terminal")
+        return self.mapping
+
+    def detach(self) -> _Generation6FailingMapping:
+        _require(not self.terminal, "nested failing mmap owner is already terminal")
+        self.terminal = True
+        return self.mapping
+
+
+def _run_generation6_o_anchor_probe_for_test(
+    case_id: str,
+    pytest_root_text: str,
+    nonce: str,
+) -> bytes:
+    """Run an irreversible conftest-runtime anchor probe in a nested exec."""
+
+    exact_case_id = _ascii(case_id, "nested anchor case")
+    _require(exact_case_id in {"O31", "O32"}, "nested anchor case differs")
+    exact_nonce = _hex(nonce, 64, "nested anchor nonce")
+    root = Path(_ascii(pytest_root_text, "nested anchor pytest root"))
+    _require(root.is_absolute() and root.resolve(strict=True) == root, "nested anchor root differs")
+    module = _selftest_load_conftest(root)
+    recorder = _Generation6HazardRecorder.create(exact_case_id)
+    observer_failure = _selftest_conftest_exception(module, "_ObserverFailure")
+    descriptor = _selftest_open_anonymous_observation()
+    raw = _selftest_conftest_raw(module, observation_fd=descriptor)
+    inherited_history: list[tuple[tuple[int, ...], Path]] = []
+
+    def accept_governed_descriptors(
+        handles: list[object],
+        *,
+        capture_root: Path,
+    ) -> None:
+        inherited_history.append(
+            (
+                tuple(cast(int, _selftest_attribute(handle, "descriptor")) for handle in handles),
+                capture_root,
+            )
+        )
+
+    runtime_type = cast(
+        Callable[..., object],
+        _selftest_attribute(module, "_Task064ObserverRuntime"),
+    )
+    with _Generation6SelftestPatch(
+        module,
+        "_require_exact_inherited_descriptors",
+        accept_governed_descriptors,
+    ):
+        runtime = runtime_type(raw)
+    _require(
+        inherited_history
+        == [
+            (
+                (descriptor,),
+                cast(Path, _selftest_attribute(raw, "basetemp")).parent,
+            )
+        ],
+        "nested anchor inherited-descriptor history differs",
+    )
+    vars(module)["_RAW_INVOCATION"] = raw
+    vars(module)["_RUNTIME"] = runtime
+    pidfd = cast(int, _selftest_attribute(runtime, "self_pidfd"))
+    _require(type(pidfd) is int and pidfd > 2, "nested anchor pidfd differs")
+    ci_token = f"{exact_case_id}-CI-FD"
+    pidfd_token = f"{exact_case_id}-PIDFD"
+    recorder.register(ci_token, "AUTHENTICATED")
+    recorder.register(pidfd_token, "AUTHENTICATED")
+    write_calls: list[str] = []
+    close_calls: list[int] = []
+    captured_close = os.close
+
+    def forbidden_write(*arguments: object, **keywords: object) -> None:
+        del arguments, keywords
+        write_calls.append("write")
+        recorder.forbid("observation_fd", "write_packet", ci_token)
+        raise ContractError("nested anchor reached observation publication")
+
+    finish_ci = cast(Callable[[dict[str, object]], None], _selftest_attribute(runtime, "finish_ci"))
+    label, message = _GENERATION6_O_REJECTIONS[exact_case_id][0]
+    failing_owner: _Generation6FailingMmapOwner | None = None
+    if exact_case_id == "O31":
+
+        def failing_pidfd_close(target: int) -> None:
+            close_calls.append(target)
+            if target == pidfd:
+                _require(
+                    _selftest_attribute(runtime, "self_pidfd") == -1,
+                    "O31 pidfd owner was not detached",
+                )
+                recorder.transition(
+                    pidfd_token,
+                    "AUTHENTICATED",
+                    "owner_detached",
+                    "DETACHED",
+                )
+                recorder.transition(
+                    pidfd_token,
+                    "DETACHED",
+                    "close_called",
+                    "CLOSE_ATTEMPTED",
+                )
+                recorder.call(
+                    "pidfd",
+                    "close",
+                    pidfd_token,
+                    [target],
+                    "RAISED",
+                    "OSError:pidfd-close-sentinel",
+                )
+                recorder.transition(
+                    pidfd_token,
+                    "CLOSE_ATTEMPTED",
+                    "close_raised",
+                    "TERMINAL",
+                )
+                raise OSError("pidfd-close-sentinel")
+            _require(target == descriptor, "O31 CI close target differs")
+            recorder.transition(ci_token, "AUTHENTICATED", "owner_detached", "DETACHED")
+            recorder.transition(ci_token, "DETACHED", "close_called", "CLOSE_ATTEMPTED")
+            captured_close(target)
+            recorder.call(
+                "observation_fd",
+                "close",
+                ci_token,
+                [target],
+                "RETURNED",
+                0,
+            )
+            recorder.transition(ci_token, "CLOSE_ATTEMPTED", "close_returned", "TERMINAL")
+
+        with (
+            _Generation6SelftestPatch(os, "close", failing_pidfd_close),
+            _Generation6SelftestPatch(module, "_write_packet", forbidden_write),
+        ):
+            _selftest_expect_exact_exception(
+                lambda: finish_ci({"probe": exact_case_id}),
+                label=label,
+                expected_type=observer_failure,
+                expected_message=message,
+            )
+        _require(close_calls == [pidfd, descriptor], "O31 close authority history differs")
+    else:
+        original_poison = _selftest_attribute(runtime, "poison")
+        detach_poison = cast(
+            Callable[[], object],
+            _selftest_attribute(original_poison, "detach"),
+        )
+        original_mapping = detach_poison()
+        cast(Callable[[], None], _selftest_attribute(original_mapping, "close"))()
+        poison_token = f"{exact_case_id}-MMAP"
+        recorder.register(poison_token, "AUTHENTICATED")
+        failing_owner = _Generation6FailingMmapOwner(
+            _Generation6FailingMapping(recorder, poison_token)
+        )
+        vars(runtime)["_poison"] = failing_owner
+
+        def record_close(target: int) -> None:
+            close_calls.append(target)
+            if target == pidfd:
+                token_id = pidfd_token
+                _require(
+                    _selftest_attribute(runtime, "self_pidfd") == -1,
+                    "O32 pidfd owner was not detached",
+                )
+                authority = "pidfd"
+            else:
+                _require(target == descriptor, "O32 CI close target differs")
+                token_id = ci_token
+                authority = "observation_fd"
+            recorder.transition(token_id, "AUTHENTICATED", "owner_detached", "DETACHED")
+            recorder.transition(token_id, "DETACHED", "close_called", "CLOSE_ATTEMPTED")
+            captured_close(target)
+            recorder.call(authority, "close", token_id, [target], "RETURNED", 0)
+            recorder.transition(token_id, "CLOSE_ATTEMPTED", "close_returned", "TERMINAL")
+
+        with (
+            _Generation6SelftestPatch(os, "close", record_close),
+            _Generation6SelftestPatch(module, "_write_packet", forbidden_write),
+        ):
+            _selftest_expect_exact_exception(
+                lambda: finish_ci({"probe": exact_case_id}),
+                label=label,
+                expected_type=observer_failure,
+                expected_message=message,
+            )
+        _require(
+            close_calls == [pidfd, descriptor] and failing_owner.mapping.close_call_count == 1,
+            "O32 close authority history differs",
+        )
+        _selftest_require_descriptor_closed(pidfd, "O32 self pidfd")
+    _require(not write_calls, f"{exact_case_id} reached CI publication")
+    ci_handle = _selftest_attribute(runtime, "ci")
+    _require(
+        _selftest_attribute(ci_handle, "terminal") is True
+        and _selftest_attribute(ci_handle, "descriptor") == -1,
+        f"{exact_case_id} CI ownership is not terminal",
+    )
+    _selftest_require_descriptor_closed(descriptor, f"{exact_case_id} CI observation")
+    poison_owner = _selftest_attribute(runtime, "poison")
+    _require(
+        _selftest_attribute(runtime, "self_pidfd") == -1
+        and _selftest_attribute(poison_owner, "terminal") is True,
+        f"{exact_case_id} anchor ownership is not terminal",
+    )
+    expected_terminal = {ci_token: "TERMINAL", pidfd_token: "TERMINAL"}
+    if exact_case_id == "O32":
+        expected_terminal[f"{exact_case_id}-MMAP"] = "TERMINAL"
+    recorder.require_terminal(expected_terminal)
+    events = tuple(_GENERATION6_CASE_CHECK_HISTORY)
+    _require(
+        events == _generation6_rejection_events(label, message),
+        "nested anchor event trace differs",
+    )
+    vars(module)["_RUNTIME"] = None
+    vars(module)["_RAW_INVOCATION"] = None
+    packet: dict[str, object] = {
+        "domain": "TASK064-GENERATION6-O-ANCHOR-PROBE-V1",
+        "nonce": exact_nonce,
+        "case_id": exact_case_id,
+        "probe_pid": os.getpid(),
+        "probe_parent_pid": os.getppid(),
+        "events": list(events),
+        **recorder.packet_fields(),
+        "anchor_close_call_count": 1,
+        "ci_close_call_count": 1,
+        "write_call_count": len(write_calls),
+        "ci_terminal": True,
+        "pidfd_terminal": True,
+        "poison_terminal": True,
+        "status": "PASS",
+    }
+    return _canonical_bytes(packet, limit=8_192)
+
+
+def _selftest_o_terminal_anchor_case(
+    case_id: str,
+    pytest_root: Path,
+) -> bool:
+    if case_id not in {"O31", "O32"}:
+        return False
+    private_root: PrivateRoot | None = None
+    command_files: CommandFiles | None = None
+    primary: BaseException | None = None
+    packet: dict[str, object] | None = None
+    try:
+        private_root = PrivateRoot()
+        command_files = CommandFiles.__new__(CommandFiles)
+        command_files.enabled = False
+        command_files._files = {}
+        command_files._published = False
+        command_files._poisoned_descriptors = private_root._poisoned_descriptors
+        supervisor = ProcessSupervisor(private_root, command_files)
+        child_root = private_root.create_child(f"nested-{case_id.lower()}")
+        nonce = _hex(secrets.token_hex(32), 64, "nested anchor parent nonce")
+        child = supervisor.run(
+            [
+                sys.executable,
+                "-c",
+                _GENERATION6_O_ANCHOR_BOOTSTRAP,
+                os.fspath(Path(__file__).resolve(strict=True)),
+                case_id,
+                os.fspath(pytest_root),
+                nonce,
+            ],
+            cwd=pytest_root,
+            timeout_ns=10_000_000_000,
+            label=f"nested-{case_id.lower()}",
+            child_root=child_root,
+        )
+        _require(
+            child.exit_code == 0 and child.stderr == b"" and child.survivor_count == 0,
+            f"{case_id} nested anchor worker failed",
+        )
+        packet = _decode_canonical(
+            child.stdout,
+            limit=8_192,
+            label=f"{case_id} nested anchor result",
+        )
+        _exact_keys(packet, _GENERATION6_O_ANCHOR_RESULT_KEYS, "nested anchor result")
+        expected_events = _generation6_rejection_events(*_GENERATION6_O_REJECTIONS[case_id][0])
+        raw_calls = packet["calls"]
+        raw_boundaries = packet["boundaries"]
+        _require(
+            type(raw_calls) is list
+            and type(raw_boundaries) is list
+            and packet["publications"] == []
+            and packet["forbidden"] == [],
+            f"{case_id} nested anchor history shape differs",
+        )
+        calls = cast(list[object], raw_calls)
+        boundaries = cast(list[object], raw_boundaries)
+        _require(
+            all(type(value) is list and len(cast(list[object], value)) == 8 for value in calls)
+            and all(
+                type(value) is list and len(cast(list[object], value)) == 5 for value in boundaries
+            ),
+            f"{case_id} nested anchor history record differs",
+        )
+        call_projection = [
+            [
+                cast(list[object], value)[0],
+                cast(list[object], value)[1],
+                cast(list[object], value)[2],
+                cast(list[object], value)[3],
+                cast(list[object], value)[4],
+                cast(list[object], value)[6],
+                cast(list[object], value)[7],
+            ]
+            for value in calls
+        ]
+        if case_id == "O31":
+            expected_call_projection: list[list[object]] = [
+                [
+                    1,
+                    "O31",
+                    "pidfd",
+                    "close",
+                    "O31-PIDFD",
+                    "RAISED",
+                    "OSError:pidfd-close-sentinel",
+                ],
+                [
+                    2,
+                    "O31",
+                    "observation_fd",
+                    "close",
+                    "O31-CI-FD",
+                    "RETURNED",
+                    0,
+                ],
+            ]
+            expected_boundaries: list[list[object]] = [
+                [1, "O31-PIDFD", "AUTHENTICATED", "owner_detached", "DETACHED"],
+                [2, "O31-PIDFD", "DETACHED", "close_called", "CLOSE_ATTEMPTED"],
+                [3, "O31-PIDFD", "CLOSE_ATTEMPTED", "close_raised", "TERMINAL"],
+                [4, "O31-CI-FD", "AUTHENTICATED", "owner_detached", "DETACHED"],
+                [5, "O31-CI-FD", "DETACHED", "close_called", "CLOSE_ATTEMPTED"],
+                [6, "O31-CI-FD", "CLOSE_ATTEMPTED", "close_returned", "TERMINAL"],
+            ]
+        else:
+            expected_call_projection = [
+                [
+                    1,
+                    "O32",
+                    "mmap",
+                    "close",
+                    "O32-MMAP",
+                    "RAISED",
+                    "OSError:mmap-close-sentinel",
+                ],
+                [2, "O32", "pidfd", "close", "O32-PIDFD", "RETURNED", 0],
+                [
+                    3,
+                    "O32",
+                    "observation_fd",
+                    "close",
+                    "O32-CI-FD",
+                    "RETURNED",
+                    0,
+                ],
+            ]
+            expected_boundaries = [
+                [1, "O32-MMAP", "AUTHENTICATED", "owner_detached", "DETACHED"],
+                [2, "O32-MMAP", "DETACHED", "close_called", "CLOSE_ATTEMPTED"],
+                [3, "O32-MMAP", "CLOSE_ATTEMPTED", "close_raised", "TERMINAL"],
+                [4, "O32-PIDFD", "AUTHENTICATED", "owner_detached", "DETACHED"],
+                [5, "O32-PIDFD", "DETACHED", "close_called", "CLOSE_ATTEMPTED"],
+                [6, "O32-PIDFD", "CLOSE_ATTEMPTED", "close_returned", "TERMINAL"],
+                [7, "O32-CI-FD", "AUTHENTICATED", "owner_detached", "DETACHED"],
+                [8, "O32-CI-FD", "DETACHED", "close_called", "CLOSE_ATTEMPTED"],
+                [9, "O32-CI-FD", "CLOSE_ATTEMPTED", "close_returned", "TERMINAL"],
+            ]
+        _require(
+            call_projection == expected_call_projection and boundaries == expected_boundaries,
+            f"{case_id} nested anchor exact history differs",
+        )
+        _require(
+            packet["domain"] == "TASK064-GENERATION6-O-ANCHOR-PROBE-V1"
+            and packet["nonce"] == nonce
+            and packet["case_id"] == case_id
+            and _integer(packet["probe_pid"], "nested anchor PID", minimum=1) == child.pid
+            and _integer(packet["probe_parent_pid"], "nested anchor parent PID", minimum=1)
+            == os.getpid()
+            and packet["events"] == list(expected_events)
+            and packet["anchor_close_call_count"] == 1
+            and packet["ci_close_call_count"] == 1
+            and packet["write_call_count"] == 0
+            and packet["ci_terminal"] is True
+            and packet["pidfd_terminal"] is True
+            and packet["poison_terminal"] is True
+            and packet["status"] == "PASS",
+            f"{case_id} nested anchor result differs",
+        )
+        cleanup = private_root.cleanup()
+        _require(
+            cleanup.status == "PASS" and cleanup.residue_count == 0,
+            f"{case_id} nested private-root cleanup differs",
+        )
+        command_files.close_without_publication()
+    except BaseException as error:
+        primary = error
+    if primary is not None:
+        try:
+            _close_failure_resources(private_root, command_files)
+        except BaseException as cleanup_error:
+            primary.add_note(f"nested anchor failure cleanup failed: {cleanup_error!r}")
+        raise primary
+    _require(packet is not None, f"{case_id} nested anchor result is absent")
+    exact_packet = cast(dict[str, object], packet)
+    for event in cast(list[object], exact_packet["events"]):
+        _record_generation6_check(_ascii(event, "nested anchor event"))
+    _record_generation6_case_evidence(case_id)
+    return True
+
+
+def _generation6_o13_replace(value: object, **changes: object) -> object:
+    return cast(object, replace(cast(Any, value), **changes))
+
+
+def _generation6_o13_fixture(module: object, *, observation_count: int) -> object:
+    _require(observation_count in {1, 2}, "O13 fixture observation count differs")
+    stat_type = cast(Callable[..., object], _selftest_attribute(module, "_ExactDescriptorStat"))
+    record_type = cast(
+        Callable[..., object],
+        _selftest_attribute(module, "_ExactDescriptorRecord"),
+    )
+    root_type = cast(Callable[..., object], _selftest_attribute(module, "_ExactCaptureRoot"))
+    topology_type = cast(
+        Callable[..., object],
+        _selftest_attribute(module, "_ExactRuntimeDescriptorTopology"),
+    )
+
+    def exact_stat(
+        device: int,
+        inode: int,
+        mode: int,
+        *,
+        rdev: int = 0,
+        uid: int | None = None,
+        gid: int | None = None,
+        link_count: int = 1,
+        size: int = 0,
+    ) -> object:
+        return stat_type(
+            device=device,
+            inode=inode,
+            rdev=rdev,
+            mode=mode,
+            uid=os.getuid() if uid is None else uid,
+            gid=os.getgid() if gid is None else gid,
+            link_count=link_count,
+            size=size,
+        )
+
+    def exact_record(
+        descriptor: int,
+        target: str,
+        descriptor_flags: int,
+        status_flags: int,
+        status_record: object,
+    ) -> object:
+        return record_type(
+            descriptor=descriptor,
+            target=target,
+            descriptor_flags=descriptor_flags,
+            status_flags=status_flags,
+            status=status_record,
+        )
+
+    capture_path = "/task064-o13-capture"
+    root_status = exact_stat(101, 10, stat.S_IFDIR | 0o700, link_count=2)
+    named_null = exact_stat(
+        202,
+        20,
+        stat.S_IFCHR | 0o666,
+        rdev=259,
+        uid=0,
+        gid=0,
+    )
+    named_urandom = exact_stat(
+        202,
+        21,
+        stat.S_IFCHR | 0o666,
+        rdev=265,
+        uid=0,
+        gid=0,
+    )
+    stdout_status = exact_stat(
+        101,
+        30,
+        stat.S_IFREG | 0o600,
+        link_count=0,
+    )
+    stderr_status = exact_stat(
+        101,
+        31,
+        stat.S_IFREG | 0o600,
+        link_count=0,
+    )
+    pipe_one_status = exact_stat(303, 40, stat.S_IFIFO | 0o600)
+    pipe_two_status = exact_stat(303, 41, stat.S_IFIFO | 0o600)
+    standards = (
+        exact_record(0, "/dev/null", 0, os.O_RDONLY, named_null),
+        exact_record(
+            1,
+            f"{capture_path}/#30 (deleted)",
+            0,
+            os.O_RDWR,
+            stdout_status,
+        ),
+        exact_record(
+            2,
+            f"{capture_path}/#31 (deleted)",
+            0,
+            os.O_RDWR,
+            stderr_status,
+        ),
+    )
+    observations = tuple(
+        exact_record(
+            2_000 + ordinal,
+            f"{capture_path}/#{60 + ordinal} (deleted)",
+            fcntl.FD_CLOEXEC,
+            os.O_RDWR,
+            exact_stat(
+                101,
+                60 + ordinal,
+                stat.S_IFREG | 0o600,
+                link_count=0,
+            ),
+        )
+        for ordinal in range(observation_count)
+    )
+    runtime = (
+        exact_record(
+            1_000,
+            "/dev/urandom",
+            fcntl.FD_CLOEXEC,
+            os.O_RDONLY,
+            named_urandom,
+        ),
+        exact_record(1_001, "/dev/null", fcntl.FD_CLOEXEC, os.O_RDONLY, named_null),
+        exact_record(1_002, "/dev/null", fcntl.FD_CLOEXEC, os.O_RDONLY, named_null),
+        exact_record(
+            1_003,
+            "pipe:[40]",
+            fcntl.FD_CLOEXEC,
+            os.O_WRONLY,
+            pipe_one_status,
+        ),
+        exact_record(
+            1_004,
+            f"{capture_path}/#30 (deleted)",
+            fcntl.FD_CLOEXEC,
+            os.O_RDWR,
+            stdout_status,
+        ),
+        exact_record(
+            1_005,
+            "pipe:[41]",
+            fcntl.FD_CLOEXEC,
+            os.O_WRONLY,
+            pipe_two_status,
+        ),
+        exact_record(
+            1_006,
+            f"{capture_path}/#31 (deleted)",
+            fcntl.FD_CLOEXEC,
+            os.O_RDWR,
+            stderr_status,
+        ),
+    )
+    return topology_type(
+        capture_root=root_type(path=capture_path, status=root_status),
+        named_null=named_null,
+        named_urandom=named_urandom,
+        standards=standards,
+        observations=observations,
+        runtime=runtime,
+        scan_transients=(3_000,),
+    )
+
+
+def _generation6_o13_authority_proof(pytest_root: Path) -> None:
+    source_bytes = _generation6_f_source_bytes(
+        (pytest_root / "tests" / "conftest.py").resolve(strict=True),
+        limit=1_000_000,
+        label="O13 conftest source",
+    )
+    try:
+        source = source_bytes.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as error:
+        raise ContractError("O13 conftest source encoding differs") from error
+    syntax = ast.parse(source, filename="tests/conftest.py", mode="exec")
+    functions = {
+        node.name: node
+        for node in ast.walk(syntax)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+    def exact_function(name: str) -> ast.FunctionDef:
+        node = functions.get(name)
+        if not isinstance(node, ast.FunctionDef):
+            raise ContractError("O13 authority function is absent")
+        return node
+
+    classifier_names = (
+        "_classify_exact_runtime_descriptor_topology",
+        "_require_exact_stat_record",
+        "_require_exact_descriptor_record",
+    )
+    collector_names = (
+        "_collect_exact_runtime_descriptor_topology",
+        "_probe_descriptor_once",
+        "_probe_capture_root_once",
+        "_probe_named_stat_once",
+        "_exact_descriptor_stat",
+        "_observation_matches_initial",
+    )
+    classifier_functions = tuple(exact_function(name) for name in classifier_names)
+    collector_functions = tuple(exact_function(name) for name in collector_names)
+    classifier = classifier_functions[0]
+    collector = collector_functions[0]
+    inherited_guard = exact_function("_require_exact_inherited_descriptors")
+
+    def calls_in(nodes: tuple[ast.FunctionDef, ...]) -> tuple[ast.Call, ...]:
+        return tuple(
+            child for node in nodes for child in ast.walk(node) if isinstance(child, ast.Call)
+        )
+
+    def local_edges(nodes: tuple[ast.FunctionDef, ...]) -> tuple[tuple[str, str], ...]:
+        return tuple(
+            sorted(
+                (node.name, child.func.id)
+                for node in nodes
+                for child in ast.walk(node)
+                if isinstance(child, ast.Call)
+                and isinstance(child.func, ast.Name)
+                and child.func.id in functions
+            )
+        )
+
+    classifier_calls = calls_in(classifier_functions)
+    collector_closure_calls = calls_in(collector_functions)
+    _require(
+        local_edges(classifier_functions)
+        == tuple(
+            sorted(
+                (
+                    (
+                        "_classify_exact_runtime_descriptor_topology",
+                        "_require_exact_descriptor_record",
+                    ),
+                    (
+                        "_classify_exact_runtime_descriptor_topology",
+                        "_require_exact_descriptor_record",
+                    ),
+                    (
+                        "_classify_exact_runtime_descriptor_topology",
+                        "_require_exact_descriptor_record",
+                    ),
+                    (
+                        "_classify_exact_runtime_descriptor_topology",
+                        "_require_exact_stat_record",
+                    ),
+                    (
+                        "_classify_exact_runtime_descriptor_topology",
+                        "_require_exact_stat_record",
+                    ),
+                    (
+                        "_classify_exact_runtime_descriptor_topology",
+                        "_require_exact_stat_record",
+                    ),
+                    ("_require_exact_descriptor_record", "_require_exact_stat_record"),
+                )
+            )
+        )
+        and local_edges(collector_functions)
+        == tuple(
+            sorted(
+                (
+                    (
+                        "_collect_exact_runtime_descriptor_topology",
+                        "_observation_matches_initial",
+                    ),
+                    (
+                        "_collect_exact_runtime_descriptor_topology",
+                        "_probe_capture_root_once",
+                    ),
+                    (
+                        "_collect_exact_runtime_descriptor_topology",
+                        "_probe_descriptor_once",
+                    ),
+                    (
+                        "_collect_exact_runtime_descriptor_topology",
+                        "_probe_named_stat_once",
+                    ),
+                    (
+                        "_collect_exact_runtime_descriptor_topology",
+                        "_probe_named_stat_once",
+                    ),
+                    ("_probe_capture_root_once", "_exact_descriptor_stat"),
+                    ("_probe_descriptor_once", "_exact_descriptor_stat"),
+                    ("_probe_descriptor_once", "_exact_descriptor_stat"),
+                    ("_probe_named_stat_once", "_exact_descriptor_stat"),
+                )
+            )
+        ),
+        "O13 authority helper closure differs",
+    )
+    inherited_guard_calls = calls_in((inherited_guard,))
+    _require(
+        local_edges((inherited_guard,))
+        == (
+            (
+                "_require_exact_inherited_descriptors",
+                "_classify_exact_runtime_descriptor_topology",
+            ),
+            (
+                "_require_exact_inherited_descriptors",
+                "_collect_exact_runtime_descriptor_topology",
+            ),
+        )
+        and len(inherited_guard_calls) == 2
+        and all(isinstance(call.func, ast.Name) for call in inherited_guard_calls)
+        and {cast(ast.Name, call.func).id for call in inherited_guard_calls}
+        == {
+            "_classify_exact_runtime_descriptor_topology",
+            "_collect_exact_runtime_descriptor_topology",
+        },
+        "O13 inherited guard authority closure differs",
+    )
+    collector_module_calls = tuple(
+        (function.name, call)
+        for function in collector_functions
+        for call in ast.walk(function)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Attribute)
+        and isinstance(call.func.value, ast.Name)
+        and call.func.value.id in {"os", "fcntl"}
+    )
+    collector_module_inventory = tuple(
+        sorted(
+            (owner, call.func.value.id, call.func.attr)
+            for owner, call in collector_module_calls
+            if isinstance(call.func, ast.Attribute) and isinstance(call.func.value, ast.Name)
+        )
+    )
+    expected_module_inventory = tuple(
+        sorted(
+            (
+                ("_collect_exact_runtime_descriptor_topology", "os", "close"),
+                ("_collect_exact_runtime_descriptor_topology", "os", "open"),
+                ("_collect_exact_runtime_descriptor_topology", "os", "scandir"),
+                ("_probe_capture_root_once", "os", "fspath"),
+                ("_probe_capture_root_once", "os", "stat"),
+                ("_probe_descriptor_once", "fcntl", "fcntl"),
+                ("_probe_descriptor_once", "fcntl", "fcntl"),
+                ("_probe_descriptor_once", "os", "fstat"),
+                ("_probe_descriptor_once", "os", "fstat"),
+                ("_probe_descriptor_once", "os", "readlink"),
+                ("_probe_named_stat_once", "os", "stat"),
+            )
+        )
+    )
+    _require(
+        collector_module_inventory == expected_module_inventory,
+        "O13 collector OS-operation whitelist differs",
+    )
+
+    def exact_module_calls(owner: str, module_name: str, operation: str) -> tuple[ast.Call, ...]:
+        return tuple(
+            call
+            for exact_owner, call in collector_module_calls
+            if exact_owner == owner
+            and isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == module_name
+            and call.func.attr == operation
+        )
+
+    descriptor_fstat_calls = exact_module_calls("_probe_descriptor_once", "os", "fstat")
+    descriptor_readlink_calls = exact_module_calls(
+        "_probe_descriptor_once",
+        "os",
+        "readlink",
+    )
+    descriptor_fcntl_calls = exact_module_calls(
+        "_probe_descriptor_once",
+        "fcntl",
+        "fcntl",
+    )
+    root_fspath_calls = exact_module_calls("_probe_capture_root_once", "os", "fspath")
+    root_stat_calls = exact_module_calls("_probe_capture_root_once", "os", "stat")
+    named_stat_calls = exact_module_calls("_probe_named_stat_once", "os", "stat")
+
+    def exact_no_follow_stat(call: ast.Call, argument: str) -> bool:
+        return (
+            len(call.args) == 1
+            and isinstance(call.args[0], ast.Name)
+            and call.args[0].id == argument
+            and len(call.keywords) == 1
+            and call.keywords[0].arg == "follow_symlinks"
+            and isinstance(call.keywords[0].value, ast.Constant)
+            and call.keywords[0].value.value is False
+        )
+
+    link_argument = (
+        descriptor_readlink_calls[0].args[0]
+        if len(descriptor_readlink_calls) == 1 and len(descriptor_readlink_calls[0].args) == 1
+        else None
+    )
+    _require(
+        len(descriptor_fstat_calls) == 2
+        and all(
+            len(call.args) == 1
+            and isinstance(call.args[0], ast.Name)
+            and call.args[0].id == "descriptor"
+            and not call.keywords
+            for call in descriptor_fstat_calls
+        )
+        and len(descriptor_readlink_calls) == 1
+        and not descriptor_readlink_calls[0].keywords
+        and isinstance(link_argument, ast.JoinedStr)
+        and len(link_argument.values) == 2
+        and isinstance(link_argument.values[0], ast.Constant)
+        and link_argument.values[0].value == "/proc/self/fd/"
+        and isinstance(link_argument.values[1], ast.FormattedValue)
+        and isinstance(link_argument.values[1].value, ast.Name)
+        and link_argument.values[1].value.id == "descriptor"
+        and link_argument.values[1].conversion == -1
+        and link_argument.values[1].format_spec is None
+        and len(descriptor_fcntl_calls) == 2
+        and all(
+            len(call.args) == 2
+            and isinstance(call.args[0], ast.Name)
+            and call.args[0].id == "descriptor"
+            and isinstance(call.args[1], ast.Attribute)
+            and isinstance(call.args[1].value, ast.Name)
+            and call.args[1].value.id == "fcntl"
+            and call.args[1].attr in {"F_GETFD", "F_GETFL"}
+            and not call.keywords
+            for call in descriptor_fcntl_calls
+        )
+        and {cast(ast.Attribute, call.args[1]).attr for call in descriptor_fcntl_calls}
+        == {"F_GETFD", "F_GETFL"}
+        and len(root_fspath_calls) == 1
+        and len(root_fspath_calls[0].args) == 1
+        and isinstance(root_fspath_calls[0].args[0], ast.Name)
+        and root_fspath_calls[0].args[0].id == "capture_root"
+        and not root_fspath_calls[0].keywords
+        and len(root_stat_calls) == 1
+        and exact_no_follow_stat(root_stat_calls[0], "capture_root")
+        and len(named_stat_calls) == 1
+        and exact_no_follow_stat(named_stat_calls[0], "path"),
+        "O13 collector read-only probe binding differs",
+    )
+    _require(
+        not any(
+            (
+                isinstance(call.func, ast.Attribute)
+                and (
+                    (
+                        isinstance(call.func.value, ast.Name)
+                        and call.func.value.id in {"os", "fcntl"}
+                    )
+                    or call.func.attr in {"close", "close_once", "detach", "adopt"}
+                )
+            )
+            or (
+                isinstance(call.func, ast.Name)
+                and call.func.id in {"close", "close_once", "detach", "adopt"}
+            )
+            for call in classifier_calls
+        ),
+        "O13 classifier retained descriptor authority",
+    )
+    collector_calls = tuple(node for node in ast.walk(collector) if isinstance(node, ast.Call))
+    os_open_calls = tuple(
+        call
+        for call in collector_calls
+        if isinstance(call.func, ast.Attribute)
+        and isinstance(call.func.value, ast.Name)
+        and call.func.value.id == "os"
+        and call.func.attr == "open"
+    )
+    scandir_calls = tuple(
+        call
+        for call in collector_calls
+        if isinstance(call.func, ast.Attribute)
+        and isinstance(call.func.value, ast.Name)
+        and call.func.value.id == "os"
+        and call.func.attr == "scandir"
+    )
+    os_close_calls = tuple(
+        call
+        for call in collector_calls
+        if isinstance(call.func, ast.Attribute)
+        and isinstance(call.func.value, ast.Name)
+        and call.func.value.id == "os"
+        and call.func.attr == "close"
+    )
+    iterator_close_calls = tuple(
+        call
+        for call in collector_calls
+        if isinstance(call.func, ast.Attribute)
+        and isinstance(call.func.value, ast.Name)
+        and call.func.value.id == "iterator"
+        and call.func.attr == "close"
+    )
+    collector_close_authorities = tuple(
+        call
+        for call in collector_closure_calls
+        if (
+            isinstance(call.func, ast.Attribute)
+            and call.func.attr in {"close", "close_once", "detach", "adopt"}
+        )
+        or (
+            isinstance(call.func, ast.Name)
+            and call.func.id in {"close", "close_once", "detach", "adopt"}
+        )
+    )
+    collector_open_authorities = tuple(
+        call
+        for call in collector_closure_calls
+        if isinstance(call.func, ast.Attribute)
+        and isinstance(call.func.value, ast.Name)
+        and call.func.value.id == "os"
+        and call.func.attr in {"open", "scandir"}
+    )
+    _require(
+        len(os_open_calls) == 1
+        and len(scandir_calls) == 1
+        and len(os_close_calls) == 1
+        and len(iterator_close_calls) == 1
+        and len(collector_close_authorities) == 2
+        and set(map(id, collector_close_authorities))
+        == {id(os_close_calls[0]), id(iterator_close_calls[0])}
+        and len(collector_open_authorities) == 2
+        and set(map(id, collector_open_authorities))
+        == {id(os_open_calls[0]), id(scandir_calls[0])},
+        "O13 collector descriptor authority differs",
+    )
+
+    os_open_call = os_open_calls[0]
+    scandir_call = scandir_calls[0]
+    os_close_call = os_close_calls[0]
+    iterator_close_call = iterator_close_calls[0]
+    raw_directory_assignments = tuple(
+        node
+        for node in ast.walk(cast(ast.AST, collector))
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "raw_directory"
+    )
+    iterator_assignments = tuple(
+        node
+        for node in ast.walk(cast(ast.AST, collector))
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "iterator"
+    )
+    provisional_assignments = tuple(
+        node
+        for node in ast.walk(cast(ast.AST, collector))
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "provisionally_owned"
+    )
+    provisional_close_guards = tuple(
+        node
+        for node in ast.walk(cast(ast.AST, collector))
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.Name)
+        and node.test.id == "provisionally_owned"
+        and any(descendant is os_close_call for descendant in ast.walk(node))
+    )
+    _require(
+        len(raw_directory_assignments) == 1
+        and raw_directory_assignments[0].value is os_open_call
+        and len(os_open_call.args) == 2
+        and not os_open_call.keywords
+        and isinstance(os_open_call.args[0], ast.Constant)
+        and os_open_call.args[0].value == "/proc/self/fd"
+        and ast.unparse(os_open_call.args[1])
+        == "os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC"
+        and len(iterator_assignments) == 1
+        and iterator_assignments[0].value is scandir_call
+        and len(scandir_call.args) == 1
+        and not scandir_call.keywords
+        and isinstance(scandir_call.args[0], ast.Name)
+        and scandir_call.args[0].id == "raw_directory",
+        "O13 collector directory acquisition binding differs",
+    )
+    close_argument = os_close_call.args[0] if len(os_close_call.args) == 1 else None
+    _require(
+        not os_close_call.keywords
+        and isinstance(close_argument, ast.Call)
+        and isinstance(close_argument.func, ast.Name)
+        and close_argument.func.id == "cast"
+        and len(close_argument.args) == 2
+        and not close_argument.keywords
+        and isinstance(close_argument.args[0], ast.Name)
+        and close_argument.args[0].id == "int"
+        and isinstance(close_argument.args[1], ast.Name)
+        and close_argument.args[1].id == "raw_directory"
+        and len(iterator_close_call.args) == 0
+        and not iterator_close_call.keywords
+        and len(provisional_assignments) == 1
+        and ast.unparse(provisional_assignments[0].value)
+        == "type(raw_directory) is int and raw_directory > 2 and raw_directory not in expected"
+        and len(provisional_close_guards) == 1,
+        "O13 collector close authority binding differs",
+    )
+
+    inherited_calls = tuple(
+        node
+        for node in ast.walk(syntax)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_require_exact_inherited_descriptors"
+    )
+    runtime_classes = tuple(
+        node
+        for node in syntax.body
+        if isinstance(node, ast.ClassDef) and node.name == "_Task064ObserverRuntime"
+    )
+    runtime_initializers = (
+        tuple(
+            node
+            for node in runtime_classes[0].body
+            if isinstance(node, ast.FunctionDef) and node.name == "__init__"
+        )
+        if len(runtime_classes) == 1
+        else ()
+    )
+    runtime_inherited_calls = (
+        tuple(
+            node
+            for node in ast.walk(runtime_initializers[0])
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_require_exact_inherited_descriptors"
+        )
+        if len(runtime_initializers) == 1
+        else ()
+    )
+    guard_collector_calls = tuple(
+        node
+        for node in ast.walk(inherited_guard)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_collect_exact_runtime_descriptor_topology"
+    )
+    guard_classifier_calls = tuple(
+        node
+        for node in ast.walk(inherited_guard)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_classify_exact_runtime_descriptor_topology"
+    )
+    guard_topology_assignments = (
+        tuple(
+            node
+            for node in ast.walk(inherited_guard)
+            if isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "topology"
+            and node.value is guard_collector_calls[0]
+        )
+        if len(guard_collector_calls) == 1
+        else ()
+    )
+    _require(
+        len(inherited_guard.args.kwonlyargs) == 1
+        and inherited_guard.args.kwonlyargs[0].arg == "capture_root"
+        and inherited_guard.args.kw_defaults == [None]
+        and len(runtime_classes) == 1
+        and len(runtime_initializers) == 1
+        and len(inherited_calls) == 1
+        and len(runtime_inherited_calls) == 1
+        and inherited_calls[0] is runtime_inherited_calls[0]
+        and len(inherited_calls[0].args) == 1
+        and isinstance(inherited_calls[0].args[0], ast.Name)
+        and inherited_calls[0].args[0].id == "handles"
+        and len(inherited_calls[0].keywords) == 1
+        and inherited_calls[0].keywords[0].arg == "capture_root"
+        and ast.unparse(inherited_calls[0].keywords[0].value) == "raw.basetemp.parent"
+        and len(guard_collector_calls) == 1
+        and len(guard_classifier_calls) == 1
+        and len(guard_topology_assignments) == 1
+        and guard_collector_calls[0].lineno < guard_classifier_calls[0].lineno
+        and len(guard_collector_calls[0].args) == 1
+        and isinstance(guard_collector_calls[0].args[0], ast.Name)
+        and guard_collector_calls[0].args[0].id == "handles"
+        and len(guard_collector_calls[0].keywords) == 1
+        and guard_collector_calls[0].keywords[0].arg == "capture_root"
+        and isinstance(guard_collector_calls[0].keywords[0].value, ast.Name)
+        and guard_collector_calls[0].keywords[0].value.id == "capture_root"
+        and len(guard_classifier_calls[0].args) == 1
+        and isinstance(guard_classifier_calls[0].args[0], ast.Name)
+        and guard_classifier_calls[0].args[0].id == "topology"
+        and not guard_classifier_calls[0].keywords,
+        "O13 mandatory capture-root binding differs",
+    )
+
+    live_runtime_assignments = tuple(
+        node
+        for node in ast.walk(collector)
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "live_runtime"
+    )
+    live_value = live_runtime_assignments[0].value if len(live_runtime_assignments) == 1 else None
+    live_generator = (
+        live_value.args[0]
+        if isinstance(live_value, ast.Call)
+        and isinstance(live_value.func, ast.Name)
+        and live_value.func.id == "tuple"
+        and len(live_value.args) == 1
+        and not live_value.keywords
+        else None
+    )
+    live_comprehension = (
+        live_generator.generators[0]
+        if isinstance(live_generator, ast.GeneratorExp) and len(live_generator.generators) == 1
+        else None
+    )
+    topology_calls = tuple(
+        node
+        for node in ast.walk(collector)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_ExactRuntimeDescriptorTopology"
+    )
+    topology_runtime_keywords = (
+        tuple(keyword for keyword in topology_calls[0].keywords if keyword.arg == "runtime")
+        if len(topology_calls) == 1
+        else ()
+    )
+
+    def is_unexpected_runtime_guard(node: ast.If) -> bool:
+        if (
+            not isinstance(node.test, ast.Compare)
+            or len(node.test.ops) != 1
+            or not isinstance(node.test.ops[0], ast.Gt)
+            or len(node.test.comparators) != 1
+            or not isinstance(node.test.comparators[0], ast.Constant)
+            or node.test.comparators[0].value != 7
+            or not isinstance(node.test.left, ast.Call)
+            or not isinstance(node.test.left.func, ast.Name)
+            or node.test.left.func.id != "len"
+            or len(node.test.left.args) != 1
+            or not isinstance(node.test.left.args[0], ast.Name)
+            or node.test.left.args[0].id != "runtime"
+            or len(node.body) != 1
+            or not isinstance(node.body[0], ast.Raise)
+        ):
+            return False
+        raised = node.body[0].exc
+        return (
+            isinstance(raised, ast.Call)
+            and isinstance(raised.func, ast.Name)
+            and raised.func.id == "_ObserverFailure"
+            and len(raised.args) == 1
+            and isinstance(raised.args[0], ast.Constant)
+            and raised.args[0].value == "unexpected inherited descriptor"
+            and not raised.keywords
+        )
+
+    unexpected_runtime_guards = tuple(
+        node
+        for node in ast.walk(classifier)
+        if isinstance(node, ast.If) and is_unexpected_runtime_guard(node)
+    )
+    _require(
+        isinstance(live_generator, ast.GeneratorExp)
+        and isinstance(live_comprehension, ast.comprehension)
+        and isinstance(live_comprehension.target, ast.Name)
+        and live_comprehension.target.id == "descriptor"
+        and ast.unparse(live_comprehension.iter) == "sorted(observed - expected_with_directory)"
+        and len(live_comprehension.ifs) == 1
+        and ast.unparse(live_comprehension.ifs[0]) == "outcomes[descriptor].state == 'LIVE'"
+        and ast.unparse(live_generator.elt)
+        == "cast(_ExactDescriptorRecord, outcomes[descriptor].record)"
+        and len(topology_calls) == 1
+        and len(topology_runtime_keywords) == 1
+        and isinstance(topology_runtime_keywords[0].value, ast.Name)
+        and topology_runtime_keywords[0].value.id == "live_runtime"
+        and len(unexpected_runtime_guards) == 1,
+        "O13 live-extra rejection binding differs",
+    )
+
+    runner_bytes = _generation6_f_source_bytes(
+        (pytest_root / "tests" / "ci_shard_runner.py").resolve(strict=True),
+        limit=2_000_000,
+        label="O13 runner source",
+    )
+    try:
+        runner_source = runner_bytes.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as error:
+        raise ContractError("O13 runner source encoding differs") from error
+    runner_syntax = ast.parse(runner_source, filename="tests/ci_shard_runner.py", mode="exec")
+    runner_functions = {
+        node.name: node
+        for node in ast.walk(runner_syntax)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    observed_runner = runner_functions.get("_run_pytest_observed")
+    shard_runner = runner_functions.get("_run_shard")
+    proof_runner = runner_functions.get("_run_report_proof")
+    _require(
+        observed_runner is not None and shard_runner is not None and proof_runner is not None,
+        "O13 clean acceptance path is absent",
+    )
+
+    observed_node = cast(ast.AST, observed_runner)
+    pass_fds_assignments = tuple(
+        node
+        for node in ast.walk(observed_node)
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "pass_fds"
+    )
+    supervisor_runs = tuple(
+        node
+        for node in ast.walk(observed_node)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "supervisor"
+        and node.func.attr == "run"
+    )
+    observation_appends = tuple(
+        node
+        for node in ast.walk(observed_node)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "observations"
+        and node.func.attr == "append"
+    )
+    proof_append_guards = (
+        tuple(
+            node
+            for node in ast.walk(observed_node)
+            if isinstance(node, ast.If)
+            and ast.unparse(node.test) == "proof_mode is not None"
+            and any(descendant is observation_appends[1] for descendant in ast.walk(node))
+        )
+        if len(observation_appends) == 2
+        else ()
+    )
+    run_pass_fds = (
+        tuple(keyword for keyword in supervisor_runs[0].keywords if keyword.arg == "pass_fds")
+        if len(supervisor_runs) == 1
+        else ()
+    )
+    _require(
+        len(pass_fds_assignments) == 1
+        and ast.unparse(pass_fds_assignments[0].value)
+        == "tuple(item.fd.require() for item in observations)"
+        and len(supervisor_runs) == 1
+        and len(run_pass_fds) == 1
+        and isinstance(run_pass_fds[0].value, ast.Name)
+        and run_pass_fds[0].value.id == "pass_fds"
+        and len(observation_appends) == 2
+        and ast.unparse(observation_appends[0]) == "observations.append(observation)"
+        and ast.unparse(observation_appends[1]) == "observations.append(proof_observation)"
+        and len(proof_append_guards) == 1,
+        "O13 observed pass-fd binding differs",
+    )
+
+    def observed_calls(function: ast.AST) -> tuple[ast.Call, ...]:
+        return tuple(
+            sorted(
+                (
+                    node
+                    for node in ast.walk(function)
+                    if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "_run_pytest_observed"
+                ),
+                key=lambda node: (node.lineno, node.col_offset),
+            )
+        )
+
+    shard_calls = observed_calls(cast(ast.AST, shard_runner))
+    proof_calls = observed_calls(cast(ast.AST, proof_runner))
+    first_shard_proof_keywords = (
+        tuple(keyword for keyword in shard_calls[0].keywords if keyword.arg == "proof_mode")
+        if len(shard_calls) == 2
+        else ()
+    )
+    second_shard_proof_keywords = (
+        tuple(keyword for keyword in shard_calls[1].keywords if keyword.arg == "proof_mode")
+        if len(shard_calls) == 2
+        else ()
+    )
+    proof_mode_keywords = (
+        tuple(keyword for keyword in proof_calls[0].keywords if keyword.arg == "proof_mode")
+        if len(proof_calls) == 1
+        else ()
+    )
+    _require(
+        len(shard_calls) == 2
+        and not first_shard_proof_keywords
+        and len(second_shard_proof_keywords) == 1
+        and isinstance(second_shard_proof_keywords[0].value, ast.Name)
+        and second_shard_proof_keywords[0].value.id == "proof_mode"
+        and len(proof_calls) == 1
+        and len(proof_mode_keywords) == 1
+        and isinstance(proof_mode_keywords[0].value, ast.Name)
+        and proof_mode_keywords[0].value.id == "mode",
+        "O13 one/two-observer acceptance binding differs",
+    )
+
+
+def _generation6_o13_expect_topology_failure(
+    module: object,
+    observer_failure: type[BaseException],
+    topology: object,
+    *,
+    label: str,
+    message: str,
+) -> None:
+    classifier = cast(
+        Callable[[object], tuple[str, ...]],
+        _selftest_attribute(module, "_classify_exact_runtime_descriptor_topology"),
+    )
+    _selftest_expect_exact_exception(
+        lambda: classifier(topology),
+        label=label,
+        expected_type=observer_failure,
+        expected_message=message,
+    )
+
+
+def _generation6_o13_probe_failures(
+    module: object,
+    observer_failure: type[BaseException],
+    pairs: tuple[tuple[str, str], ...],
+) -> None:
+    _require(len(pairs) == 6, "O13 probe-failure inventory differs")
+    probe = cast(
+        Callable[..., object],
+        _selftest_attribute(module, "_probe_descriptor_once"),
+    )
+    owner = FdOwner(
+        os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC),
+        "O13 probe descriptor",
+    )
+    descriptor = owner.require()
+    initial = _snapshot_fd(descriptor)
+    captured_fstat = os.fstat
+    captured_readlink = os.readlink
+    captured_fcntl = cast(Callable[..., object], fcntl.fcntl)
+
+    def expect(
+        ordinal: int,
+        operation: Callable[[], object],
+    ) -> None:
+        label, message = pairs[ordinal]
+        _selftest_expect_exact_exception(
+            operation,
+            label=label,
+            expected_type=observer_failure,
+            expected_message=message,
+        )
+
+    def require_unchanged() -> None:
+        _require(
+            _snapshot_fd(descriptor) == initial,
+            "O13 probe descriptor identity changed",
+        )
+
+    def uncertain_transient(target: int) -> os.stat_result:
+        if target == descriptor:
+            raise OSError(errno.EIO, "O13 transient-probe-sentinel")
+        return captured_fstat(target)
+
+    with _Generation6SelftestPatch(os, "fstat", uncertain_transient):
+        expect(
+            0,
+            lambda: probe(
+                descriptor,
+                label="O13 transient",
+                ebadf_is_transient=True,
+            ),
+        )
+    require_unchanged()
+
+    def failing_fstat(target: int) -> os.stat_result:
+        if target == descriptor:
+            raise OSError(errno.EIO, "O13 fstat-sentinel")
+        return captured_fstat(target)
+
+    with _Generation6SelftestPatch(os, "fstat", failing_fstat):
+        expect(1, lambda: probe(descriptor, label="O13 fstat"))
+    require_unchanged()
+
+    def failing_readlink(path: str) -> str:
+        if path == f"/proc/self/fd/{descriptor}":
+            raise OSError(errno.EIO, "O13 readlink-sentinel")
+        return captured_readlink(path)
+
+    with _Generation6SelftestPatch(os, "readlink", failing_readlink):
+        expect(2, lambda: probe(descriptor, label="O13 readlink"))
+    require_unchanged()
+
+    def failing_fcntl(
+        target: int,
+        operation: int,
+        *arguments: object,
+    ) -> object:
+        if target == descriptor and operation == fcntl.F_GETFD:
+            raise OSError(errno.EIO, "O13 F_GETFD-sentinel")
+        return captured_fcntl(target, operation, *arguments)
+
+    with _Generation6SelftestPatch(fcntl, "fcntl", failing_fcntl):
+        expect(3, lambda: probe(descriptor, label="O13 F_GETFD"))
+    require_unchanged()
+
+    def failing_getfl(
+        target: int,
+        operation: int,
+        *arguments: object,
+    ) -> object:
+        if target == descriptor and operation == fcntl.F_GETFL:
+            raise OSError(errno.EIO, "O13 F_GETFL-sentinel")
+        return captured_fcntl(target, operation, *arguments)
+
+    with _Generation6SelftestPatch(fcntl, "fcntl", failing_getfl):
+        expect(4, lambda: probe(descriptor, label="O13 F_GETFL"))
+    require_unchanged()
+
+    fstat_count = 0
+
+    def reused_fstat(target: int) -> object:
+        nonlocal fstat_count
+        status = captured_fstat(target)
+        if target != descriptor:
+            return status
+        fstat_count += 1
+        if fstat_count == 1:
+            return status
+        return SimpleNamespace(
+            st_dev=status.st_dev,
+            st_ino=status.st_ino + 1,
+            st_rdev=status.st_rdev,
+            st_mode=status.st_mode,
+            st_uid=status.st_uid,
+            st_gid=status.st_gid,
+            st_nlink=status.st_nlink,
+            st_size=status.st_size,
+        )
+
+    with _Generation6SelftestPatch(os, "fstat", reused_fstat):
+        expect(5, lambda: probe(descriptor, label="O13 descriptor reuse"))
+    require_unchanged()
+    _require(fstat_count == 2, "O13 descriptor reuse probe count differs")
+    owner.close_once()
+
+
+def _generation6_o13_actual_inherited_extra(
+    pytest_root: Path,
+    *,
+    with_proof: bool,
+    label: str,
+    message: str,
+) -> None:
+    private_root: PrivateRoot | None = None
+    command_files: CommandFiles | None = None
+    observations: list[ObservationOwner] = []
+    extra: FdOwner | None = None
+    primary: BaseException | None = None
+
+    def parent_flag_snapshot(descriptor: int) -> tuple[int, int]:
+        descriptor_flags = fcntl.fcntl(descriptor, fcntl.F_GETFD)
+        status_flags = fcntl.fcntl(descriptor, fcntl.F_GETFL)
+        _require(
+            type(descriptor_flags) is int
+            and descriptor_flags >= 0
+            and type(status_flags) is int
+            and status_flags >= 0,
+            "O13 parent descriptor flags differ",
+        )
+        return descriptor_flags, status_flags
+
+    try:
+        private_root, command_files, supervisor = _generation6_p_inner_supervisor()
+        child_root = private_root.create_child("o13-extra-two" if with_proof else "o13-extra-one")
+        ci = private_root.create_observation(
+            child_root,
+            label="O13 CI observation",
+            limit=OBSERVATION_LIMITS["execution" if with_proof else "collection"],
+        )
+        observations.append(ci)
+        proof: ObservationOwner | None = None
+        if with_proof:
+            proof = private_root.create_observation(
+                child_root,
+                label="O13 proof observation",
+                limit=OBSERVATION_LIMITS["proof"],
+            )
+            observations.append(proof)
+        observation_initial_flags = tuple(
+            parent_flag_snapshot(item.fd.require()) for item in observations
+        )
+        extra = FdOwner(
+            os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC),
+            "O13 actual inherited extra",
+        )
+        extra_initial = _snapshot_fd(extra.require())
+        extra_initial_flags = parent_flag_snapshot(extra.require())
+        nonce = _hex(secrets.token_hex(32), 64, "O13 CI nonce")
+        proof_nonce = _hex(secrets.token_hex(32), 64, "O13 proof nonce") if with_proof else None
+        arguments = _pytest_prefix(
+            child_root,
+            phase="execute" if with_proof else "collect",
+            nonce=nonce,
+            observation_fd=ci.fd.require(),
+            shard_id="report" if with_proof else None,
+            proof_mode="primed-full" if with_proof else None,
+            proof_nonce=proof_nonce,
+            proof_fd=proof.fd.require() if proof is not None else None,
+        )
+        if with_proof:
+            arguments.append(REPORT_NODE)
+        _record_generation6_check(f"inject:{label}")
+        child = supervisor.run(
+            arguments,
+            cwd=pytest_root,
+            pass_fds=(*tuple(item.fd.require() for item in observations), extra.require()),
+            timeout_ns=20_000_000_000,
+            label="o13-actual-extra",
+            child_root=child_root,
+        )
+        _require(
+            child.exit_code == 4
+            and child.stdout == b""
+            and child.stderr.splitlines() == [b"ERROR: TASK-064 observer initialization failed"]
+            and b"\x00" not in child.stderr
+            and b"\r" not in child.stderr
+            and child.survivor_count == 0,
+            "O13 actual inherited-extra child completion differs",
+        )
+        observed_line = child.stderr.splitlines()[0]
+        stderr_prefix = b"ERROR: "
+        _require(
+            observed_line.startswith(stderr_prefix),
+            "O13 actual inherited-extra observable reason differs",
+        )
+        observed_reason = observed_line[len(stderr_prefix) :].decode("ascii", errors="strict")
+        _require(
+            observed_reason == message == "TASK-064 observer initialization failed",
+            "O13 actual inherited-extra observable reason differs",
+        )
+        _require(
+            _snapshot_fd(extra.require()) == extra_initial
+            and parent_flag_snapshot(extra.require()) == extra_initial_flags,
+            "O13 inherited-extra parent identity changed",
+        )
+        for observation, initial_flags in zip(
+            observations,
+            observation_initial_flags,
+            strict=True,
+        ):
+            _require(
+                _snapshot_fd(observation.fd.require()) == observation.initial
+                and parent_flag_snapshot(observation.fd.require()) == initial_flags
+                and os.pread(observation.fd.require(), 1, 0) == b"",
+                "O13 failed child changed an observation",
+            )
+        _record_generation6_check(f"reject:{label}:{observed_reason}")
+        close_failures = _close_independent(
+            (item.fd for item in observations),
+            poison_sink=private_root._poisoned_descriptors,
+        )
+        _require(not close_failures, "O13 observation close uncertainty")
+        extra.close_once()
+        cleanup = private_root.cleanup()
+        _require(
+            cleanup.status == "PASS" and cleanup.residue_count == 0,
+            "O13 actual inherited-extra cleanup differs",
+        )
+        command_files.close_without_publication()
+    except BaseException as error:
+        primary = error
+    if primary is not None:
+        if private_root is not None:
+            close_failures = _close_independent(
+                (item.fd for item in observations),
+                poison_sink=private_root._poisoned_descriptors,
+            )
+            if close_failures:
+                primary.add_note(f"O13 observation close uncertainties: {close_failures!r}")
+        if extra is not None and not extra.terminal:
+            try:
+                extra.close_once()
+            except BaseException as close_error:
+                primary.add_note(f"O13 extra close uncertainty: {close_error!r}")
+        try:
+            _close_failure_resources(private_root, command_files)
+        except BaseException as cleanup_error:
+            primary.add_note(f"O13 failure cleanup failed: {cleanup_error!r}")
+        raise primary
+
+
+def _generation6_o13_case(
+    pytest_root: Path,
+    module: object,
+    observer_failure: type[BaseException],
+) -> None:
+    classifier = cast(
+        Callable[[object], tuple[str, ...]],
+        _selftest_attribute(module, "_classify_exact_runtime_descriptor_topology"),
+    )
+    probe_root = cast(
+        Callable[[Path], object],
+        _selftest_attribute(module, "_probe_capture_root_once"),
+    )
+    probe_descriptor = cast(
+        Callable[..., object],
+        _selftest_attribute(module, "_probe_descriptor_once"),
+    )
+    probe_named_stat = cast(
+        Callable[..., object],
+        _selftest_attribute(module, "_probe_named_stat_once"),
+    )
+    rejections = _GENERATION6_O_REJECTIONS["O13"]
+    rejection_index = 0
+
+    def take(expected_label: str) -> tuple[str, str]:
+        nonlocal rejection_index
+        _require(rejection_index < len(rejections), "O13 rejection cursor overflow")
+        label, message = rejections[rejection_index]
+        rejection_index += 1
+        _require(label == expected_label, "O13 rejection order differs")
+        return label, message
+
+    canonical_root = PrivateRoot()
+    try:
+        capture_record = probe_root(canonical_root.root.path)
+        _require(
+            _selftest_attribute(capture_record, "path") == os.fspath(canonical_root.root.path),
+            "O13 canonical capture-root record differs",
+        )
+    finally:
+        cleanup = canonical_root.cleanup()
+        _require(
+            cleanup.status == "PASS" and cleanup.residue_count == 0,
+            "O13 canonical capture-root cleanup differs",
+        )
+    _record_generation6_check("validate:O13:mandatory-canonical-capture-root")
+
+    one_observer = _generation6_o13_fixture(module, observation_count=1)
+    two_observer = _generation6_o13_fixture(module, observation_count=2)
+    immutable_type_names = (
+        "_ExactDescriptorStat",
+        "_ExactDescriptorRecord",
+        "_DescriptorProbeOutcome",
+        "_ExactCaptureRoot",
+        "_ExactRuntimeDescriptorTopology",
+    )
+    _require(
+        all(
+            _selftest_attribute(
+                _selftest_attribute(
+                    _selftest_attribute(module, name),
+                    "__dataclass_params__",
+                ),
+                "frozen",
+            )
+            is True
+            and "__slots__" in vars(cast(type[object], _selftest_attribute(module, name)))
+            for name in immutable_type_names
+        )
+        and not hasattr(one_observer, "__dict__")
+        and not hasattr(two_observer, "__dict__"),
+        "O13 immutable record declarations differ",
+    )
+    _record_generation6_check("validate:O13:immutable-exact-descriptor-records")
+
+    one_before = cast(tuple[object, ...], _selftest_attribute(one_observer, "runtime"))
+    _require(
+        classifier(one_observer) == ("stdin", "stdin", "pipe", "stdout", "pipe", "stderr")
+        and _selftest_attribute(one_observer, "runtime") == one_before,
+        "O13 one-observer topology differs",
+    )
+    _record_generation6_check("validate:O13:one-observer-runtime-topology")
+    two_before = cast(tuple[object, ...], _selftest_attribute(two_observer, "runtime"))
+    _require(
+        classifier(two_observer) == ("stdin", "stdin", "pipe", "stdout", "pipe", "stderr")
+        and _selftest_attribute(two_observer, "runtime") == two_before,
+        "O13 two-observer topology differs",
+    )
+    _record_generation6_check("validate:O13:two-observer-runtime-topology")
+    _generation6_o13_authority_proof(pytest_root)
+    _record_generation6_check("validate:O13:runtime-descriptors-remain-unowned")
+
+    label, message = take("O13 null capture root")
+    _selftest_expect_exact_exception(
+        lambda: probe_root(cast(Any, None)),
+        label=label,
+        expected_type=observer_failure,
+        expected_message=message,
+    )
+    label, message = take("O13 noncanonical capture root")
+    _selftest_expect_exact_exception(
+        lambda: probe_root(Path(".")),
+        label=label,
+        expected_type=observer_failure,
+        expected_message=message,
+    )
+    failing_root = PrivateRoot()
+    captured_stat = cast(Callable[..., os.stat_result], os.stat)
+
+    def failing_root_stat(
+        path: object,
+        *arguments: object,
+        **keywords: object,
+    ) -> os.stat_result:
+        if os.fspath(cast(Path, path)) == os.fspath(failing_root.root.path):
+            raise OSError(errno.EIO, "O13 capture-root-sentinel")
+        return captured_stat(path, *arguments, **keywords)
+
+    label, message = take("O13 capture root probe exception")
+    try:
+        with _Generation6SelftestPatch(os, "stat", failing_root_stat):
+            _selftest_expect_exact_exception(
+                lambda: probe_root(failing_root.root.path),
+                label=label,
+                expected_type=observer_failure,
+                expected_message=message,
+            )
+    finally:
+        cleanup = failing_root.cleanup()
+        _require(
+            cleanup.status == "PASS" and cleanup.residue_count == 0,
+            "O13 failing capture-root cleanup differs",
+        )
+
+    def failing_named_stat(
+        path: object,
+        *arguments: object,
+        **keywords: object,
+    ) -> os.stat_result:
+        if path == "/dev/null":
+            raise OSError(errno.EIO, "O13 named-device-stat-sentinel")
+        return captured_stat(path, *arguments, **keywords)
+
+    label, message = take("O13 named-device stat exception")
+    with _Generation6SelftestPatch(os, "stat", failing_named_stat):
+        _selftest_expect_exact_exception(
+            lambda: probe_named_stat("/dev/null", label="O13 named null"),
+            label=label,
+            expected_type=observer_failure,
+            expected_message=message,
+        )
+
+    runtime = cast(tuple[object, ...], _selftest_attribute(one_observer, "runtime"))
+    standards = cast(tuple[object, ...], _selftest_attribute(one_observer, "standards"))
+    observations = cast(tuple[object, ...], _selftest_attribute(one_observer, "observations"))
+    root_record = _selftest_attribute(one_observer, "capture_root")
+    root_status = _selftest_attribute(root_record, "status")
+
+    for expected_label, field, root_value in (
+        (
+            "O13 capture root wrong uid",
+            "uid",
+            cast(int, _selftest_attribute(root_status, "uid")) + 1,
+        ),
+        (
+            "O13 capture root wrong gid",
+            "gid",
+            cast(int, _selftest_attribute(root_status, "gid")) + 1,
+        ),
+        ("O13 capture root wrong mode", "mode", stat.S_IFDIR | 0o755),
+        ("O13 capture root non-directory", "mode", stat.S_IFREG | 0o700),
+    ):
+        label, message = take(expected_label)
+        mutated_root = _generation6_o13_replace(
+            root_record,
+            status=_generation6_o13_replace(root_status, **{field: root_value}),
+        )
+        _generation6_o13_expect_topology_failure(
+            module,
+            observer_failure,
+            _generation6_o13_replace(one_observer, capture_root=mutated_root),
+            label=label,
+            message=message,
+        )
+
+    for expected_label, field, malformed_value in (
+        ("O13 bool stat uid", "uid", True),
+        ("O13 string stat inode", "inode", "10"),
+        ("O13 negative stat device", "device", -1),
+    ):
+        label, message = take(expected_label)
+        malformed_root = _generation6_o13_replace(
+            root_record,
+            status=_generation6_o13_replace(root_status, **{field: malformed_value}),
+        )
+        _generation6_o13_expect_topology_failure(
+            module,
+            observer_failure,
+            _generation6_o13_replace(one_observer, capture_root=malformed_root),
+            label=label,
+            message=message,
+        )
+
+    for expected_label, invalid_descriptor in (
+        ("O13 bool descriptor metadata", True),
+        ("O13 non-int descriptor metadata", "1000"),
+        ("O13 negative descriptor metadata", -1),
+    ):
+        label, message = take(expected_label)
+        mutated_record = _generation6_o13_replace(
+            runtime[0],
+            descriptor=invalid_descriptor,
+        )
+        _generation6_o13_expect_topology_failure(
+            module,
+            observer_failure,
+            _generation6_o13_replace(
+                one_observer,
+                runtime=(mutated_record, *runtime[1:]),
+            ),
+            label=label,
+            message=message,
+        )
+    for expected_label, transients in (
+        ("O13 zero scan transients", ()),
+        ("O13 two scan transients", (3_000, 3_001)),
+    ):
+        label, message = take(expected_label)
+        _generation6_o13_expect_topology_failure(
+            module,
+            observer_failure,
+            _generation6_o13_replace(one_observer, scan_transients=transients),
+            label=label,
+            message=message,
+        )
+
+    probe_pairs = tuple(
+        take(expected_label)
+        for expected_label in (
+            "O13 uncertain scan transient",
+            "O13 fstat probe exception",
+            "O13 readlink probe exception",
+            "O13 F_GETFD probe exception",
+            "O13 F_GETFL probe exception",
+            "O13 descriptor reuse during probe",
+        )
+    )
+    _generation6_o13_probe_failures(module, observer_failure, probe_pairs)
+
+    for expected_label, fixture in (
+        ("O13 inherited pass-fd one observer", one_observer),
+        ("O13 inherited pass-fd two observers", two_observer),
+    ):
+        label, message = take(expected_label)
+        fixture_runtime = cast(tuple[object, ...], _selftest_attribute(fixture, "runtime"))
+        fixture_standards = cast(
+            tuple[object, ...],
+            _selftest_attribute(fixture, "standards"),
+        )
+        inherited_record = _generation6_o13_replace(
+            fixture_runtime[-1],
+            descriptor=1_100,
+            target="/dev/null",
+            descriptor_flags=0,
+            status_flags=_selftest_attribute(fixture_standards[0], "status_flags"),
+            status=_selftest_attribute(fixture, "named_null"),
+        )
+        inherited_runtime = tuple(
+            sorted(
+                (*fixture_runtime, inherited_record),
+                key=lambda value: cast(int, _selftest_attribute(value, "descriptor")),
+            )
+        )
+        _require(
+            len(inherited_runtime) == 8
+            and _selftest_attribute(inherited_record, "descriptor_flags") == 0,
+            "O13 inherited pass-fd fixture differs",
+        )
+        _generation6_o13_expect_topology_failure(
+            module,
+            observer_failure,
+            _generation6_o13_replace(fixture, runtime=inherited_runtime),
+            label=label,
+            message=message,
+        )
+
+    label, message = take("O13 actual inherited extra one observer")
+    _generation6_o13_actual_inherited_extra(
+        pytest_root,
+        with_proof=False,
+        label=label,
+        message=message,
+    )
+    label, message = take("O13 actual inherited extra two observers")
+    _generation6_o13_actual_inherited_extra(
+        pytest_root,
+        with_proof=True,
+        label=label,
+        message=message,
+    )
+
+    def close_observer(
+        calls: list[int],
+        closer: Callable[[int], None],
+    ) -> Callable[[int], None]:
+        def observed_close(target: int) -> None:
+            calls.append(target)
+            closer(target)
+
+        return observed_close
+
+    for expected_label, fixture in (
+        ("O13 local CLOEXEC lookalike one observer", one_observer),
+        ("O13 local CLOEXEC lookalike two observers", two_observer),
+    ):
+        label, message = take(expected_label)
+        owner = FdOwner(
+            os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC),
+            expected_label,
+        )
+        descriptor = owner.require()
+        outcome = probe_descriptor(descriptor, label=expected_label)
+        _require(
+            _selftest_attribute(outcome, "state") == "LIVE"
+            and _selftest_attribute(outcome, "record") is not None,
+            "O13 local lookalike probe differs",
+        )
+        fixture_runtime = cast(tuple[object, ...], _selftest_attribute(fixture, "runtime"))
+        lookalike_record = _selftest_attribute(outcome, "record")
+        expanded_runtime = tuple(
+            sorted(
+                (*fixture_runtime, lookalike_record),
+                key=lambda value: cast(int, _selftest_attribute(value, "descriptor")),
+            )
+        )
+        _generation6_o13_expect_topology_failure(
+            module,
+            observer_failure,
+            _generation6_o13_replace(fixture, runtime=expanded_runtime),
+            label=label,
+            message=message,
+        )
+        close_calls: list[int] = []
+        captured_close = os.close
+        with _Generation6SelftestPatch(
+            os,
+            "close",
+            close_observer(close_calls, captured_close),
+        ):
+            owner.close_once()
+        _require(
+            close_calls == [descriptor] and owner.terminal,
+            "O13 local lookalike close authority differs",
+        )
+
+    label, message = take("O13 missing runtime descriptor")
+    _generation6_o13_expect_topology_failure(
+        module,
+        observer_failure,
+        _generation6_o13_replace(one_observer, runtime=runtime[:-1]),
+        label=label,
+        message=message,
+    )
+    label, message = take("O13 duplicate runtime number")
+    duplicate_number = _generation6_o13_replace(
+        runtime[1],
+        descriptor=_selftest_attribute(runtime[0], "descriptor"),
+    )
+    _generation6_o13_expect_topology_failure(
+        module,
+        observer_failure,
+        _generation6_o13_replace(
+            one_observer,
+            runtime=(runtime[0], duplicate_number, *runtime[2:]),
+        ),
+        label=label,
+        message=message,
+    )
+    label, message = take("O13 missing urandom")
+    missing_urandom = _generation6_o13_replace(
+        runtime[0],
+        target=_selftest_attribute(runtime[1], "target"),
+        status_flags=_selftest_attribute(runtime[1], "status_flags"),
+        status=_selftest_attribute(runtime[1], "status"),
+    )
+    _generation6_o13_expect_topology_failure(
+        module,
+        observer_failure,
+        _generation6_o13_replace(
+            one_observer,
+            runtime=(missing_urandom, *runtime[1:]),
+        ),
+        label=label,
+        message=message,
+    )
+    label, message = take("O13 duplicate urandom")
+    duplicate_urandom = _generation6_o13_replace(
+        runtime[1],
+        target=_selftest_attribute(runtime[0], "target"),
+        status_flags=_selftest_attribute(runtime[0], "status_flags"),
+        status=_selftest_attribute(runtime[0], "status"),
+    )
+    _generation6_o13_expect_topology_failure(
+        module,
+        observer_failure,
+        _generation6_o13_replace(
+            one_observer,
+            runtime=(runtime[0], duplicate_urandom, *runtime[2:]),
+        ),
+        label=label,
+        message=message,
+    )
+
+    urandom_status = _selftest_attribute(runtime[0], "status")
+    label, message = take("O13 wrong urandom target")
+    wrong_urandom_target = _generation6_o13_replace(runtime[0], target="/dev/random")
+    _generation6_o13_expect_topology_failure(
+        module,
+        observer_failure,
+        _generation6_o13_replace(
+            one_observer,
+            runtime=(wrong_urandom_target, *runtime[1:]),
+        ),
+        label=label,
+        message=message,
+    )
+    label, message = take("O13 wrong urandom type")
+    wrong_urandom_type = _generation6_o13_replace(
+        runtime[0],
+        status=_generation6_o13_replace(
+            urandom_status,
+            mode=stat.S_IFREG | 0o600,
+        ),
+    )
+    _generation6_o13_expect_topology_failure(
+        module,
+        observer_failure,
+        _generation6_o13_replace(
+            one_observer,
+            runtime=(wrong_urandom_type, *runtime[1:]),
+        ),
+        label=label,
+        message=message,
+    )
+    label, message = take("O13 wrong urandom identity")
+    wrong_urandom_identity = _generation6_o13_replace(
+        runtime[0],
+        status=_generation6_o13_replace(
+            urandom_status,
+            inode=cast(int, _selftest_attribute(urandom_status, "inode")) + 1,
+        ),
+    )
+    _generation6_o13_expect_topology_failure(
+        module,
+        observer_failure,
+        _generation6_o13_replace(
+            one_observer,
+            runtime=(wrong_urandom_identity, *runtime[1:]),
+        ),
+        label=label,
+        message=message,
+    )
+    label, message = take("O13 wrong descriptor flags")
+    wrong_descriptor_flags = _generation6_o13_replace(runtime[0], descriptor_flags=0)
+    _generation6_o13_expect_topology_failure(
+        module,
+        observer_failure,
+        _generation6_o13_replace(
+            one_observer,
+            runtime=(wrong_descriptor_flags, *runtime[1:]),
+        ),
+        label=label,
+        message=message,
+    )
+    label, message = take("O13 wrong status flags")
+    wrong_status_flags = _generation6_o13_replace(runtime[0], status_flags=123_456)
+    _generation6_o13_expect_topology_failure(
+        module,
+        observer_failure,
+        _generation6_o13_replace(
+            one_observer,
+            runtime=(wrong_status_flags, *runtime[1:]),
+        ),
+        label=label,
+        message=message,
+    )
+
+    for expected_label, field in (
+        ("O13 named null non-character", "named_null"),
+        ("O13 named urandom non-character", "named_urandom"),
+    ):
+        label, message = take(expected_label)
+        named_status = _selftest_attribute(one_observer, field)
+        _generation6_o13_expect_topology_failure(
+            module,
+            observer_failure,
+            _generation6_o13_replace(
+                one_observer,
+                **{
+                    field: _generation6_o13_replace(
+                        named_status,
+                        mode=stat.S_IFREG | 0o600,
+                    )
+                },
+            ),
+            label=label,
+            message=message,
+        )
+
+    stdin_status = _selftest_attribute(standards[0], "status")
+    label, message = take("O13 wrong standard stat")
+    wrong_stdin = _generation6_o13_replace(
+        standards[0],
+        status=_generation6_o13_replace(
+            stdin_status,
+            inode=cast(int, _selftest_attribute(stdin_status, "inode")) + 1,
+        ),
+    )
+    _generation6_o13_expect_topology_failure(
+        module,
+        observer_failure,
+        _generation6_o13_replace(
+            one_observer,
+            standards=(wrong_stdin, *standards[1:]),
+        ),
+        label=label,
+        message=message,
+    )
+    label, message = take("O13 wrong capture root device")
+    root_status = _selftest_attribute(root_record, "status")
+    wrong_root = _generation6_o13_replace(
+        root_record,
+        status=_generation6_o13_replace(
+            root_status,
+            device=cast(int, _selftest_attribute(root_status, "device")) + 1,
+        ),
+    )
+    _generation6_o13_expect_topology_failure(
+        module,
+        observer_failure,
+        _generation6_o13_replace(one_observer, capture_root=wrong_root),
+        label=label,
+        message=message,
+    )
+
+    stdout_standard = standards[1]
+    stdout_status = _selftest_attribute(stdout_standard, "status")
+    for expected_label, field, value in (
+        (
+            "O13 wrong capture uid",
+            "uid",
+            cast(int, _selftest_attribute(stdout_status, "uid")) + 1,
+        ),
+        (
+            "O13 wrong capture gid",
+            "gid",
+            cast(int, _selftest_attribute(stdout_status, "gid")) + 1,
+        ),
+        ("O13 wrong capture mode", "mode", stat.S_IFREG | 0o640),
+        ("O13 wrong capture link", "link_count", 1),
+    ):
+        label, message = take(expected_label)
+        wrong_status = _generation6_o13_replace(stdout_status, **{field: value})
+        wrong_standard = _generation6_o13_replace(stdout_standard, status=wrong_status)
+        _generation6_o13_expect_topology_failure(
+            module,
+            observer_failure,
+            _generation6_o13_replace(
+                one_observer,
+                standards=(standards[0], wrong_standard, standards[2]),
+            ),
+            label=label,
+            message=message,
+        )
+    label, message = take("O13 wrong capture target")
+    wrong_capture_target = _generation6_o13_replace(stdout_standard, target="/wrong")
+    _generation6_o13_expect_topology_failure(
+        module,
+        observer_failure,
+        _generation6_o13_replace(
+            one_observer,
+            standards=(standards[0], wrong_capture_target, standards[2]),
+        ),
+        label=label,
+        message=message,
+    )
+
+    label, message = take("O13 wrong runtime type")
+    runtime_stdin_status = _selftest_attribute(runtime[1], "status")
+    wrong_runtime_type = _generation6_o13_replace(
+        runtime[1],
+        status=_generation6_o13_replace(
+            runtime_stdin_status,
+            mode=stat.S_IFREG | 0o600,
+        ),
+    )
+    _generation6_o13_expect_topology_failure(
+        module,
+        observer_failure,
+        _generation6_o13_replace(
+            one_observer,
+            runtime=(runtime[0], wrong_runtime_type, *runtime[2:]),
+        ),
+        label=label,
+        message=message,
+    )
+    label, message = take("O13 wrong runtime target")
+    wrong_runtime_target = _generation6_o13_replace(runtime[1], target="/wrong")
+    _generation6_o13_expect_topology_failure(
+        module,
+        observer_failure,
+        _generation6_o13_replace(
+            one_observer,
+            runtime=(runtime[0], wrong_runtime_target, *runtime[2:]),
+        ),
+        label=label,
+        message=message,
+    )
+    label, message = take("O13 wrong runtime order")
+    pipe_record = runtime[3]
+    stdout_alias = runtime[4]
+    stdout_at_pipe = _generation6_o13_replace(
+        pipe_record,
+        target=_selftest_attribute(stdout_alias, "target"),
+        status_flags=_selftest_attribute(stdout_alias, "status_flags"),
+        status=_selftest_attribute(stdout_alias, "status"),
+    )
+    pipe_at_stdout = _generation6_o13_replace(
+        stdout_alias,
+        target=_selftest_attribute(pipe_record, "target"),
+        status_flags=_selftest_attribute(pipe_record, "status_flags"),
+        status=_selftest_attribute(pipe_record, "status"),
+    )
+    _generation6_o13_expect_topology_failure(
+        module,
+        observer_failure,
+        _generation6_o13_replace(
+            one_observer,
+            runtime=(
+                *runtime[:3],
+                stdout_at_pipe,
+                pipe_at_stdout,
+                *runtime[5:],
+            ),
+        ),
+        label=label,
+        message=message,
+    )
+    label, message = take("O13 wrong capture alias")
+    wrong_alias = _generation6_o13_replace(runtime[4], target="/wrong")
+    _generation6_o13_expect_topology_failure(
+        module,
+        observer_failure,
+        _generation6_o13_replace(
+            one_observer,
+            runtime=(*runtime[:4], wrong_alias, *runtime[5:]),
+        ),
+        label=label,
+        message=message,
+    )
+    label, message = take("O13 swapped capture aliases")
+    stdout_alias = runtime[4]
+    stderr_alias = runtime[6]
+    stderr_at_stdout = _generation6_o13_replace(
+        stdout_alias,
+        target=_selftest_attribute(stderr_alias, "target"),
+        status=_selftest_attribute(stderr_alias, "status"),
+    )
+    stdout_at_stderr = _generation6_o13_replace(
+        stderr_alias,
+        target=_selftest_attribute(stdout_alias, "target"),
+        status=_selftest_attribute(stdout_alias, "status"),
+    )
+    _generation6_o13_expect_topology_failure(
+        module,
+        observer_failure,
+        _generation6_o13_replace(
+            one_observer,
+            runtime=(*runtime[:4], stderr_at_stdout, runtime[5], stdout_at_stderr),
+        ),
+        label=label,
+        message=message,
+    )
+    label, message = take("O13 duplicate pipe identity")
+    duplicate_pipe = _generation6_o13_replace(
+        runtime[5],
+        target=_selftest_attribute(runtime[3], "target"),
+        status=_selftest_attribute(runtime[3], "status"),
+    )
+    _generation6_o13_expect_topology_failure(
+        module,
+        observer_failure,
+        _generation6_o13_replace(
+            one_observer,
+            runtime=(*runtime[:5], duplicate_pipe, runtime[6]),
+        ),
+        label=label,
+        message=message,
+    )
+    label, message = take("O13 wrong pipe access")
+    wrong_pipe_access = _generation6_o13_replace(runtime[3], status_flags=os.O_RDWR)
+    _generation6_o13_expect_topology_failure(
+        module,
+        observer_failure,
+        _generation6_o13_replace(
+            one_observer,
+            runtime=(*runtime[:3], wrong_pipe_access, *runtime[4:]),
+        ),
+        label=label,
+        message=message,
+    )
+    label, message = take("O13 wrong pipe stat")
+    pipe_status = _selftest_attribute(runtime[3], "status")
+    wrong_pipe_stat = _generation6_o13_replace(
+        runtime[3],
+        status=_generation6_o13_replace(pipe_status, link_count=2),
+    )
+    _generation6_o13_expect_topology_failure(
+        module,
+        observer_failure,
+        _generation6_o13_replace(
+            one_observer,
+            runtime=(*runtime[:3], wrong_pipe_stat, *runtime[4:]),
+        ),
+        label=label,
+        message=message,
+    )
+    label, message = take("O13 runtime aliases observation")
+    observation = observations[0]
+    observation_alias = _generation6_o13_replace(
+        runtime[1],
+        target=_selftest_attribute(observation, "target"),
+        status_flags=_selftest_attribute(observation, "status_flags"),
+        status=_selftest_attribute(observation, "status"),
+    )
+    _generation6_o13_expect_topology_failure(
+        module,
+        observer_failure,
+        _generation6_o13_replace(
+            one_observer,
+            runtime=(runtime[0], observation_alias, *runtime[2:]),
+        ),
+        label=label,
+        message=message,
+    )
+    _require(rejection_index == len(rejections), "O13 rejection inventory was not exhausted")
+    _record_generation6_case_evidence("O13")
+
+
+def _selftest_o_case(case_id: str, pytest_root: Path) -> None:
+    if _selftest_o_terminal_anchor_case(case_id, pytest_root):
+        return
+    if case_id == "O20":
+        _selftest_isolated_hazard_case(case_id, pytest_root)
+        return
+    if case_id == "O01":
+        private_root = PrivateRoot()
+        child = private_root.create_child("o01")
+        original = os.O_TMPFILE
+        vars(os).pop("O_TMPFILE")
+        try:
+            _selftest_expect_contract_error(
+                lambda: private_root.create_observation(child, label="O01", limit=64),
+                label="O01 missing O_TMPFILE",
+                expected_message="O_TMPFILE is unavailable",
+            )
+        finally:
+            vars(os)["O_TMPFILE"] = original
+        cleanup = private_root.cleanup()
+        _require(cleanup.status == "PASS" and cleanup.residue_count == 0, "O01 cleanup differs")
+        _record_generation6_case_evidence(case_id)
+        return
+
+    module = _selftest_load_conftest(pytest_root)
+    observer_failure = _selftest_conftest_exception(module, "_ObserverFailure")
+    if _selftest_o_write_case(case_id, module, observer_failure):
+        return
+    if _selftest_o_adoption_case(case_id, module, observer_failure):
+        return
+    if _selftest_o_runtime_case(case_id, module, observer_failure):
+        return
+    validate_raw = _selftest_conftest_callable(module, "_validate_raw_task064_options")
+    if case_id in {"O02", "O03", "O04", "O05"}:
+        arguments = {
+            "O02": ["pytest", "--task064-ci-phase=collect"],
+            "O03": [
+                "pytest",
+                "--task064-ci-phase=collect",
+                "--task064-ci-phase=collect",
+            ],
+            "O04": [
+                "pytest",
+                "--task064-ci-phase=collect",
+                f"--task064-ci-nonce={'a' * 64}",
+                "--task064-ci-observation-fd=03",
+            ],
+            "O05": [
+                "pytest",
+                "--task064-ci-phase=collect",
+                f"--task064-ci-nonce={'a' * 64}",
+                "--task064-ci-observation-fd=2",
+            ],
+        }[case_id]
+        pytest_module = _selftest_attribute(module, "pytest")
+        usage_error = cast(
+            type[BaseException],
+            _selftest_attribute(pytest_module, "UsageError"),
+        )
+        label, message = _GENERATION6_O_REJECTIONS[case_id][0]
+        with _Generation6SelftestPatch(sys, "argv", arguments):
+            error = _selftest_expect_exact_exception(
+                validate_raw,
+                label=label,
+                expected_type=usage_error,
+                expected_message=message,
+            )
+        if case_id in {"O04", "O05"}:
+            cause = error.__cause__
+            _require(type(cause) is observer_failure, f"{case_id} cause type differs")
+            _require(
+                str(cause)
+                == (
+                    "noncanonical CI observation fd"
+                    if case_id == "O04"
+                    else "invalid CI observation fd"
+                ),
+                f"{case_id} cause differs",
+            )
+        _record_generation6_case_evidence(case_id)
+        return
+
+    validate_initial = _selftest_conftest_callable(module, "_validate_initial_observation")
+    validate_adopted = _selftest_conftest_callable(module, "_validate_adopted_observation")
+    if case_id == "O06":
+        descriptor = _selftest_open_anonymous_observation()
+        os.close(descriptor)
+        _selftest_expect_exact_exception(
+            lambda: validate_initial(descriptor, label="CI observation"),
+            label="O06 closed descriptor",
+            expected_type=OSError,
+            expected_message="EBADF",
+            expected_errno=errno.EBADF,
+        )
+        _record_generation6_case_evidence(case_id)
+        return
+    if case_id == "O07":
+        descriptor_owner = FdOwner(_selftest_open_anonymous_observation(), "O07 CI alias")
+        duplicate_owner = FdOwner(os.dup(descriptor_owner.require()), "O07 proof alias")
+        descriptor = descriptor_owner.detach()
+        duplicate = duplicate_owner.detach()
+        raw = _selftest_conftest_raw(module, observation_fd=descriptor, proof_fd=duplicate)
+        runtime_type = cast(
+            Callable[..., object],
+            _selftest_attribute(module, "_Task064ObserverRuntime"),
+        )
+        label, message = _GENERATION6_O_REJECTIONS[case_id][0]
+        _selftest_expect_exact_exception(
+            lambda: runtime_type(raw),
+            label=label,
+            expected_type=observer_failure,
+            expected_message=message,
+        )
+        _selftest_require_descriptor_closed(descriptor, "O07 CI alias")
+        _selftest_require_descriptor_closed(duplicate, "O07 proof alias")
+        _record_generation6_case_evidence(case_id)
+        return
+    if case_id == "O08":
+        left, right = socket.socketpair()
+        descriptor = left.detach()
+        handle = _selftest_conftest_handle(module, descriptor)
+        try:
+            label, message = _GENERATION6_O_REJECTIONS[case_id][0]
+            _selftest_expect_exact_exception(
+                lambda: validate_adopted(handle),
+                label=label,
+                expected_type=observer_failure,
+                expected_message=message,
+            )
+        finally:
+            right.close()
+        _require(
+            _selftest_attribute(handle, "terminal") is True,
+            "O08 observation ownership is not terminal",
+        )
+        _selftest_require_descriptor_closed(descriptor, "O08 observation")
+        _record_generation6_case_evidence(case_id)
+        return
+    if case_id in {"O09", "O10", "O11", "O12"}:
+        descriptor = _selftest_open_anonymous_observation()
+        handle = _selftest_conftest_handle(module, descriptor)
+        snapshot = _selftest_conftest_callable(module, "_snapshot")(descriptor)
+        values = [
+            _selftest_attribute(snapshot, "device"),
+            _selftest_attribute(snapshot, "inode"),
+            _selftest_attribute(snapshot, "uid"),
+            _selftest_attribute(snapshot, "mode"),
+            _selftest_attribute(snapshot, "link_count"),
+            _selftest_attribute(snapshot, "size"),
+            _selftest_attribute(snapshot, "mtime_ns"),
+            _selftest_attribute(snapshot, "ctime_ns"),
+        ]
+        mutation_index, mutation = {
+            "O09": (2, os.getuid() + 1),
+            "O10": (3, stat.S_IFREG | 0o640),
+            "O11": (4, 1),
+            "O12": (5, 1),
+        }[case_id]
+        values[mutation_index] = mutation
+        mutated = type(snapshot)(*values)
+        with _Generation6SelftestPatch(module, "_snapshot", lambda fd: mutated):
+            label, message = _GENERATION6_O_REJECTIONS[case_id][0]
+            _selftest_expect_exact_exception(
+                lambda: validate_adopted(handle),
+                label=label,
+                expected_type=observer_failure,
+                expected_message=message,
+            )
+        _require(
+            _selftest_attribute(handle, "terminal") is True,
+            f"{case_id} observation ownership is not terminal",
+        )
+        _selftest_require_descriptor_closed(descriptor, f"{case_id} observation")
+        _record_generation6_case_evidence(case_id)
+        return
+    if case_id == "O13":
+        _generation6_o13_case(pytest_root, module, observer_failure)
+        return
+    raise ContractError(f"Generation-6 observation driver is not wired: {case_id}")
+
+
+def _run_generation6_case_body_for_test(case_id: str, pytest_root: Path) -> None:
+    drivers: dict[str, Callable[[str, Path], None]] = {
+        "O": _selftest_o_case,
+        "F": _selftest_f_case,
+        "P": _selftest_p_case,
+        "R": _selftest_r_case,
+        "G": _selftest_g_case,
+        "Q": _selftest_q_case,
+        "M": _selftest_m_case,
+        "N": _selftest_n_case,
+        "E": _selftest_e_case,
+        "K": _selftest_k_case,
+        "A": _selftest_a_case,
+        "X": _selftest_x_case,
+        "U": _selftest_u_case,
+    }
+    driver = drivers.get(case_id[0])
+    _require(driver is not None, f"Generation-6 self-test driver is not wired: {case_id}")
+    cast(Callable[[str, Path], None], driver)(case_id, pytest_root)
+
+
+def _bind_generation6_case_driver(case_id: str) -> Callable[[Path], None]:
+    def run_case(pytest_root: Path) -> None:
+        _run_generation6_case_body_for_test(case_id, pytest_root)
+
+    return run_case
+
+
+def _generation6_protocol_cases() -> tuple[_Generation6ProtocolCase, ...]:
+    atomic_lookup = dict(_GENERATION6_PROTOCOL_ATOMIC_MAP)
+    result: list[_Generation6ProtocolCase] = []
+    for result_key, case_ids in GENERATION6_PROTOCOL_CASE_GROUPS:
+        for case_id in case_ids:
+            prefix = case_id[0]
+            atoms = atomic_lookup.get(case_id, (case_id,))
+            expected_checks = _generation6_expected_case_checks(case_id)
+            expected_outcome = _generation6_expected_outcome(case_id, expected_checks)
+            result.append(
+                _Generation6ProtocolCase(
+                    case_id=case_id,
+                    category=prefix,
+                    result_key=result_key,
+                    atomic_ids=atoms,
+                    contract_lines=(f"TASK-064 Generation-6 matrix {case_id}",),
+                    runner_surface=_GENERATION6_SELFTEST_SURFACES[prefix],
+                    expected_fail_closed_checks=expected_checks,
+                    expected_forbidden_actions=(),
+                    expected_outcome=expected_outcome,
+                    driver=_bind_generation6_case_driver(case_id),
+                )
+            )
+    cases = tuple(result)
+    _require(
+        frozenset(case.case_id for case in cases if case.expected_outcome == "UNWIRED")
+        == _GENERATION6_TEMPORARILY_UNWIRED_CASES,
+        "temporarily unwired self-test registry differs",
+    )
+    return cases
+
+
+_GENERATION6_PROTOCOL_CASES: Final = _generation6_protocol_cases()
+
+
+_GENERATION6_SUPPLEMENT_PAIRINGS: Final = (
+    *((f"O{ordinal:02d}", f"Q{ordinal:02d}") for ordinal in range(1, 9)),
+    *((f"O{ordinal + 8:02d}", f"N{ordinal:02d}") for ordinal in range(1, 6)),
+    *((f"O{ordinal + 13:02d}", f"K{ordinal:02d}") for ordinal in range(1, 13)),
+    *((f"O{ordinal + 25:02d}", f"E{ordinal + 5:02d}") for ordinal in range(1, 5)),
+    *((f"O{ordinal + 29:02d}", f"U{ordinal:02d}") for ordinal in range(1, 4)),
+    *((f"R{ordinal:02d}", f"M{ordinal:02d}") for ordinal in range(1, 13)),
+    *((f"R{ordinal + 12:02d}", f"E{ordinal + 1:02d}") for ordinal in range(1, 5)),
+    *((f"P{ordinal:02d}", f"G{ordinal:02d}") for ordinal in range(1, 13)),
+    ("P13", "E01"),
+    *((f"P{ordinal + 13:02d}", f"A{ordinal:02d}") for ordinal in range(1, 11)),
+    *((f"P{ordinal + 23:02d}", f"X{ordinal:02d}") for ordinal in range(1, 13)),
+    *((f"C{ordinal:02d}", f"U{ordinal + 3:02d}") for ordinal in range(1, 7)),
+)
+
+
+def _generation6_execution_groups() -> tuple[tuple[str, ...], ...]:
+    supplemental_by_primary = dict(_GENERATION6_SUPPLEMENT_PAIRINGS)
+    primary_ids = tuple(
+        case_id
+        for _, grouped_ids in GENERATION6_PROTOCOL_CASE_GROUPS[:5]
+        for case_id in grouped_ids
+    )
+    return tuple(
+        (
+            (supplemental_by_primary[primary_id], primary_id)
+            if primary_id in supplemental_by_primary
+            else (primary_id,)
+        )
+        for primary_id in primary_ids
+    )
+
+
+GENERATION6_PROTOCOL_EXECUTION_GROUPS: Final = _generation6_execution_groups()
+
+
+_GENERATION6_CASE_EVIDENCE: Final[list[str]] = []
+_GENERATION6_CASE_CHECK_HISTORY: Final[list[str]] = []
+_GENERATION6_CASE_ACTION_HISTORY: Final[list[str]] = []
+_GENERATION6_ACTIVE_PATCHES: Final[list[tuple[int, int, str, int, int]]] = []
+_GENERATION6_SELFTEST_RECEIPT_KEYS: Final = (
+    "domain",
+    "contract_generation",
+    "contract_sha256",
+    "nonce",
+    "group_id",
+    "worker_pid",
+    "worker_parent_pid",
+    "logical_results",
+    "status",
+)
+_GENERATION6_SELFTEST_LOGICAL_RESULT_KEYS: Final = (
+    "case_id",
+    "result_key",
+    "case_spec_sha256",
+    "trace_sha256",
+    "event_count",
+    "forbidden_trace_sha256",
+    "forbidden_action_count",
+    "outcome",
+    "injected",
+    "rejected",
+    "no_pass_publication",
+    "forbidden_history_empty",
+    "reset_verified",
+    "status",
+)
+_GENERATION6_HAZARD_RESULT_KEYS: Final = (
+    "domain",
+    "nonce",
+    "case_id",
+    "probe_pid",
+    "probe_parent_pid",
+    "events",
+    "calls",
+    "boundaries",
+    "publications",
+    "forbidden",
+    "status",
+)
+_GENERATION6_F_RESULT_KEYS: Final = (
+    "domain",
+    "nonce",
+    "case_id",
+    "probe_pid",
+    "probe_parent_pid",
+    "events",
+    "calls",
+    "boundaries",
+    "publications",
+    "forbidden",
+    "facts",
+    "status",
+)
+_GENERATION6_P_RESULT_KEYS: Final = (
+    "domain",
+    "nonce",
+    "case_id",
+    "probe_pid",
+    "probe_parent_pid",
+    "events",
+    "calls",
+    "boundaries",
+    "publications",
+    "forbidden",
+    "facts",
+    "status",
+)
+_GENERATION6_O_ANCHOR_RESULT_KEYS: Final = (
+    "domain",
+    "nonce",
+    "case_id",
+    "probe_pid",
+    "probe_parent_pid",
+    "events",
+    "calls",
+    "boundaries",
+    "publications",
+    "forbidden",
+    "anchor_close_call_count",
+    "ci_close_call_count",
+    "write_call_count",
+    "ci_terminal",
+    "pidfd_terminal",
+    "poison_terminal",
+    "status",
+)
+_GENERATION6_SELFTEST_BOOTSTRAP: Final = (
+    "import importlib.util,sys\n"
+    "s=importlib.util.spec_from_file_location('_task064_g6_selftest_worker',sys.argv[1])\n"
+    "if s is None or s.loader is None: raise SystemExit(70)\n"
+    "m=importlib.util.module_from_spec(s)\n"
+    "sys.modules[s.name]=m\n"
+    "s.loader.exec_module(m)\n"
+    "try:\n"
+    " m._run_generation6_single_protocol_case_for_test(*sys.argv[2:])\n"
+    "except BaseException:\n"
+    " m._CAPTURED_RUNNER_OS_EXIT(70)\n"
+    "m._CAPTURED_RUNNER_OS_EXIT(0)\n"
+)
+_GENERATION6_HAZARD_BOOTSTRAP: Final = (
+    "import importlib.util,os,sys\n"
+    "s=importlib.util.spec_from_file_location('_task064_g6_hazard_worker',sys.argv[1])\n"
+    "if s is None or s.loader is None: raise SystemExit(70)\n"
+    "m=importlib.util.module_from_spec(s)\n"
+    "sys.modules[s.name]=m\n"
+    "s.loader.exec_module(m)\n"
+    "try:\n"
+    " p=m._run_generation6_hazard_probe_for_test(*sys.argv[2:])\n"
+    " n=0\n"
+    " while n<len(p):\n"
+    "  w=os.write(1,p[n:])\n"
+    "  if type(w) is not int or w<=0 or w>len(p)-n: m._CAPTURED_RUNNER_OS_EXIT(70)\n"
+    "  n+=w\n"
+    "except BaseException:\n"
+    " m._CAPTURED_RUNNER_OS_EXIT(70)\n"
+    "m._CAPTURED_RUNNER_OS_EXIT(0)\n"
+)
+_GENERATION6_F_BOOTSTRAP: Final = (
+    "import importlib.util,os,sys\n"
+    "s=importlib.util.spec_from_file_location('_task064_g6_f_worker',sys.argv[1])\n"
+    "if s is None or s.loader is None: raise SystemExit(70)\n"
+    "m=importlib.util.module_from_spec(s)\n"
+    "sys.modules[s.name]=m\n"
+    "s.loader.exec_module(m)\n"
+    "try:\n"
+    " p=m._run_generation6_f_probe_for_test(*sys.argv[2:])\n"
+    " n=0\n"
+    " while n<len(p):\n"
+    "  w=os.write(1,p[n:])\n"
+    "  if type(w) is not int or w<=0 or w>len(p)-n: m._CAPTURED_RUNNER_OS_EXIT(70)\n"
+    "  n+=w\n"
+    "except BaseException:\n"
+    " m._CAPTURED_RUNNER_OS_EXIT(70)\n"
+    "m._CAPTURED_RUNNER_OS_EXIT(0)\n"
+)
+_GENERATION6_P_BOOTSTRAP: Final = (
+    "import importlib.util,os,sys\n"
+    "s=importlib.util.spec_from_file_location('_task064_g6_p_worker',sys.argv[1])\n"
+    "if s is None or s.loader is None: raise SystemExit(70)\n"
+    "m=importlib.util.module_from_spec(s)\n"
+    "sys.modules[s.name]=m\n"
+    "s.loader.exec_module(m)\n"
+    "try:\n"
+    " p=m._run_generation6_p_probe_for_test(*sys.argv[2:])\n"
+    " n=0\n"
+    " while n<len(p):\n"
+    "  w=os.write(1,p[n:])\n"
+    "  if type(w) is not int or w<=0 or w>len(p)-n: m._CAPTURED_RUNNER_OS_EXIT(70)\n"
+    "  n+=w\n"
+    "except BaseException:\n"
+    " m._CAPTURED_RUNNER_OS_EXIT(70)\n"
+    "m._CAPTURED_RUNNER_OS_EXIT(0)\n"
+)
+_GENERATION6_O_ANCHOR_BOOTSTRAP: Final = (
+    "import importlib.util,os,sys\n"
+    "s=importlib.util.spec_from_file_location('_task064_g6_anchor_worker',sys.argv[1])\n"
+    "if s is None or s.loader is None: raise SystemExit(70)\n"
+    "m=importlib.util.module_from_spec(s)\n"
+    "sys.modules[s.name]=m\n"
+    "s.loader.exec_module(m)\n"
+    "try:\n"
+    " p=m._run_generation6_o_anchor_probe_for_test(*sys.argv[2:])\n"
+    " n=0\n"
+    " while n<len(p):\n"
+    "  w=os.write(1,p[n:])\n"
+    "  if type(w) is not int or w<=0 or w>len(p)-n: m._CAPTURED_RUNNER_OS_EXIT(70)\n"
+    "  n+=w\n"
+    "except BaseException:\n"
+    " m._CAPTURED_RUNNER_OS_EXIT(70)\n"
+    "m._CAPTURED_RUNNER_OS_EXIT(0)\n"
+)
+
+
+def _generation6_case_spec(case: _Generation6ProtocolCase) -> dict[str, object]:
+    return {
+        "case_id": case.case_id,
+        "contract_generation": CONTRACT_GENERATION,
+        "contract_sha256": CONTRACT_SHA256,
+        "category": case.category,
+        "result_key": case.result_key,
+        "atomic_ids": list(case.atomic_ids),
+        "contract_lines": list(case.contract_lines),
+        "runner_surface": case.runner_surface,
+        "expected_fail_closed_checks": list(case.expected_fail_closed_checks),
+        "expected_forbidden_actions": list(case.expected_forbidden_actions),
+        "expected_outcome": case.expected_outcome,
+    }
+
+
+def _generation6_case_spec_sha256(case: _Generation6ProtocolCase) -> str:
+    return _sha256(_canonical_bytes(_generation6_case_spec(case), limit=16_384))
+
+
+def _record_generation6_case_evidence(case_id: str) -> None:
+    matches = tuple(case for case in _GENERATION6_PROTOCOL_CASES if case.case_id == case_id)
+    _require(len(matches) == 1, "self-test evidence case identity differs")
+    _require(not _GENERATION6_CASE_EVIDENCE, "self-test evidence was already recorded")
+    expected_prefix = matches[0].expected_fail_closed_checks[:-3]
+    _require(
+        tuple(_GENERATION6_CASE_CHECK_HISTORY) == expected_prefix,
+        "self-test driver check history differs",
+    )
+    _GENERATION6_CASE_EVIDENCE.append(case_id)
+
+
+def _record_generation6_check(label: str) -> None:
+    exact = _ascii(label, "self-test check label")
+    _require(exact != "" and exact not in _GENERATION6_CASE_CHECK_HISTORY, "check label differs")
+    _GENERATION6_CASE_CHECK_HISTORY.append(exact)
+
+
+def _record_generation6_forbidden_action(label: str) -> None:
+    exact = _ascii(label, "self-test forbidden action")
+    _require(exact != "", "self-test forbidden action differs")
+    _GENERATION6_CASE_ACTION_HISTORY.append(exact)
+
+
+def _generation6_receipt_aliases(snapshot: DescriptorSnapshot) -> tuple[int, ...]:
+    try:
+        names = os.listdir("/proc/self/fd")
+    except OSError as error:
+        raise ContractError("self-test descriptor inventory unavailable") from error
+    _require(len(names) <= 100_000, "self-test descriptor inventory cap exceeded")
+    aliases: list[int] = []
+    for name in names:
+        if type(name) is not str or not name.isdigit() or (name != "0" and name.startswith("0")):
+            continue
+        descriptor = int(name, 10)
+        if descriptor <= 2:
+            continue
+        try:
+            status = os.fstat(descriptor)
+        except OSError as error:
+            if error.errno == errno.EBADF:
+                continue
+            raise ContractError("self-test descriptor inventory changed") from error
+        if status.st_dev == snapshot.device and status.st_ino == snapshot.inode:
+            aliases.append(descriptor)
+    aliases.sort()
+    _require(len(aliases) == len(set(aliases)), "self-test receipt alias inventory repeats")
+    return tuple(aliases)
+
+
+@dataclass(frozen=True)
+class _Generation6DescriptorState:
+    descriptor: int
+    device: int
+    inode: int
+    uid: int
+    gid: int
+    mode: int
+    link_count: int
+    size: int
+    mtime_ns: int
+    ctime_ns: int
+    descriptor_flags: int
+    cloexec: bool
+    status_flags: int
+    seek_state: str
+    seek_value: int
+    fdinfo_flags: int
+    position: int
+    mount_id: int
+    fdinfo_inode: int
+    target_bytes_hex: str
+
+
+@dataclass(frozen=True)
+class _Generation6ProcessState:
+    process_identity: tuple[
+        int,
+        int,
+        int,
+        int,
+        int,
+        int,
+        int,
+        int,
+        tuple[int, ...],
+    ]
+    proc_stat_identity: tuple[int, int, int, int]
+    namespace_identities: tuple[tuple[str, str], ...]
+    cwd_bytes_hex: str
+    cwd_identity: tuple[int, int, int, int, int]
+    argv: tuple[str, ...]
+    original_argv: tuple[str, ...]
+    environment: tuple[tuple[str, str], ...]
+    environment_identity: int
+    sys_path: tuple[str, ...]
+    sys_warnoptions: tuple[str, ...]
+    sys_runtime_flags: tuple[bool, str, float, int, int, bool, int]
+    sys_hook_identities: tuple[tuple[str, str, int], ...]
+    gc_state: tuple[bool, int, tuple[int, int, int], tuple[int, ...]]
+    warnings_state: tuple[tuple[str, ...], int, int]
+    atexit_callback_count: int
+    import_hooks: tuple[tuple[str, int], ...]
+    importer_cache: tuple[tuple[str, str, int], ...]
+    module_inventory: tuple[tuple[str, str, int, int, str, str], ...]
+    signal_handlers: tuple[tuple[int, str, int], ...]
+    blocked_signals: tuple[int, ...]
+    pending_signals: tuple[int, ...]
+    proc_signal_state: tuple[tuple[str, int], ...]
+    interval_timers: tuple[tuple[int, float, float], ...]
+    trace_profile_hooks: tuple[tuple[str, str, int], ...]
+    threads: tuple[tuple[int, int, str, bool, bool, str, int], ...]
+    proc_task_ids: tuple[int, ...]
+    proc_thread_count: int
+    direct_child_pids: tuple[int, ...]
+    umask: int
+    resource_limits: tuple[tuple[str, int, int], ...]
+    process_priority: int
+    function_identities: tuple[tuple[str, int], ...]
+    patch_authorities: tuple[tuple[str, int, str, int], ...]
+    descriptors: tuple[_Generation6DescriptorState, ...]
+    subprocess_state: tuple[
+        int,
+        int,
+        int,
+        int,
+        int,
+        int,
+        int,
+        tuple[int, ...],
+        tuple[tuple[str, bool], ...],
+    ]
+    tempfile_state: tuple[int, str, str, int]
+    runner_mutable_state: tuple[
+        tuple[int, ...],
+        tuple[str, ...],
+        tuple[str, ...],
+        tuple[str, ...],
+        tuple[tuple[int, int, str, int, int], ...],
+    ]
+    runner_global_digests: tuple[tuple[str, str], ...]
+
+
+def _generation6_handler_identity(handler: object, *, label: str) -> tuple[str, int]:
+    if handler is None:
+        return ("none", 0)
+    if handler is signal.SIG_DFL:
+        return ("SIG_DFL", 0)
+    if handler is signal.SIG_IGN:
+        return ("SIG_IGN", 0)
+    _require(callable(handler), f"{label} identity differs")
+    handler_type = type(handler)
+    type_name = f"{handler_type.__module__}.{handler_type.__qualname__}"
+    _ascii(type_name, f"{label} type")
+    return (type_name, id(handler))
+
+
+def _generation6_fdinfo(descriptor: int) -> tuple[int, int, int, int]:
+    poison_sink: set[int] = set()
+    payload = _read_bounded_file(
+        f"/proc/self/fdinfo/{descriptor}",
+        limit=4_096,
+        label="self-test descriptor fdinfo",
+        excluded_descriptors=((descriptor,) if descriptor > 2 else ()),
+        poison_sink=poison_sink,
+    )
+    _require(payload != b"" and b"\x00" not in payload, "invalid self-test fdinfo")
+    positions: list[int] = []
+    flags: list[int] = []
+    mount_ids: list[int] = []
+    inodes: list[int] = []
+    for line in payload.splitlines():
+        key, separator, raw_value = line.partition(b":")
+        if separator != b":":
+            continue
+        value = raw_value.strip()
+        if key == b"pos":
+            _require(
+                value.isdigit() and (value == b"0" or not value.startswith(b"0")),
+                "self-test descriptor position differs",
+            )
+            positions.append(int(value, 10))
+        elif key == b"flags":
+            _require(
+                value != b"" and all(octet in b"01234567" for octet in value),
+                "self-test descriptor fdinfo flags differ",
+            )
+            flags.append(int(value, 8))
+        elif key == b"mnt_id":
+            _require(
+                value.isdigit() and not value.startswith(b"0"),
+                "self-test descriptor mount identity differs",
+            )
+            mount_ids.append(int(value, 10))
+        elif key == b"ino":
+            _require(
+                value.isdigit() and (value == b"0" or not value.startswith(b"0")),
+                "self-test descriptor fdinfo inode differs",
+            )
+            inodes.append(int(value, 10))
+    _require(
+        len(positions) == len(flags) == len(mount_ids) == len(inodes) == 1 and mount_ids[0] > 0,
+        "self-test descriptor fdinfo shape differs",
+    )
+    return (positions[0], flags[0], mount_ids[0], inodes[0])
+
+
+def _generation6_descriptor_state(descriptor: int) -> _Generation6DescriptorState:
+    try:
+        status = os.fstat(descriptor)
+        descriptor_flags = fcntl.fcntl(descriptor, fcntl.F_GETFD)
+        status_flags = fcntl.fcntl(descriptor, fcntl.F_GETFL)
+        target = os.readlink(f"/proc/self/fd/{descriptor}")
+    except OSError as error:
+        raise ContractError("self-test descriptor reset inventory changed") from error
+    integer_values = (
+        descriptor,
+        status.st_dev,
+        status.st_ino,
+        status.st_uid,
+        status.st_gid,
+        status.st_mode,
+        status.st_nlink,
+        status.st_size,
+        status.st_mtime_ns,
+        status.st_ctime_ns,
+        descriptor_flags,
+        status_flags,
+    )
+    _require(
+        all(type(value) is int and value >= 0 for value in integer_values),
+        "self-test descriptor reset values differ",
+    )
+    _require(type(target) is str, "self-test descriptor target differs")
+    try:
+        seek_value = os.lseek(descriptor, 0, os.SEEK_CUR)
+        _require(type(seek_value) is int and seek_value >= 0, "descriptor offset differs")
+        seek_state = "OFFSET"
+    except OSError as error:
+        _require(type(error.errno) is int and error.errno > 0, "descriptor seek errno differs")
+        seek_value = cast(int, error.errno)
+        seek_state = "ESPIPE" if seek_value == errno.ESPIPE else "ERROR"
+    position, fdinfo_flags, mount_id, fdinfo_inode = _generation6_fdinfo(descriptor)
+    if seek_state == "OFFSET":
+        _require(position == seek_value, "descriptor fdinfo offset differs")
+    return _Generation6DescriptorState(
+        descriptor=descriptor,
+        device=status.st_dev,
+        inode=status.st_ino,
+        uid=status.st_uid,
+        gid=status.st_gid,
+        mode=status.st_mode,
+        link_count=status.st_nlink,
+        size=status.st_size,
+        mtime_ns=status.st_mtime_ns,
+        ctime_ns=status.st_ctime_ns,
+        descriptor_flags=descriptor_flags,
+        cloexec=bool(descriptor_flags & fcntl.FD_CLOEXEC),
+        status_flags=status_flags,
+        seek_state=seek_state,
+        seek_value=seek_value,
+        fdinfo_flags=fdinfo_flags,
+        position=position,
+        mount_id=mount_id,
+        fdinfo_inode=fdinfo_inode,
+        target_bytes_hex=os.fsencode(target).hex(),
+    )
+
+
+def _generation6_runner_global_digests() -> tuple[tuple[str, str], ...]:
+    rejection_packet: list[object] = []
+    for label, mapping in (
+        ("O", _GENERATION6_O_REJECTIONS),
+        ("F", _GENERATION6_F_REJECTIONS),
+        ("P", _GENERATION6_P_REJECTIONS),
+        ("G", _GENERATION6_G_REJECTIONS),
+        ("M", _GENERATION6_M_REJECTIONS),
+        ("R", _GENERATION6_R_REJECTIONS),
+        ("K", _GENERATION6_K_REJECTIONS),
+        ("A", _GENERATION6_A_REJECTIONS),
+        ("X", _GENERATION6_X_REJECTIONS),
+        ("U", _GENERATION6_U_REJECTIONS),
+    ):
+        rejection_packet.append(
+            [
+                label,
+                [
+                    [case_id, [[fault, message] for fault, message in mapping[case_id]]]
+                    for case_id in sorted(mapping)
+                ],
+            ]
+        )
+    shard_packet = [
+        [
+            shard_id,
+            expectation.count,
+            expectation.canonical_bytes,
+            expectation.sha256,
+            expectation.selector_bytes,
+        ]
+        for shard_id, expectation in sorted(SHARD_EXPECTATIONS.items())
+    ]
+    packets: tuple[tuple[str, dict[str, object]], ...] = (
+        ("external_plugins", {"value": EXPECTED_EXTERNAL_PLUGINS}),
+        ("observation_limits", {"value": OBSERVATION_LIMITS}),
+        ("shard_expectations", {"value": shard_packet}),
+        ("selftest_surfaces", {"value": _GENERATION6_SELFTEST_SURFACES}),
+        ("selftest_rejections", {"value": rejection_packet}),
+    )
+    return tuple(
+        (
+            label,
+            _sha256(
+                _canonical_bytes(
+                    {
+                        "domain": "TASK064-GENERATION6-RUNNER-GLOBAL-STATE-V1",
+                        "label": label,
+                        **packet,
+                    },
+                    limit=65_536,
+                )
+            ),
+        )
+        for label, packet in packets
+    )
+
+
+def _generation6_read_proc(path: str, *, label: str, limit: int = 16_384) -> bytes:
+    poison_sink: set[int] = set()
+    return _read_bounded_file(
+        path,
+        limit=limit,
+        label=label,
+        poison_sink=poison_sink,
+    )
+
+
+def _generation6_proc_status_state() -> tuple[
+    tuple[tuple[str, int], ...],
+    int,
+    int,
+]:
+    payload = _generation6_read_proc("/proc/self/status", label="self-test process status")
+    _require(payload.endswith(b"\n") and b"\x00" not in payload, "process status differs")
+    requested = (b"SigPnd", b"ShdPnd", b"SigBlk", b"SigIgn", b"SigCgt")
+    signal_values: list[tuple[str, int]] = []
+    thread_values: list[int] = []
+    umask_values: list[int] = []
+    for raw_line in payload.splitlines():
+        key, separator, raw_value = raw_line.partition(b":")
+        if separator != b":":
+            continue
+        value = raw_value.strip()
+        if key in requested:
+            _require(
+                len(value) == 16 and all(octet in b"0123456789abcdefABCDEF" for octet in value),
+                "process signal status differs",
+            )
+            signal_values.append((key.decode("ascii"), int(value, 16)))
+        elif key == b"Threads":
+            thread_values.append(
+                _canonical_proc_decimal(value, label="process thread count", allow_zero=False)
+            )
+        elif key == b"Umask":
+            _require(
+                len(value) == 4 and all(octet in b"01234567" for octet in value),
+                "process umask status differs",
+            )
+            umask_values.append(int(value, 8))
+    signal_values.sort()
+    _require(
+        tuple(name for name, _ in signal_values)
+        == tuple(sorted(value.decode("ascii") for value in requested))
+        and len(thread_values) == 1
+        and len(umask_values) == 1,
+        "process status reset shape differs",
+    )
+    return (tuple(signal_values), thread_values[0], umask_values[0])
+
+
+def _generation6_direct_child_pids(pid: int) -> tuple[int, ...]:
+    payload = _generation6_read_proc(
+        f"/proc/self/task/{pid}/children",
+        label="self-test direct child inventory",
+        limit=4_096,
+    )
+    _require(b"\x00" not in payload and b"\r" not in payload, "direct child inventory differs")
+    values = tuple(
+        _canonical_proc_decimal(value, label="direct child PID", allow_zero=False)
+        for value in payload.split()
+    )
+    _require(
+        values == tuple(sorted(set(values))),
+        "direct child inventory order or uniqueness differs",
+    )
+    return values
+
+
+def _generation6_namespace_identities() -> tuple[tuple[str, str], ...]:
+    raw_names = os.listdir("/proc/self/ns")
+    _require(len(raw_names) <= 64, "namespace inventory cap exceeded")
+    values: list[tuple[str, str]] = []
+    for raw_name in raw_names:
+        name = _ascii(raw_name, "namespace name")
+        _require(name not in {value[0] for value in values}, "namespace name repeats")
+        try:
+            target = os.readlink(f"/proc/self/ns/{name}")
+        except OSError as error:
+            raise ContractError("namespace identity unavailable") from error
+        _require(type(target) is str, "namespace target differs")
+        values.append((name, os.fsencode(target).hex()))
+    values.sort()
+    _require(bool(values), "namespace inventory is empty")
+    return tuple(values)
+
+
+def _generation6_warning_atom(value: object, *, label: str) -> list[object]:
+    if value is None:
+        return ["none"]
+    if type(value) is str:
+        return ["str", os.fsencode(value).hex()]
+    pattern = getattr(value, "pattern", None)
+    flags = getattr(value, "flags", None)
+    _require(
+        type(pattern) is str and type(flags) is int,
+        f"{label} warning pattern differs",
+    )
+    value_type = type(value)
+    type_name = f"{value_type.__module__}.{value_type.__qualname__}"
+    _ascii(type_name, f"{label} warning pattern type")
+    return [
+        "pattern",
+        type_name,
+        id(value),
+        os.fsencode(cast(str, pattern)).hex(),
+        cast(int, flags),
+    ]
+
+
+def _generation6_warnings_state() -> tuple[tuple[str, ...], int, int]:
+    filters = warnings.filters
+    _require(type(filters) is list, "warning filter registry differs")
+    digests: list[str] = []
+    for ordinal, raw_filter in enumerate(filters):
+        _require(
+            type(raw_filter) is tuple and len(raw_filter) == 5,
+            "warning filter shape differs",
+        )
+        action, message, category, module_pattern, lineno = raw_filter
+        _require(type(action) is str and type(lineno) is int, "warning filter value differs")
+        _require(
+            type(category) is type and issubclass(category, Warning),
+            "warning category differs",
+        )
+        exact_category = cast(type[Warning], category)
+        category_name = f"{exact_category.__module__}.{exact_category.__qualname__}"
+        _ascii(category_name, "warning category name")
+        packet: dict[str, object] = {
+            "domain": "TASK064-GENERATION6-WARNING-FILTER-V1",
+            "ordinal": ordinal,
+            "action": action,
+            "message": _generation6_warning_atom(message, label="message"),
+            "category": [category_name, id(exact_category)],
+            "module": _generation6_warning_atom(module_pattern, label="module"),
+            "lineno": lineno,
+        }
+        digests.append(_sha256(_canonical_bytes(packet, limit=4_096)))
+    return (tuple(digests), id(filters), id(warnings.showwarning))
+
+
+def _generation6_module_path(value: object, *, label: str) -> str:
+    _require(value is None or type(value) in {str, bytes}, f"{label} differs")
+    if value is None:
+        return "none"
+    return f"{type(value).__name__}:{os.fsencode(cast(str | bytes, value)).hex()}"
+
+
+def _generation6_process_state() -> _Generation6ProcessState:
+    pid = os.getpid()
+    ppid = os.getppid()
+    session_id = os.getsid(0)
+    process_group_id = os.getpgid(0)
+    process_identity = (
+        pid,
+        ppid,
+        session_id,
+        process_group_id,
+        os.getuid(),
+        os.geteuid(),
+        os.getgid(),
+        os.getegid(),
+        tuple(sorted(os.getgroups())),
+    )
+    _require(
+        all(type(value) is int and value >= 0 for value in process_identity[:-1])
+        and all(type(value) is int and value >= 0 for value in process_identity[-1]),
+        "self-test process identity differs",
+    )
+    proc_stat_identity = _parse_proc_stat_projection(
+        _generation6_read_proc("/proc/self/stat", label="self-test process stat"),
+        expected_pid=pid,
+    )
+    _require(
+        proc_stat_identity[:3] == (ppid, process_group_id, session_id),
+        "self-test process stat identity differs",
+    )
+
+    cwd = Path.cwd().resolve(strict=True)
+    cwd_status = os.stat(cwd, follow_symlinks=True)
+    cwd_identity = (
+        cwd_status.st_dev,
+        cwd_status.st_ino,
+        cwd_status.st_uid,
+        cwd_status.st_gid,
+        cwd_status.st_mode,
+    )
+    _require(
+        all(type(value) is int and value >= 0 for value in cwd_identity),
+        "self-test cwd identity differs",
+    )
+    exact_argv = tuple(sys.argv)
+    exact_original_argv = tuple(sys.orig_argv)
+    exact_sys_path = tuple(sys.path)
+    exact_warnoptions = tuple(sys.warnoptions)
+    _require(
+        all(type(value) is str for value in (*exact_argv, *exact_original_argv, *exact_sys_path)),
+        "self-test interpreter path state differs",
+    )
+    _require(
+        all(type(value) is str for value in exact_warnoptions),
+        "self-test interpreter warning state differs",
+    )
+
+    pycache_prefix = sys.pycache_prefix
+    _require(pycache_prefix is None or type(pycache_prefix) is str, "pycache prefix differs")
+    switch_interval = sys.getswitchinterval()
+    coroutine_depth = sys.get_coroutine_origin_tracking_depth()
+    int_max_digits = sys.get_int_max_str_digits()
+    _require(
+        type(switch_interval) is float
+        and math.isfinite(switch_interval)
+        and switch_interval > 0.0
+        and type(coroutine_depth) is int
+        and coroutine_depth >= 0
+        and type(int_max_digits) is int
+        and int_max_digits >= 0,
+        "self-test interpreter runtime state differs",
+    )
+
+    asyncgen_hooks = sys.get_asyncgen_hooks()
+    sys_hook_values = (
+        ("sys.asyncgen.firstiter", asyncgen_hooks.firstiter),
+        ("sys.asyncgen.finalizer", asyncgen_hooks.finalizer),
+        ("sys.excepthook", sys.excepthook),
+        ("sys.unraisablehook", sys.unraisablehook),
+        ("sys.breakpointhook", sys.breakpointhook),
+        ("sys.displayhook", sys.displayhook),
+        ("threading.excepthook", threading.excepthook),
+        ("warnings.showwarning", warnings.showwarning),
+        ("warnings._showwarnmsg_impl", getattr(warnings, "_showwarnmsg_impl", None)),
+    )
+    sys_hook_identities = tuple(
+        (label, *_generation6_handler_identity(value, label=label))
+        for label, value in sys_hook_values
+    )
+    gc_thresholds = gc.get_threshold()
+    _require(
+        len(gc_thresholds) == 3
+        and all(type(value) is int and value >= 0 for value in gc_thresholds),
+        "self-test garbage collector thresholds differ",
+    )
+    gc_state = (
+        bool(gc.isenabled()),
+        gc.get_debug(),
+        gc_thresholds,
+        tuple(id(value) for value in gc.callbacks),
+    )
+    ncallbacks = getattr(atexit, "_ncallbacks", None)
+    _require(callable(ncallbacks), "self-test atexit callback counter differs")
+    atexit_callback_count = cast(Callable[[], int], ncallbacks)()
+    _require(
+        type(atexit_callback_count) is int and atexit_callback_count >= 0,
+        "self-test atexit callback count differs",
+    )
+
+    handlers: list[tuple[int, str, int]] = []
+    for signal_number in sorted(int(value) for value in signal.valid_signals()):
+        if signal_number in {int(signal.SIGKILL), int(signal.SIGSTOP)}:
+            continue
+        try:
+            handler = signal.getsignal(signal_number)
+        except (OSError, ValueError) as error:
+            raise ContractError("self-test signal inventory unavailable") from error
+        handler_type, handler_id = _generation6_handler_identity(
+            handler,
+            label=f"signal {signal_number} handler",
+        )
+        handlers.append((signal_number, handler_type, handler_id))
+    try:
+        blocked_signals = tuple(
+            sorted(int(value) for value in signal.pthread_sigmask(signal.SIG_BLOCK, ()))
+        )
+    except (OSError, ValueError) as error:
+        raise ContractError("self-test pthread signal mask unavailable") from error
+    try:
+        pending_signals = tuple(sorted(int(value) for value in signal.sigpending()))
+    except OSError as error:
+        raise ContractError("self-test pending signal inventory unavailable") from error
+    proc_signal_state, proc_thread_count, umask = _generation6_proc_status_state()
+    interval_timers: list[tuple[int, float, float]] = []
+    for timer in (signal.ITIMER_REAL, signal.ITIMER_VIRTUAL, signal.ITIMER_PROF):
+        try:
+            remaining, interval = signal.getitimer(timer)
+        except (OSError, ValueError) as error:
+            raise ContractError("self-test interval timer inventory unavailable") from error
+        _require(
+            type(remaining) is float
+            and type(interval) is float
+            and math.isfinite(remaining)
+            and math.isfinite(interval)
+            and remaining == 0.0
+            and interval == 0.0,
+            "active interval timer is forbidden",
+        )
+        interval_timers.append((int(timer), remaining, interval))
+
+    trace_profile_values = (
+        ("sys.trace", sys.gettrace()),
+        ("sys.profile", sys.getprofile()),
+        ("threading.trace", threading.gettrace()),
+        ("threading.profile", threading.getprofile()),
+    )
+    _require(
+        all(value is None for _, value in trace_profile_values),
+        "self-test trace/profile hook is forbidden",
+    )
+    trace_profile_hooks = tuple(
+        (label, *_generation6_handler_identity(value, label=label))
+        for label, value in trace_profile_values
+    )
+
+    current_thread = threading.current_thread()
+    main_thread = threading.main_thread()
+    enumerated_threads = threading.enumerate()
+    _require(
+        len(enumerated_threads) == 1
+        and enumerated_threads[0] is current_thread
+        and current_thread is main_thread,
+        "self-test worker is not the sole main thread",
+    )
+    thread_values: list[tuple[int, int, str, bool, bool, str, int]] = []
+    for thread in enumerated_threads:
+        ident = thread.ident
+        native_id = thread.native_id
+        _require(
+            type(ident) is int and ident > 0 and type(native_id) is int and native_id > 0,
+            "self-test thread identity differs",
+        )
+        exact_ident = cast(int, ident)
+        exact_native_id = cast(int, native_id)
+        thread_type = type(thread)
+        type_name = f"{thread_type.__module__}.{thread_type.__qualname__}"
+        _ascii(type_name, "self-test thread type")
+        _require(type(thread.name) is str, "self-test thread name differs")
+        thread_values.append(
+            (
+                exact_ident,
+                exact_native_id,
+                thread.name,
+                bool(thread.daemon),
+                bool(thread.is_alive()),
+                type_name,
+                id(thread),
+            )
+        )
+    thread_values.sort(key=lambda value: (value[0], value[1], value[6]))
+    raw_task_names = os.listdir("/proc/self/task")
+    _require(len(raw_task_names) <= 100_000, "self-test task inventory cap exceeded")
+    proc_task_ids: list[int] = []
+    for raw_name in raw_task_names:
+        _require(
+            type(raw_name) is str
+            and raw_name.isdigit()
+            and (raw_name == "0" or not raw_name.startswith("0")),
+            "self-test task identity differs",
+        )
+        proc_task_ids.append(int(raw_name, 10))
+    proc_task_ids.sort()
+    _require(
+        len(proc_task_ids) == len(set(proc_task_ids)) == 1
+        and proc_task_ids[0] == thread_values[0][1]
+        and proc_thread_count == 1,
+        "self-test kernel thread inventory differs",
+    )
+
+    runner_module = _generation6_module()
+    authority_specs: list[tuple[str, object, str]] = [
+        ("os.open", os, "open"),
+        ("os.close", os, "close"),
+        ("os.read", os, "read"),
+        ("os.write", os, "write"),
+        ("os.pread", os, "pread"),
+        ("os.pwrite", os, "pwrite"),
+        ("os.fstat", os, "fstat"),
+        ("os.fsync", os, "fsync"),
+        ("os.lseek", os, "lseek"),
+        ("os.ftruncate", os, "ftruncate"),
+        ("os.fork", os, "fork"),
+        ("os._exit", os, "_exit"),
+        ("os.setsid", os, "setsid"),
+        ("os.setpgid", os, "setpgid"),
+        ("os.link", os, "link"),
+        ("os.rename", os, "rename"),
+        ("os.unlink", os, "unlink"),
+        ("os.rmdir", os, "rmdir"),
+        ("os.scandir", os, "scandir"),
+        ("os.stat", os, "stat"),
+        ("os.waitpid", os, "waitpid"),
+        ("os.waitid", os, "waitid"),
+        ("os.kill", os, "kill"),
+        ("os.killpg", os, "killpg"),
+        ("os.pidfd_open", os, "pidfd_open"),
+        ("os.register_at_fork", os, "register_at_fork"),
+        ("sys.addaudithook", sys, "addaudithook"),
+        ("signal.signal", signal, "signal"),
+        ("signal.pthread_sigmask", signal, "pthread_sigmask"),
+        ("signal.getitimer", signal, "getitimer"),
+        ("signal.setitimer", signal, "setitimer"),
+        ("signal.set_wakeup_fd", signal, "set_wakeup_fd"),
+        ("signal.siginterrupt", signal, "siginterrupt"),
+        ("signal.pidfd_send_signal", signal, "pidfd_send_signal"),
+        ("atexit.register", atexit, "register"),
+        ("atexit.unregister", atexit, "unregister"),
+        ("threading.Thread.start", threading.Thread, "start"),
+        ("fcntl.fcntl", fcntl, "fcntl"),
+        ("secrets.token_hex", secrets, "token_hex"),
+        ("tempfile.gettempdir", tempfile, "gettempdir"),
+        ("tempfile.mkdtemp", tempfile, "mkdtemp"),
+        ("tempfile.NamedTemporaryFile", tempfile, "NamedTemporaryFile"),
+        ("importlib.util.spec_from_file_location", importlib.util, "spec_from_file_location"),
+        ("importlib.util.module_from_spec", importlib.util, "module_from_spec"),
+        ("metadata.version", importlib.metadata, "version"),
+        ("subprocess.Popen", subprocess, "Popen"),
+        ("subprocess.Popen.__init__", subprocess.Popen, "__init__"),
+        ("subprocess.Popen.__del__", subprocess.Popen, "__del__"),
+        ("subprocess.Popen.wait", subprocess.Popen, "wait"),
+        ("subprocess.Popen.poll", subprocess.Popen, "poll"),
+        ("subprocess.Popen.communicate", subprocess.Popen, "communicate"),
+        ("subprocess._cleanup", subprocess, "_cleanup"),
+        ("socket.socket", socket, "socket"),
+        ("shutil.rmtree", shutil, "rmtree"),
+        ("runner._emit_stdout", runner_module, "_emit_stdout"),
+        ("runner._runtime_spawn_gate", runner_module, "_runtime_spawn_gate"),
+        ("runner._file_bytes", runner_module, "_file_bytes"),
+        ("runner._read_bounded_file", runner_module, "_read_bounded_file"),
+        ("runner._drain_child", runner_module, "_drain_child"),
+        (
+            "runner._consume_and_propagate_raw_reserved",
+            runner_module,
+            "_consume_and_propagate_raw_reserved",
+        ),
+        ("runner.ProcessSupervisor.run", ProcessSupervisor, "run"),
+        ("runner.CommandFiles.assert_unchanged", CommandFiles, "assert_unchanged"),
+        ("runner.CommandFiles._fresh_rollback", CommandFiles, "_fresh_rollback"),
+        ("runner.CommandFiles.publish", CommandFiles, "publish"),
+        (
+            "runner.CommandFiles.close_without_publication",
+            CommandFiles,
+            "close_without_publication",
+        ),
+        ("runner.PrivateRoot.cleanup", PrivateRoot, "cleanup"),
+    ]
+    conftest_modules = tuple(
+        module
+        for name, module in sys.modules.items()
+        if name == f"_task064_generation6_conftest_{pid}"
+    )
+    _require(len(conftest_modules) <= 1, "self-test conftest module inventory differs")
+    if conftest_modules:
+        conftest_module = conftest_modules[0]
+        for attribute in (
+            "_snapshot",
+            "_validate_adopted_observation",
+            "_validate_initial_observation",
+            "_close_once",
+            "_write_packet",
+            "_require_exact_inherited_descriptors",
+            "_validate_raw_task064_options",
+            "_external_plugins",
+            "_worker_indicator_count",
+            "_validate_proof_record",
+        ):
+            authority_specs.append((f"conftest.{attribute}", conftest_module, attribute))
+    identities: list[tuple[str, int]] = []
+    patch_authorities: list[tuple[str, int, str, int]] = []
+    for name, target, attribute in authority_specs:
+        value = getattr(target, attribute)
+        _require(callable(value), f"self-test function identity {name} differs")
+        identities.append((name, id(value)))
+        patch_authorities.append((name, id(target), attribute, id(value)))
+    _require(
+        len(patch_authorities) == len({value[0] for value in patch_authorities}),
+        "self-test patch authority repeats",
+    )
+
+    descriptor_numbers: list[int] = []
+    raw_descriptor_names = os.listdir("/proc/self/fd")
+    _require(
+        len(raw_descriptor_names) <= 100_000,
+        "self-test descriptor reset inventory cap exceeded",
+    )
+    for name in raw_descriptor_names:
+        if type(name) is not str or not name.isdigit() or (name != "0" and name.startswith("0")):
+            continue
+        descriptor = int(name, 10)
+        try:
+            os.fstat(descriptor)
+        except OSError as error:
+            if error.errno == errno.EBADF:
+                continue
+            raise ContractError("self-test descriptor reset inventory changed") from error
+        descriptor_numbers.append(descriptor)
+    descriptor_numbers.sort()
+    _require(
+        len(descriptor_numbers) == len(set(descriptor_numbers)),
+        "self-test descriptor reset inventory repeats",
+    )
+    descriptors = tuple(_generation6_descriptor_state(value) for value in descriptor_numbers)
+
+    raw_active = getattr(subprocess, "_active", None)
+    _require(type(raw_active) is list, "self-test subprocess active registry differs")
+    active_object_ids = tuple(sorted(id(process) for process in cast(list[object], raw_active)))
+    subprocess_flags = tuple(
+        (name, cast(bool, getattr(subprocess, name))) for name in ("_USE_POSIX_SPAWN", "_USE_VFORK")
+    )
+    _require(
+        all(type(value) is bool for _, value in subprocess_flags),
+        "self-test subprocess mode flags differ",
+    )
+
+    raw_tempdir = tempfile.tempdir
+    _require(
+        raw_tempdir is None or type(raw_tempdir) in {str, bytes},
+        "self-test tempfile directory cache differs",
+    )
+    once_lock = getattr(tempfile, "_once_lock", None)
+    tempfile_state = (
+        id(tempfile),
+        type(raw_tempdir).__name__,
+        "" if raw_tempdir is None else os.fsencode(raw_tempdir).hex(),
+        id(once_lock),
+    )
+
+    module_inventory: list[tuple[str, str, int, int, str, str]] = []
+    for module_name, module_value in sorted(sys.modules.items()):
+        _require(type(module_name) is str, "self-test module name differs")
+        module_type = type(module_value)
+        module_type_name = f"{module_type.__module__}.{module_type.__qualname__}"
+        _ascii(module_type_name, "self-test module type")
+        module_spec = getattr(module_value, "__spec__", None)
+        module_origin = getattr(module_spec, "origin", None)
+        module_file = getattr(module_value, "__file__", None)
+        module_inventory.append(
+            (
+                module_name,
+                module_type_name,
+                id(module_value),
+                id(module_spec),
+                _generation6_module_path(module_origin, label="self-test module origin"),
+                _generation6_module_path(module_file, label="self-test module file"),
+            )
+        )
+    importer_cache: list[tuple[str, str, int]] = []
+    for cache_key, finder in sorted(sys.path_importer_cache.items()):
+        _require(type(cache_key) is str, "self-test importer cache key differs")
+        finder_type = type(finder)
+        type_name = f"{finder_type.__module__}.{finder_type.__qualname__}"
+        _ascii(type_name, "self-test importer cache type")
+        importer_cache.append((os.fsencode(cache_key).hex(), type_name, id(finder)))
+    import_hooks = tuple(
+        (f"meta_path:{ordinal}", id(value)) for ordinal, value in enumerate(sys.meta_path)
+    ) + tuple((f"path_hook:{ordinal}", id(value)) for ordinal, value in enumerate(sys.path_hooks))
+
+    resource_limits: list[tuple[str, int, int]] = []
+    for name in sorted(value for value in dir(resource) if value.startswith("RLIMIT_")):
+        selector = getattr(resource, name)
+        _require(type(selector) is int, "self-test resource limit selector differs")
+        soft, hard = resource.getrlimit(selector)
+        _require(type(soft) is int and type(hard) is int, "self-test resource limit differs")
+        resource_limits.append((name, soft, hard))
+    process_priority = os.getpriority(os.PRIO_PROCESS, 0)
+    _require(type(process_priority) is int, "self-test process priority differs")
+    runner_mutable_state = (
+        tuple(id(value) for value in _OPAQUE_OWNER_QUARANTINE),
+        tuple(_GENERATION6_CASE_EVIDENCE),
+        tuple(_GENERATION6_CASE_CHECK_HISTORY),
+        tuple(_GENERATION6_CASE_ACTION_HISTORY),
+        tuple(_GENERATION6_ACTIVE_PATCHES),
+    )
+    return _Generation6ProcessState(
+        process_identity=process_identity,
+        proc_stat_identity=proc_stat_identity,
+        namespace_identities=_generation6_namespace_identities(),
+        cwd_bytes_hex=os.fsencode(Path.cwd().resolve(strict=True)).hex(),
+        cwd_identity=cwd_identity,
+        argv=exact_argv,
+        original_argv=exact_original_argv,
+        environment=tuple(sorted(os.environ.items())),
+        environment_identity=id(os.environ),
+        sys_path=exact_sys_path,
+        sys_warnoptions=exact_warnoptions,
+        sys_runtime_flags=(
+            bool(sys.dont_write_bytecode),
+            "" if pycache_prefix is None else os.fsencode(pycache_prefix).hex(),
+            switch_interval,
+            coroutine_depth,
+            int_max_digits,
+            bool(sys.flags.utf8_mode),
+            sys.flags.optimize,
+        ),
+        sys_hook_identities=sys_hook_identities,
+        gc_state=gc_state,
+        warnings_state=_generation6_warnings_state(),
+        atexit_callback_count=atexit_callback_count,
+        import_hooks=import_hooks,
+        importer_cache=tuple(importer_cache),
+        module_inventory=tuple(module_inventory),
+        signal_handlers=tuple(handlers),
+        blocked_signals=blocked_signals,
+        pending_signals=pending_signals,
+        proc_signal_state=proc_signal_state,
+        interval_timers=tuple(interval_timers),
+        trace_profile_hooks=trace_profile_hooks,
+        threads=tuple(thread_values),
+        proc_task_ids=tuple(proc_task_ids),
+        proc_thread_count=proc_thread_count,
+        direct_child_pids=_generation6_direct_child_pids(pid),
+        umask=umask,
+        resource_limits=tuple(resource_limits),
+        process_priority=process_priority,
+        function_identities=tuple(identities),
+        patch_authorities=tuple(patch_authorities),
+        descriptors=descriptors,
+        subprocess_state=(
+            id(subprocess),
+            id(subprocess.Popen),
+            id(subprocess.Popen.__init__),
+            id(subprocess.Popen.__del__),
+            id(getattr(subprocess, "_fork_exec", None)),
+            id(getattr(subprocess, "_cleanup", None)),
+            id(raw_active),
+            active_object_ids,
+            subprocess_flags,
+        ),
+        tempfile_state=tempfile_state,
+        runner_mutable_state=runner_mutable_state,
+        runner_global_digests=_generation6_runner_global_digests(),
+    )
+
+
+_GENERATION6_PROCESS_STATE_FIELDS: Final = tuple(_Generation6ProcessState.__dataclass_fields__)
+_GENERATION6_ALLOWED_PROCESS_STATE_DELTAS: Final[tuple[str, ...]] = ()
+
+
+def _generation6_require_process_reset(
+    baseline: _Generation6ProcessState,
+    current: _Generation6ProcessState,
+) -> bool:
+    _require(
+        tuple(_GENERATION6_ALLOWED_PROCESS_STATE_DELTAS)
+        == tuple(sorted(set(_GENERATION6_ALLOWED_PROCESS_STATE_DELTAS))),
+        "self-test allowed reset delta inventory differs",
+    )
+    unknown_allowed = set(_GENERATION6_ALLOWED_PROCESS_STATE_DELTAS).difference(
+        _GENERATION6_PROCESS_STATE_FIELDS
+    )
+    _require(not unknown_allowed, "self-test allowed reset delta field differs")
+    changed = tuple(
+        name
+        for name in _GENERATION6_PROCESS_STATE_FIELDS
+        if getattr(baseline, name) != getattr(current, name)
+    )
+    _require(
+        changed == _GENERATION6_ALLOWED_PROCESS_STATE_DELTAS,
+        "self-test driver process-local reset differs",
+    )
+    return True
+
+
+def _generation6_trace_sha256(case_id: str, events: Sequence[str]) -> str:
+    packet: dict[str, object] = {
+        "domain": "TASK064-GENERATION6-SELFTEST-TRACE-V1",
+        "case_id": case_id,
+        "events": list(events),
+    }
+    return _sha256(_canonical_bytes(packet, limit=32_768))
+
+
+def _generation6_forbidden_trace_sha256(case_id: str, actions: Sequence[str]) -> str:
+    packet: dict[str, object] = {
+        "domain": "TASK064-GENERATION6-SELFTEST-FORBIDDEN-TRACE-V1",
+        "case_id": case_id,
+        "actions": list(actions),
+    }
+    return _sha256(_canonical_bytes(packet, limit=32_768))
+
+
+def _run_generation6_logical_case_in_worker(
+    case: _Generation6ProtocolCase,
+    *,
+    pytest_root: Path,
+) -> dict[str, object]:
+    _require(
+        case.expected_outcome != "UNWIRED",
+        "temporarily unwired self-test case cannot execute",
+    )
+    _require(
+        not _GENERATION6_CASE_EVIDENCE
+        and not _GENERATION6_CASE_CHECK_HISTORY
+        and not _GENERATION6_CASE_ACTION_HISTORY
+        and not _GENERATION6_ACTIVE_PATCHES
+        and not _OPAQUE_OWNER_QUARANTINE,
+        "logical self-test evidence is not fresh",
+    )
+    baseline_state = _generation6_process_state()
+
+    def record_stdout_publication(payload: bytes) -> None:
+        _record_generation6_forbidden_action(f"stdout:{_sha256(payload)}")
+
+    with _Generation6SelftestPatch(
+        _generation6_module(),
+        "_emit_stdout",
+        record_stdout_publication,
+    ):
+        case.driver(pytest_root)
+    _require([case.case_id] == _GENERATION6_CASE_EVIDENCE, "driver completion marker differs")
+    actions = tuple(_GENERATION6_CASE_ACTION_HISTORY)
+    _require(
+        actions == case.expected_forbidden_actions,
+        "self-test forbidden action history differs",
+    )
+    _record_generation6_check("publication:none")
+    _record_generation6_check("forbidden:none")
+    pre_reset_events = tuple(_GENERATION6_CASE_CHECK_HISTORY)
+    _require(
+        pre_reset_events == case.expected_fail_closed_checks[:-1],
+        "pre-reset expected event history differs",
+    )
+    _GENERATION6_CASE_EVIDENCE.clear()
+    _GENERATION6_CASE_CHECK_HISTORY.clear()
+    _GENERATION6_CASE_ACTION_HISTORY.clear()
+    reset_verified = _generation6_require_process_reset(
+        baseline_state,
+        _generation6_process_state(),
+    )
+    events = (*pre_reset_events, "reset:process-local-state")
+    _require(events == case.expected_fail_closed_checks, "exact expected event history differs")
+    has_injection = any(value.startswith("inject:") for value in events)
+    has_rejection = any(value.startswith("reject:") for value in events)
+    has_validation = any(value.startswith("validate:") for value in events)
+    _require(
+        _generation6_expected_outcome(case.case_id, events) == case.expected_outcome,
+        "self-test mechanically derived outcome differs",
+    )
+    if case.expected_outcome == "REJECT":
+        _require(
+            has_injection and has_rejection and not has_validation,
+            "self-test rejection outcome differs",
+        )
+    elif case.expected_outcome == "ACCEPT":
+        _require(
+            has_validation and not has_injection and not has_rejection,
+            "self-test acceptance outcome differs",
+        )
+    elif case.expected_outcome == "MIXED":
+        _require(
+            has_validation and has_injection and has_rejection,
+            "self-test mixed outcome differs",
+        )
+    else:
+        raise ContractError("self-test expected outcome differs")
+    result: dict[str, object] = {
+        "case_id": case.case_id,
+        "result_key": case.result_key,
+        "case_spec_sha256": _generation6_case_spec_sha256(case),
+        "trace_sha256": _generation6_trace_sha256(case.case_id, events),
+        "event_count": len(events),
+        "forbidden_trace_sha256": _generation6_forbidden_trace_sha256(case.case_id, actions),
+        "forbidden_action_count": len(actions),
+        "outcome": case.expected_outcome,
+        "injected": has_injection,
+        "rejected": has_rejection,
+        "no_pass_publication": not actions,
+        "forbidden_history_empty": not actions,
+        "reset_verified": reset_verified,
+        "status": "PASS",
+    }
+    return result
+
+
+def _run_generation6_single_protocol_case_for_test(
+    group_id: str,
+    pytest_root_text: str,
+    nonce: str,
+    receipt_descriptor_text: str,
+) -> None:
+    """Run one concrete case in the supervisor-owned exec and authenticate its receipt."""
+
+    exact_group_id = _ascii(group_id, "self-test group ID")
+    exact_nonce = _hex(nonce, 64, "self-test receipt nonce")
+    descriptor = _integer(int(_ascii(receipt_descriptor_text, "receipt descriptor")), "receipt fd")
+    _require(descriptor > 2, "invalid self-test receipt descriptor")
+    prior_flags = fcntl.fcntl(descriptor, fcntl.F_GETFD)
+    _require(type(prior_flags) is int and prior_flags >= 0, "invalid receipt descriptor flags")
+    expected_flags = prior_flags | fcntl.FD_CLOEXEC
+    set_result = fcntl.fcntl(descriptor, fcntl.F_SETFD, expected_flags)
+    _require(set_result == 0, "receipt CLOEXEC set result differs")
+    _require(
+        fcntl.fcntl(descriptor, fcntl.F_GETFD) == expected_flags,
+        "receipt CLOEXEC readback differs",
+    )
+    worker_pid = os.getpid()
+    worker_parent_pid = os.getppid()
+    _require(worker_pid > 1 and worker_parent_pid > 0, "self-test worker identity differs")
+    receipt = FdOwner(descriptor, "Generation-6 self-test receipt")
+    receipt_initial = _snapshot_fd(receipt.require())
+    _require(
+        stat.S_ISREG(receipt_initial.mode)
+        and receipt_initial.uid == os.getuid()
+        and stat.S_IMODE(receipt_initial.mode) == 0o600
+        and receipt_initial.link_count == 0
+        and receipt_initial.size == 0,
+        "self-test receipt initial identity differs",
+    )
+    _require(
+        _generation6_receipt_aliases(receipt_initial) == (descriptor,),
+        "self-test receipt aliases before driver",
+    )
+    captured_close = os.close
+    captured_exit = _CAPTURED_RUNNER_OS_EXIT
+    captured_listdir = os.listdir
+    captured_fstat = os.fstat
+
+    def detach_receipt_after_fork() -> None:
+        original_descriptor = receipt.descriptor
+        receipt.descriptor = -1
+        receipt.terminal = True
+        if type(original_descriptor) is not int or original_descriptor <= 2:
+            captured_exit(191)
+        try:
+            raw_names = captured_listdir("/proc/self/fd")
+        except BaseException:
+            captured_exit(191)
+        if len(raw_names) > 100_000:
+            captured_exit(191)
+        matching: list[int] = []
+        for raw_name in raw_names:
+            if type(raw_name) is not str or not raw_name.isdigit():
+                continue
+            raw_descriptor = int(raw_name, 10)
+            if raw_descriptor <= 2:
+                continue
+            try:
+                raw_status = captured_fstat(raw_descriptor)
+            except OSError as error:
+                if error.errno == errno.EBADF and raw_descriptor != original_descriptor:
+                    continue
+                captured_exit(191)
+            except BaseException:
+                captured_exit(191)
+            if (
+                raw_status.st_dev == receipt_initial.device
+                and raw_status.st_ino == receipt_initial.inode
+            ):
+                matching.append(raw_descriptor)
+        if original_descriptor not in matching:
+            captured_exit(191)
+        for raw_descriptor in sorted(set(matching)):
+            try:
+                captured_close(raw_descriptor)
+            except BaseException:
+                captured_exit(191)
+
+    os.register_at_fork(after_in_child=detach_receipt_after_fork)
+    root = Path(_ascii(pytest_root_text, "self-test pytest root"))
+    _require(root.is_absolute() and root.resolve(strict=True) == root, "self-test root differs")
+    cached_tempdir = tempfile.gettempdir()
+    _require(
+        type(cached_tempdir) is str
+        and Path(cached_tempdir).is_absolute()
+        and tempfile.tempdir == cached_tempdir,
+        "self-test tempfile cache initialization differs",
+    )
+    groups = tuple(
+        group for group in GENERATION6_PROTOCOL_EXECUTION_GROUPS if group[-1] == exact_group_id
+    )
+    _require(len(groups) == 1, "self-test worker group identity differs")
+    if exact_group_id.startswith("O"):
+        # Load the governed producer and all of its import dependencies before any
+        # logical-case reset baseline is captured.  Each O driver then reuses this
+        # exact module identity instead of leaving import residue behind.
+        _selftest_load_conftest(root)
+    _require(
+        importlib.metadata.version("pytest") == "9.1.1",
+        "self-test pytest metadata warmup differs",
+    )
+    warm_state = _generation6_process_state()
+    _generation6_require_process_reset(warm_state, _generation6_process_state())
+    case_by_id = {case.case_id: case for case in _GENERATION6_PROTOCOL_CASES}
+    logical_results = [
+        _run_generation6_logical_case_in_worker(case_by_id[logical_id], pytest_root=root)
+        for logical_id in groups[0]
+    ]
+    _require(
+        os.getpid() == worker_pid
+        and os.getppid() == worker_parent_pid
+        and not receipt.terminal
+        and fcntl.fcntl(receipt.require(), fcntl.F_GETFD) == expected_flags
+        and _generation6_receipt_aliases(receipt_initial) == (receipt.require(),)
+        and _snapshot_fd(receipt.require()) == receipt_initial,
+        "self-test receipt owner changed before publication",
+    )
+    packet: dict[str, object] = {
+        "domain": "TASK064-GENERATION6-PROTOCOL-SELFTEST-V1",
+        "contract_generation": CONTRACT_GENERATION,
+        "contract_sha256": CONTRACT_SHA256,
+        "nonce": exact_nonce,
+        "group_id": exact_group_id,
+        "worker_pid": worker_pid,
+        "worker_parent_pid": worker_parent_pid,
+        "logical_results": logical_results,
+        "status": "PASS",
+    }
+    payload = _canonical_bytes(packet, limit=4_096)
+    primary: BaseException | None = None
+    try:
+        before = _snapshot_fd(receipt.require())
+        _require(
+            before == receipt_initial,
+            "self-test receipt initial identity differs",
+        )
+        _pwrite_payload(receipt.require(), payload, limit=4_096)
+        os.fsync(receipt.require())
+        after = _snapshot_fd(receipt.require())
+        _require(
+            after.device == before.device
+            and after.inode == before.inode
+            and after.uid == before.uid
+            and after.mode == before.mode
+            and after.link_count == before.link_count
+            and after.size == len(payload),
+            "self-test receipt terminal identity differs",
+        )
+        _require(
+            _pread_payload(receipt.require(), len(payload), limit=4_096) == payload,
+            "self-test receipt readback differs",
+        )
+    except BaseException as error:
+        primary = error
+    try:
+        receipt.close_once()
+    except BaseException as close_error:
+        if primary is not None:
+            primary.add_note(f"self-test receipt close uncertainty: {close_error!r}")
+        else:
+            primary = close_error
+    if primary is not None:
+        raise primary
+
+
+def _validate_generation6_selftest_receipt(
+    packet: dict[str, object],
+    *,
+    group: tuple[str, ...],
+    nonce: str,
+    child: ChildResult,
+) -> None:
+    _exact_keys(packet, _GENERATION6_SELFTEST_RECEIPT_KEYS, "Generation-6 self-test receipt")
+    _require(
+        packet["domain"] == "TASK064-GENERATION6-PROTOCOL-SELFTEST-V1",
+        "self-test receipt domain differs",
+    )
+    _require(
+        _integer(packet["contract_generation"], "self-test contract generation")
+        == CONTRACT_GENERATION
+        and packet["contract_sha256"] == CONTRACT_SHA256,
+        "self-test receipt contract binding differs",
+    )
+    _require(_hex(packet["nonce"], 64, "self-test receipt nonce") == nonce, "nonce differs")
+    _require(packet["group_id"] == group[-1], "self-test receipt group differs")
+    _require(
+        _integer(packet["worker_pid"], "self-test worker PID", minimum=1) == child.pid
+        and _integer(packet["worker_parent_pid"], "self-test worker parent PID", minimum=1)
+        == os.getpid(),
+        "self-test receipt worker binding differs",
+    )
+    raw_results = packet["logical_results"]
+    _require(type(raw_results) is list, "self-test logical results are not a list")
+    results = cast(list[object], raw_results)
+    _require(len(results) == len(group), "self-test logical result cardinality differs")
+    case_by_id = {case.case_id: case for case in _GENERATION6_PROTOCOL_CASES}
+    for logical_id, raw_result in zip(group, results, strict=True):
+        _require(type(raw_result) is dict, "self-test logical result is not an object")
+        result = cast(dict[str, object], raw_result)
+        _exact_keys(result, _GENERATION6_SELFTEST_LOGICAL_RESULT_KEYS, "logical self-test result")
+        case = case_by_id[logical_id]
+        _require(result["case_id"] == logical_id, "logical self-test case differs")
+        _require(result["result_key"] == case.result_key, "logical result key differs")
+        _require(
+            result["case_spec_sha256"] == _generation6_case_spec_sha256(case),
+            "logical case specification differs",
+        )
+        _require(
+            result["trace_sha256"]
+            == _generation6_trace_sha256(logical_id, case.expected_fail_closed_checks)
+            and _integer(result["event_count"], "logical event count")
+            == len(case.expected_fail_closed_checks),
+            "logical trace binding differs",
+        )
+        _require(
+            result["forbidden_trace_sha256"]
+            == _generation6_forbidden_trace_sha256(
+                logical_id,
+                case.expected_forbidden_actions,
+            )
+            and _integer(result["forbidden_action_count"], "logical forbidden action count")
+            == len(case.expected_forbidden_actions),
+            "logical forbidden trace binding differs",
+        )
+        _require(result["outcome"] == case.expected_outcome, "logical outcome differs")
+        expected_injected = any(
+            event.startswith("inject:") for event in case.expected_fail_closed_checks
+        )
+        expected_rejected = any(
+            event.startswith("reject:") for event in case.expected_fail_closed_checks
+        )
+        _require(
+            _boolean(result["injected"], "logical injected") is expected_injected,
+            "logical injected differs",
+        )
+        _require(
+            _boolean(result["rejected"], "logical rejected") is expected_rejected,
+            "logical rejected differs",
+        )
+        for key in (
+            "no_pass_publication",
+            "forbidden_history_empty",
+            "reset_verified",
+        ):
+            _require(_boolean(result[key], f"logical {key}"), f"logical {key} differs")
+        _require(result["status"] == "PASS", "logical self-test status differs")
+    _require(
+        packet["status"] == "PASS"
+        and child.exit_code == 0
+        and child.stdout == b""
+        and child.stderr == b""
+        and child.survivor_count == 0,
+        "self-test worker completion differs",
+    )
+
+
+def _run_generation6_isolated_group(
+    group: tuple[str, ...],
+    *,
+    pytest_root: Path,
+) -> None:
+    private_root: PrivateRoot | None = None
+    command_files: CommandFiles | None = None
+    receipt: ObservationOwner | None = None
+    primary: BaseException | None = None
+    try:
+        private_root = PrivateRoot()
+        command_files = CommandFiles.__new__(CommandFiles)
+        command_files.enabled = False
+        command_files._files = {}
+        command_files._published = False
+        command_files._poisoned_descriptors = private_root._poisoned_descriptors
+        supervisor = ProcessSupervisor(private_root, command_files)
+        group_id = group[-1]
+        child_root = private_root.create_child(f"selftest-{group_id.lower()}")
+        receipt = private_root.create_observation(
+            child_root,
+            label=f"self-test receipt {group_id}",
+            limit=4_096,
+        )
+        nonce = _hex(secrets.token_hex(32), 64, "self-test parent nonce")
+        worker_timeout_ns = (
+            90_000_000_000
+            if len(group) == 2 and group[0].startswith("M") and group_id.startswith("R")
+            else 20_000_000_000
+        )
+        child = supervisor.run(
+            [
+                sys.executable,
+                "-c",
+                _GENERATION6_SELFTEST_BOOTSTRAP,
+                os.fspath(Path(__file__).resolve(strict=True)),
+                group_id,
+                os.fspath(pytest_root),
+                nonce,
+                str(receipt.fd.require()),
+            ],
+            cwd=pytest_root,
+            pass_fds=(receipt.fd.require(),),
+            timeout_ns=worker_timeout_ns,
+            label=f"selftest-{group_id.lower()}",
+            child_root=child_root,
+        )
+        if (
+            child.exit_code != 0
+            or child.stdout != b""
+            or child.stderr != b""
+            or child.survivor_count != 0
+        ):
+            close_failures = _close_independent(
+                (receipt.fd,),
+                poison_sink=private_root._poisoned_descriptors,
+            )
+            _require(not close_failures, "failed self-test receipt close is uncertain")
+            raise ContractError("self-test worker failed before receipt publication")
+        packet, _ = _read_observation(
+            receipt,
+            poison_sink=private_root._poisoned_descriptors,
+        )
+        _validate_generation6_selftest_receipt(packet, group=group, nonce=nonce, child=child)
+        cleanup = private_root.cleanup()
+        _require(
+            cleanup.status == "PASS" and cleanup.residue_count == 0,
+            "self-test private-root cleanup differs",
+        )
+        command_files.close_without_publication()
+    except BaseException as error:
+        primary = error
+    if primary is not None:
+        if receipt is not None and not receipt.fd.terminal:
+            poison_sink = private_root._poisoned_descriptors if private_root is not None else set()
+            close_failures = _close_independent((receipt.fd,), poison_sink=poison_sink)
+            if close_failures:
+                primary.add_note(f"self-test receipt close uncertainty: {close_failures!r}")
+        try:
+            _close_failure_resources(private_root, command_files)
+        except BaseException as cleanup_error:
+            primary.add_note(f"self-test failure cleanup failed: {cleanup_error!r}")
+        raise primary
+
+
+def _run_generation6_protocol_self_tests_for_test(pytest_root: Path) -> dict[str, int]:
+    """Execute 222 logical checks in 133 frozen, independently supervised reset groups."""
+
+    _require(
+        type(pytest_root) is type(Path()),
+        "self-test pytest root is not the exact platform Path",
+    )
+    exact_root = pytest_root.resolve(strict=True)
+    _require(exact_root == pytest_root and exact_root.is_dir(), "self-test pytest root differs")
+    _require(
+        CONTRACT_GENERATION == 6
+        and CONTRACT_SHA256 == "ec89a1df740805cc9b43e6f2530e940c0bf9b66e8f25ed878d3207d091c4bcb8",
+        "self-test frozen contract binding differs",
+    )
+    cases = _GENERATION6_PROTOCOL_CASES
+    case_ids = tuple(case.case_id for case in cases)
+    expected_ids = tuple(
+        case_id for _, grouped_ids in GENERATION6_PROTOCOL_CASE_GROUPS for case_id in grouped_ids
+    )
+    _require(case_ids == expected_ids and len(case_ids) == 222, "self-test case inventory differs")
+    _require(len(set(case_ids)) == 222, "self-test case IDs repeat")
+    groups = GENERATION6_PROTOCOL_EXECUTION_GROUPS
+    flattened_group_ids = tuple(logical_id for group in groups for logical_id in group)
+    primary_ids = tuple(group[-1] for group in groups)
+    expected_primary_ids = tuple(
+        case_id
+        for _, grouped_ids in GENERATION6_PROTOCOL_CASE_GROUPS[:5]
+        for case_id in grouped_ids
+    )
+    _require(
+        len(groups) == 133
+        and primary_ids == expected_primary_ids
+        and len(flattened_group_ids) == 222
+        and len(set(flattened_group_ids)) == 222
+        and set(flattened_group_ids) == set(case_ids)
+        and all(len(group) == 1 for group in groups[32:50]),
+        "self-test physical execution-group map differs",
+    )
+    cleanup_atoms = tuple(atom for _, atoms in _GENERATION6_PROTOCOL_ATOMIC_MAP for atom in atoms)
+    _require(
+        len(_GENERATION6_PROTOCOL_ATOMIC_MAP) == 133
+        and len(cleanup_atoms) == 151
+        and len(set(cleanup_atoms)) == 151,
+        "cleanup atomic-obligation mapping differs",
+    )
+    _require(
+        len({id(case.driver) for case in cases}) == len(cases),
+        "self-test cases do not have unique bound drivers",
+    )
+    counts = {key: 0 for key in _GENERATION6_SELFTEST_RESULT_KEYS}
+    started = _checked_clock()
+    deadline = started + 480_000_000_000
+    previous = started
+    case_by_id = {case.case_id: case for case in cases}
+    for group in groups:
+        now = _checked_clock(previous)
+        _require(now < deadline, "Generation-6 self-test total deadline exceeded")
+        previous = now
+        _run_generation6_isolated_group(group, pytest_root=exact_root)
+        for logical_id in group:
+            counts[case_by_id[logical_id].result_key] += 1
+    _require(_checked_clock(previous) < deadline, "Generation-6 self-test deadline differs")
+    expected_counts = {
+        "observation_transport": 109,
+        "raw_fork_191_clean": 18,
+        "fd_relative_cleanup": 24,
+        "process_provisional": 57,
+        "command_rollback": 14,
+    }
+    _require(counts == expected_counts, "Generation-6 self-test totals differ")
+    _require(
+        tuple(counts) == _GENERATION6_SELFTEST_RESULT_KEYS
+        and all(type(value) is int and value >= 0 for value in counts.values())
+        and sum(counts.values()) == 222,
+        "Generation-6 self-test result contract differs",
+    )
+    return counts
+
+
+def _parse_arguments(arguments: list[str]) -> argparse.Namespace:
+    _require(
+        type(arguments) is list and all(type(value) is str for value in arguments),
+        "runner argv is not an exact string list",
+    )
+    if arguments == ["--aggregate-static"]:
+        return argparse.Namespace(shard=None, report_proof=None, aggregate_static=True)
+    if len(arguments) == 2 and arguments[0] == "--shard" and arguments[1] in SHARD_IDS:
+        return argparse.Namespace(
+            shard=arguments[1],
+            report_proof=None,
+            aggregate_static=False,
+        )
+    if (
+        len(arguments) == 2
+        and arguments[0] == "--report-proof"
+        and arguments[1] in REPORT_PROOF_MODES
+    ):
+        return argparse.Namespace(
+            shard=None,
+            report_proof=arguments[1],
+            aggregate_static=False,
+        )
+    raise ContractError("runner argv is outside the exact grammar")
+
+
+def main(arguments: list[str] | None = None) -> int:
+    try:
+        parsed = _parse_arguments(sys.argv[1:] if arguments is None else arguments)
+        if parsed.shard is not None:
+            _run_shard(cast(str, parsed.shard))
+        elif parsed.report_proof is not None:
+            _run_report_proof(cast(str, parsed.report_proof))
+        else:
+            _require(parsed.aggregate_static is True, "aggregate mode differs")
+            _run_aggregate()
+    except BaseException:
+        try:
+            os.write(2, b"TASK064 runner failed closed\n")
+        except BaseException:
+            if _OPAQUE_OWNER_QUARANTINE:
+                _CAPTURED_RUNNER_OS_EXIT(1)
+            return 1
+        if _OPAQUE_OWNER_QUARANTINE:
+            _CAPTURED_RUNNER_OS_EXIT(1)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
