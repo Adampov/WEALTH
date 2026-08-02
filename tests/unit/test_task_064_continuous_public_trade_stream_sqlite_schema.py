@@ -23,6 +23,14 @@ else:
     import tests.support.continuous_public_trade_stream_sqlite_harness as harness
 
 
+_TASK064_CAPTURED_OS_EXIT = os._exit
+
+
+def _guard_task064_reserved_observer_exit(status: int) -> None:
+    if os.WIFEXITED(status) and os.WEXITSTATUS(status) == 191:
+        _TASK064_CAPTURED_OS_EXIT(191)
+
+
 def _bind_task064_harness_module() -> None:
     harness._bind_task064_test_module()
 
@@ -1288,12 +1296,27 @@ def test_live_transaction_authority_rejects_hostile_token_and_connection_binding
             with contextlib.suppress(OSError):
                 os.write(write_descriptor, payload)
             os._exit(0 if payload == b"P" else 70)
-        os.close(write_descriptor)
+        parent_error: BaseException | None = None
+        payload = b""
         try:
-            assert os.read(read_descriptor, 1) == b"P"
-        finally:
+            os.close(write_descriptor)
+        except BaseException as error:
+            parent_error = error
+        if parent_error is None:
+            try:
+                payload = os.read(read_descriptor, 1)
+            except BaseException as error:
+                parent_error = error
+        try:
             os.close(read_descriptor)
+        except BaseException as error:
+            if parent_error is None:
+                parent_error = error
         _, child_status = os.waitpid(child_pid, 0)
+        _guard_task064_reserved_observer_exit(child_status)
+        if parent_error is not None:
+            raise parent_error
+        assert payload == b"P"
         assert os.WIFEXITED(child_status)
         assert os.WEXITSTATUS(child_status) == 0
         assert harness._require_live_transaction_authority(first, first_token, True)
@@ -1443,12 +1466,27 @@ def test_connection_runtime_creator_pid_rejects_inherited_authority(
         finally:
             os.close(write_descriptor)
         os._exit(0 if payload == b"P" else 70)
-    os.close(write_descriptor)
+    parent_error: BaseException | None = None
+    payload = b""
     try:
-        assert os.read(read_descriptor, 1) == b"P"
-    finally:
+        os.close(write_descriptor)
+    except BaseException as error:
+        parent_error = error
+    if parent_error is None:
+        try:
+            payload = os.read(read_descriptor, 1)
+        except BaseException as error:
+            parent_error = error
+    try:
         os.close(read_descriptor)
+    except BaseException as error:
+        if parent_error is None:
+            parent_error = error
     _, status = os.waitpid(child_pid, 0)
+    _guard_task064_reserved_observer_exit(status)
+    if parent_error is not None:
+        raise parent_error
+    assert payload == b"P"
     assert os.WIFEXITED(status)
     assert os.WEXITSTATUS(status) == 0
     assert (

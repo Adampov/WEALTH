@@ -1,6 +1,8 @@
 """Tests for the canonical machine-readable project-state contract."""
 
+import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any, cast
 
@@ -11,6 +13,13 @@ from wealth.domain.project_state import ProjectState, load_project_state
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_STATE_PATH = REPOSITORY_ROOT / "PROJECT_STATE.json"
+CI_WORKFLOW_PATH = REPOSITORY_ROOT / ".github" / "workflows" / "ci.yml"
+TASK064_UNIT_SCHEMA_TEST_PATH = (
+    REPOSITORY_ROOT
+    / "tests"
+    / "unit"
+    / "test_task_064_continuous_public_trade_stream_sqlite_schema.py"
+)
 ROOT_README_PATH = REPOSITORY_ROOT / "README.md"
 RISK_REGISTER_PATH = REPOSITORY_ROOT / "RISK_REGISTER.md"
 BACKLOG_PATH = REPOSITORY_ROOT / "BACKLOG.md"
@@ -339,7 +348,10 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     )
     assert "was `SUPERSEDED` before writable activation" in next_action_prose
     assert "`SUPERSEDED` during writable activation, before any result commit" in next_action_prose
+    assert "is `SUPERSEDED` before integration or acceptance" in next_action_prose
+    assert "No generation-5 result commit is an integration source" in next_action_prose
     assert "Generation 6 starts only from that generation-3 candidate" in next_action_prose
+    assert "all 2,298 tests passed" in next_action_prose
     assert "Earlier outputs are evidence only and cannot count as generation-6 acceptance" in (
         next_action_prose
     )
@@ -1805,6 +1817,262 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "TASK-063 remains the canonical design-only next action" not in roadmap_prose
     assert "grants no physical implementation authority" in roadmap_prose
     assert "The canonical next action is TASK-037" not in roadmap
+
+    workflow = CI_WORKFLOW_PATH.read_text(encoding="utf-8")
+    unit_schema_source = TASK064_UNIT_SCHEMA_TEST_PATH.read_text(encoding="utf-8")
+    contract_digest = "ec89a1df740805cc9b43e6f2530e940c0bf9b66e8f25ed878d3207d091c4bcb8"
+    generation_line = f"- **Contract generation:** 6 | STATUS=FROZEN | SHA256={contract_digest}"
+
+    assert backlog.count(generation_line) == 1
+    assert (
+        "- **Generation-6 amendment:** `FROZEN`; normalized TASK-064 contract SHA-256 "
+        f"`{contract_digest}`." in adr_0032
+    )
+    normalized_backlog = backlog.replace("\r\n", "\n").replace("\r", "\n")
+    section_start = normalized_backlog.index("### TASK-064")
+    section_end = normalized_backlog.index("\n### ", section_start + 1) + 1
+    contract_section = normalized_backlog[section_start:section_end]
+    generation_pattern = re.compile(
+        r"^- \*\*Contract generation:\*\* 6 \| "
+        r"STATUS=(DRAFT|FROZEN) \| SHA256=(PENDING|[0-9a-f]{64})$",
+        re.MULTILINE,
+    )
+    assert len(generation_pattern.findall(contract_section)) == 1
+    normalized_contract = generation_pattern.sub(
+        "- **Contract generation:** 6 | STATUS=<STATUS> | SHA256=<SHA256>",
+        contract_section,
+    )
+    normalized_contract = (
+        "\n".join(line.rstrip(" \t") for line in normalized_contract.split("\n")).strip("\n") + "\n"
+    )
+    normalized_contract_bytes = normalized_contract.encode("utf-8")
+    assert len(normalized_contract_bytes) == 93_449
+    assert hashlib.sha256(normalized_contract_bytes).hexdigest() == contract_digest
+
+    assert "`TASK064-REPORT-LIVE-EPOCH-V2`" in next_action_section
+    assert "only that SHM object's `mtime_ns` and `ctime_ns` may differ" in next_action_prose
+    assert "complete retained post-validation file snapshot" in next_action_prose
+    assert "`120_000_000_000` monotonic nanoseconds" in next_action_prose
+    assert "`O_RDWR|O_TMPFILE|O_CLOEXEC`" in next_action_section
+    assert "Normal exit status `191` is globally reserved as observer-fatal" in next_action_prose
+    assert "Every raw child is tracked and reaped" in next_action_prose
+    assert "The frozen full-node manifest is exactly 2,298 unique" in next_action_prose
+    assert "296,078 bytes" in next_action_prose
+    assert "`96a15ecb6af6469f6da82bace28350163b99d48b8226d867830f7aec5816b483`" in (
+        next_action_section
+    )
+    for shard_row in (
+        "| `report` | 1 | 302 | "
+        "`f0530be0d219c64bbd1b9eb4df635dd138a345e8685172d188d02e177e488a3e` | 146 |",
+        "| `remainder-0` | 600 | 76,664 | "
+        "`9946638e834ffa44c0cd1e511c348b1f8226fc078ef79eb9e4100e770de80044` | "
+        "75,290 |",
+        "| `remainder-1` | 563 | 72,767 | "
+        "`e6814eb76767d9462ed9bfa82c85d8e7daebd7265027883290ca88842365dfd0` | "
+        "71,471 |",
+        "| `remainder-2` | 588 | 75,756 | "
+        "`8d86911d7a7cfc4f32022d68be1eaa3d6b459d5a968a462deea188df2369ed5b` | "
+        "74,394 |",
+        "| `remainder-3` | 546 | 71,332 | "
+        "`69e69516345c674cadf552202b80c392f8297b74b46328278b098b462e25b4ca` | "
+        "70,049 |",
+    ):
+        assert shard_row in next_action_section
+
+    assert "on:\n  pull_request:\n  push:\n  workflow_dispatch:\n" in workflow
+    assert (
+        workflow.count(
+            "TASK064_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}"
+        )
+        == 1
+    )
+    jobs_section = workflow.split("\njobs:\n", maxsplit=1)[1]
+    expected_job_ids = (
+        "quality_gates",
+        "report",
+        "remainder_0",
+        "remainder_1",
+        "remainder_2",
+        "remainder_3",
+        "quality",
+    )
+    assert tuple(re.findall(r"(?m)^  ([a-z][a-z0-9_]*):\n", jobs_section)) == expected_job_ids
+
+    def job_block(job_id: str) -> str:
+        match = re.search(
+            rf"(?ms)^  {re.escape(job_id)}:\n.*?(?=^  [a-z][a-z0-9_]*:\n|\Z)",
+            jobs_section,
+        )
+        assert match is not None
+        return match.group(0)
+
+    checkout_action = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+    setup_uv_action = "astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b"
+    for job_id in expected_job_ids:
+        block = job_block(job_id)
+        assert block.count("runs-on: ubuntu-latest") == 1
+        assert block.count("timeout-minutes: 15") == 1
+        assert block.count(checkout_action) == 1
+        assert block.count("fetch-depth: 0") == 1
+        assert block.count("persist-credentials: false") == 1
+        assert block.count(setup_uv_action) == 1
+        assert block.count('version: "0.11.31"') == 1
+        assert block.count("run: uv python install") == 1
+        assert block.count("run: uv sync --locked --all-groups") == 1
+
+    quality_gates = job_block("quality_gates")
+    for command in (
+        "uv lock --check",
+        "uv run ruff format --check .",
+        "uv run ruff check .",
+        "uv run mypy",
+        "uv --preview-features audit-command audit --locked",
+        "uv run wealth-health",
+    ):
+        assert f"run: {command}" in quality_gates
+    assert "uv run pytest" not in quality_gates
+
+    expected_shards = {
+        "report": "report",
+        "remainder_0": "remainder-0",
+        "remainder_1": "remainder-1",
+        "remainder_2": "remainder-2",
+        "remainder_3": "remainder-3",
+    }
+    expected_outputs = (
+        "      task064_packet_b64: ${{ steps.shard.outputs.task064_packet_b64 }}\n"
+        "      task064_packet_sha256: "
+        "${{ steps.shard.outputs.task064_packet_sha256 }}"
+    )
+    for job_id, shard_id in expected_shards.items():
+        block = job_block(job_id)
+        assert block.count("id: shard") == 1
+        assert block.count("--shard") == 1
+        assert f"run: uv run python tests/ci_shard_runner.py --shard {shard_id}" in block
+        outputs = block.split("    outputs:\n", maxsplit=1)[1].split("\n\n    steps:", maxsplit=1)[
+            0
+        ]
+        assert outputs == expected_outputs
+
+    quality = job_block("quality")
+    assert "name: Quality and security" in quality
+    assert "if: always()" in quality
+    expected_needs = (
+        "      - quality_gates\n"
+        "      - report\n"
+        "      - remainder_0\n"
+        "      - remainder_1\n"
+        "      - remainder_2\n"
+        "      - remainder_3"
+    )
+    assert (
+        quality.split("    needs:\n", maxsplit=1)[1].split("\n    runs-on:", maxsplit=1)[0]
+        == expected_needs
+    )
+    assert "run: uv run python tests/ci_shard_runner.py --aggregate-static" in quality
+
+    aggregate_env = {
+        "TASK064_AGG_QUALITY_GATES_RESULT": "${{ needs.quality_gates.result }}",
+        "TASK064_AGG_REPORT_RESULT": "${{ needs.report.result }}",
+        "TASK064_AGG_REMAINDER_0_RESULT": "${{ needs.remainder_0.result }}",
+        "TASK064_AGG_REMAINDER_1_RESULT": "${{ needs.remainder_1.result }}",
+        "TASK064_AGG_REMAINDER_2_RESULT": "${{ needs.remainder_2.result }}",
+        "TASK064_AGG_REMAINDER_3_RESULT": "${{ needs.remainder_3.result }}",
+        "TASK064_AGG_REPORT_PACKET_B64": "${{ needs.report.outputs.task064_packet_b64 }}",
+        "TASK064_AGG_REPORT_PACKET_SHA256": "${{ needs.report.outputs.task064_packet_sha256 }}",
+        "TASK064_AGG_REMAINDER_0_PACKET_B64": (
+            "${{ needs.remainder_0.outputs.task064_packet_b64 }}"
+        ),
+        "TASK064_AGG_REMAINDER_0_PACKET_SHA256": (
+            "${{ needs.remainder_0.outputs.task064_packet_sha256 }}"
+        ),
+        "TASK064_AGG_REMAINDER_1_PACKET_B64": (
+            "${{ needs.remainder_1.outputs.task064_packet_b64 }}"
+        ),
+        "TASK064_AGG_REMAINDER_1_PACKET_SHA256": (
+            "${{ needs.remainder_1.outputs.task064_packet_sha256 }}"
+        ),
+        "TASK064_AGG_REMAINDER_2_PACKET_B64": (
+            "${{ needs.remainder_2.outputs.task064_packet_b64 }}"
+        ),
+        "TASK064_AGG_REMAINDER_2_PACKET_SHA256": (
+            "${{ needs.remainder_2.outputs.task064_packet_sha256 }}"
+        ),
+        "TASK064_AGG_REMAINDER_3_PACKET_B64": (
+            "${{ needs.remainder_3.outputs.task064_packet_b64 }}"
+        ),
+        "TASK064_AGG_REMAINDER_3_PACKET_SHA256": (
+            "${{ needs.remainder_3.outputs.task064_packet_sha256 }}"
+        ),
+    }
+    observed_aggregate_names = set(re.findall(r"(?m)^\s+(TASK064_AGG_[A-Z0-9_]+):", quality))
+    assert observed_aggregate_names == set(aggregate_env)
+    for name, expression in aggregate_env.items():
+        assert quality.count(f"{name}: {expression}") == 1
+
+    assert workflow.count("timeout-minutes: 15") == len(expected_job_ids)
+    assert workflow.count("uv run python tests/ci_shard_runner.py --shard ") == 5
+    assert workflow.count("uv run python tests/ci_shard_runner.py --aggregate-static") == 1
+    assert "continue-on-error" not in workflow
+    assert "strategy:" not in workflow
+    assert "matrix:" not in workflow
+    assert "|| true" not in workflow
+    assert "upload-artifact" not in workflow
+    assert "download-artifact" not in workflow
+    assert "--report-proof" not in workflow
+    assert "xdist" not in workflow
+    assert "execnet" not in workflow
+    assert "$TASK064_AGG_" not in workflow
+    assert "${TASK064_AGG_" not in workflow
+    assert "GITHUB_OUTPUT:" not in workflow
+    assert "GITHUB_ENV:" not in workflow
+    assert "GITHUB_PATH:" not in workflow
+    assert "GITHUB_STEP_SUMMARY:" not in workflow
+
+    assert unit_schema_source.count("_TASK064_CAPTURED_OS_EXIT = os._exit") == 1
+    assert unit_schema_source.count("def _guard_task064_reserved_observer_exit(") == 1
+    assert unit_schema_source.count("_TASK064_CAPTURED_OS_EXIT(191)") == 1
+    assert unit_schema_source.count("== 191") == 1
+    assert unit_schema_source.count("191") == 2
+    assert unit_schema_source.count("os.fork()") == 2
+    assert unit_schema_source.count("os.waitpid(child_pid, 0)") == 2
+    assert unit_schema_source.count("os.read(read_descriptor, 1)") == 2
+    assert unit_schema_source.count('os._exit(0 if payload == b"P" else 70)') == 2
+    assert unit_schema_source.count("parent_error: BaseException | None = None") == 2
+    assert unit_schema_source.count('payload = b""') == 2
+    assert unit_schema_source.count("if parent_error is not None:") == 2
+    assert unit_schema_source.count('assert payload == b"P"') == 2
+    assert (
+        len(
+            re.findall(
+                r"if parent_error is None:\n\s+try:\n\s+payload = "
+                r"os\.read\(read_descriptor, 1\)",
+                unit_schema_source,
+            )
+        )
+        == 2
+    )
+    assert (
+        len(
+            re.findall(
+                r"_, (child_status|status) = os\.waitpid\(child_pid, 0\)\n"
+                r"\s+_guard_task064_reserved_observer_exit\(\1\)",
+                unit_schema_source,
+            )
+        )
+        == 2
+    )
+    assert (
+        len(
+            re.findall(
+                r"_guard_task064_reserved_observer_exit\((?:child_status|status)\)\n"
+                r"\s+if parent_error is not None:\n\s+raise parent_error\n"
+                r'\s+assert payload == b"P"',
+                unit_schema_source,
+            )
+        )
+        == 2
+    )
 
 
 def test_project_state_forbids_unknown_fields() -> None:
