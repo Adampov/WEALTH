@@ -694,6 +694,407 @@ def _open_directory(path: Path, *, label: str, poison_sink: set[int]) -> Directo
     return DirectoryOwner(owner, snapshot, mount_identity, path.name, path)
 
 
+def _duplicate_authenticated_child_directory(
+    containing_directory: DirectoryOwner,
+    child: DirectoryOwner,
+    *,
+    label: str,
+    poison_sink: set[int],
+) -> DirectoryOwner:
+    _require(
+        type(containing_directory) is DirectoryOwner
+        and type(child) is DirectoryOwner
+        and type(poison_sink) is set
+        and all(type(value) is int and value > 2 for value in poison_sink),
+        "authenticated child duplication inputs differ",
+    )
+    _require(
+        not poison_sink,
+        "descriptor close uncertainty forbids authenticated child duplication",
+    )
+    exact_label = _ascii(label, "authenticated child duplication label")
+    _require(exact_label != "", "authenticated child duplication label is empty")
+    _exact_keys(
+        vars(containing_directory),
+        ("fd", "snapshot", "mount_id", "name", "path"),
+        "authenticated containing-directory owner",
+    )
+    _exact_keys(
+        vars(child),
+        ("fd", "snapshot", "mount_id", "name", "path"),
+        "authenticated child owner",
+    )
+    _require(
+        type(containing_directory.fd) is FdOwner
+        and type(child.fd) is FdOwner
+        and type(containing_directory.snapshot) is DescriptorSnapshot
+        and type(child.snapshot) is DescriptorSnapshot
+        and type(containing_directory.mount_id) is int
+        and containing_directory.mount_id > 0
+        and type(child.mount_id) is int
+        and child.mount_id > 0,
+        "authenticated child ownership metadata differs",
+    )
+    _exact_keys(
+        vars(containing_directory.fd),
+        ("descriptor", "label", "terminal"),
+        "authenticated containing-directory descriptor owner",
+    )
+    _exact_keys(
+        vars(child.fd),
+        ("descriptor", "label", "terminal"),
+        "authenticated child descriptor owner",
+    )
+    _require(
+        type(containing_directory.fd.descriptor) is int
+        and containing_directory.fd.descriptor > 2
+        and type(containing_directory.fd.label) is str
+        and type(containing_directory.fd.terminal) is bool
+        and not containing_directory.fd.terminal
+        and type(child.fd.descriptor) is int
+        and child.fd.descriptor > 2
+        and type(child.fd.label) is str
+        and type(child.fd.terminal) is bool
+        and not child.fd.terminal,
+        "authenticated child descriptor ownership differs",
+    )
+    containing_name, _ = _component(
+        containing_directory.name,
+        label="authenticated containing-directory name",
+    )
+    child_name, _ = _component(child.name, label="authenticated child name")
+    _require(
+        type(containing_directory.path) is type(Path())
+        and type(child.path) is type(Path())
+        and containing_directory.path.is_absolute()
+        and child.path.is_absolute()
+        and containing_directory.path.name == containing_name
+        and child.path == containing_directory.path / child_name,
+        "authenticated child path binding differs",
+    )
+    containing_descriptor = containing_directory.fd.require()
+    source_descriptor = child.fd.require()
+    _require(
+        source_descriptor != containing_descriptor,
+        "authenticated child descriptor aliases its container",
+    )
+    containing_snapshot = _snapshot_fd(containing_descriptor)
+    source_snapshot = _snapshot_fd(source_descriptor)
+    named_snapshot = _snapshot_stat(
+        os.stat(child_name, dir_fd=containing_descriptor, follow_symlinks=False)
+    )
+    current_uid = os.getuid()
+    _require(
+        type(current_uid) is int
+        and current_uid >= 0
+        and _stable_directory_matches(
+            containing_snapshot,
+            containing_directory.snapshot,
+            require_link_count=False,
+        )
+        and source_snapshot == child.snapshot
+        and named_snapshot == source_snapshot
+        and stat.S_ISDIR(containing_snapshot.mode)
+        and stat.S_ISDIR(source_snapshot.mode)
+        and containing_snapshot.uid == current_uid
+        and source_snapshot.uid == current_uid
+        and stat.S_IMODE(containing_snapshot.mode) == 0o700
+        and stat.S_IMODE(source_snapshot.mode) == 0o700,
+        "authenticated child source identity differs",
+    )
+    containing_mount = _mount_id(
+        containing_descriptor,
+        excluded_descriptors=(source_descriptor,),
+        poisoned_descriptors=poison_sink,
+        poison_sink=poison_sink,
+    )
+    source_mount = _mount_id(
+        source_descriptor,
+        excluded_descriptors=(containing_descriptor,),
+        poisoned_descriptors=poison_sink,
+        poison_sink=poison_sink,
+    )
+    _require(
+        containing_mount == containing_directory.mount_id
+        and source_mount == child.mount_id == containing_mount,
+        "authenticated child source mount differs",
+    )
+    containing_descriptor_flags = fcntl.fcntl(containing_descriptor, fcntl.F_GETFD)
+    source_descriptor_flags = fcntl.fcntl(source_descriptor, fcntl.F_GETFD)
+    containing_status_flags = fcntl.fcntl(containing_descriptor, fcntl.F_GETFL)
+    source_status_flags = fcntl.fcntl(source_descriptor, fcntl.F_GETFL)
+    _require(
+        type(containing_descriptor_flags) is int
+        and containing_descriptor_flags == fcntl.FD_CLOEXEC
+        and type(source_descriptor_flags) is int
+        and source_descriptor_flags == fcntl.FD_CLOEXEC
+        and type(containing_status_flags) is int
+        and containing_status_flags >= 0
+        and (containing_status_flags & os.O_ACCMODE) == os.O_RDONLY
+        and (containing_status_flags & os.O_DIRECTORY) == os.O_DIRECTORY
+        and (containing_status_flags & os.O_PATH) == 0
+        and type(source_status_flags) is int
+        and source_status_flags >= 0
+        and (source_status_flags & os.O_ACCMODE) == os.O_RDONLY
+        and (source_status_flags & os.O_DIRECTORY) == os.O_DIRECTORY
+        and (source_status_flags & os.O_PATH) == 0,
+        "authenticated child source flags differ",
+    )
+
+    authentication_owner: FdOwner | None = None
+    duplicate_owner: FdOwner | None = None
+    completed_result: DirectoryOwner
+    primary: BaseException | None = None
+    try:
+        raw_authentication: object = os.open(
+            child_name,
+            os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=containing_descriptor,
+        )
+        if (
+            type(raw_authentication) is int
+            and raw_authentication > 2
+            and raw_authentication not in {containing_descriptor, source_descriptor, *poison_sink}
+        ):
+            authentication_owner = FdOwner(
+                raw_authentication,
+                f"{exact_label} named authentication",
+            )
+            raw_authentication = _PID_SENTINEL
+        _require(
+            authentication_owner is not None,
+            "invalid authenticated child named descriptor",
+        )
+        live_authentication_owner = cast(FdOwner, authentication_owner)
+        authentication_descriptor = live_authentication_owner.require()
+        authentication_snapshot = _snapshot_fd(authentication_descriptor)
+        authentication_mount = _mount_id(
+            authentication_descriptor,
+            excluded_descriptors=(containing_descriptor, source_descriptor),
+            poisoned_descriptors=poison_sink,
+            poison_sink=poison_sink,
+        )
+        authentication_descriptor_flags = fcntl.fcntl(
+            authentication_descriptor,
+            fcntl.F_GETFD,
+        )
+        authentication_status_flags = fcntl.fcntl(
+            authentication_descriptor,
+            fcntl.F_GETFL,
+        )
+        _require(
+            authentication_snapshot == named_snapshot == source_snapshot == child.snapshot
+            and authentication_mount == source_mount == child.mount_id == containing_mount
+            and type(authentication_descriptor_flags) is int
+            and authentication_descriptor_flags == fcntl.FD_CLOEXEC
+            and type(authentication_status_flags) is int
+            and authentication_status_flags >= 0
+            and (authentication_status_flags & os.O_ACCMODE) == os.O_RDONLY
+            and (authentication_status_flags & os.O_PATH) == os.O_PATH
+            and (authentication_status_flags & os.O_DIRECTORY) == os.O_DIRECTORY,
+            "authenticated child named-handle identity differs",
+        )
+
+        raw_duplicate: object = fcntl.fcntl(
+            source_descriptor,
+            fcntl.F_DUPFD_CLOEXEC,
+            3,
+        )
+        if (
+            type(raw_duplicate) is int
+            and raw_duplicate > 2
+            and raw_duplicate
+            not in {
+                containing_descriptor,
+                source_descriptor,
+                authentication_descriptor,
+                *poison_sink,
+            }
+        ):
+            duplicate_owner = FdOwner(raw_duplicate, f"{exact_label} duplicate")
+            raw_duplicate = _PID_SENTINEL
+        _require(
+            duplicate_owner is not None,
+            "invalid authenticated child duplicate descriptor",
+        )
+        live_duplicate_owner = cast(FdOwner, duplicate_owner)
+        duplicate_descriptor = live_duplicate_owner.require()
+        duplicate_snapshot = _snapshot_fd(duplicate_descriptor)
+        containing_after = _snapshot_fd(containing_descriptor)
+        source_after = _snapshot_fd(source_descriptor)
+        authentication_after = _snapshot_fd(authentication_descriptor)
+        named_after = _snapshot_stat(
+            os.stat(child_name, dir_fd=containing_descriptor, follow_symlinks=False)
+        )
+        containing_mount_after = _mount_id(
+            containing_descriptor,
+            excluded_descriptors=(
+                source_descriptor,
+                authentication_descriptor,
+                duplicate_descriptor,
+            ),
+            poisoned_descriptors=poison_sink,
+            poison_sink=poison_sink,
+        )
+        source_mount_after = _mount_id(
+            source_descriptor,
+            excluded_descriptors=(
+                containing_descriptor,
+                authentication_descriptor,
+                duplicate_descriptor,
+            ),
+            poisoned_descriptors=poison_sink,
+            poison_sink=poison_sink,
+        )
+        authentication_mount_after = _mount_id(
+            authentication_descriptor,
+            excluded_descriptors=(
+                containing_descriptor,
+                source_descriptor,
+                duplicate_descriptor,
+            ),
+            poisoned_descriptors=poison_sink,
+            poison_sink=poison_sink,
+        )
+        duplicate_mount = _mount_id(
+            duplicate_descriptor,
+            excluded_descriptors=(
+                containing_descriptor,
+                source_descriptor,
+                authentication_descriptor,
+            ),
+            poisoned_descriptors=poison_sink,
+            poison_sink=poison_sink,
+        )
+        containing_descriptor_flags_after = fcntl.fcntl(
+            containing_descriptor,
+            fcntl.F_GETFD,
+        )
+        containing_status_flags_after = fcntl.fcntl(
+            containing_descriptor,
+            fcntl.F_GETFL,
+        )
+        duplicate_descriptor_flags = fcntl.fcntl(duplicate_descriptor, fcntl.F_GETFD)
+        duplicate_status_flags = fcntl.fcntl(duplicate_descriptor, fcntl.F_GETFL)
+        source_descriptor_flags_after = fcntl.fcntl(source_descriptor, fcntl.F_GETFD)
+        source_status_flags_after = fcntl.fcntl(source_descriptor, fcntl.F_GETFL)
+        authentication_descriptor_flags_after = fcntl.fcntl(
+            authentication_descriptor,
+            fcntl.F_GETFD,
+        )
+        authentication_status_flags_after = fcntl.fcntl(
+            authentication_descriptor,
+            fcntl.F_GETFL,
+        )
+        _require(
+            _stable_directory_matches(
+                containing_after,
+                containing_snapshot,
+                require_link_count=False,
+            )
+            and _stable_directory_matches(
+                containing_after,
+                containing_directory.snapshot,
+                require_link_count=False,
+            )
+            and duplicate_snapshot
+            == source_after
+            == authentication_after
+            == named_after
+            == authentication_snapshot
+            == source_snapshot
+            == child.snapshot
+            and containing_mount_after == containing_mount == containing_directory.mount_id
+            and source_mount_after
+            == authentication_mount_after
+            == duplicate_mount
+            == source_mount
+            == authentication_mount
+            == child.mount_id
+            == containing_mount
+            and type(containing_descriptor_flags_after) is int
+            and containing_descriptor_flags_after == containing_descriptor_flags
+            and type(containing_status_flags_after) is int
+            and containing_status_flags_after == containing_status_flags
+            and type(duplicate_descriptor_flags) is int
+            and duplicate_descriptor_flags == fcntl.FD_CLOEXEC
+            and type(duplicate_status_flags) is int
+            and duplicate_status_flags == source_status_flags
+            and type(source_descriptor_flags_after) is int
+            and source_descriptor_flags_after == source_descriptor_flags
+            and type(source_status_flags_after) is int
+            and source_status_flags_after == source_status_flags
+            and type(authentication_descriptor_flags_after) is int
+            and authentication_descriptor_flags_after == authentication_descriptor_flags
+            and type(authentication_status_flags_after) is int
+            and authentication_status_flags_after == authentication_status_flags
+            and stat.S_ISDIR(duplicate_snapshot.mode)
+            and duplicate_snapshot.uid == current_uid
+            and stat.S_IMODE(duplicate_snapshot.mode) == 0o700,
+            "authenticated child duplicate identity differs",
+        )
+        candidate_result: object = DirectoryOwner(
+            live_duplicate_owner,
+            child.snapshot,
+            child.mount_id,
+            child.name,
+            child.path,
+        )
+        _require(
+            type(candidate_result) is DirectoryOwner,
+            "authenticated child duplicate ownership was not established",
+        )
+        completed_result = cast(DirectoryOwner, candidate_result)
+        _exact_keys(
+            vars(completed_result),
+            ("fd", "snapshot", "mount_id", "name", "path"),
+            "authenticated child duplicate result",
+        )
+        _require(
+            completed_result.fd is live_duplicate_owner
+            and completed_result.snapshot is child.snapshot
+            and type(completed_result.mount_id) is int
+            and completed_result.mount_id == child.mount_id
+            and type(completed_result.name) is str
+            and completed_result.name == child.name
+            and type(completed_result.path) is type(Path())
+            and completed_result.path == child.path
+            and type(completed_result.fd.descriptor) is int
+            and completed_result.fd.descriptor == duplicate_descriptor
+            and type(completed_result.fd.terminal) is bool
+            and not completed_result.fd.terminal,
+            "authenticated child duplicate ownership differs",
+        )
+    except BaseException as error:
+        primary = error
+
+    if authentication_owner is not None and not authentication_owner.terminal:
+        authentication_closing_number = authentication_owner.descriptor
+        try:
+            authentication_owner.close_once()
+        except BaseException as close_error:
+            if type(authentication_closing_number) is int and authentication_closing_number > 2:
+                poison_sink.add(authentication_closing_number)
+            if primary is not None:
+                primary.add_note(
+                    f"{exact_label} named-authentication close uncertainty: {close_error!r}"
+                )
+            else:
+                primary = ContractError(f"uncertain {exact_label} named-authentication close")
+
+    if primary is not None:
+        closing_number = duplicate_owner.descriptor if duplicate_owner is not None else -1
+        if duplicate_owner is not None and not duplicate_owner.terminal:
+            try:
+                duplicate_owner.close_once()
+            except BaseException as close_error:
+                if type(closing_number) is int and closing_number > 2:
+                    poison_sink.add(closing_number)
+                primary.add_note(f"{exact_label} duplicate close uncertainty: {close_error!r}")
+        raise primary
+    return completed_result
+
+
 def _component(name: object, *, label: str) -> tuple[str, int]:
     text = _ascii(name, label)
     _require(text not in {"", ".", ".."}, f"invalid {label}")
@@ -804,26 +1205,113 @@ class PrivateRoot:
             label="temporary parent",
             poison_sink=poisoned_descriptors,
         )
-        root_name = f"task064-g6-{secrets.token_hex(16)}"
+        self._initialize_from_owned_parent(
+            parent,
+            poisoned_descriptors=poisoned_descriptors,
+            protected_descriptors=(),
+            parent_close_uncertainty_note="temporary-parent close uncertainty",
+        )
+
+    def _initialize_from_owned_parent(
+        self,
+        parent: DirectoryOwner,
+        *,
+        poisoned_descriptors: set[int],
+        protected_descriptors: tuple[int, ...],
+        parent_close_uncertainty_note: str,
+    ) -> None:
+        parent_fd_owner: FdOwner | None = None
         root_fd: FdOwner | None = None
-        root: DirectoryOwner | None = None
         created = False
+        exact_parent_close_note = "owned-parent close uncertainty"
         try:
+            _require(
+                type(parent) is DirectoryOwner,
+                "private-root owned-parent input differs",
+            )
+            parent_fields = vars(parent)
+            candidate_parent_fd_owner = parent_fields.get("fd")
+            if type(candidate_parent_fd_owner) is FdOwner:
+                parent_fd_owner = candidate_parent_fd_owner
+            _exact_keys(
+                parent_fields,
+                ("fd", "snapshot", "mount_id", "name", "path"),
+                "private-root owned parent",
+            )
+            _require(
+                parent_fd_owner is not None,
+                "private-root owned-parent input differs",
+            )
+            live_parent_fd_owner = cast(FdOwner, parent_fd_owner)
+            _exact_keys(
+                vars(live_parent_fd_owner),
+                ("descriptor", "label", "terminal"),
+                "private-root owned-parent descriptor owner",
+            )
+            _require(
+                type(poisoned_descriptors) is set
+                and all(type(value) is int and value > 2 for value in poisoned_descriptors)
+                and type(protected_descriptors) is tuple
+                and all(type(value) is int and value > 2 for value in protected_descriptors)
+                and len(set(protected_descriptors)) == len(protected_descriptors)
+                and not poisoned_descriptors.intersection(protected_descriptors)
+                and type(parent.snapshot) is DescriptorSnapshot
+                and type(parent.mount_id) is int
+                and parent.mount_id > 0
+                and type(parent.name) is str
+                and type(parent.path) is type(Path())
+                and type(live_parent_fd_owner.descriptor) is int
+                and live_parent_fd_owner.descriptor > 2
+                and live_parent_fd_owner.descriptor not in protected_descriptors
+                and live_parent_fd_owner.descriptor not in poisoned_descriptors
+                and type(live_parent_fd_owner.label) is str
+                and type(live_parent_fd_owner.terminal) is bool
+                and not live_parent_fd_owner.terminal,
+                "private-root owned-parent input differs",
+            )
+            candidate_parent_close_note = _ascii(
+                parent_close_uncertainty_note,
+                "private-root owned-parent close-uncertainty note",
+            )
+            _require(
+                candidate_parent_close_note != "",
+                "private-root owned-parent close-uncertainty note is empty",
+            )
+            exact_parent_close_note = candidate_parent_close_note
+            root_name = f"task064-g6-{secrets.token_hex(16)}"
             _require_ext4_mount(
                 parent.mount_id,
+                excluded_descriptors=(
+                    live_parent_fd_owner.descriptor,
+                    *protected_descriptors,
+                ),
                 poisoned_descriptors=poisoned_descriptors,
                 poison_sink=poisoned_descriptors,
             )
             _component(root_name, label="private-root name")
-            parent_fd = parent.fd.require()
+            parent_fd = live_parent_fd_owner.require()
             os.mkdir(root_name, mode=0o700, dir_fd=parent_fd)
             created = True
-            root_descriptor = os.open(
+            raw_root_descriptor: object = os.open(
                 root_name,
                 os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
                 dir_fd=parent_fd,
             )
-            root_fd = FdOwner(root_descriptor, "private root")
+            if (
+                type(raw_root_descriptor) is int
+                and raw_root_descriptor > 2
+                and raw_root_descriptor
+                not in {
+                    parent_fd,
+                    *protected_descriptors,
+                    *poisoned_descriptors,
+                }
+            ):
+                root_fd = FdOwner(raw_root_descriptor, "private root")
+                raw_root_descriptor = _PID_SENTINEL
+            _require(root_fd is not None, "invalid private-root descriptor")
+            live_root_fd = cast(FdOwner, root_fd)
+            root_descriptor = live_root_fd.require()
             snapshot = _snapshot_fd(root_descriptor)
             named = _snapshot_stat(os.stat(root_name, dir_fd=parent_fd, follow_symlinks=False))
             _require(snapshot == named, "private-root descriptor/name identity differs")
@@ -835,22 +1323,42 @@ class PrivateRoot:
             )
             mount_identity = _mount_id(
                 root_descriptor,
+                excluded_descriptors=(parent_fd, *protected_descriptors),
                 poisoned_descriptors=poisoned_descriptors,
                 poison_sink=poisoned_descriptors,
             )
             _require(mount_identity == parent.mount_id, "private-root mount identity differs")
             root = DirectoryOwner(
-                root_fd,
+                live_root_fd,
                 snapshot,
                 mount_identity,
                 root_name,
                 parent.path / root_name,
             )
+            _require(root is not None, "private-root constructor did not establish ownership")
+            self.parent = parent
+            self.root_name = root_name
+            self.root = root
+            self._children: list[DirectoryOwner] = []
+            self._known_directories: dict[tuple[str, ...], DescriptorSnapshot] = {}
+            self._protected_paths: set[tuple[str, ...]] = set()
+            self._poisoned_descriptors = poisoned_descriptors
+            self._opaque_close_uncertain = False
+            self._opaque_owner_quarantine = _OPAQUE_OWNER_QUARANTINE
+            self._process_tree_uncertain = False
+            self._cleaned = False
         except BaseException as primary:
             if root_fd is not None and not root_fd.terminal:
+                root_closing_number = root_fd.descriptor
                 try:
                     root_fd.close_once()
                 except BaseException as close_error:
+                    if (
+                        type(poisoned_descriptors) is set
+                        and type(root_closing_number) is int
+                        and root_closing_number > 2
+                    ):
+                        poisoned_descriptors.add(root_closing_number)
                     primary.add_note(
                         f"private-root constructor fd close uncertainty: {close_error!r}"
                     )
@@ -858,25 +1366,275 @@ class PrivateRoot:
                 primary.add_note(
                     "private-root constructor preserved unverified created-name residue"
                 )
-            if not parent.fd.terminal:
+            if parent_fd_owner is not None and not parent_fd_owner.terminal:
+                parent_closing_number = parent_fd_owner.descriptor
                 try:
-                    parent.fd.close_once()
+                    parent_fd_owner.close_once()
                 except BaseException as close_error:
-                    primary.add_note(f"temporary-parent close uncertainty: {close_error!r}")
+                    if (
+                        type(poisoned_descriptors) is set
+                        and type(parent_closing_number) is int
+                        and parent_closing_number > 2
+                    ):
+                        poisoned_descriptors.add(parent_closing_number)
+                    primary.add_note(f"{exact_parent_close_note}: {close_error!r}")
             raise
-        if root is None:
-            raise ContractError("private-root constructor did not establish ownership")
-        self.parent = parent
-        self.root_name = root_name
-        self.root = root
-        self._children: list[DirectoryOwner] = []
-        self._known_directories: dict[tuple[str, ...], DescriptorSnapshot] = {}
-        self._protected_paths: set[tuple[str, ...]] = set()
-        self._poisoned_descriptors = poisoned_descriptors
-        self._opaque_close_uncertain = False
-        self._opaque_owner_quarantine = _OPAQUE_OWNER_QUARANTINE
-        self._process_tree_uncertain = False
-        self._cleaned = False
+
+    @classmethod
+    def _from_guard_child_for_generation6_r_selftest(
+        cls,
+        guard: PrivateRoot,
+        parent: DirectoryOwner,
+        *,
+        label: str,
+    ) -> PrivateRoot:
+        _require(
+            cls is PrivateRoot and type(guard) is PrivateRoot and type(parent) is DirectoryOwner,
+            "R nested private-root factory types differ",
+        )
+        exact_label = _ascii(label, "R nested private-root label")
+        _require(exact_label != "", "R nested private-root label is empty")
+
+        guard_fields = vars(guard)
+        _exact_keys(
+            guard_fields,
+            (
+                "parent",
+                "root_name",
+                "root",
+                "_children",
+                "_known_directories",
+                "_protected_paths",
+                "_poisoned_descriptors",
+                "_opaque_close_uncertain",
+                "_opaque_owner_quarantine",
+                "_process_tree_uncertain",
+                "_cleaned",
+            ),
+            "R outer-guard fields",
+        )
+        guard_root_value = guard_fields["root"]
+        guard_root_name_value = guard_fields["root_name"]
+        guard_children_value = guard_fields["_children"]
+        guard_known_value = guard_fields["_known_directories"]
+        guard_protected_value = guard_fields["_protected_paths"]
+        guard_poison_value = guard_fields["_poisoned_descriptors"]
+        guard_opaque_close_value = guard_fields["_opaque_close_uncertain"]
+        guard_quarantine_value = guard_fields["_opaque_owner_quarantine"]
+        guard_process_tree_value = guard_fields["_process_tree_uncertain"]
+        guard_cleaned_value = guard_fields["_cleaned"]
+        _require(
+            type(guard_root_value) is DirectoryOwner
+            and type(guard_root_name_value) is str
+            and type(guard_children_value) is list
+            and all(type(item) is DirectoryOwner for item in guard_children_value)
+            and type(guard_known_value) is dict
+            and all(
+                type(relative) is tuple
+                and len(relative) > 0
+                and all(type(component) is str for component in relative)
+                and type(snapshot) is DescriptorSnapshot
+                for relative, snapshot in guard_known_value.items()
+            )
+            and type(guard_protected_value) is set
+            and all(
+                type(relative) is tuple
+                and len(relative) > 0
+                and all(type(component) is str for component in relative)
+                for relative in guard_protected_value
+            )
+            and type(guard_poison_value) is set
+            and all(type(value) is int and value > 2 for value in guard_poison_value)
+            and type(guard_opaque_close_value) is bool
+            and type(guard_quarantine_value) is list
+            and guard_quarantine_value is _OPAQUE_OWNER_QUARANTINE
+            and type(guard_process_tree_value) is bool
+            and type(guard_cleaned_value) is bool,
+            "R outer-guard field types differ",
+        )
+        guard_root = cast(DirectoryOwner, guard_root_value)
+        guard_children = cast(list[DirectoryOwner], guard_children_value)
+        guard_known = cast(
+            dict[tuple[str, ...], DescriptorSnapshot],
+            guard_known_value,
+        )
+        guard_protected = cast(set[tuple[str, ...]], guard_protected_value)
+        guard_poison = cast(set[int], guard_poison_value)
+        _require(
+            not cast(bool, guard_cleaned_value)
+            and not cast(bool, guard_opaque_close_value)
+            and not cast(bool, guard_process_tree_value)
+            and not guard_poison,
+            "R outer guard is uncertain or terminal",
+        )
+        _require(
+            not cast(list[object], guard_quarantine_value),
+            "R outer guard opaque-owner quarantine is not empty",
+        )
+
+        _exact_keys(
+            vars(guard_root),
+            ("fd", "snapshot", "mount_id", "name", "path"),
+            "R outer-guard root owner",
+        )
+        _exact_keys(
+            vars(parent),
+            ("fd", "snapshot", "mount_id", "name", "path"),
+            "R subject-parent owner",
+        )
+        _require(
+            type(guard_root.fd) is FdOwner
+            and type(parent.fd) is FdOwner
+            and type(guard_root.snapshot) is DescriptorSnapshot
+            and type(parent.snapshot) is DescriptorSnapshot
+            and type(guard_root.mount_id) is int
+            and guard_root.mount_id > 0
+            and type(parent.mount_id) is int
+            and parent.mount_id > 0
+            and type(guard_root.name) is str
+            and type(parent.name) is str
+            and type(guard_root.path) is type(Path())
+            and type(parent.path) is type(Path()),
+            "R subject-parent ownership metadata differs",
+        )
+        _exact_keys(
+            vars(guard_root.fd),
+            ("descriptor", "label", "terminal"),
+            "R outer-guard root descriptor owner",
+        )
+        _exact_keys(
+            vars(parent.fd),
+            ("descriptor", "label", "terminal"),
+            "R subject-parent descriptor owner",
+        )
+        _require(
+            type(guard_root.fd.descriptor) is int
+            and guard_root.fd.descriptor > 2
+            and type(guard_root.fd.label) is str
+            and type(guard_root.fd.terminal) is bool
+            and not guard_root.fd.terminal
+            and type(parent.fd.descriptor) is int
+            and parent.fd.descriptor > 2
+            and type(parent.fd.label) is str
+            and type(parent.fd.terminal) is bool
+            and not parent.fd.terminal,
+            "R subject-parent descriptor ownership differs",
+        )
+        for index, item in enumerate(guard_children):
+            _exact_keys(
+                vars(item),
+                ("fd", "snapshot", "mount_id", "name", "path"),
+                f"R outer-guard child {index}",
+            )
+            _require(
+                type(item.name) is str,
+                f"R outer-guard child {index} name differs",
+            )
+
+        guard_root_name, _ = _component(
+            guard_root_name_value,
+            label="R outer-guard root name",
+        )
+        parent_name, _ = _component(parent.name, label="R subject-parent name")
+        relative = (parent_name,)
+        _require(
+            sum(item is parent for item in guard_children) == 1
+            and sum(item.name == parent_name for item in guard_children) == 1
+            and guard_known.get(relative) is parent.snapshot
+            and relative not in guard_protected
+            and guard_root.path.is_absolute()
+            and parent.path.is_absolute()
+            and guard_root.name == guard_root_name
+            and guard_root.path.name == guard_root_name
+            and parent.path == guard_root.path / parent_name
+            and parent.mount_id == guard_root.mount_id,
+            "R subject-parent guard binding differs",
+        )
+        guard_root_descriptor = guard_root.fd.require()
+        parent_descriptor = parent.fd.require()
+        _require(
+            guard_root_descriptor != parent_descriptor,
+            "R outer-root/subject-parent descriptors alias",
+        )
+        guard_root_snapshot = _snapshot_fd(guard_root_descriptor)
+        parent_snapshot = _snapshot_fd(parent_descriptor)
+        named_parent = _snapshot_stat(
+            os.stat(parent_name, dir_fd=guard_root_descriptor, follow_symlinks=False)
+        )
+        current_uid = os.getuid()
+        _require(
+            type(current_uid) is int
+            and current_uid >= 0
+            and _stable_directory_matches(
+                guard_root_snapshot,
+                guard_root.snapshot,
+                require_link_count=False,
+            )
+            and parent_snapshot == named_parent == parent.snapshot
+            and stat.S_ISDIR(guard_root_snapshot.mode)
+            and stat.S_ISDIR(parent_snapshot.mode)
+            and guard_root_snapshot.uid == current_uid
+            and parent_snapshot.uid == current_uid
+            and stat.S_IMODE(guard_root_snapshot.mode) == 0o700
+            and stat.S_IMODE(parent_snapshot.mode) == 0o700,
+            "R subject-parent named identity differs",
+        )
+        guard_root_mount = _mount_id(
+            guard_root_descriptor,
+            excluded_descriptors=(parent_descriptor,),
+            poisoned_descriptors=guard_poison,
+            poison_sink=guard_poison,
+        )
+        parent_mount = _mount_id(
+            parent_descriptor,
+            excluded_descriptors=(guard_root_descriptor,),
+            poisoned_descriptors=guard_poison,
+            poison_sink=guard_poison,
+        )
+        guard_root_descriptor_flags = fcntl.fcntl(guard_root_descriptor, fcntl.F_GETFD)
+        parent_descriptor_flags = fcntl.fcntl(parent_descriptor, fcntl.F_GETFD)
+        guard_root_status_flags = fcntl.fcntl(guard_root_descriptor, fcntl.F_GETFL)
+        parent_status_flags = fcntl.fcntl(parent_descriptor, fcntl.F_GETFL)
+        _require(
+            guard_root_mount == guard_root.mount_id
+            and parent_mount == parent.mount_id == guard_root_mount
+            and type(guard_root_descriptor_flags) is int
+            and guard_root_descriptor_flags == fcntl.FD_CLOEXEC
+            and type(parent_descriptor_flags) is int
+            and parent_descriptor_flags == fcntl.FD_CLOEXEC
+            and type(guard_root_status_flags) is int
+            and guard_root_status_flags >= 0
+            and (guard_root_status_flags & os.O_ACCMODE) == os.O_RDONLY
+            and (guard_root_status_flags & os.O_DIRECTORY) == os.O_DIRECTORY
+            and (guard_root_status_flags & os.O_PATH) == 0
+            and type(parent_status_flags) is int
+            and parent_status_flags >= 0
+            and (parent_status_flags & os.O_ACCMODE) == os.O_RDONLY
+            and (parent_status_flags & os.O_DIRECTORY) == os.O_DIRECTORY
+            and (parent_status_flags & os.O_PATH) == 0,
+            "R subject-parent descriptor authority differs",
+        )
+        subject = cls.__new__(cls)
+        subject_poison: set[int] = set()
+        try:
+            duplicated_parent = _duplicate_authenticated_child_directory(
+                guard_root,
+                parent,
+                label=exact_label,
+                poison_sink=subject_poison,
+            )
+            subject._initialize_from_owned_parent(
+                duplicated_parent,
+                poisoned_descriptors=subject_poison,
+                protected_descriptors=(guard_root_descriptor, parent_descriptor),
+                parent_close_uncertainty_note=(
+                    f"{exact_label} duplicated-parent close uncertainty"
+                ),
+            )
+        except BaseException:
+            guard._poisoned_descriptors.update(subject_poison)
+            raise
+        return subject
 
     def create_child(self, label: str) -> DirectoryOwner:
         _require(not self._cleaned, "private root is terminal")
