@@ -38,9 +38,10 @@ import tempfile
 import threading
 import time
 import warnings
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, replace
+from enum import Enum
 from functools import partial
 from pathlib import Path
 from types import FrameType, ModuleType, SimpleNamespace
@@ -10560,586 +10561,1787 @@ def _selftest_m_case(case_id: str, pytest_root: Path) -> None:
     _record_generation6_case_evidence(case_id)
 
 
-@dataclass
-class _Generation6RCloseReceipt:
-    token: str
-    label: str
+_GENERATION6_R_CAPTURED_FD_INIT: Final = FdOwner.__init__
+_GENERATION6_R_CAPTURED_FD_REQUIRE: Final = FdOwner.require
+_GENERATION6_R_CAPTURED_FD_DETACH: Final = FdOwner.detach
+_GENERATION6_R_CAPTURED_FD_CLOSE_ONCE: Final = FdOwner.close_once
+_GENERATION6_R_CAPTURED_SOCKET_DETACH: Final = socket.socket.detach
+_GENERATION6_R_CAPTURED_SOCKET_FILENO: Final = socket.socket.fileno
+_GENERATION6_R_CAPTURED_SNAPSHOT_STAT: Final = _snapshot_stat
+_GENERATION6_R_REAL_OS_CLOSE: Final = os.close
+_GENERATION6_R_REAL_OS_OPEN: Final = os.open
+_GENERATION6_R_REAL_OS_SCANDIR: Final = os.scandir
+_GENERATION6_R_REAL_OS_FSTAT: Final = os.fstat
+_GENERATION6_R_REAL_FCNTL: Final = fcntl.fcntl
+
+
+class _Generation6RPhase(str, Enum):  # noqa: UP042 - exact frozen str-enum contract
+    SETUP = "SETUP"
+    SUBJECT = "SUBJECT"
+    PRODUCTION = "PRODUCTION"
+    INJECTION = "INJECTION"
+    REUSE_TEARDOWN = "REUSE_TEARDOWN"
+    TERMINAL = "TERMINAL"
+
+
+class _Generation6RDescriptorState(str, Enum):  # noqa: UP042 - exact frozen str-enum contract
+    LIVE = "LIVE"
+    DETACHED = "DETACHED"
+    CLOSE_SUCCEEDED = "CLOSE_SUCCEEDED"
+    CLOSE_UNCERTAIN = "CLOSE_UNCERTAIN"
+
+
+@dataclass(frozen=True, eq=False)
+class _Generation6ROwnerToken:
+    ordinal: int
+    generation: int
+    owner_identity: int
     descriptor: int
-    events: list[str]
+    label: str
+    acquired_phase: _Generation6RPhase
+    snapshot: DescriptorSnapshot
+    fd_flags: int
+    status_flags: int
+
+
+@dataclass
+class _Generation6ROwnerRecord:
+    token: _Generation6ROwnerToken
+    owner: FdOwner
+    state: _Generation6RDescriptorState
+    detached_descriptor: int | None = None
     close_attempts: int = 0
 
 
-class _Generation6RCloseLedger:
-    def __init__(self) -> None:
-        self._captured_detach: Callable[[FdOwner], int] = FdOwner.detach
-        self._captured_close: Callable[[int], None] = os.close
-        self._captured_fstat: Callable[[int], os.stat_result] = os.fstat
-        self._captured_open: Callable[..., int] = os.open
-        self._captured_stat: Callable[..., os.stat_result] = os.stat
-        self._captured_unlink: Callable[..., None] = os.unlink
-        self._captured_rmdir: Callable[..., None] = os.rmdir
-        self.receipts: list[_Generation6RCloseReceipt] = []
-        self.pending: dict[int, _Generation6RCloseReceipt] = {}
-        self.unowned_close_attempts: list[int] = []
-        self.production_removals: list[tuple[str, str, int | None]] = []
-        self.relative_open_count = 0
-        self.relative_stat_count = 0
-        self.forbidden_calls: list[str] = []
-        self.production_active = False
-        self.fail_label: str | None = None
-        self.failure_injected = False
-        self.reused_owner: FdOwner | None = None
-        self.reused_snapshot: DescriptorSnapshot | None = None
-        self.reused_descriptor: int | None = None
-        self.reused_inspection_count = 0
-        self.reused_close_count_during_production = 0
+@dataclass(frozen=True)
+class _Generation6RAuthorityEvent:
+    ordinal: int
+    phase: _Generation6RPhase
+    owner_ordinal: int
+    owner_generation: int
+    operation: str
 
-    def detach(self, owner: FdOwner) -> int:
-        label = owner.label
-        descriptor = owner.descriptor
-        detached = self._captured_detach(owner)
-        _require(
+
+@dataclass(frozen=True, eq=False)
+class _Generation6RIteratorToken:
+    ordinal: int
+    iterator_identity: int
+    parent: _Generation6ROwnerToken
+    acquired_phase: _Generation6RPhase
+
+
+@dataclass(frozen=True, eq=False)
+class _Generation6RScandirCapability:
+    ordinal: int
+    owner_identity: int
+    parent: _Generation6ROwnerToken
+    acquired_phase: _Generation6RPhase
+
+
+class _Generation6RAuthorityLedger:
+    """Uncalled test-only descriptor authority; namespace mutation is deliberately absent."""
+
+    def __init__(self) -> None:
+        self.phase = _Generation6RPhase.SETUP
+        self._next_owner_ordinal = 1
+        self._next_iterator_ordinal = 1
+        self._next_scan_capability_ordinal = 1
+        self._next_event_ordinal = 1
+        self._generation_by_descriptor: dict[int, int] = {}
+        self._records_by_owner_identity: dict[int, _Generation6ROwnerRecord] = {}
+        self._records_by_ordinal: dict[int, _Generation6ROwnerRecord] = {}
+        self._current_by_descriptor: dict[int, _Generation6ROwnerToken] = {}
+        self._journal: list[_Generation6RAuthorityEvent] = []
+        self._registration_quarantine: list[FdOwner] = []
+        self._uncertain_descriptors: set[int] = set()
+        self._iterator_quarantine: list[object] = []
+        self._scan_capabilities_by_owner_identity: dict[int, _Generation6RScandirCapability] = {}
+        self._scan_capabilities_by_descriptor: dict[int, _Generation6RScandirCapability] = {}
+        self._live_scandir_proxies: dict[int, _Generation6RScandirProxy] = {}
+        self._socket_handoffs: dict[int, socket.socket] = {}
+        self._close_uncertainty_target: _Generation6ROwnerToken | None = None
+        self._expected_reuse_descriptor: int | None = None
+        self._reused_owner: FdOwner | None = None
+        self._reused_token: _Generation6ROwnerToken | None = None
+        self._scope_active = False
+
+    def _append_event(self, token: _Generation6ROwnerToken, operation: str) -> None:
+        exact_operation = _ascii(operation, "R authority operation")
+        _require(exact_operation != "", "R authority operation is empty")
+        ordinal = self._next_event_ordinal
+        _require(type(ordinal) is int and ordinal > 0, "R authority event ordinal differs")
+        self._next_event_ordinal = ordinal + 1
+        self._journal.append(
+            _Generation6RAuthorityEvent(
+                ordinal,
+                self.phase,
+                token.ordinal,
+                token.generation,
+                exact_operation,
+            )
+        )
+
+    def _remove_partial_registration(
+        self,
+        owner: FdOwner,
+        expected: _Generation6ROwnerRecord | None,
+    ) -> _Generation6ROwnerRecord | None:
+        if expected is None:
+            return None
+        owner_identity = id(owner)
+        record = self._records_by_owner_identity.get(owner_identity)
+        if record is expected:
+            self._records_by_owner_identity.pop(owner_identity)
+        capability = self._scan_capabilities_by_owner_identity.get(owner_identity)
+        if capability is not None and capability.parent is expected.token:
+            self._scan_capabilities_by_owner_identity.pop(owner_identity)
+            selected = self._scan_capabilities_by_descriptor.get(capability.parent.descriptor)
+            if selected is capability:
+                self._scan_capabilities_by_descriptor.pop(capability.parent.descriptor)
+        indexed = self._records_by_ordinal.get(expected.token.ordinal)
+        if indexed is expected:
+            self._records_by_ordinal.pop(expected.token.ordinal)
+        current = self._current_by_descriptor.get(expected.token.descriptor)
+        if current is expected.token:
+            self._current_by_descriptor.pop(expected.token.descriptor)
+        return expected
+
+    def _close_registration_failure(
+        self,
+        owner: FdOwner,
+        descriptor: int,
+        primary: BaseException,
+        *,
+        initialized: bool,
+        partial_record: _Generation6ROwnerRecord | None,
+    ) -> None:
+        record = self._remove_partial_registration(owner, partial_record)
+        cleanup_error: BaseException | None = None
+        if initialized:
+            try:
+                _require(
+                    FdOwner.require is _GENERATION6_R_CAPTURED_FD_REQUIRE,
+                    "R failed registration require identity differs",
+                )
+                detached = _GENERATION6_R_CAPTURED_FD_DETACH(owner)
+                if record is not None:
+                    record.detached_descriptor = detached
+                    record.state = _Generation6RDescriptorState.DETACHED
+                _require(
+                    type(detached) is int
+                    and detached == descriptor
+                    and owner.terminal
+                    and owner.descriptor == -1,
+                    "R failed registration detach differs",
+                )
+            except BaseException as error:
+                cleanup_error = error
+                self._registration_quarantine.append(owner)
+        if not initialized or cleanup_error is None:
+            try:
+                _GENERATION6_R_REAL_OS_CLOSE(descriptor)
+                if record is not None:
+                    record.state = _Generation6RDescriptorState.CLOSE_SUCCEEDED
+            except BaseException as error:
+                self._uncertain_descriptors.add(descriptor)
+                if not any(candidate is owner for candidate in self._registration_quarantine):
+                    self._registration_quarantine.append(owner)
+                if record is not None:
+                    record.state = _Generation6RDescriptorState.CLOSE_UNCERTAIN
+                cleanup_error = error
+        else:
+            self._uncertain_descriptors.add(descriptor)
+            if not any(candidate is owner for candidate in self._registration_quarantine):
+                self._registration_quarantine.append(owner)
+        if cleanup_error is not None:
+            primary.add_note(f"R owner registration cleanup failed: {cleanup_error!r}")
+
+    def initialize_owner(
+        self,
+        owner: FdOwner,
+        descriptor: int,
+        label: str,
+        terminal: bool = False,
+    ) -> None:
+        owner_identity = id(owner)
+        offered_unclaimed_descriptor = (
             type(descriptor) is int
             and descriptor > 2
-            and detached == descriptor
+            and self._current_by_descriptor.get(descriptor) is None
+        )
+        initialized = False
+        partial_record: _Generation6ROwnerRecord | None = None
+        try:
+            _require(self._scope_active, "R owner initialization is outside its scope")
+            _require(type(owner) is FdOwner, "R owner initialization type differs")
+            _require(
+                type(descriptor) is int
+                and descriptor > 2
+                and (
+                    descriptor not in self._uncertain_descriptors
+                    or (
+                        self.phase is _Generation6RPhase.INJECTION
+                        and descriptor == self._expected_reuse_descriptor
+                    )
+                )
+                and self._current_by_descriptor.get(descriptor) is None,
+                "R owner acquisition descriptor differs",
+            )
+            exact_label = _ascii(label, "R owner acquisition label")
+            _require(exact_label != "", "R owner acquisition label is empty")
+            _require(
+                type(terminal) is bool and not terminal,
+                "R owner acquisition terminality differs",
+            )
+            _require(
+                type(owner_identity) is int
+                and owner_identity > 0
+                and owner_identity not in self._records_by_owner_identity,
+                "R owner acquisition identity differs",
+            )
+            _GENERATION6_R_CAPTURED_FD_INIT(owner, descriptor, exact_label, terminal)
+            initialized = True
+            _require(
+                owner.descriptor == descriptor
+                and owner.label == exact_label
+                and type(owner.terminal) is bool
+                and not owner.terminal,
+                "R owner acquisition fields differ",
+            )
+            status = _GENERATION6_R_REAL_OS_FSTAT(descriptor)
+            snapshot = _GENERATION6_R_CAPTURED_SNAPSHOT_STAT(status)
+            fd_flags = _GENERATION6_R_REAL_FCNTL(descriptor, fcntl.F_GETFD)
+            status_flags = _GENERATION6_R_REAL_FCNTL(descriptor, fcntl.F_GETFL)
+            _require(
+                type(fd_flags) is int
+                and fd_flags == fcntl.FD_CLOEXEC
+                and type(status_flags) is int
+                and status_flags >= 0,
+                "R owner acquisition flags differ",
+            )
+            generation = self._generation_by_descriptor.get(descriptor, 0) + 1
+            ordinal = self._next_owner_ordinal
+            _require(
+                type(generation) is int and generation > 0 and type(ordinal) is int and ordinal > 0,
+                "R owner acquisition sequence differs",
+            )
+            token = _Generation6ROwnerToken(
+                ordinal,
+                generation,
+                owner_identity,
+                descriptor,
+                exact_label,
+                self.phase,
+                snapshot,
+                fd_flags,
+                status_flags,
+            )
+            record = _Generation6ROwnerRecord(
+                token,
+                owner,
+                _Generation6RDescriptorState.LIVE,
+            )
+            partial_record = record
+            self._next_owner_ordinal = ordinal + 1
+            self._generation_by_descriptor[descriptor] = generation
+            self._records_by_owner_identity[owner_identity] = record
+            self._records_by_ordinal[ordinal] = record
+            self._current_by_descriptor[descriptor] = token
+            self._append_event(token, "ACQUISITION_AUTH_FSTAT")
+            if (
+                stat.S_ISDIR(snapshot.mode)
+                and status_flags & os.O_ACCMODE == os.O_RDONLY
+                and not status_flags & os.O_PATH
+            ):
+                capability_ordinal = self._next_scan_capability_ordinal
+                _require(
+                    type(capability_ordinal) is int and capability_ordinal > 0,
+                    "R scandir capability ordinal differs",
+                )
+                capability = _Generation6RScandirCapability(
+                    capability_ordinal,
+                    owner_identity,
+                    token,
+                    self.phase,
+                )
+                self._next_scan_capability_ordinal = capability_ordinal + 1
+                self._scan_capabilities_by_owner_identity[owner_identity] = capability
+                self._scan_capabilities_by_descriptor[descriptor] = capability
+                self._append_event(token, "SCANDIR_CAPABILITY_MINTED")
+        except BaseException as primary:
+            current = (
+                self._current_by_descriptor.get(descriptor)
+                if type(descriptor) is int and descriptor > 2
+                else None
+            )
+            partial_is_current = partial_record is not None and current is partial_record.token
+            if offered_unclaimed_descriptor and (current is None or partial_is_current):
+                self._close_registration_failure(
+                    owner,
+                    descriptor,
+                    primary,
+                    initialized=initialized,
+                    partial_record=partial_record,
+                )
+            elif type(owner) is FdOwner and not any(
+                candidate is owner for candidate in self._registration_quarantine
+            ):
+                self._registration_quarantine.append(owner)
+            raise
+
+    def _record_for_owner(self, owner: FdOwner) -> _Generation6ROwnerRecord:
+        _require(type(owner) is FdOwner, "R owner authorization type differs")
+        owner_identity = id(owner)
+        record = self._records_by_owner_identity.get(owner_identity)
+        _require(
+            record is not None
+            and record.owner is owner
+            and record.token.owner_identity == owner_identity,
+            "R owner authorization identity differs",
+        )
+        return cast(_Generation6ROwnerRecord, record)
+
+    def _revoke_scan_capability(self, record: _Generation6ROwnerRecord) -> None:
+        token = record.token
+        capability = self._scan_capabilities_by_owner_identity.pop(
+            token.owner_identity,
+            None,
+        )
+        selected = self._scan_capabilities_by_descriptor.get(token.descriptor)
+        if capability is None:
+            _require(selected is None, "R scandir capability selector differs")
+            return
+        _require(
+            capability.parent is token
+            and capability.owner_identity == token.owner_identity
+            and selected is capability,
+            "R scandir capability identity differs",
+        )
+        self._scan_capabilities_by_descriptor.pop(token.descriptor)
+        self._append_event(token, "SCANDIR_CAPABILITY_REVOKED")
+
+    def _authorize_live(
+        self,
+        owner: FdOwner,
+        token: _Generation6ROwnerToken | None = None,
+    ) -> _Generation6ROwnerRecord:
+        record = self._record_for_owner(owner)
+        if token is not None:
+            _require(record.token is token, "R owner authorization token differs")
+        exact_token = record.token
+        _require(
+            record.state is _Generation6RDescriptorState.LIVE
+            and type(owner.terminal) is bool
+            and not owner.terminal
+            and type(owner.descriptor) is int
+            and owner.descriptor == exact_token.descriptor
+            and type(owner.label) is str
+            and owner.label == exact_token.label
+            and self._records_by_ordinal.get(exact_token.ordinal) is record
+            and self._generation_by_descriptor.get(exact_token.descriptor) == exact_token.generation
+            and self._current_by_descriptor.get(exact_token.descriptor) is exact_token,
+            "R live owner authorization differs",
+        )
+        return record
+
+    def _reauthorize_live(
+        self,
+        owner: FdOwner,
+        token: _Generation6ROwnerToken,
+        *,
+        operation: str,
+    ) -> _Generation6ROwnerRecord:
+        record = self._authorize_live(owner, token)
+        _require(
+            self.phase is not _Generation6RPhase.PRODUCTION,
+            "R production descriptor reauthentication is forbidden",
+        )
+        exact_operation = _ascii(operation, "R reauthentication operation")
+        _require(exact_operation != "", "R reauthentication operation is empty")
+        exact_token = record.token
+        current_snapshot = _GENERATION6_R_CAPTURED_SNAPSHOT_STAT(
+            _GENERATION6_R_REAL_OS_FSTAT(exact_token.descriptor)
+        )
+        current_fd_flags = _GENERATION6_R_REAL_FCNTL(
+            exact_token.descriptor,
+            fcntl.F_GETFD,
+        )
+        current_status_flags = _GENERATION6_R_REAL_FCNTL(
+            exact_token.descriptor,
+            fcntl.F_GETFL,
+        )
+        _require(
+            current_snapshot.device == exact_token.snapshot.device
+            and current_snapshot.inode == exact_token.snapshot.inode
+            and current_snapshot.uid == exact_token.snapshot.uid
+            and current_snapshot.mode == exact_token.snapshot.mode
+            and type(current_fd_flags) is int
+            and current_fd_flags == exact_token.fd_flags
+            and type(current_status_flags) is int
+            and current_status_flags == exact_token.status_flags,
+            "R live owner reauthentication differs",
+        )
+        self._append_event(exact_token, exact_operation)
+        return record
+
+    def _token_after_immediate_acquisition(
+        self,
+        owner: FdOwner,
+    ) -> _Generation6ROwnerToken:
+        return self._authorize_live(owner).token
+
+    def token_for_owner(self, owner: FdOwner) -> _Generation6ROwnerToken:
+        return self._authorize_live(owner).token
+
+    def detach_owner(self, owner: FdOwner) -> int:
+        _require(self._scope_active, "R owner detach is outside its scope")
+        record = self._authorize_live(owner)
+        token = record.token
+        _require(
+            FdOwner.require is _GENERATION6_R_CAPTURED_FD_REQUIRE,
+            "R owner require identity differs during detach",
+        )
+        detached = _GENERATION6_R_CAPTURED_FD_DETACH(owner)
+        record.detached_descriptor = detached
+        record.state = _Generation6RDescriptorState.DETACHED
+        current = self._current_by_descriptor.get(token.descriptor)
+        _require(current is token, "R detached owner current-token binding differs")
+        self._revoke_scan_capability(record)
+        self._current_by_descriptor.pop(token.descriptor)
+        self._append_event(token, "DETACH")
+        _require(
+            type(detached) is int
+            and detached == token.descriptor
             and owner.terminal
-            and owner.descriptor == -1
-            and descriptor not in self.pending,
-            "R cleanup owner detach differs",
+            and owner.descriptor == -1,
+            "R owner detach result differs",
         )
-        token = f"{len(self.receipts):04d}:{label}:{descriptor}"
-        receipt = _Generation6RCloseReceipt(
-            token,
-            label,
-            descriptor,
-            ["detach", "poison"],
-        )
-        self.receipts.append(receipt)
-        self.pending[descriptor] = receipt
         return detached
 
-    def close(self, descriptor: int) -> None:
-        _require(type(descriptor) is int and descriptor > 2, "R close descriptor differs")
-        receipt = self.pending.pop(descriptor, None)
-        if receipt is None:
-            self.unowned_close_attempts.append(descriptor)
-            if self.production_active and descriptor == self.reused_descriptor:
-                self.reused_close_count_during_production += 1
-            self._captured_close(descriptor)
-            return
-        receipt.events.append("close")
-        receipt.close_attempts += 1
-        if receipt.label == self.fail_label and not self.failure_injected:
-            self.failure_injected = True
-            self._captured_close(descriptor)
-            replacement = self._captured_open("/dev/null", os.O_RDONLY | os.O_CLOEXEC)
-            if replacement != descriptor:
-                duplicated = os.dup2(replacement, descriptor, inheritable=False)
-                self._captured_close(replacement)
-                _require(duplicated == descriptor, "R reused descriptor duplication differs")
-            snapshot = _snapshot_stat(self._captured_fstat(descriptor))
-            self.reused_owner = FdOwner(descriptor, "R05 reused descriptor")
-            self.reused_snapshot = snapshot
-            self.reused_descriptor = descriptor
-            raise OSError(errno.EIO, "R05 synthetic close ambiguity")
-        self._captured_close(descriptor)
-
-    def fstat(self, descriptor: int) -> os.stat_result:
-        if self.production_active and descriptor == self.reused_descriptor:
-            self.reused_inspection_count += 1
-        return self._captured_fstat(descriptor)
-
-    def open(self, *args: object, **kwargs: object) -> int:
-        if self.production_active:
-            path = args[0] if args else kwargs.get("path")
-            flags = args[1] if len(args) > 1 else kwargs.get("flags")
-            try:
-                raw_path = os.fspath(
-                    cast(os.PathLike[str] | os.PathLike[bytes] | str | bytes, path)
-                )
-            except TypeError:
-                raw_path = None
-            if raw_path is not None and not os.path.isabs(raw_path) and raw_path != ".":
-                directory_fd = kwargs.get("dir_fd")
-                _require(
-                    type(flags) is int
-                    and type(directory_fd) is int
-                    and directory_fd > 2
-                    and flags & os.O_NOFOLLOW
-                    and flags & os.O_CLOEXEC,
-                    "R cleanup relative open authority differs",
-                )
-                self.relative_open_count += 1
-        return self._captured_open(*args, **kwargs)
-
-    def stat(self, *args: object, **kwargs: object) -> os.stat_result:
-        if self.production_active:
-            path = args[0] if args else kwargs.get("path")
-            try:
-                raw_path = os.fspath(
-                    cast(os.PathLike[str] | os.PathLike[bytes] | str | bytes, path)
-                )
-            except TypeError:
-                raw_path = None
-            if raw_path is not None and not os.path.isabs(raw_path):
-                directory_fd = kwargs.get("dir_fd")
-                _require(
-                    type(directory_fd) is int
-                    and directory_fd > 2
-                    and kwargs.get("follow_symlinks") is False,
-                    "R cleanup relative stat authority differs",
-                )
-                self.relative_stat_count += 1
-        return self._captured_stat(*args, **kwargs)
-
-    def unlink(self, *args: object, **kwargs: object) -> None:
-        if self.production_active:
-            path = args[0] if args else kwargs.get("path")
-            directory_fd = kwargs.get("dir_fd")
-            _require(
-                type(path) is str and type(directory_fd) is int and directory_fd > 2,
-                "R cleanup unlink authority differs",
-            )
-            self.production_removals.append(("unlink", path, directory_fd))
-        self._captured_unlink(*args, **kwargs)
-
-    def rmdir(self, *args: object, **kwargs: object) -> None:
-        if self.production_active:
-            path = args[0] if args else kwargs.get("path")
-            directory_fd = kwargs.get("dir_fd")
-            _require(
-                type(path) is str and type(directory_fd) is int and directory_fd > 2,
-                "R cleanup rmdir authority differs",
-            )
-            self.production_removals.append(("rmdir", path, directory_fd))
-        self._captured_rmdir(*args, **kwargs)
-
-    def forbid_rmtree(self, *args: object, **kwargs: object) -> None:
-        del args, kwargs
-        self.forbidden_calls.append("shutil.rmtree")
-        raise ContractError("R cleanup acquired pathname-recursive authority")
-
-    def require_complete(self) -> None:
-        _require(not self.pending, "R cleanup close receipt remains pending")
-        _require(self.receipts, "R cleanup produced no close receipts")
+    def schedule_close_uncertainty(
+        self,
+        owner: FdOwner,
+        token: _Generation6ROwnerToken,
+    ) -> None:
         _require(
-            all(
-                receipt.events == ["detach", "poison", "close"] and receipt.close_attempts == 1
-                for receipt in self.receipts
-            ),
-            "R cleanup detach/poison/close receipt differs",
+            self.phase is _Generation6RPhase.SUBJECT
+            and self._close_uncertainty_target is None
+            and self._reused_owner is None
+            and self._reused_token is None,
+            "R close-uncertainty schedule state differs",
         )
-        _require(not self.unowned_close_attempts, "R cleanup used an unowned direct close")
-        _require(not self.forbidden_calls, "R cleanup used pathname-recursive removal")
+        record = self._authorize_live(owner, token)
+        self._close_uncertainty_target = record.token
+        self._append_event(record.token, "SCHEDULE_CLOSE_UNCERTAINTY")
 
-
-def _generation6_r_duplicate_owner(owner: FdOwner, *, label: str) -> FdOwner:
-    source = owner.require()
-    descriptor = fcntl.fcntl(source, fcntl.F_DUPFD_CLOEXEC, 3)
-    _require(
-        type(descriptor) is int
-        and descriptor > 2
-        and descriptor != source
-        and _snapshot_fd(descriptor) == _snapshot_fd(source),
-        "R cleanup duplicate anchor differs",
-    )
-    return FdOwner(descriptor, label)
-
-
-def _generation6_r_create_regular(
-    directory_fd: int,
-    name: str,
-    *,
-    mode: int = 0o600,
-) -> DescriptorSnapshot:
-    descriptor = os.open(
-        name,
-        os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC,
-        mode,
-        dir_fd=directory_fd,
-    )
-    owner = FdOwner(descriptor, f"R fixture regular {name}")
-    snapshot = _snapshot_fd(owner.require())
-    owner.close_once()
-    named = _snapshot_stat(os.stat(name, dir_fd=directory_fd, follow_symlinks=False))
-    _require(snapshot == named and stat.S_ISREG(named.mode), "R fixture regular identity differs")
-    return named
-
-
-def _generation6_r_named_snapshot(directory_fd: int, name: str) -> DescriptorSnapshot:
-    return _snapshot_stat(os.stat(name, dir_fd=directory_fd, follow_symlinks=False))
-
-
-def _generation6_r_require_absent(directory_fd: int, name: str) -> None:
-    try:
-        os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-    except FileNotFoundError as error:
-        _require(error.errno == errno.ENOENT, "R teardown absence errno differs")
-    else:
-        raise ContractError("R teardown name remains present")
-
-
-def _selftest_r_case(case_id: str, pytest_root: Path) -> None:
-    del pytest_root
-    _require(case_id in _GENERATION6_R_REJECTIONS, "unknown cleanup self-test case")
-    module = _generation6_module()
-    ledger = _Generation6RCloseLedger()
-    private_root: PrivateRoot | None = None
-    parent_anchor: FdOwner | None = None
-    root_anchor: FdOwner | None = None
-    child: DirectoryOwner | None = None
-    child_anchor: FdOwner | None = None
-    grandparent_anchor: FdOwner | None = None
-    parent_component = ""
-    parent_backup = ""
-    root_backup = ""
-    child_backup = ""
-    entry_names: list[str] = []
-    entry_snapshots: dict[str, DescriptorSnapshot] = {}
-    target_identity: tuple[int, int] | None = None
-
-    def observed_detach(owner: FdOwner) -> int:
-        return ledger.detach(owner)
-
-    with (
-        _Generation6SelftestPatch(FdOwner, "detach", observed_detach),
-        _Generation6SelftestPatch(os, "close", ledger.close),
-        _Generation6SelftestPatch(os, "fstat", ledger.fstat),
-        _Generation6SelftestPatch(os, "open", ledger.open),
-        _Generation6SelftestPatch(os, "stat", ledger.stat),
-        _Generation6SelftestPatch(os, "unlink", ledger.unlink),
-        _Generation6SelftestPatch(os, "rmdir", ledger.rmdir),
-        _Generation6SelftestPatch(shutil, "rmtree", ledger.forbid_rmtree),
-    ):
+    def _inject_close_uncertainty(
+        self,
+        owner: FdOwner,
+        record: _Generation6ROwnerRecord,
+    ) -> None:
+        exact_record = self._authorize_live(owner, record.token)
+        _require(exact_record is record, "R injected close record differs")
+        token = exact_record.token
+        _require(
+            self.phase is _Generation6RPhase.PRODUCTION
+            and self._close_uncertainty_target is token
+            and self._reused_owner is None
+            and self._reused_token is None,
+            "R close-uncertainty injection state differs",
+        )
+        self._close_uncertainty_target = None
+        record.close_attempts += 1
+        self._append_event(token, "CLOSE_ONCE_BEGIN")
         try:
-            private_root = PrivateRoot()
-            parent_anchor = _generation6_r_duplicate_owner(
-                private_root.parent.fd,
-                label=f"{case_id} parent teardown anchor",
+            detached = owner.detach()
+            _require(
+                record.state is _Generation6RDescriptorState.DETACHED
+                and type(detached) is int
+                and detached == token.descriptor
+                and record.detached_descriptor == detached
+                and owner.terminal
+                and owner.descriptor == -1,
+                "R injected owner detach differs",
             )
-            root_anchor = _generation6_r_duplicate_owner(
-                private_root.root.fd,
-                label=f"{case_id} root teardown anchor",
+            try:
+                _GENERATION6_R_REAL_OS_CLOSE(detached)
+            except BaseException as error:
+                raise ContractError("R injected close is uncertain") from error
+        except BaseException as primary:
+            for secondary in self._mark_close_uncertain(record):
+                primary.add_note(f"R close uncertainty finalization failed: {secondary!r}")
+            raise
+        uncertainty_errors = self._mark_close_uncertain(record)
+
+        previous_phase = self.phase
+        self.phase = _Generation6RPhase.INJECTION
+        self._expected_reuse_descriptor = detached
+        raw_reuse: object = _PID_SENTINEL
+        reused_owner: FdOwner | None = None
+        reused_retained = False
+        try:
+            raw_reuse = _GENERATION6_R_REAL_OS_OPEN(
+                "/dev/null",
+                os.O_RDONLY | os.O_CLOEXEC,
             )
-            root_fd = private_root.root.fd.require()
-            parent_fd = private_root.parent.fd.require()
-
-            if case_id == "R01":
-                parent_component, _ = _filesystem_component(
-                    private_root.parent.path.name,
-                    label="R01 parent component",
-                )
-                parent_backup, _ = _component(
-                    f"{parent_component}-r01-backup",
-                    label="R01 parent backup",
-                )
-                grandparent_descriptor = os.open(
-                    private_root.parent.path.parent,
-                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
-                )
-                grandparent_anchor = FdOwner(
-                    grandparent_descriptor,
-                    "R01 grandparent teardown anchor",
-                )
-                os.rename(
-                    parent_component,
-                    parent_backup,
-                    src_dir_fd=grandparent_anchor.require(),
-                    dst_dir_fd=grandparent_anchor.require(),
-                )
-                os.mkdir(parent_component, mode=0o700, dir_fd=grandparent_anchor.require())
-            elif case_id == "R02":
-                root_backup, _ = _component(
-                    f"{private_root.root_name}-r02-backup",
-                    label="R02 root backup",
-                )
-                os.rename(
-                    private_root.root_name,
-                    root_backup,
-                    src_dir_fd=parent_fd,
-                    dst_dir_fd=parent_fd,
-                )
-                os.mkdir(private_root.root_name, mode=0o700, dir_fd=parent_fd)
-            elif case_id == "R03":
-                child = private_root.create_child("r03-known-child")
-                child_anchor = _generation6_r_duplicate_owner(
-                    child.fd,
-                    label="R03 child teardown anchor",
-                )
-                child_backup, _ = _component(
-                    f"{child.name}-backup",
-                    label="R03 child backup",
-                )
-                os.rename(
-                    child.name,
-                    child_backup,
-                    src_dir_fd=root_fd,
-                    dst_dir_fd=root_fd,
-                )
-                os.mkdir(child.name, mode=0o700, dir_fd=root_fd)
-            elif case_id in {"R04", "R05"}:
-                entry_name = f"{case_id.lower()}-unexpected"
-                entry_names.append(entry_name)
-                entry_snapshots[entry_name] = _generation6_r_create_regular(
-                    root_fd,
-                    entry_name,
-                )
-                if case_id == "R05":
-                    ledger.fail_label = "private-root O_PATH handle"
-            else:
-                child = private_root.create_child(f"{case_id.lower()}-unsafe")
-                child_anchor = _generation6_r_duplicate_owner(
-                    child.fd,
-                    label=f"{case_id} child teardown anchor",
-                )
-                child_fd = child.fd.require()
-                entry_name = f"{case_id.lower()}-entry"
-                entry_names.append(entry_name)
-                if case_id == "R06":
-                    os.symlink("untrusted-target", entry_name, dir_fd=child_fd)
-                elif case_id == "R07":
-                    fixture_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                    fixture_socket.bind(f"/proc/self/fd/{child_fd}/{entry_name}")
-                    socket_owner = FdOwner(
-                        fixture_socket.detach(),
-                        "R07 fixture socket",
-                    )
-                    socket_owner.close_once()
-                elif case_id == "R08":
-                    os.mkfifo(entry_name, mode=0o600, dir_fd=child_fd)
-                elif case_id == "R09":
-                    _generation6_r_create_regular(child_fd, entry_name)
-                    alias_name = f"{entry_name}-alias"
-                    entry_names.append(alias_name)
-                    os.link(
-                        entry_name,
-                        alias_name,
-                        src_dir_fd=child_fd,
-                        dst_dir_fd=child_fd,
-                        follow_symlinks=False,
-                    )
-                elif case_id == "R10":
-                    _generation6_r_create_regular(child_fd, entry_name)
-                    os.chmod(
-                        entry_name,
-                        0o1600,
-                        dir_fd=child_fd,
-                        follow_symlinks=False,
-                    )
-                else:
-                    _require(case_id in {"R11", "R12"}, "unknown cleanup fixture branch")
-                    _generation6_r_create_regular(child_fd, entry_name)
-                for name in entry_names:
-                    entry_snapshots[name] = _generation6_r_named_snapshot(child_fd, name)
-                target = entry_snapshots[entry_name]
-                target_identity = (target.device, target.inode)
-
-            label, message = _GENERATION6_R_REJECTIONS[case_id][0]
-            _record_generation6_check(f"inject:{label}")
-
-            def run_cleanup() -> CleanupResult:
-                if private_root is None:
-                    raise ContractError("R cleanup root is absent")
-                ledger.production_active = True
+            _require(
+                type(raw_reuse) is int and raw_reuse > 2,
+                "R reused descriptor acquisition differs",
+            )
+            accepted_reuse = raw_reuse
+            raw_reuse = _PID_SENTINEL
+            reused_owner = FdOwner(
+                accepted_reuse,
+                "R close-uncertainty reused descriptor",
+            )
+            reused_token = self._token_after_immediate_acquisition(reused_owner)
+            _require(
+                accepted_reuse == detached
+                and reused_token.descriptor == accepted_reuse == detached
+                and reused_token.generation == token.generation + 1
+                and reused_token.acquired_phase is _Generation6RPhase.INJECTION,
+                "R reused descriptor generation differs",
+            )
+            _require(
+                not any(
+                    event.owner_ordinal == reused_token.ordinal
+                    and event.owner_generation == reused_token.generation
+                    and event.phase is _Generation6RPhase.PRODUCTION
+                    for event in self._journal
+                ),
+                "R reused descriptor has a production journal operation",
+            )
+            self._reused_owner = reused_owner
+            self._reused_token = reused_token
+            reused_retained = True
+        except BaseException as primary:
+            for secondary in uncertainty_errors:
+                primary.add_note(f"R close uncertainty finalization failed: {secondary!r}")
+            if reused_owner is not None and not reused_retained:
                 try:
-                    return private_root.cleanup()
-                finally:
-                    ledger.production_active = False
-
-            if case_id == "R11":
-                _require(target_identity is not None, "R11 target identity is absent")
-                captured_mount = cast(Callable[..., int], _mount_id)
-
-                def foreign_mount(descriptor: int, **kwargs: object) -> int:
-                    status = os.fstat(descriptor)
-                    if (status.st_dev, status.st_ino) == target_identity:
-                        if private_root is None:
-                            raise ContractError("R11 root is absent")
-                        return private_root.root.mount_id + 1
-                    return captured_mount(descriptor, **kwargs)
-
-                with _Generation6SelftestPatch(module, "_mount_id", foreign_mount):
-                    result = run_cleanup()
-            elif case_id == "R12":
-                _require(target_identity is not None, "R12 target identity is absent")
-                captured_snapshot_fd = _snapshot_fd
-                captured_snapshot_stat = _snapshot_stat
-
-                def unknown_fd(descriptor: int) -> DescriptorSnapshot:
-                    snapshot = captured_snapshot_fd(descriptor)
-                    if (snapshot.device, snapshot.inode) == target_identity:
-                        return replace(snapshot, mode=(snapshot.mode & 0o7777) | 0o030000)
-                    return snapshot
-
-                def unknown_stat(status: os.stat_result) -> DescriptorSnapshot:
-                    snapshot = captured_snapshot_stat(status)
-                    if (snapshot.device, snapshot.inode) == target_identity:
-                        return replace(snapshot, mode=(snapshot.mode & 0o7777) | 0o030000)
-                    return snapshot
-
-                with (
-                    _Generation6SelftestPatch(module, "_snapshot_fd", unknown_fd),
-                    _Generation6SelftestPatch(module, "_snapshot_stat", unknown_stat),
-                ):
-                    result = run_cleanup()
-            else:
-                result = run_cleanup()
-
-            _require(
-                result.status == "FAIL" and result.residue_count > 0 and bool(result.failures),
-                f"{case_id} cleanup did not fail closed",
-            )
-            _require(
-                ledger.production_removals == [],
-                f"{case_id} removed an unsafe entry",
-            )
-            _require(
-                "rmtree" not in PrivateRoot._walk.__code__.co_names
-                and "rmtree" not in PrivateRoot.cleanup.__code__.co_names,
-                f"{case_id} pathname-recursive branch exists",
-            )
-
-            if case_id == "R01":
-                _require(grandparent_anchor is not None, "R01 grandparent anchor is absent")
-                replacement = _generation6_r_named_snapshot(
-                    grandparent_anchor.require(),
-                    parent_component,
-                )
-                original = _generation6_r_named_snapshot(
-                    grandparent_anchor.require(),
-                    parent_backup,
-                )
-                _require(
-                    stat.S_ISDIR(replacement.mode)
-                    and (original.device, original.inode)
-                    == (private_root.parent.snapshot.device, private_root.parent.snapshot.inode)
-                    and (replacement.device, replacement.inode)
-                    != (original.device, original.inode),
-                    "R01 replacement preservation differs",
-                )
-            elif case_id == "R02":
-                replacement = _generation6_r_named_snapshot(
-                    parent_anchor.require(), private_root.root_name
-                )
-                original = _generation6_r_named_snapshot(parent_anchor.require(), root_backup)
-                _require(
-                    stat.S_ISDIR(replacement.mode)
-                    and (original.device, original.inode)
-                    == (private_root.root.snapshot.device, private_root.root.snapshot.inode)
-                    and (replacement.device, replacement.inode)
-                    != (original.device, original.inode),
-                    "R02 replacement preservation differs",
-                )
-            elif case_id == "R03":
-                _require(child is not None, "R03 child is absent")
-                replacement = _generation6_r_named_snapshot(root_anchor.require(), child.name)
-                original = _generation6_r_named_snapshot(root_anchor.require(), child_backup)
-                _require(
-                    stat.S_ISDIR(replacement.mode)
-                    and (original.device, original.inode)
-                    == (child.snapshot.device, child.snapshot.inode)
-                    and (replacement.device, replacement.inode)
-                    != (original.device, original.inode),
-                    "R03 replacement preservation differs",
-                )
-            else:
-                directory_anchor = child_anchor if child_anchor is not None else root_anchor
-                _require(directory_anchor is not None, f"{case_id} entry anchor is absent")
-                preserved = {
-                    name: _generation6_r_named_snapshot(directory_anchor.require(), name)
-                    for name in entry_names
-                }
-                _require(
-                    all(
-                        (preserved[name].device, preserved[name].inode, preserved[name].mode)
-                        == (
-                            entry_snapshots[name].device,
-                            entry_snapshots[name].inode,
-                            entry_snapshots[name].mode,
-                        )
-                        for name in entry_names
-                    ),
-                    f"{case_id} unsafe entry was not preserved",
-                )
-                if case_id == "R06":
-                    _require(stat.S_ISLNK(preserved[entry_names[0]].mode), "R06 type differs")
-                elif case_id == "R07":
-                    _require(stat.S_ISSOCK(preserved[entry_names[0]].mode), "R07 type differs")
-                elif case_id == "R08":
-                    _require(stat.S_ISFIFO(preserved[entry_names[0]].mode), "R08 type differs")
-                elif case_id == "R09":
-                    _require(
-                        len(preserved) == 2
-                        and len({(item.device, item.inode) for item in preserved.values()}) == 1
-                        and all(item.link_count == 2 for item in preserved.values()),
-                        "R09 hardlink identity differs",
-                    )
-                elif case_id == "R10":
-                    _require(
-                        preserved[entry_names[0]].mode & SPECIAL_PERMISSION_BITS != 0,
-                        "R10 special mode differs",
-                    )
-
-            if case_id == "R05":
-                _require(
-                    ledger.failure_injected
-                    and ledger.reused_owner is not None
-                    and ledger.reused_snapshot is not None
-                    and ledger.reused_descriptor is not None
-                    and ledger.reused_inspection_count == 0
-                    and ledger.reused_close_count_during_production == 0
-                    and _snapshot_fd(ledger.reused_owner.require()) == ledger.reused_snapshot,
-                    "R05 reused descriptor quarantine differs",
-                )
-
-            _record_generation6_check(f"reject:{label}:{message}")
+                    reuse_record = self._record_for_owner(reused_owner)
+                    if reuse_record.state is _Generation6RDescriptorState.LIVE:
+                        reused_owner.close_once()
+                except BaseException as close_error:
+                    primary.add_note(f"R failed reused-owner cleanup: {close_error!r}")
+            elif type(raw_reuse) is int:
+                raw_closing_number = raw_reuse
+                try:
+                    _GENERATION6_R_REAL_OS_CLOSE(raw_closing_number)
+                except BaseException as close_error:
+                    if raw_closing_number >= 0:
+                        self._uncertain_descriptors.add(raw_closing_number)
+                    primary.add_note(f"R unadopted reuse close uncertainty: {close_error!r}")
+            raise
         finally:
-            ledger.production_active = False
-            if private_root is not None and parent_anchor is not None and root_anchor is not None:
-                if case_id == "R01" and grandparent_anchor is not None:
-                    os.rmdir(parent_component, dir_fd=grandparent_anchor.require())
-                    os.rename(
-                        parent_backup,
-                        parent_component,
-                        src_dir_fd=grandparent_anchor.require(),
-                        dst_dir_fd=grandparent_anchor.require(),
-                    )
-                elif case_id == "R02":
-                    os.rmdir(private_root.root_name, dir_fd=parent_anchor.require())
-                    os.rename(
-                        root_backup,
-                        private_root.root_name,
-                        src_dir_fd=parent_anchor.require(),
-                        dst_dir_fd=parent_anchor.require(),
-                    )
-                elif case_id == "R03" and child is not None:
-                    os.rmdir(child.name, dir_fd=root_anchor.require())
-                    os.rename(
-                        child_backup,
-                        child.name,
-                        src_dir_fd=root_anchor.require(),
-                        dst_dir_fd=root_anchor.require(),
-                    )
+            self._expected_reuse_descriptor = None
+            self.phase = previous_phase
+        ambiguity = ContractError("R close ambiguity was injected after exact numeric reuse")
+        for secondary in uncertainty_errors:
+            ambiguity.add_note(f"R close uncertainty finalization failed: {secondary!r}")
+        raise ambiguity
 
-                if case_id == "R05" and ledger.reused_owner is not None:
-                    private_root._poisoned_descriptors.discard(ledger.reused_owner.require())
-                    ledger.reused_owner.close_once()
+    def _mark_close_uncertain(
+        self,
+        record: _Generation6ROwnerRecord,
+    ) -> tuple[BaseException, ...]:
+        token = record.token
+        record.state = _Generation6RDescriptorState.CLOSE_UNCERTAIN
+        current = self._current_by_descriptor.get(token.descriptor)
+        if current is token:
+            self._current_by_descriptor.pop(token.descriptor)
+        self._uncertain_descriptors.add(token.descriptor)
+        secondary_errors: list[BaseException] = []
+        try:
+            self._revoke_scan_capability(record)
+        except BaseException as error:
+            secondary_errors.append(error)
+        try:
+            if not any(
+                event.owner_ordinal == token.ordinal
+                and event.owner_generation == token.generation
+                and event.operation == "CLOSE_UNCERTAIN"
+                for event in self._journal
+            ):
+                self._append_event(token, "CLOSE_UNCERTAIN")
+        except BaseException as error:
+            secondary_errors.append(error)
+        return tuple(secondary_errors)
 
-                entry_anchor = child_anchor if child_anchor is not None else root_anchor
-                for name in entry_names:
-                    os.unlink(name, dir_fd=entry_anchor.require())
-                if child is not None and child_anchor is not None:
-                    child_anchor.close_once()
-                    os.rmdir(child.name, dir_fd=root_anchor.require())
-                root_anchor.close_once()
-                os.rmdir(private_root.root_name, dir_fd=parent_anchor.require())
-                _generation6_r_require_absent(parent_anchor.require(), private_root.root_name)
-                parent_anchor.close_once()
-                if grandparent_anchor is not None:
-                    grandparent_anchor.close_once()
-        ledger.require_complete()
+    def close_owner_once(self, owner: FdOwner) -> None:
+        _require(self._scope_active, "R owner close is outside its scope")
+        record = self._authorize_live(owner)
+        if self._close_uncertainty_target is record.token:
+            self._inject_close_uncertainty(owner, record)
+        record.close_attempts += 1
+        self._append_event(record.token, "CLOSE_ONCE_BEGIN")
+        try:
+            detached = owner.detach()
+            _require(
+                record.state is _Generation6RDescriptorState.DETACHED
+                and type(detached) is int
+                and detached == record.token.descriptor
+                and record.detached_descriptor == detached
+                and owner.terminal,
+                "R owner close terminality differs",
+            )
+            try:
+                _GENERATION6_R_REAL_OS_CLOSE(detached)
+            except BaseException as error:
+                raise ContractError(f"uncertain {record.token.label} close") from error
+        except BaseException as primary:
+            for secondary in self._mark_close_uncertain(record):
+                primary.add_note(f"R close uncertainty finalization failed: {secondary!r}")
+            raise
+        record.state = _Generation6RDescriptorState.CLOSE_SUCCEEDED
+        self._append_event(record.token, "CLOSE_SUCCEEDED")
 
-    _record_generation6_case_evidence(case_id)
+    def transition_phase(
+        self,
+        expected: _Generation6RPhase,
+        target: _Generation6RPhase,
+    ) -> None:
+        _require(
+            type(expected) is _Generation6RPhase
+            and type(target) is _Generation6RPhase
+            and self.phase is expected,
+            "R authority phase transition source differs",
+        )
+        allowed = {
+            (_Generation6RPhase.SETUP, _Generation6RPhase.SUBJECT),
+            (_Generation6RPhase.SUBJECT, _Generation6RPhase.PRODUCTION),
+            (_Generation6RPhase.PRODUCTION, _Generation6RPhase.REUSE_TEARDOWN),
+            (_Generation6RPhase.PRODUCTION, _Generation6RPhase.TERMINAL),
+            (_Generation6RPhase.REUSE_TEARDOWN, _Generation6RPhase.TERMINAL),
+            (_Generation6RPhase.SETUP, _Generation6RPhase.TERMINAL),
+            (_Generation6RPhase.SUBJECT, _Generation6RPhase.TERMINAL),
+        }
+        _require((expected, target) in allowed, "R authority phase transition differs")
+        self.phase = target
+
+    def close_reused_after_production(self) -> None:
+        _require(
+            self.phase is _Generation6RPhase.REUSE_TEARDOWN
+            and self._reused_owner is not None
+            and self._reused_token is not None,
+            "R reused descriptor teardown state differs",
+        )
+        reused_owner = cast(FdOwner, self._reused_owner)
+        reused_token = cast(_Generation6ROwnerToken, self._reused_token)
+        record: _Generation6ROwnerRecord | None = None
+        primary: BaseException | None = None
+        try:
+            record = self._reauthorize_live(
+                reused_owner,
+                reused_token,
+                operation="REUSE_TEARDOWN_REAUTH_FSTAT",
+            )
+            reused_events = tuple(
+                event
+                for event in self._journal
+                if event.owner_ordinal == reused_token.ordinal
+                and event.owner_generation == reused_token.generation
+            )
+            _require(
+                sum(event.operation == "ACQUISITION_AUTH_FSTAT" for event in reused_events) == 1
+                and not any(
+                    event.phase is _Generation6RPhase.PRODUCTION for event in reused_events
+                ),
+                "R reused descriptor journal claim differs",
+            )
+        except BaseException as error:
+            primary = error
+        if record is not None:
+            try:
+                reused_owner.close_once()
+                _require(
+                    record.state is _Generation6RDescriptorState.CLOSE_SUCCEEDED,
+                    "R reused descriptor close state differs",
+                )
+            except BaseException as close_error:
+                if primary is None:
+                    primary = close_error
+                else:
+                    primary.add_note(f"R reused descriptor cleanup failed: {close_error!r}")
+        if primary is not None:
+            raise primary
+
+    def _release_scandir_proxy(self, proxy: _Generation6RScandirProxy) -> None:
+        proxy_identity = id(proxy)
+        registered = self._live_scandir_proxies.pop(proxy_identity, None)
+        _require(registered is proxy, "R scandir proxy registration differs")
+
+    def scandir(self, path: object = ".") -> _Generation6RScandirProxy:
+        _require(
+            self._scope_active
+            and self.phase is _Generation6RPhase.PRODUCTION
+            and type(path) is int
+            and path > 2,
+            "R scandir selector differs",
+        )
+        descriptor = cast(int, path)
+        capability = self._scan_capabilities_by_descriptor.get(descriptor)
+        _require(
+            capability is not None
+            and capability.parent.descriptor == descriptor
+            and self._scan_capabilities_by_owner_identity.get(capability.owner_identity)
+            is capability
+            and self._current_by_descriptor.get(descriptor) is capability.parent,
+            "R scandir selector has no pre-minted authority",
+        )
+        exact_capability = cast(_Generation6RScandirCapability, capability)
+        candidate_record = self._records_by_owner_identity.get(exact_capability.owner_identity)
+        _require(
+            candidate_record is not None and candidate_record.token is exact_capability.parent,
+            "R scandir capability owner binding differs",
+        )
+        record = cast(_Generation6ROwnerRecord, candidate_record)
+        authorized = self._authorize_live(record.owner, exact_capability.parent)
+        _require(
+            authorized is record
+            and id(authorized.owner) == exact_capability.owner_identity
+            and stat.S_ISDIR(authorized.token.snapshot.mode)
+            and authorized.token.status_flags & os.O_ACCMODE == os.O_RDONLY
+            and not authorized.token.status_flags & os.O_PATH,
+            "R scandir owner record differs",
+        )
+        authorized_descriptor = _GENERATION6_R_CAPTURED_FD_REQUIRE(authorized.owner)
+        _require(
+            authorized_descriptor == descriptor,
+            "R scandir authorized descriptor differs",
+        )
+        self._append_event(authorized.token, "SCANDIR_AUTHORIZED")
+        iterator = _GENERATION6_R_REAL_OS_SCANDIR(authorized_descriptor)
+        proxy: _Generation6RScandirProxy | None = None
+        try:
+            iterator_identity = id(iterator)
+            _require(
+                type(iterator_identity) is int and iterator_identity > 0,
+                "R scandir iterator identity differs",
+            )
+            iterator_ordinal = self._next_iterator_ordinal
+            _require(
+                type(iterator_ordinal) is int and iterator_ordinal > 0,
+                "R scandir iterator ordinal differs",
+            )
+            self._next_iterator_ordinal = iterator_ordinal + 1
+            iterator_token = _Generation6RIteratorToken(
+                iterator_ordinal,
+                iterator_identity,
+                authorized.token,
+                self.phase,
+            )
+            proxy = _Generation6RScandirProxy(self, iterator_token, iterator)
+            proxy_identity = id(proxy)
+            _require(
+                type(proxy_identity) is int
+                and proxy_identity > 0
+                and proxy_identity not in self._live_scandir_proxies,
+                "R scandir proxy identity differs",
+            )
+            self._live_scandir_proxies[proxy_identity] = proxy
+            self._append_event(authorized.token, "SCANDIR_ACQUIRE")
+            return proxy
+        except BaseException as primary:
+            if proxy is not None:
+                try:
+                    proxy.close()
+                except BaseException as close_error:
+                    primary.add_note(f"R scandir adoption close uncertainty: {close_error!r}")
+            else:
+                close_operation = getattr(iterator, "close", None)
+                if callable(close_operation):
+                    try:
+                        close_operation()
+                    except BaseException as close_error:
+                        self._iterator_quarantine.append(iterator)
+                        primary.add_note(f"R scandir adoption close uncertainty: {close_error!r}")
+            raise
+
+
+class _Generation6RScandirProxy(Iterator[os.DirEntry[str]]):
+    """One-close wrapper for an opaque iterator; it never claims an internal fd."""
+
+    def __init__(
+        self,
+        ledger: _Generation6RAuthorityLedger,
+        token: _Generation6RIteratorToken,
+        iterator: object,
+    ) -> None:
+        _require(
+            type(ledger) is _Generation6RAuthorityLedger
+            and type(token) is _Generation6RIteratorToken,
+            "R scandir proxy authority differs",
+        )
+        _require(id(iterator) == token.iterator_identity, "R scandir proxy identity differs")
+        close_operation = getattr(iterator, "close", None)
+        _require(callable(close_operation), "R scandir proxy close authority differs")
+        self._ledger = ledger
+        self._token = token
+        self._iterator = iterator
+        self._close_operation = cast(Callable[[], None], close_operation)
+        self._terminal = False
+        self._close_attempts = 0
+
+    def __iter__(self) -> _Generation6RScandirProxy:
+        return self
+
+    def __next__(self) -> os.DirEntry[str]:
+        _require(not self._terminal, "R scandir proxy is terminal")
+        self._ledger._append_event(self._token.parent, "SCANDIR_NEXT")
+        iterator = cast(Iterator[os.DirEntry[str]], self._iterator)
+        return next(iterator)
+
+    def close(self) -> None:
+        _require(not self._terminal, "R scandir proxy close repeated")
+        self._terminal = True
+        self._close_attempts += 1
+        _require(self._close_attempts == 1, "R scandir proxy close count differs")
+        primary: BaseException | None = None
+        try:
+            self._close_operation()
+        except BaseException as error:
+            primary = error
+            self._ledger._iterator_quarantine.append(self)
+            try:
+                self._ledger._append_event(
+                    self._token.parent,
+                    "SCANDIR_CLOSE_UNCERTAIN",
+                )
+            except BaseException as event_error:
+                primary.add_note(f"R scandir uncertainty journal failed: {event_error!r}")
+        else:
+            try:
+                self._ledger._append_event(
+                    self._token.parent,
+                    "SCANDIR_CLOSE_SUCCEEDED",
+                )
+            except BaseException as event_error:
+                primary = event_error
+        try:
+            self._ledger._release_scandir_proxy(self)
+        except BaseException as release_error:
+            if primary is None:
+                primary = release_error
+            else:
+                primary.add_note(f"R scandir proxy release failed: {release_error!r}")
+        if primary is not None:
+            raise primary
+
+    def __enter__(self) -> _Generation6RScandirProxy:
+        _require(not self._terminal, "R scandir proxy is terminal")
+        return self
+
+    def __exit__(
+        self,
+        error_type: type[BaseException] | None,
+        error: BaseException | None,
+        traceback: object,
+    ) -> None:
+        del error_type, error, traceback
+        self.close()
+
+
+def _generation6_r_socket_detach_handoff(
+    ledger: _Generation6RAuthorityLedger,
+    fixture_socket: socket.socket,
+    *,
+    label: str,
+) -> tuple[FdOwner, _Generation6ROwnerToken]:
+    _require(
+        type(ledger) is _Generation6RAuthorityLedger
+        and ledger._scope_active
+        and ledger.phase is _Generation6RPhase.SETUP
+        and type(fixture_socket) is socket.socket,
+        "R socket handoff authority differs",
+    )
+    _require(
+        socket.socket.detach is _GENERATION6_R_CAPTURED_SOCKET_DETACH
+        and socket.socket.fileno is _GENERATION6_R_CAPTURED_SOCKET_FILENO
+        and _snapshot_stat is _GENERATION6_R_CAPTURED_SNAPSHOT_STAT,
+        "R socket handoff captured identity differs",
+    )
+    exact_label = _ascii(label, "R socket handoff label")
+    _require(exact_label != "", "R socket handoff label is empty")
+    socket_identity = id(fixture_socket)
+    _require(
+        type(socket_identity) is int
+        and socket_identity > 0
+        and socket_identity not in ledger._socket_handoffs,
+        "R socket handoff identity differs",
+    )
+    ledger._socket_handoffs[socket_identity] = fixture_socket
+    descriptor = _GENERATION6_R_CAPTURED_SOCKET_FILENO(fixture_socket)
+    _require(type(descriptor) is int and descriptor > 2, "R socket fileno differs")
+    before = _GENERATION6_R_CAPTURED_SNAPSHOT_STAT(_GENERATION6_R_REAL_OS_FSTAT(descriptor))
+    descriptor_flags = _GENERATION6_R_REAL_FCNTL(descriptor, fcntl.F_GETFD)
+    status_flags = _GENERATION6_R_REAL_FCNTL(descriptor, fcntl.F_GETFL)
+    _require(
+        stat.S_ISSOCK(before.mode)
+        and type(descriptor_flags) is int
+        and descriptor_flags == fcntl.FD_CLOEXEC
+        and type(status_flags) is int
+        and status_flags >= 0,
+        "R socket handoff authentication differs",
+    )
+    detached = _GENERATION6_R_CAPTURED_SOCKET_DETACH(fixture_socket)
+    _require(
+        type(detached) is int and detached == descriptor and detached > 2,
+        "R socket detach result differs",
+    )
+    owner = FdOwner(detached, exact_label)
+    try:
+        _require(
+            _GENERATION6_R_CAPTURED_SOCKET_FILENO(fixture_socket) == -1,
+            "R detached socket remained live",
+        )
+        token = ledger._token_after_immediate_acquisition(owner)
+        _require(
+            token.descriptor == detached
+            and token.snapshot == before
+            and token.fd_flags == descriptor_flags
+            and token.status_flags == status_flags,
+            "R socket handoff ownership differs",
+        )
+    except BaseException as primary:
+        try:
+            owner.close_once()
+        except BaseException as close_error:
+            primary.add_note(f"R socket handoff close uncertainty: {close_error!r}")
+        raise
+    return owner, token
+
+
+class _Generation6RAuthorityScope:
+    """Install exactly four test-only patches and restore every one independently."""
+
+    def __init__(self, ledger: _Generation6RAuthorityLedger) -> None:
+        _require(type(ledger) is _Generation6RAuthorityLedger, "R scope ledger differs")
+        self.ledger = ledger
+        self.active = False
+
+        def initialize(
+            owner: FdOwner,
+            descriptor: int,
+            label: str,
+            terminal: bool = False,
+        ) -> None:
+            ledger.initialize_owner(owner, descriptor, label, terminal)
+
+        def detach(owner: FdOwner) -> int:
+            return ledger.detach_owner(owner)
+
+        def close_once(owner: FdOwner) -> None:
+            ledger.close_owner_once(owner)
+
+        def scandir(path: object = ".") -> _Generation6RScandirProxy:
+            return ledger.scandir(path)
+
+        self._initialize = initialize
+        self._detach = detach
+        self._close_once = close_once
+        self._scandir = scandir
+        self._bindings = (
+            (FdOwner, "__init__", self._initialize, _GENERATION6_R_CAPTURED_FD_INIT),
+            (FdOwner, "detach", self._detach, _GENERATION6_R_CAPTURED_FD_DETACH),
+            (
+                FdOwner,
+                "close_once",
+                self._close_once,
+                _GENERATION6_R_CAPTURED_FD_CLOSE_ONCE,
+            ),
+            (os, "scandir", self._scandir, _GENERATION6_R_REAL_OS_SCANDIR),
+        )
+        self._patches = (
+            _Generation6SelftestPatch(FdOwner, "__init__", self._initialize),
+            _Generation6SelftestPatch(FdOwner, "detach", self._detach),
+            _Generation6SelftestPatch(FdOwner, "close_once", self._close_once),
+            _Generation6SelftestPatch(os, "scandir", self._scandir),
+        )
+
+    @staticmethod
+    def _require_original_identities() -> None:
+        _require(
+            FdOwner.__init__ is _GENERATION6_R_CAPTURED_FD_INIT
+            and FdOwner.require is _GENERATION6_R_CAPTURED_FD_REQUIRE
+            and FdOwner.detach is _GENERATION6_R_CAPTURED_FD_DETACH
+            and FdOwner.close_once is _GENERATION6_R_CAPTURED_FD_CLOSE_ONCE
+            and socket.socket.detach is _GENERATION6_R_CAPTURED_SOCKET_DETACH
+            and socket.socket.fileno is _GENERATION6_R_CAPTURED_SOCKET_FILENO
+            and _snapshot_stat is _GENERATION6_R_CAPTURED_SNAPSHOT_STAT
+            and os.close is _GENERATION6_R_REAL_OS_CLOSE
+            and os.open is _GENERATION6_R_REAL_OS_OPEN
+            and os.scandir is _GENERATION6_R_REAL_OS_SCANDIR
+            and os.fstat is _GENERATION6_R_REAL_OS_FSTAT
+            and fcntl.fcntl is _GENERATION6_R_REAL_FCNTL,
+            "R authority original identity differs",
+        )
+
+    def _restore_all(self, primary: BaseException | None) -> BaseException | None:
+        def preserve(error: BaseException, label: str) -> None:
+            nonlocal primary
+            if primary is None:
+                primary = error
+            else:
+                primary.add_note(f"{label}: {error!r}")
+
+        for proxy in tuple(self.ledger._live_scandir_proxies.values()):
+            try:
+                proxy.close()
+            except BaseException as close_error:
+                preserve(close_error, "R live scandir proxy cleanup failed")
+        if self.ledger._live_scandir_proxies:
+            preserve(
+                ContractError("R live scandir proxies survived authority restoration"),
+                "R scandir proxy inventory restoration failed",
+            )
+            self.ledger._live_scandir_proxies.clear()
+        self.ledger._scope_active = False
+        self.active = False
+        for patch, binding in reversed(tuple(zip(self._patches, self._bindings, strict=True))):
+            target, name, replacement, original = binding
+            observed: object = _PID_SENTINEL
+            try:
+                observed = getattr(target, name)
+            except BaseException as inspect_error:
+                preserve(inspect_error, f"R {name} installed binding inspection failed")
+            if patch.active and patch.original is not original:
+                preserve(
+                    ContractError(f"R {name} patch original identity differs"),
+                    f"R {name} patch state audit failed",
+                )
+            if patch.active and observed is replacement:
+                try:
+                    patch.__exit__(None, None, None)
+                except BaseException as restore_error:
+                    preserve(restore_error, f"R {name} patch exit failed")
+            elif patch.active or observed is replacement:
+                preserve(
+                    ContractError(f"R {name} patch activity/binding state differs"),
+                    f"R {name} installed binding audit failed",
+                )
+            elif observed is not original:
+                preserve(
+                    ContractError(f"R {name} foreign binding replaced authority"),
+                    f"R {name} foreign binding audit failed",
+                )
+            try:
+                setattr(target, name, original)
+            except BaseException as restore_error:
+                preserve(restore_error, f"R {name} fixed restoration failed")
+            try:
+                _require(
+                    getattr(target, name) is original,
+                    f"R {name} fixed restoration readback differs",
+                )
+            except BaseException as restore_error:
+                preserve(restore_error, f"R {name} restoration audit failed")
+            expected_marker = (
+                id(patch),
+                id(target),
+                name,
+                id(original),
+                id(replacement),
+            )
+            related_markers = tuple(
+                marker
+                for marker in _GENERATION6_ACTIVE_PATCHES
+                if marker[0] == id(patch) or (marker[1] == id(target) and marker[2] == name)
+            )
+            if related_markers:
+                preserve(
+                    ContractError(
+                        f"R {name} patch marker survived restoration: "
+                        f"count={len(related_markers)} exact={related_markers.count(expected_marker)}"
+                    ),
+                    f"R {name} patch marker reconciliation failed",
+                )
+            for marker in related_markers:
+                try:
+                    _GENERATION6_ACTIVE_PATCHES.remove(marker)
+                except BaseException as restore_error:
+                    preserve(restore_error, f"R {name} patch marker removal failed")
+            patch.original = _PID_SENTINEL
+            patch.active = False
+        if _GENERATION6_ACTIVE_PATCHES:
+            preserve(
+                ContractError("R unrelated patch markers survived exclusive restoration"),
+                "R patch marker inventory restoration failed",
+            )
+            _GENERATION6_ACTIVE_PATCHES.clear()
+        try:
+            self._require_original_identities()
+            _require(
+                all(not patch.active and patch.original is _PID_SENTINEL for patch in self._patches)
+                and not _GENERATION6_ACTIVE_PATCHES,
+                "R patch restoration state differs",
+            )
+        except BaseException as restore_error:
+            preserve(restore_error, "R patch restoration audit failed")
+        return primary
+
+    def __enter__(self) -> _Generation6RAuthorityScope:
+        _require(
+            not self.active and not self.ledger._scope_active and not _GENERATION6_ACTIVE_PATCHES,
+            "R authority scope entry state differs",
+        )
+        self._require_original_identities()
+        _require(
+            len(self._patches) == 4
+            and len(self._bindings) == 4
+            and len({(id(patch.target), patch.name) for patch in self._patches}) == 4
+            and all(
+                patch.target is target
+                and patch.name == name
+                and patch.replacement is replacement
+                and getattr(target, name) is original
+                for patch, (target, name, replacement, original) in zip(
+                    self._patches,
+                    self._bindings,
+                    strict=True,
+                )
+            )
+            and all(
+                not patch.active and patch.original is _PID_SENTINEL for patch in self._patches
+            ),
+            "R authority patch inventory differs",
+        )
+        self.ledger._scope_active = True
+        try:
+            for patch in self._patches:
+                patch.__enter__()
+        except BaseException as primary:
+            restored = self._restore_all(primary)
+            if restored is primary:
+                raise
+            raise cast(BaseException, restored) from primary
+        self.active = True
+        return self
+
+    def __exit__(
+        self,
+        error_type: type[BaseException] | None,
+        error: BaseException | None,
+        traceback: object,
+    ) -> None:
+        del error_type, traceback
+        primary = error
+        try:
+            _require(self.active and self.ledger._scope_active, "R authority scope is absent")
+        except BaseException as state_error:
+            if primary is None:
+                primary = state_error
+            else:
+                primary.add_note(f"R authority scope exit state failed: {state_error!r}")
+        restored = self._restore_all(primary)
+        if error is None and restored is not None:
+            raise restored
+
+
+def _generation6_r_authority_source_gates(source: str) -> None:
+    """Uncalled static proof for the deliberately integration-blocked R authority core."""
+
+    _require(
+        type(source) is str and "\x00" not in source and 0 < len(source) <= 2_000_000,
+        "R authority source input differs",
+    )
+    syntax = ast.parse(source, filename="tests/ci_shard_runner.py", mode="exec")
+
+    def top_function(name: str) -> ast.FunctionDef:
+        matches = tuple(
+            node for node in syntax.body if isinstance(node, ast.FunctionDef) and node.name == name
+        )
+        _require(len(matches) == 1, f"R static function inventory differs: {name}")
+        return matches[0]
+
+    def top_class(name: str) -> ast.ClassDef:
+        matches = tuple(
+            node for node in syntax.body if isinstance(node, ast.ClassDef) and node.name == name
+        )
+        _require(len(matches) == 1, f"R static class inventory differs: {name}")
+        return matches[0]
+
+    def class_method(class_node: ast.ClassDef, name: str) -> ast.FunctionDef:
+        matches = tuple(
+            node
+            for node in class_node.body
+            if isinstance(node, ast.FunctionDef) and node.name == name
+        )
+        _require(len(matches) == 1, f"R static method inventory differs: {name}")
+        return matches[0]
+
+    def calls(node: ast.AST) -> tuple[ast.Call, ...]:
+        return tuple(candidate for candidate in ast.walk(node) if isinstance(candidate, ast.Call))
+
+    def call_targets(node: ast.AST) -> tuple[str, ...]:
+        return tuple(ast.unparse(candidate.func) for candidate in calls(node))
+
+    capture_values = {
+        "_GENERATION6_R_CAPTURED_FD_INIT": "FdOwner.__init__",
+        "_GENERATION6_R_CAPTURED_FD_REQUIRE": "FdOwner.require",
+        "_GENERATION6_R_CAPTURED_FD_DETACH": "FdOwner.detach",
+        "_GENERATION6_R_CAPTURED_FD_CLOSE_ONCE": "FdOwner.close_once",
+        "_GENERATION6_R_CAPTURED_SOCKET_DETACH": "socket.socket.detach",
+        "_GENERATION6_R_CAPTURED_SOCKET_FILENO": "socket.socket.fileno",
+        "_GENERATION6_R_CAPTURED_SNAPSHOT_STAT": "_snapshot_stat",
+        "_GENERATION6_R_REAL_OS_CLOSE": "os.close",
+        "_GENERATION6_R_REAL_OS_OPEN": "os.open",
+        "_GENERATION6_R_REAL_OS_SCANDIR": "os.scandir",
+        "_GENERATION6_R_REAL_OS_FSTAT": "os.fstat",
+        "_GENERATION6_R_REAL_FCNTL": "fcntl.fcntl",
+    }
+    capture_nodes: dict[str, ast.AnnAssign] = {}
+    for name, expected_value in capture_values.items():
+        matches = tuple(
+            node
+            for node in syntax.body
+            if isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == name
+        )
+        _require(len(matches) == 1, f"R static capture inventory differs: {name}")
+        capture = matches[0]
+        _require(
+            isinstance(capture.annotation, ast.Name)
+            and capture.annotation.id == "Final"
+            and capture.value is not None
+            and ast.unparse(capture.value) == expected_value,
+            f"R static capture binding differs: {name}",
+        )
+        capture_nodes[name] = capture
+
+    class_names = (
+        "_Generation6RPhase",
+        "_Generation6RDescriptorState",
+        "_Generation6ROwnerToken",
+        "_Generation6ROwnerRecord",
+        "_Generation6RAuthorityEvent",
+        "_Generation6RIteratorToken",
+        "_Generation6RScandirCapability",
+        "_Generation6RAuthorityLedger",
+        "_Generation6RScandirProxy",
+        "_Generation6RAuthorityScope",
+    )
+    classes = {name: top_class(name) for name in class_names}
+    phase_class = classes["_Generation6RPhase"]
+    state_class = classes["_Generation6RDescriptorState"]
+    _require(
+        all(capture.lineno < phase_class.lineno for capture in capture_nodes.values())
+        and tuple(ast.unparse(base) for base in phase_class.bases) == ("str", "Enum")
+        and tuple(ast.unparse(base) for base in state_class.bases) == ("str", "Enum"),
+        "R static enum or capture ordering differs",
+    )
+
+    def enum_members(class_node: ast.ClassDef) -> tuple[tuple[str, object], ...]:
+        result: list[tuple[str, object]] = []
+        for node in class_node.body:
+            if (
+                isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Constant)
+            ):
+                result.append((node.targets[0].id, node.value.value))
+        return tuple(result)
+
+    _require(
+        enum_members(phase_class)
+        == tuple(
+            (value, value)
+            for value in (
+                "SETUP",
+                "SUBJECT",
+                "PRODUCTION",
+                "INJECTION",
+                "REUSE_TEARDOWN",
+                "TERMINAL",
+            )
+        )
+        and enum_members(state_class)
+        == tuple(
+            (value, value)
+            for value in (
+                "LIVE",
+                "DETACHED",
+                "CLOSE_SUCCEEDED",
+                "CLOSE_UNCERTAIN",
+            )
+        ),
+        "R static enum members differ",
+    )
+
+    owner_token_class = classes["_Generation6ROwnerToken"]
+    token_fields = tuple(
+        node.target.id
+        for node in owner_token_class.body
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+    )
+    token_decorators = tuple(ast.unparse(value) for value in owner_token_class.decorator_list)
+    _require(
+        token_fields
+        == (
+            "ordinal",
+            "generation",
+            "owner_identity",
+            "descriptor",
+            "label",
+            "acquired_phase",
+            "snapshot",
+            "fd_flags",
+            "status_flags",
+        )
+        and token_decorators == ("dataclass(frozen=True, eq=False)",)
+        and tuple(
+            ast.unparse(value) for value in classes["_Generation6RScandirCapability"].decorator_list
+        )
+        == ("dataclass(frozen=True, eq=False)",)
+        and tuple(
+            ast.unparse(value) for value in classes["_Generation6ROwnerRecord"].decorator_list
+        )
+        == ("dataclass",),
+        "R static token mutability or field inventory differs",
+    )
+
+    ledger_class = classes["_Generation6RAuthorityLedger"]
+    ledger_init = class_method(ledger_class, "__init__")
+    ledger_init_source = ast.unparse(ledger_init)
+    _require(
+        all(
+            fragment in ledger_init_source
+            for fragment in (
+                "self._generation_by_descriptor: dict[int, int] = {}",
+                "self._records_by_owner_identity",
+                "self._records_by_ordinal",
+                "self._current_by_descriptor",
+                "self._scan_capabilities_by_owner_identity",
+                "self._scan_capabilities_by_descriptor",
+                "self._live_scandir_proxies",
+                "self._uncertain_descriptors",
+            )
+        ),
+        "R static ledger index inventory differs",
+    )
+
+    initialize_owner = class_method(ledger_class, "initialize_owner")
+    initialize_source = ast.unparse(initialize_owner)
+    initialize_tries = tuple(node for node in initialize_owner.body if isinstance(node, ast.Try))
+    _require(
+        len(initialize_tries) == 1
+        and initialize_owner.body[-1] is initialize_tries[0]
+        and not any(
+            isinstance(candidate, ast.Call)
+            and isinstance(candidate.func, ast.Name)
+            and candidate.func.id == "_require"
+            for statement in initialize_owner.body[:-1]
+            for candidate in ast.walk(statement)
+        )
+        and "offered_unclaimed_descriptor" in initialize_source
+        and "current is None or partial_is_current" in initialize_source
+        and "partial_record=partial_record" in initialize_source
+        and "owner_identity not in self._records_by_owner_identity" in initialize_source
+        and call_targets(initialize_owner).count("_GENERATION6_R_REAL_OS_FSTAT") == 1
+        and call_targets(initialize_owner).count("_GENERATION6_R_REAL_FCNTL") == 2
+        and call_targets(initialize_owner).count("_Generation6RScandirCapability") == 1,
+        "R static total acquisition transaction differs",
+    )
+    partial_remove = class_method(ledger_class, "_remove_partial_registration")
+    partial_remove_source = ast.unparse(partial_remove)
+    registration_cleanup = class_method(ledger_class, "_close_registration_failure")
+    registration_cleanup_source = ast.unparse(registration_cleanup)
+    registration_cleanup_calls = calls(registration_cleanup)
+    registration_close_lines = tuple(
+        call.lineno
+        for call in registration_cleanup_calls
+        if ast.unparse(call.func) == "_GENERATION6_R_REAL_OS_CLOSE"
+    )
+    registration_poison_lines = tuple(
+        call.lineno
+        for call in registration_cleanup_calls
+        if ast.unparse(call.func) == "self._uncertain_descriptors.add"
+    )
+    _require(
+        "record is expected" in partial_remove_source
+        and "current is expected.token" in partial_remove_source
+        and "capability.parent is expected.token" in partial_remove_source
+        and call_targets(registration_cleanup).count("_GENERATION6_R_CAPTURED_FD_DETACH") == 1
+        and len(registration_close_lines) == 1
+        and len(registration_poison_lines) == 2
+        and all(line > registration_close_lines[0] for line in registration_poison_lines)
+        and "if not initialized or cleanup_error is None" in registration_cleanup_source,
+        "R static registration cleanup authority differs",
+    )
+
+    record_for_owner = class_method(ledger_class, "_record_for_owner")
+    authorize_live = class_method(ledger_class, "_authorize_live")
+    authorize_source = ast.unparse(authorize_live)
+    immediate_token = class_method(ledger_class, "_token_after_immediate_acquisition")
+    _require(
+        "owner_identity = id(owner)" in ast.unparse(record_for_owner)
+        and "self._records_by_owner_identity.get(owner_identity)" in ast.unparse(record_for_owner)
+        and "record.token is token" in authorize_source
+        and "self._records_by_ordinal.get(exact_token.ordinal) is record" in authorize_source
+        and "self._generation_by_descriptor.get(exact_token.descriptor) == exact_token.generation"
+        in authorize_source
+        and "owner.label == exact_token.label" in authorize_source
+        and "self._current_by_descriptor.get(exact_token.descriptor) is exact_token"
+        in authorize_source
+        and "_GENERATION6_R_REAL_OS_FSTAT" not in call_targets(authorize_live)
+        and "_GENERATION6_R_REAL_FCNTL" not in call_targets(authorize_live),
+        "R static exact live authorization differs",
+    )
+    _require(
+        ast.unparse(immediate_token).endswith("return self._authorize_live(owner).token"),
+        "R static immediate acquisition authorization differs",
+    )
+
+    reauthorize_live = class_method(ledger_class, "_reauthorize_live")
+    reauthorize_source = ast.unparse(reauthorize_live)
+    _require(
+        call_targets(reauthorize_live).count("_GENERATION6_R_REAL_OS_FSTAT") == 1
+        and call_targets(reauthorize_live).count("_GENERATION6_R_REAL_FCNTL") == 2
+        and "self.phase is not _Generation6RPhase.PRODUCTION" in reauthorize_source,
+        "R static post-production reauthentication differs",
+    )
+
+    close_owner = class_method(ledger_class, "close_owner_once")
+    close_targets = call_targets(close_owner)
+    close_begin = tuple(
+        node
+        for node in close_owner.body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and ast.unparse(node.value.func) == "self._append_event"
+        and any(
+            isinstance(argument, ast.Constant) and argument.value == "CLOSE_ONCE_BEGIN"
+            for argument in node.value.args
+        )
+    )
+    close_guard = tuple(
+        node
+        for node in close_owner.body
+        if isinstance(node, ast.Try)
+        and any(ast.unparse(call.func) == "owner.detach" for call in calls(node))
+    )
+    _require(
+        len(close_begin) == 1
+        and len(close_guard) == 1
+        and close_owner.body.index(close_guard[0]) == close_owner.body.index(close_begin[0]) + 1
+        and close_targets.count("owner.detach") == 1
+        and close_targets.count("_GENERATION6_R_REAL_OS_CLOSE") == 1
+        and close_targets.count("_GENERATION6_R_CAPTURED_FD_CLOSE_ONCE") == 0
+        and call_targets(close_guard[0]).count("self._mark_close_uncertain") == 1,
+        "R static normal close one-call guard differs",
+    )
+
+    inject_close = class_method(ledger_class, "_inject_close_uncertainty")
+    inject_targets = call_targets(inject_close)
+    inject_source = ast.unparse(inject_close)
+    injected_close_guards = tuple(
+        node
+        for node in inject_close.body
+        if isinstance(node, ast.Try)
+        and any(ast.unparse(call.func) == "owner.detach" for call in calls(node))
+    )
+    open_calls = tuple(
+        call
+        for call in calls(inject_close)
+        if ast.unparse(call.func) == "_GENERATION6_R_REAL_OS_OPEN"
+    )
+    owner_adoptions = tuple(
+        call for call in calls(inject_close) if ast.unparse(call.func) == "FdOwner"
+    )
+    raw_release_assignments = tuple(
+        node
+        for node in ast.walk(inject_close)
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "raw_reuse" for target in node.targets
+        )
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "_PID_SENTINEL"
+    )
+    _require(
+        len(injected_close_guards) == 1
+        and call_targets(injected_close_guards[0]).count("owner.detach") == 1
+        and call_targets(injected_close_guards[0]).count("_GENERATION6_R_REAL_OS_CLOSE") == 1
+        and call_targets(injected_close_guards[0]).count("self._mark_close_uncertain") == 1
+        and len(open_calls) == len(owner_adoptions) == len(raw_release_assignments) == 1
+        and open_calls[0].lineno < raw_release_assignments[0].lineno < owner_adoptions[0].lineno
+        and "self.phase = _Generation6RPhase.INJECTION" in inject_source
+        and "reused_token.generation == token.generation + 1" in inject_source
+        and "event.phase is _Generation6RPhase.PRODUCTION" in inject_source
+        and "_GENERATION6_R_REAL_OS_FSTAT" not in inject_targets
+        and "_GENERATION6_R_REAL_FCNTL" not in inject_targets,
+        "R static close-ambiguity adoption differs",
+    )
+
+    mark_uncertain = class_method(ledger_class, "_mark_close_uncertain")
+    mark_calls = calls(mark_uncertain)
+    state_assignments = tuple(
+        node
+        for node in ast.walk(mark_uncertain)
+        if isinstance(node, ast.Assign)
+        and any(ast.unparse(target) == "record.state" for target in node.targets)
+        and ast.unparse(node.value) == "_Generation6RDescriptorState.CLOSE_UNCERTAIN"
+    )
+    current_removals = tuple(
+        call for call in mark_calls if ast.unparse(call.func) == "self._current_by_descriptor.pop"
+    )
+    poison_additions = tuple(
+        call for call in mark_calls if ast.unparse(call.func) == "self._uncertain_descriptors.add"
+    )
+    revoke_calls = tuple(
+        call for call in mark_calls if ast.unparse(call.func) == "self._revoke_scan_capability"
+    )
+    _require(
+        len(state_assignments) == len(current_removals) == len(poison_additions) == 1
+        and len(revoke_calls) == 1
+        and max(
+            state_assignments[0].lineno,
+            current_removals[0].lineno,
+            poison_additions[0].lineno,
+        )
+        < revoke_calls[0].lineno
+        and "secondary_errors.append(error)" in ast.unparse(mark_uncertain),
+        "R static fail-closed uncertainty ordering differs",
+    )
+
+    scandir = class_method(ledger_class, "scandir")
+    scandir_source = ast.unparse(scandir)
+    scandir_targets = call_targets(scandir)
+    _require(
+        "self._scan_capabilities_by_descriptor.get(descriptor)" in scandir_source
+        and "self._current_by_descriptor.get(descriptor) is capability.parent" in scandir_source
+        and "self._records_by_owner_identity.get(exact_capability.owner_identity)" in scandir_source
+        and "candidate_record.token is exact_capability.parent" in scandir_source
+        and "self._authorize_live(record.owner, exact_capability.parent)" in scandir_source
+        and scandir_targets.count("_GENERATION6_R_CAPTURED_FD_REQUIRE") == 1
+        and scandir_targets.count("_GENERATION6_R_REAL_OS_SCANDIR") == 1
+        and "_GENERATION6_R_REAL_OS_FSTAT" not in scandir_targets
+        and "_GENERATION6_R_REAL_FCNTL" not in scandir_targets
+        and "self._live_scandir_proxies[proxy_identity] = proxy" in scandir_source
+        and "SCANDIR_AUTHORIZED" in scandir_source
+        and "SCANDIR_ACQUIRE" in scandir_source,
+        "R static scandir selector authority differs",
+    )
+    release_proxy = class_method(ledger_class, "_release_scandir_proxy")
+    proxy_class = classes["_Generation6RScandirProxy"]
+    proxy_close = class_method(proxy_class, "close")
+    _require(
+        "self._live_scandir_proxies.pop(proxy_identity, None)" in ast.unparse(release_proxy)
+        and call_targets(proxy_close).count("self._close_operation") == 1
+        and call_targets(proxy_close).count("self._ledger._release_scandir_proxy") == 1
+        and "self._terminal = True" in ast.unparse(proxy_close)
+        and "self._close_attempts == 1" in ast.unparse(proxy_close),
+        "R static opaque iterator one-close authority differs",
+    )
+
+    close_reused = class_method(ledger_class, "close_reused_after_production")
+    close_reused_source = ast.unparse(close_reused)
+    _require(
+        call_targets(close_reused).count("self._reauthorize_live") == 1
+        and call_targets(close_reused).count("reused_owner.close_once") == 1
+        and "self.phase is _Generation6RPhase.REUSE_TEARDOWN" in close_reused_source
+        and "event.phase is _Generation6RPhase.PRODUCTION" in close_reused_source
+        and "if record is not None" in close_reused_source,
+        "R static reused-descriptor teardown claim differs",
+    )
+
+    fd_owner_class = top_class("FdOwner")
+    original_close = class_method(fd_owner_class, "close_once")
+    _require(
+        call_targets(original_close).count("self.detach") == 1
+        and call_targets(original_close).count("os.close") == 1,
+        "R static captured FdOwner close semantics differ",
+    )
+
+    scope_class = classes["_Generation6RAuthorityScope"]
+    scope_init = class_method(scope_class, "__init__")
+    nested_patch_closures = tuple(
+        node.name for node in scope_init.body if isinstance(node, ast.FunctionDef)
+    )
+    patch_calls = tuple(
+        call
+        for call in calls(scope_init)
+        if isinstance(call.func, ast.Name) and call.func.id == "_Generation6SelftestPatch"
+    )
+    patch_arguments = tuple(
+        tuple(ast.unparse(argument) for argument in call.args) for call in patch_calls
+    )
+    _require(
+        nested_patch_closures == ("initialize", "detach", "close_once", "scandir")
+        and patch_arguments
+        == (
+            ("FdOwner", "'__init__'", "self._initialize"),
+            ("FdOwner", "'detach'", "self._detach"),
+            ("FdOwner", "'close_once'", "self._close_once"),
+            ("os", "'scandir'", "self._scandir"),
+        ),
+        "R static exact-four patch inventory differs",
+    )
+    restore_all = class_method(scope_class, "_restore_all")
+    restore_source = ast.unparse(restore_all)
+    scope_exit = class_method(scope_class, "__exit__")
+    original_identity_source = ast.unparse(
+        class_method(scope_class, "_require_original_identities")
+    )
+    _require(
+        "for proxy in tuple(self.ledger._live_scandir_proxies.values())" in restore_source
+        and "reversed(tuple(zip(self._patches, self._bindings, strict=True)))" in restore_source
+        and "observed is not original" in restore_source
+        and "setattr(target, name, original)" in restore_source
+        and "getattr(target, name) is original" in restore_source
+        and "_GENERATION6_ACTIVE_PATCHES.clear()" in restore_source
+        and call_targets(scope_exit).count("self._restore_all") == 1
+        and all(value in original_identity_source for value in capture_values)
+        and "FdOwner.require is _GENERATION6_R_CAPTURED_FD_REQUIRE" in original_identity_source,
+        "R static composite restoration differs",
+    )
+
+    socket_handoff = top_function("_generation6_r_socket_detach_handoff")
+    socket_source = ast.unparse(socket_handoff)
+    _require(
+        call_targets(socket_handoff).count("_GENERATION6_R_CAPTURED_SOCKET_DETACH") == 1
+        and call_targets(socket_handoff).count("_GENERATION6_R_CAPTURED_SOCKET_FILENO") == 2
+        and call_targets(socket_handoff).count("_GENERATION6_R_CAPTURED_SNAPSHOT_STAT") == 1
+        and "owner = FdOwner(detached, exact_label)" in socket_source,
+        "R static socket handoff differs",
+    )
+
+    authority_nodes: tuple[ast.AST, ...] = (
+        *capture_nodes.values(),
+        *classes.values(),
+        socket_handoff,
+    )
+    authority_calls = tuple(call for node in authority_nodes for call in calls(node))
+    authority_targets = tuple(ast.unparse(call.func) for call in authority_calls)
+    authority_source = "\n".join(ast.unparse(node) for node in authority_nodes)
+    _require(
+        not any(
+            target
+            in {
+                "os.close",
+                "os.open",
+                "os.fstat",
+                "fcntl.fcntl",
+                "os.unlink",
+                "os.rmdir",
+                "os.rename",
+                "os.replace",
+                "os.stat",
+                "os.dup",
+                "os.dup2",
+                "os.dup3",
+            }
+            for target in authority_targets
+        )
+        and authority_targets.count("_GENERATION6_R_CAPTURED_FD_CLOSE_ONCE") == 0
+        and "_pending_scandir_permit" not in authority_source
+        and "_uncertain_descriptors.discard" not in authority_source
+        and "_uncertain_descriptors.remove" not in authority_source
+        and "_uncertain_descriptors.clear" not in authority_source,
+        "R static forbidden syscall or poison mutation differs",
+    )
+
+    stub = top_function("_selftest_r_case")
+    _require(
+        len(stub.body) == 1
+        and isinstance(stub.body[0], ast.Raise)
+        and isinstance(stub.body[0].exc, ast.Call)
+        and isinstance(stub.body[0].exc.func, ast.Name)
+        and stub.body[0].exc.func.id == "ContractError"
+        and len(stub.body[0].exc.args) == 1
+        and isinstance(stub.body[0].exc.args[0], ast.Constant)
+        and stub.body[0].exc.args[0].value == "Generation-6 R authority integration is blocked",
+        "R static blocked stub differs",
+    )
+    full_calls = tuple(call for node in syntax.body for call in calls(node))
+    forbidden_runtime_constructors = {
+        "_selftest_r_case",
+        "_Generation6RAuthorityLedger",
+        "_Generation6RAuthorityScope",
+        "_generation6_r_socket_detach_handoff",
+        "_generation6_r_authority_source_gates",
+    }
+    _require(
+        not any(ast.unparse(call.func) in forbidden_runtime_constructors for call in full_calls),
+        "R static integration block has a runtime call site",
+    )
+
+    driver_function = top_function("_run_generation6_case_body_for_test")
+    driver_assignments = tuple(
+        node
+        for node in driver_function.body
+        if isinstance(node, ast.AnnAssign)
+        and isinstance(node.target, ast.Name)
+        and node.target.id == "drivers"
+        and isinstance(node.value, ast.Dict)
+    )
+    _require(
+        len(driver_assignments) == 1
+        and all(
+            not (isinstance(key, ast.Constant) and key.value == "R")
+            for key in cast(ast.Dict, driver_assignments[0].value).keys
+        )
+        and "_selftest_r_case" not in ast.unparse(driver_assignments[0]),
+        "R static runtime driver is unexpectedly wired",
+    )
+
+    protocol_groups = tuple(
+        node
+        for node in syntax.body
+        if isinstance(node, ast.AnnAssign)
+        and isinstance(node.target, ast.Name)
+        and node.target.id == "GENERATION6_PROTOCOL_CASE_GROUPS"
+    )
+    r_rejections = tuple(
+        node
+        for node in syntax.body
+        if isinstance(node, ast.AnnAssign)
+        and isinstance(node.target, ast.Name)
+        and node.target.id == "_GENERATION6_R_REJECTIONS"
+        and isinstance(node.value, ast.Dict)
+    )
+    temporary_unwired = tuple(
+        node
+        for node in syntax.body
+        if isinstance(node, ast.AnnAssign)
+        and isinstance(node.target, ast.Name)
+        and node.target.id == "_GENERATION6_TEMPORARILY_UNWIRED_CASES"
+    )
+    _require(
+        len(protocol_groups) == len(r_rejections) == len(temporary_unwired) == 1
+        and "_generation6_case_ids('R', 24)" in ast.unparse(protocol_groups[0])
+        and tuple(
+            key.value
+            for key in cast(ast.Dict, r_rejections[0].value).keys
+            if isinstance(key, ast.Constant) and type(key.value) is str
+        )
+        == tuple(f"R{ordinal:02d}" for ordinal in range(1, 13))
+        and "_generation6_case_ids('R'" not in ast.unparse(temporary_unwired[0]),
+        "R static R13-R24 registry block differs",
+    )
+
+    process_state = top_function("_generation6_process_state")
+    process_state_source = ast.unparse(process_state)
+    _require(
+        all(
+            fragment in process_state_source
+            for fragment in (
+                "('runner.FdOwner.__init__', FdOwner, '__init__')",
+                "('runner.FdOwner.require', FdOwner, 'require')",
+                "('runner.FdOwner.detach', FdOwner, 'detach')",
+                "('runner.FdOwner.close_once', FdOwner, 'close_once')",
+            )
+        ),
+        "R static process-reset FdOwner authority differs",
+    )
+
+
+# R-AUTH is intentionally integration-blocked until its namespace journal and teardown
+# authority are independently reviewed.  This stub must remain unreachable from dispatch.
+def _selftest_r_case(case_id: str, pytest_root: Path) -> None:
+    raise ContractError("Generation-6 R authority integration is blocked")
 
 
 def _selftest_o_write_case(
@@ -21810,7 +23012,6 @@ def _run_generation6_case_body_for_test(case_id: str, pytest_root: Path) -> None
         "O": _selftest_o_case,
         "F": _selftest_f_case,
         "P": _selftest_p_case,
-        "R": _selftest_r_case,
         "G": _selftest_g_case,
         "Q": _selftest_q_case,
         "M": _selftest_m_case,
@@ -22853,6 +24054,10 @@ def _generation6_process_state() -> _Generation6ProcessState:
         ("subprocess._cleanup", subprocess, "_cleanup"),
         ("socket.socket", socket, "socket"),
         ("shutil.rmtree", shutil, "rmtree"),
+        ("runner.FdOwner.__init__", FdOwner, "__init__"),
+        ("runner.FdOwner.require", FdOwner, "require"),
+        ("runner.FdOwner.detach", FdOwner, "detach"),
+        ("runner.FdOwner.close_once", FdOwner, "close_once"),
         ("runner._emit_stdout", runner_module, "_emit_stdout"),
         ("runner._runtime_spawn_gate", runner_module, "_runtime_spawn_gate"),
         ("runner._file_bytes", runner_module, "_file_bytes"),
