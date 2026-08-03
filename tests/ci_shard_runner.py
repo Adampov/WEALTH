@@ -11738,6 +11738,2996 @@ class _Generation6RAuthorityScope:
             raise restored
 
 
+# R-AUTH-NAMESPACE A1a is an uncalled, read-only authorization foundation.  Its
+# conclusions are limited to the controlled single-threaded, quiescent self-test;
+# it makes no atomicity or hostile pathname-race claim.
+_GENERATION6_R_NAMESPACE_REAL_OS_STAT: Final = os.stat
+_GENERATION6_R_NAMESPACE_REAL_OS_OPEN: Final = os.open
+_GENERATION6_R_NAMESPACE_REAL_OS_FSTAT: Final = os.fstat
+_GENERATION6_R_NAMESPACE_REAL_FCNTL: Final = fcntl.fcntl
+_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT: Final = _snapshot_stat
+_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD: Final = _snapshot_fd
+_GENERATION6_R_NAMESPACE_CAPTURED_STABLE_DIRECTORY_MATCHES: Final = _stable_directory_matches
+_GENERATION6_R_NAMESPACE_CAPTURED_MOUNT_ID: Final = _mount_id
+_GENERATION6_R_NAMESPACE_CAPTURED_COMPONENT: Final = _component
+_GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE: Final = FdOwner.require
+_GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT: Final = stat.S_IFMT
+_GENERATION6_R_NAMESPACE_CAPTURED_S_ISDIR: Final = stat.S_ISDIR
+
+
+class _Generation6RNamespacePhase(str, Enum):  # noqa: UP042 - exact str-enum contract
+    BUILDING = "BUILDING"
+    SEALED = "SEALED"
+    PATCH_ACTIVE = "PATCH_ACTIVE"
+    PATCH_RESTORED = "PATCH_RESTORED"
+    TEARDOWN_ACTIVE = "TEARDOWN_ACTIVE"
+    COMPLETE = "COMPLETE"
+    UNCERTAIN = "UNCERTAIN"
+
+
+class _Generation6RNamespaceTokenState(  # noqa: UP042 - exact str-enum contract
+    str, Enum
+):
+    AUTHORIZED = "AUTHORIZED"
+    ATTEMPTED = "ATTEMPTED"
+    CONSUMED = "CONSUMED"
+    UNCERTAIN = "UNCERTAIN"
+
+
+class _Generation6RNamespaceAction(str, Enum):  # noqa: UP042 - exact str-enum contract
+    UNLINK = "UNLINK"
+    RMDIR = "RMDIR"
+    RENAME = "RENAME"
+
+
+class _Generation6RNamespaceNodeKind(  # noqa: UP042 - exact str-enum contract
+    str, Enum
+):
+    DIRECTORY = "DIRECTORY"
+    REGULAR = "REGULAR"
+    SYMLINK = "SYMLINK"
+    SOCKET = "SOCKET"
+    FIFO = "FIFO"
+    HARDLINK = "HARDLINK"
+    SPECIAL = "SPECIAL"
+
+
+class _Generation6RNamespaceAuthorityKind(  # noqa: UP042 - exact str-enum contract
+    str, Enum
+):
+    BORROWED_GUARD = "BORROWED_GUARD"
+    OWNED_CURSOR = "OWNED_CURSOR"
+
+
+class _Generation6RNamespaceOwnerState(  # noqa: UP042 - exact str-enum contract
+    str, Enum
+):
+    LIVE = "LIVE"
+    CLOSED = "CLOSED"
+    UNCERTAIN = "UNCERTAIN"
+
+
+class _Generation6RNamespaceOwnerKind(str, Enum):  # noqa: UP042 - exact contract
+    OWNED_CURSOR = "OWNED_CURSOR"
+    ENTRY_HANDLE = "ENTRY_HANDLE"
+
+
+class _Generation6RNamespaceOwnerPurpose(str, Enum):  # noqa: UP042 - exact contract
+    OWNED_CURSOR = "OWNED_CURSOR"
+    SEALED_ENTRY = "SEALED_ENTRY"
+    PRESENT_TOKEN = "PRESENT_TOKEN"
+    RENAME_TOKEN = "RENAME_TOKEN"
+
+
+class _Generation6RNamespaceContextState(str, Enum):  # noqa: UP042 - exact contract
+    OPENING = "OPENING"
+    LIVE = "LIVE"
+    TRANSFERRED = "TRANSFERRED"
+    ATTEMPTED = "ATTEMPTED"
+    CLOSED = "CLOSED"
+    UNCERTAIN = "UNCERTAIN"
+
+
+class _Generation6RNamespaceCloseEvent(str, Enum):  # noqa: UP042 - exact contract
+    OWNED_CURSOR_ABORT_CLOSED = "OWNED_CURSOR_ABORT_CLOSED"
+    OWNED_CURSOR_CLOSED = "OWNED_CURSOR_CLOSED"
+    ENTRY_HANDLE_ABORT_CLOSED = "ENTRY_HANDLE_ABORT_CLOSED"
+    SEALED_ENTRY_HANDLE_CLOSED = "SEALED_ENTRY_HANDLE_CLOSED"
+    SEALED_ENTRY_ABORT_CLOSED = "SEALED_ENTRY_ABORT_CLOSED"
+    PRESENT_TOKEN_ABORT_CLOSED = "PRESENT_TOKEN_ABORT_CLOSED"
+    RENAME_TOKEN_ABORT_CLOSED = "RENAME_TOKEN_ABORT_CLOSED"
+    MUTATION_TOKEN_HANDLE_CLOSED = "MUTATION_TOKEN_HANDLE_CLOSED"
+
+
+@dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceDirectoryFact:
+    serial: int
+    issuer_identity: int
+    name: str
+    relative: tuple[str, ...]
+    device: int
+    inode: int
+    uid: int
+    mode: int
+    mount_id: int
+
+
+@dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceNameFact:
+    serial: int
+    issuer_identity: int
+    parent_authority: _Generation6RNamespaceDirectoryAuthority
+    name: str
+    kind: _Generation6RNamespaceNodeKind
+    device: int
+    inode: int
+    uid: int
+    mode: int
+    link_count: int
+    mount_id: int
+    hardlink_group: str | None
+
+
+@dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceDirectoryAuthority:
+    serial: int
+    issuer_identity: int
+
+
+@dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceDirectoryBinding:
+    serial: int
+    issuer_identity: int
+    authority: _Generation6RNamespaceDirectoryAuthority
+    kind: _Generation6RNamespaceAuthorityKind
+    owner: DirectoryOwner
+    owner_identity: int
+    fd_owner_identity: int
+    snapshot_identity: int
+    descriptor_token: _Generation6ROwnerToken
+    fact: _Generation6RNamespaceDirectoryFact
+
+
+@dataclass(eq=False)
+class _Generation6RNamespaceDirectoryRecord:
+    binding: _Generation6RNamespaceDirectoryBinding
+    state: _Generation6RNamespaceOwnerState
+    close_receipt: _Generation6RNamespaceReceipt | None
+
+
+@dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceOwnerContextBinding:
+    serial: int
+    issuer_identity: int
+    owner: FdOwner
+    owner_identity: int
+    descriptor_token: _Generation6ROwnerToken
+    token_generation: int
+    kind: _Generation6RNamespaceOwnerKind
+    purpose: _Generation6RNamespaceOwnerPurpose
+    origin_authority_record: _Generation6RNamespaceDirectoryRecord
+
+
+@dataclass(eq=False)
+class _Generation6RNamespaceOwnerContext:
+    binding: _Generation6RNamespaceOwnerContextBinding
+    authority_record: _Generation6RNamespaceDirectoryRecord
+    state: _Generation6RNamespaceContextState
+    capability_record: _Generation6RNamespaceCapabilityRecord | None
+    close_receipt: _Generation6RNamespaceReceipt | None
+
+
+@dataclass(frozen=True, eq=False)
+class _Generation6RNamespacePresentToken:
+    serial: int
+    issuer_identity: int
+    action: _Generation6RNamespaceAction
+
+
+@dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceAbsenceToken:
+    serial: int
+    issuer_identity: int
+    action: _Generation6RNamespaceAction
+
+
+@dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceRenameToken:
+    serial: int
+    issuer_identity: int
+    action: _Generation6RNamespaceAction
+
+
+_Generation6RNamespaceLiveToken = (
+    _Generation6RNamespacePresentToken
+    | _Generation6RNamespaceAbsenceToken
+    | _Generation6RNamespaceRenameToken
+)
+
+
+@dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceCapabilityBinding:
+    serial: int
+    issuer_identity: int
+    token: _Generation6RNamespaceLiveToken
+    token_serial: int
+    token_issuer_identity: int
+    action: _Generation6RNamespaceAction
+    authority: _Generation6RNamespaceDirectoryAuthority
+    authority_record: _Generation6RNamespaceDirectoryRecord
+    fact: _Generation6RNamespaceNameFact | None
+    name: str
+    path_owner: FdOwner | None
+    descriptor_token: _Generation6ROwnerToken | None
+    owner_context: _Generation6RNamespaceOwnerContext | None
+    owner_state: _Generation6RNamespaceOwnerState | None
+    destination_authority: _Generation6RNamespaceDirectoryAuthority | None
+    destination_record: _Generation6RNamespaceDirectoryRecord | None
+    destination_name: str | None
+
+
+@dataclass(eq=False)
+class _Generation6RNamespaceCapabilityRecord:
+    binding: _Generation6RNamespaceCapabilityBinding
+    state: _Generation6RNamespaceTokenState
+    owner_state: _Generation6RNamespaceOwnerState | None
+    authorization_receipt: _Generation6RNamespaceReceipt | None
+    close_receipt: _Generation6RNamespaceReceipt | None
+    terminal_receipt: _Generation6RNamespaceReceipt | None
+
+
+@dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceReceipt:
+    serial: int
+    issuer_identity: int
+    token_serial: int | None
+    authority_serial: int | None
+    event: str
+
+
+class _Generation6RNamespaceJournal:
+    """Strong, private A1a registry with no mutation or activation surface."""
+
+    def __init__(
+        self,
+        descriptor_ledger: _Generation6RAuthorityLedger,
+        guard: PrivateRoot,
+    ) -> None:
+        _require(
+            type(descriptor_ledger) is _Generation6RAuthorityLedger
+            and descriptor_ledger._scope_active
+            and type(guard) is PrivateRoot,
+            "R namespace journal inputs differ",
+        )
+        self._issuer = object()
+        issuer_identity = id(self._issuer)
+        _require(
+            type(issuer_identity) is int and issuer_identity > 0,
+            "R namespace issuer identity differs",
+        )
+        self._issuer_identity = issuer_identity
+        self._descriptor_ledger = descriptor_ledger
+        self._guard = guard
+        self._phase = _Generation6RNamespacePhase.BUILDING
+        self._next_serial = 1
+        self._authority_records_by_serial: dict[int, _Generation6RNamespaceDirectoryRecord] = {}
+        self._authority_records_by_identity: dict[int, _Generation6RNamespaceDirectoryRecord] = {}
+        self._authority_records_by_owner_identity: dict[
+            int, _Generation6RNamespaceDirectoryRecord
+        ] = {}
+        self._directory_facts_by_serial: dict[int, _Generation6RNamespaceDirectoryFact] = {}
+        self._name_facts_by_key: dict[tuple[int, str], _Generation6RNamespaceNameFact] = {}
+        self._hardlink_groups: dict[str, list[_Generation6RNamespaceNameFact]] = {}
+        self._capability_records_by_serial: dict[int, _Generation6RNamespaceCapabilityRecord] = {}
+        self._capability_records_by_identity: dict[int, _Generation6RNamespaceCapabilityRecord] = {}
+        self._live_capability_record: _Generation6RNamespaceCapabilityRecord | None = None
+        self._archived_capability_records: list[_Generation6RNamespaceCapabilityRecord] = []
+        self._pending_publication: object | None = None
+        self._poisoned_descriptors: set[int] = set()
+        self._namespace_owner_tokens: dict[int, _Generation6ROwnerToken] = {}
+        self._namespace_owner_contexts: dict[int, _Generation6RNamespaceOwnerContext] = {}
+        self._owner_quarantine: list[FdOwner] = []
+        self._untransferred_raw_quarantine: list[object] = []
+        self._receipts: list[_Generation6RNamespaceReceipt] = []
+        self._require_dependencies()
+        self._require_clean_guard()
+        _require(
+            self._poisoned_descriptors is not guard._poisoned_descriptors,
+            "R namespace poison ownership aliases guard state",
+        )
+
+    def _require_dependencies(self) -> None:
+        initializer_closure = getattr(FdOwner.__init__, "__closure__", None)
+        _require(
+            type(initializer_closure) is tuple
+            and len(initializer_closure) == 1
+            and initializer_closure[0].cell_contents is self._descriptor_ledger
+            and os.stat is _GENERATION6_R_NAMESPACE_REAL_OS_STAT
+            and os.open is _GENERATION6_R_NAMESPACE_REAL_OS_OPEN
+            and os.fstat is _GENERATION6_R_NAMESPACE_REAL_OS_FSTAT
+            and fcntl.fcntl is _GENERATION6_R_NAMESPACE_REAL_FCNTL
+            and _snapshot_stat is _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT
+            and _snapshot_fd is _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD
+            and _stable_directory_matches
+            is _GENERATION6_R_NAMESPACE_CAPTURED_STABLE_DIRECTORY_MATCHES
+            and _mount_id is _GENERATION6_R_NAMESPACE_CAPTURED_MOUNT_ID
+            and _component is _GENERATION6_R_NAMESPACE_CAPTURED_COMPONENT
+            and FdOwner.require is _GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE
+            and stat.S_IFMT is _GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT
+            and stat.S_ISDIR is _GENERATION6_R_NAMESPACE_CAPTURED_S_ISDIR,
+            "R namespace read-only dependency identity differs",
+        )
+
+    def _issue_serial(self) -> int:
+        serial = self._next_serial
+        _require(type(serial) is int and serial > 0, "R namespace serial differs")
+        self._next_serial = serial + 1
+        return serial
+
+    def _append_receipt(
+        self,
+        *,
+        token_serial: int | None,
+        authority_serial: int | None,
+        event: str,
+    ) -> _Generation6RNamespaceReceipt:
+        try:
+            _require(
+                (token_serial is None or (type(token_serial) is int and token_serial > 0))
+                and (
+                    authority_serial is None
+                    or (type(authority_serial) is int and authority_serial > 0)
+                ),
+                "R namespace receipt binding differs",
+            )
+            exact_event = _ascii(event, "R namespace receipt event")
+            _require(exact_event != "", "R namespace receipt event is empty")
+            receipt = _Generation6RNamespaceReceipt(
+                self._issue_serial(),
+                self._issuer_identity,
+                token_serial,
+                authority_serial,
+                exact_event,
+            )
+            self._receipts.append(receipt)
+        except BaseException:
+            self._phase = _Generation6RNamespacePhase.UNCERTAIN
+            raise
+        return receipt
+
+    def _begin_publication(self, value: object) -> None:
+        if self._pending_publication is not None:
+            self._phase = _Generation6RNamespacePhase.UNCERTAIN
+            raise ContractError("R namespace publication slot is occupied")
+        self._pending_publication = value
+
+    def _finish_publication(self, value: object) -> None:
+        if self._pending_publication is not value:
+            self._phase = _Generation6RNamespacePhase.UNCERTAIN
+            raise ContractError("R namespace publication binding differs")
+        self._pending_publication = None
+
+    def _fail_publication(self, value: object) -> None:
+        self._phase = _Generation6RNamespacePhase.UNCERTAIN
+        _require(
+            self._pending_publication is value,
+            "R namespace failed publication binding differs",
+        )
+
+    def _require_clean_guard(self) -> None:
+        guard = self._guard
+        _require(type(guard) is PrivateRoot, "R namespace guard type differs")
+        _exact_keys(
+            vars(guard),
+            (
+                "parent",
+                "root_name",
+                "root",
+                "_children",
+                "_known_directories",
+                "_protected_paths",
+                "_poisoned_descriptors",
+                "_opaque_close_uncertain",
+                "_opaque_owner_quarantine",
+                "_process_tree_uncertain",
+                "_cleaned",
+            ),
+            "R namespace guard fields",
+        )
+        _require(
+            type(guard.parent) is DirectoryOwner
+            and type(guard.root) is DirectoryOwner
+            and type(guard.root_name) is str
+            and type(guard._children) is list
+            and all(type(child) is DirectoryOwner for child in guard._children)
+            and type(guard._known_directories) is dict
+            and type(guard._protected_paths) is set
+            and not guard._protected_paths
+            and type(guard._poisoned_descriptors) is set
+            and not guard._poisoned_descriptors
+            and type(guard._opaque_close_uncertain) is bool
+            and not guard._opaque_close_uncertain
+            and guard._opaque_owner_quarantine is _OPAQUE_OWNER_QUARANTINE
+            and not guard._opaque_owner_quarantine
+            and type(guard._process_tree_uncertain) is bool
+            and not guard._process_tree_uncertain
+            and type(guard._cleaned) is bool
+            and not guard._cleaned,
+            "R namespace guard is not exact and clean",
+        )
+        for label, directory in (
+            ("parent", guard.parent),
+            ("root", guard.root),
+            *((f"child-{index}", child) for index, child in enumerate(guard._children)),
+        ):
+            _exact_keys(
+                vars(directory),
+                ("fd", "snapshot", "mount_id", "name", "path"),
+                f"R namespace guard {label} owner",
+            )
+            _require(
+                type(directory.fd) is FdOwner
+                and type(directory.snapshot) is DescriptorSnapshot
+                and type(directory.mount_id) is int
+                and directory.mount_id > 0
+                and type(directory.name) is str
+                and type(directory.path) is type(Path())
+                and type(directory.fd.descriptor) is int
+                and directory.fd.descriptor > 2
+                and type(directory.fd.label) is str
+                and type(directory.fd.terminal) is bool
+                and not directory.fd.terminal,
+                f"R namespace guard {label} ownership differs",
+            )
+
+    def _require_building(self) -> None:
+        _require(
+            self._phase is _Generation6RNamespacePhase.BUILDING
+            and self._live_capability_record is None
+            and self._pending_publication is None
+            and not self._poisoned_descriptors
+            and not self._owner_quarantine
+            and not self._untransferred_raw_quarantine
+            and all(
+                type(context) is _Generation6RNamespaceOwnerContext
+                and (
+                    context.state is _Generation6RNamespaceContextState.LIVE
+                    or context.state is _Generation6RNamespaceContextState.CLOSED
+                )
+                for context in self._namespace_owner_contexts.values()
+            ),
+            "R namespace journal is not building",
+        )
+        self._require_dependencies()
+        self._require_clean_guard()
+
+    def _copy_directory_fact(
+        self,
+        owner: DirectoryOwner,
+        *,
+        relative: tuple[str, ...],
+        current: DescriptorSnapshot,
+        mount_id: int,
+    ) -> _Generation6RNamespaceDirectoryFact:
+        _require(
+            type(owner) is DirectoryOwner
+            and type(relative) is tuple
+            and all(type(component) is str for component in relative)
+            and type(current) is DescriptorSnapshot
+            and type(mount_id) is int
+            and mount_id > 0,
+            "R namespace directory fact inputs differ",
+        )
+        name = owner.name
+        if relative:
+            exact_name, _ = _GENERATION6_R_NAMESPACE_CAPTURED_COMPONENT(
+                name,
+                label="R namespace directory fact name",
+            )
+            _require(relative[-1] == exact_name, "R namespace directory relative binding differs")
+        else:
+            exact_name = _ascii(name, "R namespace root fact name")
+            _require(exact_name != "", "R namespace root fact name is empty")
+        return _Generation6RNamespaceDirectoryFact(
+            self._issue_serial(),
+            self._issuer_identity,
+            exact_name,
+            relative,
+            current.device,
+            current.inode,
+            current.uid,
+            current.mode,
+            mount_id,
+        )
+
+    def _register_authority(
+        self,
+        owner: DirectoryOwner,
+        *,
+        kind: _Generation6RNamespaceAuthorityKind,
+        relative: tuple[str, ...],
+        current: DescriptorSnapshot,
+        mount_id: int,
+        descriptor_token: _Generation6ROwnerToken,
+    ) -> _Generation6RNamespaceDirectoryAuthority:
+        owner_identity = id(owner)
+        fd_owner_identity = id(owner.fd)
+        snapshot_identity = id(owner.snapshot)
+        owner_context: _Generation6RNamespaceOwnerContext | None = None
+        _require(
+            type(kind) is _Generation6RNamespaceAuthorityKind
+            and type(owner_identity) is int
+            and owner_identity > 0
+            and type(fd_owner_identity) is int
+            and fd_owner_identity > 0
+            and type(snapshot_identity) is int
+            and snapshot_identity > 0
+            and owner_identity not in self._authority_records_by_owner_identity,
+            "R namespace directory authority identity differs",
+        )
+        if kind is _Generation6RNamespaceAuthorityKind.OWNED_CURSOR:
+            owner_context = self._namespace_owner_contexts.get(fd_owner_identity)
+            _require(
+                type(owner_context) is _Generation6RNamespaceOwnerContext,
+                "R namespace owned authority context type differs",
+            )
+            exact_owner_context = cast(_Generation6RNamespaceOwnerContext, owner_context)
+            context_binding = exact_owner_context.binding
+            _exact_keys(
+                vars(exact_owner_context),
+                (
+                    "binding",
+                    "authority_record",
+                    "state",
+                    "capability_record",
+                    "close_receipt",
+                ),
+                "R namespace owned authority context",
+            )
+            _exact_keys(
+                vars(context_binding),
+                (
+                    "serial",
+                    "issuer_identity",
+                    "owner",
+                    "owner_identity",
+                    "descriptor_token",
+                    "token_generation",
+                    "kind",
+                    "purpose",
+                    "origin_authority_record",
+                ),
+                "R namespace owned authority context binding",
+            )
+            current_context_record, _, _ = self._require_authority(
+                exact_owner_context.authority_record.binding.authority
+            )
+            _require(
+                context_binding.issuer_identity == self._issuer_identity
+                and type(context_binding.serial) is int
+                and context_binding.serial > 0
+                and context_binding.owner is owner.fd
+                and context_binding.owner_identity == fd_owner_identity
+                and context_binding.descriptor_token is descriptor_token
+                and context_binding.token_generation == descriptor_token.generation
+                and context_binding.kind is _Generation6RNamespaceOwnerKind.OWNED_CURSOR
+                and context_binding.purpose is _Generation6RNamespaceOwnerPurpose.OWNED_CURSOR
+                and context_binding.origin_authority_record is exact_owner_context.authority_record
+                and current_context_record is exact_owner_context.authority_record
+                and exact_owner_context.state is _Generation6RNamespaceContextState.LIVE
+                and exact_owner_context.capability_record is None
+                and exact_owner_context.close_receipt is None
+                and self._namespace_owner_tokens.get(fd_owner_identity) is descriptor_token,
+                "R namespace owned authority context differs",
+            )
+        else:
+            _require(
+                kind is _Generation6RNamespaceAuthorityKind.BORROWED_GUARD
+                and fd_owner_identity not in self._namespace_owner_contexts
+                and fd_owner_identity not in self._namespace_owner_tokens,
+                "R namespace borrowed authority unexpectedly owns close context",
+            )
+        fact = self._copy_directory_fact(
+            owner,
+            relative=relative,
+            current=current,
+            mount_id=mount_id,
+        )
+        authority = _Generation6RNamespaceDirectoryAuthority(
+            self._issue_serial(),
+            self._issuer_identity,
+        )
+        binding = _Generation6RNamespaceDirectoryBinding(
+            self._issue_serial(),
+            self._issuer_identity,
+            authority,
+            kind,
+            owner,
+            owner_identity,
+            fd_owner_identity,
+            snapshot_identity,
+            descriptor_token,
+            fact,
+        )
+        authority_record = _Generation6RNamespaceDirectoryRecord(
+            binding,
+            _Generation6RNamespaceOwnerState.LIVE,
+            None,
+        )
+        self._begin_publication(authority_record)
+        try:
+            if owner_context is not None:
+                owner_context.authority_record = authority_record
+            self._directory_facts_by_serial[fact.serial] = fact
+            self._authority_records_by_serial[authority.serial] = authority_record
+            self._authority_records_by_identity[id(authority)] = authority_record
+            self._authority_records_by_owner_identity[owner_identity] = authority_record
+            self._append_receipt(
+                token_serial=None,
+                authority_serial=authority.serial,
+                event="DIRECTORY_AUTHORITY_REGISTERED",
+            )
+            self._finish_publication(authority_record)
+        except BaseException:
+            authority_record.state = _Generation6RNamespaceOwnerState.UNCERTAIN
+            if owner_context is not None:
+                owner_context.state = _Generation6RNamespaceContextState.UNCERTAIN
+            self._fail_publication(authority_record)
+            raise
+        return authority
+
+    def _require_authority(
+        self,
+        authority: _Generation6RNamespaceDirectoryAuthority,
+    ) -> tuple[
+        _Generation6RNamespaceDirectoryRecord,
+        _Generation6ROwnerRecord,
+        int,
+    ]:
+        _require(
+            type(authority) is _Generation6RNamespaceDirectoryAuthority,
+            "R namespace directory authority type differs",
+        )
+        _exact_keys(
+            vars(authority),
+            ("serial", "issuer_identity"),
+            "R namespace public directory authority",
+        )
+        authority_identity = id(authority)
+        authority_record = self._authority_records_by_identity.get(authority_identity)
+        _require(
+            type(authority_record) is _Generation6RNamespaceDirectoryRecord,
+            "R namespace directory authority record type differs",
+        )
+        exact_authority_record = cast(
+            _Generation6RNamespaceDirectoryRecord,
+            authority_record,
+        )
+        _exact_keys(
+            vars(exact_authority_record),
+            ("binding", "state", "close_receipt"),
+            "R namespace directory authority record",
+        )
+        binding = exact_authority_record.binding
+        _require(
+            type(binding) is _Generation6RNamespaceDirectoryBinding,
+            "R namespace directory authority binding type differs",
+        )
+        _exact_keys(
+            vars(binding),
+            (
+                "serial",
+                "issuer_identity",
+                "authority",
+                "kind",
+                "owner",
+                "owner_identity",
+                "fd_owner_identity",
+                "snapshot_identity",
+                "descriptor_token",
+                "fact",
+            ),
+            "R namespace directory authority binding",
+        )
+        _require(
+            type(binding.fact) is _Generation6RNamespaceDirectoryFact,
+            "R namespace directory fact type differs",
+        )
+        _exact_keys(
+            vars(binding.fact),
+            (
+                "serial",
+                "issuer_identity",
+                "name",
+                "relative",
+                "device",
+                "inode",
+                "uid",
+                "mode",
+                "mount_id",
+            ),
+            "R namespace directory fact",
+        )
+        _require(
+            authority.issuer_identity == self._issuer_identity
+            and type(authority.serial) is int
+            and authority.serial > 0
+            and type(authority_identity) is int
+            and authority_identity > 0
+            and self._authority_records_by_serial.get(authority.serial) is exact_authority_record
+            and binding.authority is authority
+            and type(binding.serial) is int
+            and binding.serial > 0
+            and binding.issuer_identity == self._issuer_identity
+            and type(binding.kind) is _Generation6RNamespaceAuthorityKind
+            and type(binding.owner) is DirectoryOwner
+            and type(binding.descriptor_token) is _Generation6ROwnerToken
+            and binding.owner_identity == id(binding.owner)
+            and binding.fd_owner_identity == id(binding.owner.fd)
+            and binding.snapshot_identity == id(binding.owner.snapshot)
+            and self._authority_records_by_owner_identity.get(binding.owner_identity)
+            is exact_authority_record
+            and binding.fact.issuer_identity == self._issuer_identity
+            and type(binding.fact.serial) is int
+            and binding.fact.serial > 0
+            and self._directory_facts_by_serial.get(binding.fact.serial) is binding.fact
+            and exact_authority_record.state is _Generation6RNamespaceOwnerState.LIVE
+            and exact_authority_record.close_receipt is None,
+            "R namespace directory authority binding differs",
+        )
+        descriptor_record = self._descriptor_ledger._authorize_live(
+            binding.owner.fd,
+            binding.descriptor_token,
+        )
+        descriptor = _GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE(binding.owner.fd)
+        _require(
+            descriptor_record.owner is binding.owner.fd
+            and descriptor_record.token is binding.descriptor_token
+            and descriptor == binding.descriptor_token.descriptor,
+            "R namespace descriptor authority differs",
+        )
+        return exact_authority_record, descriptor_record, descriptor
+
+    def _reauthenticate_directory(
+        self,
+        authority: _Generation6RNamespaceDirectoryAuthority,
+    ) -> tuple[
+        _Generation6RNamespaceDirectoryRecord,
+        _Generation6ROwnerRecord,
+        int,
+        DescriptorSnapshot,
+    ]:
+        self._require_dependencies()
+        authority_record, descriptor_record, descriptor = self._require_authority(authority)
+        binding = authority_record.binding
+        current = _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD(descriptor)
+        copied_expected = DescriptorSnapshot(
+            binding.fact.device,
+            binding.fact.inode,
+            binding.fact.uid,
+            binding.fact.mode,
+            current.link_count,
+            current.size,
+            current.mtime_ns,
+            current.ctime_ns,
+        )
+        mount_id = self._namespace_mount_id(
+            descriptor,
+        )
+        descriptor_flags = _GENERATION6_R_NAMESPACE_REAL_FCNTL(
+            descriptor,
+            fcntl.F_GETFD,
+        )
+        status_flags = _GENERATION6_R_NAMESPACE_REAL_FCNTL(
+            descriptor,
+            fcntl.F_GETFL,
+        )
+        _require(
+            _GENERATION6_R_NAMESPACE_CAPTURED_STABLE_DIRECTORY_MATCHES(
+                current,
+                copied_expected,
+                require_link_count=False,
+            )
+            and _GENERATION6_R_NAMESPACE_CAPTURED_STABLE_DIRECTORY_MATCHES(
+                descriptor_record.token.snapshot,
+                copied_expected,
+                require_link_count=False,
+            )
+            and mount_id == binding.fact.mount_id
+            and type(descriptor_flags) is int
+            and descriptor_flags == fcntl.FD_CLOEXEC
+            and descriptor_flags == descriptor_record.token.fd_flags
+            and type(status_flags) is int
+            and status_flags >= 0
+            and status_flags == descriptor_record.token.status_flags
+            and status_flags & os.O_ACCMODE == os.O_RDONLY
+            and status_flags & os.O_DIRECTORY == os.O_DIRECTORY
+            and status_flags & os.O_PATH == 0,
+            "R namespace directory reauthentication differs",
+        )
+        return authority_record, descriptor_record, descriptor, current
+
+    def register_borrowed_directory(
+        self,
+        directory: DirectoryOwner,
+    ) -> _Generation6RNamespaceDirectoryAuthority:
+        self._require_building()
+        guard = self._guard
+        _require(type(directory) is DirectoryOwner, "R namespace borrowed owner type differs")
+        if directory is guard.root:
+            relative: tuple[str, ...] = ()
+        else:
+            matching_children = tuple(child for child in guard._children if child is directory)
+            _require(
+                len(matching_children) == 1,
+                "R namespace borrowed owner is not an exact guard child",
+            )
+            child_name, _ = _GENERATION6_R_NAMESPACE_CAPTURED_COMPONENT(
+                directory.name,
+                label="R namespace borrowed child name",
+            )
+            relative = (child_name,)
+            _require(
+                guard._known_directories.get(relative) is directory.snapshot,
+                "R namespace borrowed child fact binding differs",
+            )
+        descriptor_token = self._descriptor_ledger.token_for_owner(directory.fd)
+        record = self._descriptor_ledger._authorize_live(
+            directory.fd,
+            descriptor_token,
+        )
+        descriptor = _GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE(directory.fd)
+        current = _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD(descriptor)
+        mount_id = self._namespace_mount_id(descriptor)
+        descriptor_flags = _GENERATION6_R_NAMESPACE_REAL_FCNTL(
+            descriptor,
+            fcntl.F_GETFD,
+        )
+        status_flags = _GENERATION6_R_NAMESPACE_REAL_FCNTL(
+            descriptor,
+            fcntl.F_GETFL,
+        )
+        _require(
+            record.owner is directory.fd
+            and record.token is descriptor_token
+            and _GENERATION6_R_NAMESPACE_CAPTURED_STABLE_DIRECTORY_MATCHES(
+                current,
+                directory.snapshot,
+                require_link_count=False,
+            )
+            and _GENERATION6_R_NAMESPACE_CAPTURED_STABLE_DIRECTORY_MATCHES(
+                current,
+                descriptor_token.snapshot,
+                require_link_count=False,
+            )
+            and mount_id == directory.mount_id
+            and type(descriptor_flags) is int
+            and descriptor_flags == fcntl.FD_CLOEXEC
+            and descriptor_flags == descriptor_token.fd_flags
+            and type(status_flags) is int
+            and status_flags >= 0
+            and status_flags == descriptor_token.status_flags
+            and status_flags & os.O_ACCMODE == os.O_RDONLY
+            and status_flags & os.O_DIRECTORY == os.O_DIRECTORY
+            and status_flags & os.O_PATH == 0,
+            "R namespace borrowed directory identity differs",
+        )
+        return self._register_authority(
+            directory,
+            kind=_Generation6RNamespaceAuthorityKind.BORROWED_GUARD,
+            relative=relative,
+            current=current,
+            mount_id=mount_id,
+            descriptor_token=descriptor_token,
+        )
+
+    def _retain_uncertain_owner(
+        self,
+        owner: FdOwner,
+        descriptor: int,
+    ) -> None:
+        _require(
+            type(owner) is FdOwner and type(descriptor) is int and descriptor > 2,
+            "R namespace uncertain owner binding differs",
+        )
+        self._poisoned_descriptors.add(descriptor)
+        self._phase = _Generation6RNamespacePhase.UNCERTAIN
+        if not any(candidate is owner for candidate in self._owner_quarantine):
+            self._owner_quarantine.append(owner)
+
+    def _reconcile_mount_poison(
+        self,
+        before: frozenset[int],
+        primary: BaseException | None,
+    ) -> None:
+        new_poison = self._poisoned_descriptors.difference(before)
+        if not new_poison:
+            return
+        self._phase = _Generation6RNamespacePhase.UNCERTAIN
+        for descriptor_record in self._descriptor_ledger._records_by_owner_identity.values():
+            if descriptor_record.token.descriptor in new_poison and not any(
+                candidate is descriptor_record.owner for candidate in self._owner_quarantine
+            ):
+                self._owner_quarantine.append(descriptor_record.owner)
+        error = ContractError("R namespace mount helper poisoned a descriptor")
+        if primary is not None:
+            primary.add_note(f"R namespace mount poison reconciliation: {error!r}")
+            return
+        raise error
+
+    def _namespace_mount_id(
+        self,
+        descriptor: int,
+        *,
+        excluded_descriptors: tuple[int, ...] = (),
+    ) -> int:
+        before = frozenset(self._poisoned_descriptors)
+        try:
+            mount_id = _GENERATION6_R_NAMESPACE_CAPTURED_MOUNT_ID(
+                descriptor,
+                excluded_descriptors=excluded_descriptors,
+                poisoned_descriptors=self._poisoned_descriptors,
+                poison_sink=self._poisoned_descriptors,
+            )
+        except BaseException as primary:
+            self._reconcile_mount_poison(before, primary)
+            raise
+        self._reconcile_mount_poison(before, None)
+        return mount_id
+
+    def _close_namespace_owner(
+        self,
+        owner: FdOwner,
+        descriptor_token: _Generation6ROwnerToken,
+        owner_context: _Generation6RNamespaceOwnerContext,
+        *,
+        capability_record: _Generation6RNamespaceCapabilityRecord | None,
+        event: _Generation6RNamespaceCloseEvent,
+    ) -> _Generation6RNamespaceReceipt:
+        record: _Generation6ROwnerRecord | None = None
+        close_verified = False
+        try:
+            self._require_dependencies()
+            owner_identity = id(owner)
+            _require(
+                self._descriptor_ledger._scope_active
+                and type(owner) is FdOwner
+                and type(descriptor_token) is _Generation6ROwnerToken
+                and type(owner_context) is _Generation6RNamespaceOwnerContext
+                and (
+                    capability_record is None
+                    or type(capability_record) is _Generation6RNamespaceCapabilityRecord
+                )
+                and type(event) is _Generation6RNamespaceCloseEvent
+                and type(owner_identity) is int
+                and owner_identity > 0
+                and self._namespace_owner_tokens.get(owner_identity) is descriptor_token
+                and self._namespace_owner_contexts.get(owner_identity) is owner_context,
+                "R namespace close inputs differ",
+            )
+            _exact_keys(
+                vars(owner_context),
+                (
+                    "binding",
+                    "authority_record",
+                    "state",
+                    "capability_record",
+                    "close_receipt",
+                ),
+                "R namespace close owner context",
+            )
+            context_binding = owner_context.binding
+            _require(
+                type(context_binding) is _Generation6RNamespaceOwnerContextBinding,
+                "R namespace close owner context binding type differs",
+            )
+            _exact_keys(
+                vars(context_binding),
+                (
+                    "serial",
+                    "issuer_identity",
+                    "owner",
+                    "owner_identity",
+                    "descriptor_token",
+                    "token_generation",
+                    "kind",
+                    "purpose",
+                    "origin_authority_record",
+                ),
+                "R namespace close owner context binding",
+            )
+            authority_record = owner_context.authority_record
+            _require(
+                type(authority_record) is _Generation6RNamespaceDirectoryRecord,
+                "R namespace close authority record type differs",
+            )
+            exact_authority_record, _, _ = self._require_authority(
+                authority_record.binding.authority
+            )
+            _require(
+                context_binding.issuer_identity == self._issuer_identity
+                and type(context_binding.serial) is int
+                and context_binding.serial > 0
+                and context_binding.owner is owner
+                and context_binding.owner_identity == owner_identity
+                and context_binding.descriptor_token is descriptor_token
+                and context_binding.token_generation == descriptor_token.generation
+                and descriptor_token.owner_identity == owner_identity
+                and type(context_binding.kind) is _Generation6RNamespaceOwnerKind
+                and type(context_binding.purpose) is _Generation6RNamespaceOwnerPurpose
+                and type(context_binding.origin_authority_record)
+                is _Generation6RNamespaceDirectoryRecord
+                and exact_authority_record is authority_record
+                and owner_context.close_receipt is None,
+                "R namespace close owner context differs",
+            )
+            if capability_record is None:
+                token_serial: int | None = None
+                _require(
+                    owner_context.capability_record is None,
+                    "R namespace authority-only context has a capability",
+                )
+                if context_binding.purpose is _Generation6RNamespaceOwnerPurpose.OWNED_CURSOR:
+                    _require(
+                        context_binding.kind is _Generation6RNamespaceOwnerKind.OWNED_CURSOR
+                        and owner_context.state is _Generation6RNamespaceContextState.LIVE
+                        and (
+                            (
+                                event is _Generation6RNamespaceCloseEvent.OWNED_CURSOR_ABORT_CLOSED
+                                and authority_record is context_binding.origin_authority_record
+                            )
+                            or (
+                                event is _Generation6RNamespaceCloseEvent.OWNED_CURSOR_CLOSED
+                                and authority_record is not context_binding.origin_authority_record
+                                and authority_record.binding.kind
+                                is _Generation6RNamespaceAuthorityKind.OWNED_CURSOR
+                                and authority_record.binding.owner.fd is owner
+                                and authority_record.binding.descriptor_token is descriptor_token
+                            )
+                        ),
+                        "R namespace owned cursor close context differs",
+                    )
+                else:
+                    _require(
+                        context_binding.kind is _Generation6RNamespaceOwnerKind.ENTRY_HANDLE
+                        and authority_record is context_binding.origin_authority_record
+                        and (
+                            (
+                                owner_context.state is _Generation6RNamespaceContextState.OPENING
+                                and event
+                                is _Generation6RNamespaceCloseEvent.ENTRY_HANDLE_ABORT_CLOSED
+                            )
+                            or (
+                                owner_context.state is _Generation6RNamespaceContextState.LIVE
+                                and (
+                                    (
+                                        context_binding.purpose
+                                        is _Generation6RNamespaceOwnerPurpose.SEALED_ENTRY
+                                        and (
+                                            event
+                                            is _Generation6RNamespaceCloseEvent.SEALED_ENTRY_HANDLE_CLOSED
+                                            or event
+                                            is _Generation6RNamespaceCloseEvent.SEALED_ENTRY_ABORT_CLOSED
+                                        )
+                                    )
+                                    or (
+                                        context_binding.purpose
+                                        is _Generation6RNamespaceOwnerPurpose.PRESENT_TOKEN
+                                        and event
+                                        is _Generation6RNamespaceCloseEvent.PRESENT_TOKEN_ABORT_CLOSED
+                                    )
+                                    or (
+                                        context_binding.purpose
+                                        is _Generation6RNamespaceOwnerPurpose.RENAME_TOKEN
+                                        and event
+                                        is _Generation6RNamespaceCloseEvent.RENAME_TOKEN_ABORT_CLOSED
+                                    )
+                                )
+                            )
+                        ),
+                        "R namespace entry close purpose differs",
+                    )
+            else:
+                capability_binding = capability_record.binding
+                _require(
+                    event is _Generation6RNamespaceCloseEvent.MUTATION_TOKEN_HANDLE_CLOSED
+                    and self._live_capability_record is capability_record
+                    and self._capability_records_by_identity.get(id(capability_binding.token))
+                    is capability_record
+                    and self._capability_records_by_serial.get(capability_binding.token_serial)
+                    is capability_record
+                    and capability_record.state is _Generation6RNamespaceTokenState.ATTEMPTED
+                    and capability_record.owner_state is _Generation6RNamespaceOwnerState.LIVE
+                    and capability_binding.authority_record is authority_record
+                    and capability_binding.path_owner is owner
+                    and capability_binding.descriptor_token is descriptor_token
+                    and capability_binding.owner_context is owner_context
+                    and owner_context.capability_record is capability_record
+                    and owner_context.state is _Generation6RNamespaceContextState.ATTEMPTED
+                    and context_binding.kind is _Generation6RNamespaceOwnerKind.ENTRY_HANDLE
+                    and (
+                        context_binding.purpose is _Generation6RNamespaceOwnerPurpose.PRESENT_TOKEN
+                        or context_binding.purpose
+                        is _Generation6RNamespaceOwnerPurpose.RENAME_TOKEN
+                    ),
+                    "R namespace capability close context differs",
+                )
+                token_serial = capability_binding.token_serial
+            authority_serial = authority_record.binding.authority.serial
+            record = self._descriptor_ledger._authorize_live(owner, descriptor_token)
+            descriptor = descriptor_token.descriptor
+            _require(
+                record.owner is owner
+                and record.token is descriptor_token
+                and record.state is _Generation6RDescriptorState.LIVE
+                and type(descriptor) is int
+                and descriptor > 2
+                and descriptor == _GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE(owner),
+                "R namespace close preauthorization differs",
+            )
+            owner_context.state = _Generation6RNamespaceContextState.ATTEMPTED
+            self._descriptor_ledger.close_owner_once(owner)
+            _require(
+                record.state is _Generation6RDescriptorState.CLOSE_SUCCEEDED
+                and record.token is descriptor_token
+                and record.close_attempts == 1
+                and record.detached_descriptor == descriptor
+                and type(owner.terminal) is bool
+                and owner.terminal
+                and owner.descriptor == -1,
+                "R namespace descriptor close result differs",
+            )
+            close_verified = True
+            close_receipt = self._append_receipt(
+                token_serial=token_serial,
+                authority_serial=authority_serial,
+                event=event.value,
+            )
+            owner_context.close_receipt = close_receipt
+            owner_context.state = _Generation6RNamespaceContextState.CLOSED
+            return close_receipt
+        except BaseException as primary:
+            self._phase = _Generation6RNamespacePhase.UNCERTAIN
+            accepted_context = (
+                self._namespace_owner_contexts.get(id(owner)) if type(owner) is FdOwner else None
+            )
+            if type(accepted_context) is _Generation6RNamespaceOwnerContext:
+                accepted_context.state = _Generation6RNamespaceContextState.UNCERTAIN
+            if type(owner) is FdOwner and not any(
+                candidate is owner for candidate in self._owner_quarantine
+            ):
+                self._owner_quarantine.append(owner)
+            if not close_verified and type(descriptor_token) is _Generation6ROwnerToken:
+                descriptor = descriptor_token.descriptor
+                if type(descriptor) is int and descriptor > 2:
+                    self._poisoned_descriptors.add(descriptor)
+            if (
+                record is not None
+                and record.state is _Generation6RDescriptorState.CLOSE_UNCERTAIN
+                and record.token is descriptor_token
+                and record.token.descriptor not in self._descriptor_ledger._uncertain_descriptors
+            ):
+                primary.add_note("R namespace accepted ledger omitted its uncertain descriptor")
+            raise
+
+    def _retain_untransferred_raw(self, owner: FdOwner, raw_descriptor: object) -> None:
+        self._phase = _Generation6RNamespacePhase.UNCERTAIN
+        self._untransferred_raw_quarantine.append(raw_descriptor)
+        if type(raw_descriptor) is int and raw_descriptor > 2:
+            self._poisoned_descriptors.add(raw_descriptor)
+        if not any(candidate is owner for candidate in self._owner_quarantine):
+            self._owner_quarantine.append(owner)
+
+    def _open_namespace_owner(
+        self,
+        authority: _Generation6RNamespaceDirectoryAuthority,
+        authority_record: _Generation6RNamespaceDirectoryRecord,
+        directory_descriptor: int,
+        name: str,
+        flags: int,
+        *,
+        purpose: _Generation6RNamespaceOwnerPurpose,
+        label: str,
+    ) -> tuple[
+        FdOwner,
+        _Generation6ROwnerToken,
+        _Generation6RNamespaceOwnerContext,
+    ]:
+        self._require_dependencies()
+        exact_authority_record, _, exact_directory_descriptor = self._require_authority(authority)
+        exact_label = _ascii(label, "R namespace descriptor label")
+        _require(
+            exact_authority_record is authority_record
+            and exact_directory_descriptor == directory_descriptor
+            and exact_label != ""
+            and type(directory_descriptor) is int
+            and directory_descriptor > 2
+            and type(name) is str
+            and type(flags) is int
+            and flags > 0
+            and type(purpose) is _Generation6RNamespaceOwnerPurpose,
+            "R namespace open transaction inputs differ",
+        )
+        owner = object.__new__(FdOwner)
+        _require(
+            type(owner) is FdOwner and not vars(owner),
+            "R namespace owner shell differs",
+        )
+        raw_descriptor: object = _PID_SENTINEL
+        accepted_descriptor: object = _PID_SENTINEL
+        owner_context: _Generation6RNamespaceOwnerContext | None = None
+        try:
+            raw_descriptor = _GENERATION6_R_NAMESPACE_REAL_OS_OPEN(
+                name,
+                flags,
+                dir_fd=directory_descriptor,
+            )
+            _require(
+                type(raw_descriptor) is int and raw_descriptor > 2,
+                "R namespace opened descriptor differs",
+            )
+            accepted_descriptor = raw_descriptor
+            raw_descriptor = _PID_SENTINEL
+            try:
+                FdOwner.__init__(
+                    owner,
+                    accepted_descriptor,
+                    exact_label,
+                )
+            except BaseException:
+                owner_identity = id(owner)
+                accepted_record = self._descriptor_ledger._records_by_owner_identity.get(
+                    owner_identity
+                )
+                accepted_current = self._descriptor_ledger._current_by_descriptor.get(
+                    accepted_descriptor
+                )
+                retained_by_ledger = any(
+                    candidate is owner
+                    for candidate in self._descriptor_ledger._registration_quarantine
+                )
+                partial_is_current = (
+                    accepted_current is not None
+                    and accepted_current.owner_identity == owner_identity
+                )
+                if (
+                    accepted_descriptor in self._descriptor_ledger._uncertain_descriptors
+                    or retained_by_ledger
+                    or accepted_record is not None
+                    or partial_is_current
+                ):
+                    self._retain_uncertain_owner(
+                        owner,
+                        accepted_descriptor,
+                    )
+                accepted_descriptor = _PID_SENTINEL
+                raise
+            accepted_number = accepted_descriptor
+            accepted_descriptor = _PID_SENTINEL
+            descriptor_token = self._descriptor_ledger.token_for_owner(owner)
+            record = self._descriptor_ledger._authorize_live(owner, descriptor_token)
+            _require(
+                owner.label == exact_label
+                and record.owner is owner
+                and record.token is descriptor_token
+                and descriptor_token.descriptor == accepted_number
+                and descriptor_token.owner_identity == id(owner)
+                and accepted_number == _GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE(owner),
+                "R namespace adopted descriptor authority differs",
+            )
+            owner_identity = id(owner)
+            owner_kind = (
+                _Generation6RNamespaceOwnerKind.OWNED_CURSOR
+                if purpose is _Generation6RNamespaceOwnerPurpose.OWNED_CURSOR
+                else _Generation6RNamespaceOwnerKind.ENTRY_HANDLE
+            )
+            _require(
+                type(owner_identity) is int
+                and owner_identity > 0
+                and owner_identity not in self._namespace_owner_tokens
+                and owner_identity not in self._namespace_owner_contexts,
+                "R namespace adopted owner identity differs",
+            )
+            owner_context = _Generation6RNamespaceOwnerContext(
+                _Generation6RNamespaceOwnerContextBinding(
+                    self._issue_serial(),
+                    self._issuer_identity,
+                    owner,
+                    owner_identity,
+                    descriptor_token,
+                    descriptor_token.generation,
+                    owner_kind,
+                    purpose,
+                    authority_record,
+                ),
+                authority_record,
+                _Generation6RNamespaceContextState.OPENING,
+                None,
+                None,
+            )
+            self._namespace_owner_contexts[owner_identity] = owner_context
+            self._namespace_owner_tokens[owner_identity] = descriptor_token
+        except BaseException as primary:
+            if owner_context is not None:
+                owner_context.state = _Generation6RNamespaceContextState.UNCERTAIN
+            owner_fields = vars(owner)
+            if (
+                type(owner_fields.get("terminal")) is bool
+                and not owner_fields["terminal"]
+                and type(owner_fields.get("descriptor")) is int
+                and cast(int, owner_fields["descriptor"]) > 2
+            ):
+                self._retain_uncertain_owner(owner, owner.descriptor)
+                primary.add_note(
+                    "R namespace retained an owner whose accepted token was unavailable"
+                )
+            raise
+        finally:
+            if raw_descriptor is not _PID_SENTINEL:
+                self._retain_untransferred_raw(owner, raw_descriptor)
+            if accepted_descriptor is not _PID_SENTINEL:
+                self._retain_untransferred_raw(owner, accepted_descriptor)
+        return owner, descriptor_token, owner_context
+
+    def _require_same_parent_proof(
+        self,
+        authority: _Generation6RNamespaceDirectoryAuthority,
+        before_authority_record: _Generation6RNamespaceDirectoryRecord,
+        before_descriptor_record: _Generation6ROwnerRecord,
+        before_descriptor: int,
+        after_authority_record: _Generation6RNamespaceDirectoryRecord,
+        after_descriptor_record: _Generation6ROwnerRecord,
+        after_descriptor: int,
+    ) -> None:
+        _require(
+            type(authority) is _Generation6RNamespaceDirectoryAuthority
+            and before_authority_record is after_authority_record
+            and before_authority_record.binding.authority is authority
+            and before_descriptor_record is after_descriptor_record
+            and before_descriptor_record.token is before_authority_record.binding.descriptor_token
+            and after_descriptor_record.token is after_authority_record.binding.descriptor_token
+            and type(before_descriptor) is int
+            and before_descriptor > 2
+            and before_descriptor == after_descriptor
+            and before_descriptor == before_authority_record.binding.descriptor_token.descriptor,
+            "R namespace parent pre/post authority differs",
+        )
+
+    def open_owned_cursor(
+        self,
+        parent_authority: _Generation6RNamespaceDirectoryAuthority,
+        name: str,
+    ) -> _Generation6RNamespaceDirectoryAuthority:
+        self._require_building()
+        (
+            parent_record_before,
+            parent_descriptor_record_before,
+            parent_descriptor,
+            _,
+        ) = self._reauthenticate_directory(parent_authority)
+        parent_binding = parent_record_before.binding
+        exact_name, _ = _GENERATION6_R_NAMESPACE_CAPTURED_COMPONENT(
+            name,
+            label="R namespace owned cursor name",
+        )
+        named_before = _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT(
+            _GENERATION6_R_NAMESPACE_REAL_OS_STAT(
+                exact_name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+        )
+        _require(
+            _GENERATION6_R_NAMESPACE_CAPTURED_S_ISDIR(named_before.mode),
+            "R namespace owned cursor is not a directory",
+        )
+        owner: FdOwner | None = None
+        descriptor_token: _Generation6ROwnerToken | None = None
+        owner_context: _Generation6RNamespaceOwnerContext | None = None
+        try:
+            owner, descriptor_token, owner_context = self._open_namespace_owner(
+                parent_authority,
+                parent_record_before,
+                parent_descriptor,
+                exact_name,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                purpose=_Generation6RNamespaceOwnerPurpose.OWNED_CURSOR,
+                label=f"R namespace owned cursor {exact_name}",
+            )
+            owner_context.state = _Generation6RNamespaceContextState.LIVE
+            descriptor = _GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE(owner)
+            opened = _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD(descriptor)
+            named_after = _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT(
+                _GENERATION6_R_NAMESPACE_REAL_OS_STAT(
+                    exact_name,
+                    dir_fd=parent_descriptor,
+                    follow_symlinks=False,
+                )
+            )
+            mount_id = self._namespace_mount_id(
+                descriptor,
+                excluded_descriptors=(parent_descriptor,),
+            )
+            descriptor_flags = _GENERATION6_R_NAMESPACE_REAL_FCNTL(
+                descriptor,
+                fcntl.F_GETFD,
+            )
+            status_flags = _GENERATION6_R_NAMESPACE_REAL_FCNTL(
+                descriptor,
+                fcntl.F_GETFL,
+            )
+            _require(
+                descriptor != parent_descriptor
+                and named_before == opened == named_after
+                and descriptor_token.snapshot == opened
+                and descriptor_token.fd_flags == descriptor_flags
+                and descriptor_token.status_flags == status_flags
+                and mount_id == parent_binding.fact.mount_id
+                and opened.uid == parent_binding.fact.uid
+                and type(descriptor_flags) is int
+                and descriptor_flags == fcntl.FD_CLOEXEC
+                and type(status_flags) is int
+                and status_flags >= 0
+                and status_flags & os.O_ACCMODE == os.O_RDONLY
+                and status_flags & os.O_DIRECTORY == os.O_DIRECTORY
+                and status_flags & os.O_PATH == 0,
+                "R namespace owned cursor identity differs",
+            )
+            (
+                parent_record_after,
+                parent_descriptor_record_after,
+                parent_descriptor_after,
+                _,
+            ) = self._reauthenticate_directory(parent_authority)
+            self._require_same_parent_proof(
+                parent_authority,
+                parent_record_before,
+                parent_descriptor_record_before,
+                parent_descriptor,
+                parent_record_after,
+                parent_descriptor_record_after,
+                parent_descriptor_after,
+            )
+            relative = (*parent_binding.fact.relative, exact_name)
+            path = parent_binding.owner.path / exact_name
+            _require(
+                type(path) is type(Path())
+                and path.name == exact_name
+                and path.parent == parent_binding.owner.path,
+                "R namespace owned cursor path binding differs",
+            )
+            directory = DirectoryOwner(
+                owner,
+                opened,
+                mount_id,
+                exact_name,
+                path,
+            )
+            return self._register_authority(
+                directory,
+                kind=_Generation6RNamespaceAuthorityKind.OWNED_CURSOR,
+                relative=relative,
+                current=opened,
+                mount_id=mount_id,
+                descriptor_token=descriptor_token,
+            )
+        except BaseException as primary:
+            if (
+                owner is not None
+                and descriptor_token is not None
+                and owner_context is not None
+                and not owner.terminal
+            ):
+                if self._phase is _Generation6RNamespacePhase.UNCERTAIN:
+                    self._retain_uncertain_owner(owner, descriptor_token.descriptor)
+                else:
+                    try:
+                        self._close_namespace_owner(
+                            owner,
+                            descriptor_token,
+                            owner_context,
+                            capability_record=None,
+                            event=_Generation6RNamespaceCloseEvent.OWNED_CURSOR_ABORT_CLOSED,
+                        )
+                    except BaseException as close_error:
+                        primary.add_note(f"R namespace owned cursor close failed: {close_error!r}")
+            raise
+
+    def close_owned_cursor(
+        self,
+        authority: _Generation6RNamespaceDirectoryAuthority,
+    ) -> None:
+        self._require_building()
+        authority_record, _, _, _ = self._reauthenticate_directory(authority)
+        binding = authority_record.binding
+        _require(
+            type(authority) is _Generation6RNamespaceDirectoryAuthority
+            and authority.issuer_identity == self._issuer_identity
+            and binding.authority is authority
+            and binding.kind is _Generation6RNamespaceAuthorityKind.OWNED_CURSOR
+            and authority_record.state is _Generation6RNamespaceOwnerState.LIVE,
+            "R namespace owned cursor close authority differs",
+        )
+        owner_context = self._namespace_owner_contexts.get(id(binding.owner.fd))
+        _require(
+            type(owner_context) is _Generation6RNamespaceOwnerContext,
+            "R namespace owned cursor context type differs",
+        )
+        try:
+            close_receipt = self._close_namespace_owner(
+                binding.owner.fd,
+                binding.descriptor_token,
+                cast(_Generation6RNamespaceOwnerContext, owner_context),
+                capability_record=None,
+                event=_Generation6RNamespaceCloseEvent.OWNED_CURSOR_CLOSED,
+            )
+        except BaseException:
+            authority_record.state = _Generation6RNamespaceOwnerState.UNCERTAIN
+            raise
+        authority_record.close_receipt = close_receipt
+        authority_record.state = _Generation6RNamespaceOwnerState.CLOSED
+
+    def _acquire_name_owner(
+        self,
+        authority: _Generation6RNamespaceDirectoryAuthority,
+        name: str,
+        *,
+        purpose: _Generation6RNamespaceOwnerPurpose,
+        label: str,
+    ) -> tuple[
+        FdOwner,
+        _Generation6ROwnerToken,
+        _Generation6RNamespaceOwnerContext,
+        DescriptorSnapshot,
+        int,
+        _Generation6RNamespaceDirectoryRecord,
+        _Generation6ROwnerRecord,
+        int,
+    ]:
+        (
+            authority_record_before,
+            descriptor_record_before,
+            directory_descriptor,
+            _,
+        ) = self._reauthenticate_directory(authority)
+        authority_binding = authority_record_before.binding
+        exact_name, _ = _GENERATION6_R_NAMESPACE_CAPTURED_COMPONENT(
+            name,
+            label="R namespace entry name",
+        )
+        named_before = _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT(
+            _GENERATION6_R_NAMESPACE_REAL_OS_STAT(
+                exact_name,
+                dir_fd=directory_descriptor,
+                follow_symlinks=False,
+            )
+        )
+        owner, descriptor_token, owner_context = self._open_namespace_owner(
+            authority,
+            authority_record_before,
+            directory_descriptor,
+            exact_name,
+            os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC,
+            purpose=purpose,
+            label=label,
+        )
+        try:
+            descriptor = _GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE(owner)
+            opened = _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD(descriptor)
+            named_after = _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT(
+                _GENERATION6_R_NAMESPACE_REAL_OS_STAT(
+                    exact_name,
+                    dir_fd=directory_descriptor,
+                    follow_symlinks=False,
+                )
+            )
+            mount_id = self._namespace_mount_id(
+                descriptor,
+                excluded_descriptors=(directory_descriptor,),
+            )
+            descriptor_flags = _GENERATION6_R_NAMESPACE_REAL_FCNTL(
+                descriptor,
+                fcntl.F_GETFD,
+            )
+            status_flags = _GENERATION6_R_NAMESPACE_REAL_FCNTL(
+                descriptor,
+                fcntl.F_GETFL,
+            )
+            _require(
+                descriptor != directory_descriptor
+                and named_before == opened == named_after
+                and descriptor_token.snapshot == opened
+                and descriptor_token.fd_flags == descriptor_flags
+                and descriptor_token.status_flags == status_flags
+                and mount_id == authority_binding.fact.mount_id
+                and opened.uid == authority_binding.fact.uid
+                and type(descriptor_flags) is int
+                and descriptor_flags == fcntl.FD_CLOEXEC
+                and type(status_flags) is int
+                and status_flags >= 0
+                and status_flags & os.O_ACCMODE == os.O_RDONLY
+                and status_flags & os.O_PATH == os.O_PATH,
+                "R namespace entry handle identity differs",
+            )
+            (
+                authority_record_after,
+                descriptor_record_after,
+                directory_descriptor_after,
+                _,
+            ) = self._reauthenticate_directory(authority)
+            self._require_same_parent_proof(
+                authority,
+                authority_record_before,
+                descriptor_record_before,
+                directory_descriptor,
+                authority_record_after,
+                descriptor_record_after,
+                directory_descriptor_after,
+            )
+        except BaseException as primary:
+            if not owner.terminal:
+                if self._phase is _Generation6RNamespacePhase.UNCERTAIN:
+                    self._retain_uncertain_owner(owner, descriptor_token.descriptor)
+                else:
+                    try:
+                        self._close_namespace_owner(
+                            owner,
+                            descriptor_token,
+                            owner_context,
+                            capability_record=None,
+                            event=_Generation6RNamespaceCloseEvent.ENTRY_HANDLE_ABORT_CLOSED,
+                        )
+                    except BaseException as close_error:
+                        primary.add_note(f"R namespace entry handle close failed: {close_error!r}")
+            raise
+        owner_context.state = _Generation6RNamespaceContextState.LIVE
+        return (
+            owner,
+            descriptor_token,
+            owner_context,
+            opened,
+            mount_id,
+            authority_record_after,
+            descriptor_record_after,
+            directory_descriptor_after,
+        )
+
+    def _validate_node_kind(
+        self,
+        snapshot: DescriptorSnapshot,
+        kind: _Generation6RNamespaceNodeKind,
+        hardlink_group: str | None,
+    ) -> str | None:
+        _require(
+            type(snapshot) is DescriptorSnapshot
+            and type(kind) is _Generation6RNamespaceNodeKind
+            and type(snapshot.link_count) is int
+            and snapshot.link_count > 0,
+            "R namespace node-kind inputs differ",
+        )
+        mode = snapshot.mode
+        file_type = _GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT(mode)
+        special_permissions = mode & SPECIAL_PERMISSION_BITS
+        exact_group: str | None = None
+        if kind is _Generation6RNamespaceNodeKind.DIRECTORY:
+            matches = file_type == stat.S_IFDIR
+        elif kind is _Generation6RNamespaceNodeKind.REGULAR:
+            matches = file_type == stat.S_IFREG and snapshot.link_count == 1
+        elif kind is _Generation6RNamespaceNodeKind.SYMLINK:
+            matches = file_type == stat.S_IFLNK
+        elif kind is _Generation6RNamespaceNodeKind.SOCKET:
+            matches = file_type == stat.S_IFSOCK
+        elif kind is _Generation6RNamespaceNodeKind.FIFO:
+            matches = file_type == stat.S_IFIFO
+        elif kind is _Generation6RNamespaceNodeKind.HARDLINK:
+            matches = file_type == stat.S_IFREG and snapshot.link_count == 2
+            exact_group = _ascii(hardlink_group, "R namespace hardlink group")
+            _require(exact_group != "", "R namespace hardlink group is empty")
+        else:
+            _require(
+                kind is _Generation6RNamespaceNodeKind.SPECIAL,
+                "R namespace node kind differs",
+            )
+            matches = (
+                file_type == stat.S_IFCHR or file_type == stat.S_IFBLK or special_permissions != 0
+            )
+        _require(matches, "R namespace node kind does not match its snapshot")
+        if kind is not _Generation6RNamespaceNodeKind.SPECIAL:
+            _require(
+                special_permissions == 0,
+                "R namespace ordinary node has special permissions",
+            )
+        if kind is not _Generation6RNamespaceNodeKind.HARDLINK:
+            _require(
+                hardlink_group is None,
+                "R namespace non-hardlink has a hardlink group",
+            )
+        return exact_group
+
+    def _copy_name_fact(
+        self,
+        authority: _Generation6RNamespaceDirectoryAuthority,
+        name: str,
+        snapshot: DescriptorSnapshot,
+        mount_id: int,
+        kind: _Generation6RNamespaceNodeKind,
+        hardlink_group: str | None,
+    ) -> _Generation6RNamespaceNameFact:
+        exact_name, _ = _GENERATION6_R_NAMESPACE_CAPTURED_COMPONENT(
+            name,
+            label="R namespace copied entry name",
+        )
+        exact_group = self._validate_node_kind(snapshot, kind, hardlink_group)
+        return _Generation6RNamespaceNameFact(
+            self._issue_serial(),
+            self._issuer_identity,
+            authority,
+            exact_name,
+            kind,
+            snapshot.device,
+            snapshot.inode,
+            snapshot.uid,
+            snapshot.mode,
+            snapshot.link_count,
+            mount_id,
+            exact_group,
+        )
+
+    def _register_name_fact(
+        self,
+        fact: _Generation6RNamespaceNameFact,
+    ) -> _Generation6RNamespaceReceipt:
+        _require(
+            type(fact) is _Generation6RNamespaceNameFact,
+            "R namespace name-fact type differs",
+        )
+        parent_record, _, _ = self._require_authority(fact.parent_authority)
+        _require(
+            fact.issuer_identity == self._issuer_identity
+            and type(fact.parent_authority) is _Generation6RNamespaceDirectoryAuthority
+            and parent_record.binding.authority is fact.parent_authority
+            and (fact.parent_authority.serial, fact.name) not in self._name_facts_by_key,
+            "R namespace name-fact registration differs",
+        )
+        self._begin_publication(fact)
+        try:
+            if fact.kind is _Generation6RNamespaceNodeKind.HARDLINK:
+                _require(
+                    type(fact.hardlink_group) is str
+                    and fact.hardlink_group != ""
+                    and fact.link_count == 2,
+                    "R namespace hardlink fact differs",
+                )
+                exact_group = cast(str, fact.hardlink_group)
+                group = self._hardlink_groups.setdefault(exact_group, [])
+                _require(
+                    len(group) < 2
+                    and all(
+                        candidate.kind is _Generation6RNamespaceNodeKind.HARDLINK
+                        and candidate.hardlink_group == exact_group
+                        and candidate.device == fact.device
+                        and candidate.inode == fact.inode
+                        and candidate.uid == fact.uid
+                        and candidate.mode == fact.mode
+                        and candidate.mount_id == fact.mount_id
+                        and (
+                            candidate.parent_authority is not fact.parent_authority
+                            or candidate.name != fact.name
+                        )
+                        for candidate in group
+                    ),
+                    "R namespace hardlink member identity differs",
+                )
+                group.append(fact)
+            else:
+                _require(
+                    fact.hardlink_group is None,
+                    "R namespace ordinary fact has a hardlink group",
+                )
+            self._name_facts_by_key[(fact.parent_authority.serial, fact.name)] = fact
+            receipt = self._append_receipt(
+                token_serial=None,
+                authority_serial=fact.parent_authority.serial,
+                event="NAME_FACT_SEALED",
+            )
+            self._finish_publication(fact)
+        except BaseException:
+            self._fail_publication(fact)
+            raise
+        return receipt
+
+    def seal_name(
+        self,
+        authority: _Generation6RNamespaceDirectoryAuthority,
+        name: str,
+        kind: _Generation6RNamespaceNodeKind,
+        *,
+        hardlink_group: str | None = None,
+    ) -> _Generation6RNamespaceNameFact:
+        self._require_building()
+        exact_name, _ = _GENERATION6_R_NAMESPACE_CAPTURED_COMPONENT(
+            name,
+            label="R namespace sealed entry name",
+        )
+        _require(
+            type(authority) is _Generation6RNamespaceDirectoryAuthority
+            and type(kind) is _Generation6RNamespaceNodeKind
+            and (authority.serial, exact_name) not in self._name_facts_by_key,
+            "R namespace sealed entry inventory differs",
+        )
+        owner: FdOwner | None = None
+        descriptor_token: _Generation6ROwnerToken | None = None
+        owner_context: _Generation6RNamespaceOwnerContext | None = None
+        fact: _Generation6RNamespaceNameFact | None = None
+        try:
+            (
+                owner,
+                descriptor_token,
+                owner_context,
+                opened,
+                mount_id,
+                _,
+                _,
+                _,
+            ) = self._acquire_name_owner(
+                authority,
+                exact_name,
+                purpose=_Generation6RNamespaceOwnerPurpose.SEALED_ENTRY,
+                label=f"R namespace sealed entry {exact_name}",
+            )
+            fact = self._copy_name_fact(
+                authority,
+                exact_name,
+                opened,
+                mount_id,
+                kind,
+                hardlink_group,
+            )
+            closing_owner = owner
+            closing_descriptor_token = descriptor_token
+            closing_owner_context = owner_context
+            owner = None
+            descriptor_token = None
+            owner_context = None
+            self._close_namespace_owner(
+                closing_owner,
+                closing_descriptor_token,
+                closing_owner_context,
+                capability_record=None,
+                event=_Generation6RNamespaceCloseEvent.SEALED_ENTRY_HANDLE_CLOSED,
+            )
+        except BaseException as primary:
+            if (
+                owner is not None
+                and descriptor_token is not None
+                and owner_context is not None
+                and not owner.terminal
+            ):
+                if self._phase is _Generation6RNamespacePhase.UNCERTAIN:
+                    self._retain_uncertain_owner(owner, descriptor_token.descriptor)
+                else:
+                    try:
+                        self._close_namespace_owner(
+                            owner,
+                            descriptor_token,
+                            owner_context,
+                            capability_record=None,
+                            event=_Generation6RNamespaceCloseEvent.SEALED_ENTRY_ABORT_CLOSED,
+                        )
+                    except BaseException as close_error:
+                        primary.add_note(f"R namespace sealed entry close failed: {close_error!r}")
+            raise
+        _require(
+            fact is not None
+            and owner is None
+            and descriptor_token is None
+            and owner_context is None
+            and (authority.serial, exact_name) not in self._name_facts_by_key,
+            "R namespace sealed entry completion differs",
+        )
+        self._register_name_fact(fact)
+        return fact
+
+    def _require_name_fact(
+        self,
+        authority: _Generation6RNamespaceDirectoryAuthority,
+        fact: _Generation6RNamespaceNameFact,
+    ) -> None:
+        _require(
+            type(fact) is _Generation6RNamespaceNameFact,
+            "R namespace name fact type differs",
+        )
+        _exact_keys(
+            vars(fact),
+            (
+                "serial",
+                "issuer_identity",
+                "parent_authority",
+                "name",
+                "kind",
+                "device",
+                "inode",
+                "uid",
+                "mode",
+                "link_count",
+                "mount_id",
+                "hardlink_group",
+            ),
+            "R namespace name fact",
+        )
+        authority_record, _, _ = self._require_authority(authority)
+        _require(
+            type(authority) is _Generation6RNamespaceDirectoryAuthority
+            and fact.issuer_identity == self._issuer_identity
+            and type(fact.serial) is int
+            and fact.serial > 0
+            and fact.parent_authority is authority
+            and type(fact.name) is str
+            and fact.name != ""
+            and type(fact.kind) is _Generation6RNamespaceNodeKind
+            and authority_record.binding.authority is authority
+            and self._name_facts_by_key.get((authority.serial, fact.name)) is fact,
+            "R namespace name fact authority differs",
+        )
+
+    @staticmethod
+    def _name_fact_matches(
+        fact: _Generation6RNamespaceNameFact,
+        snapshot: DescriptorSnapshot,
+        mount_id: int,
+    ) -> bool:
+        return (
+            type(fact) is _Generation6RNamespaceNameFact
+            and type(snapshot) is DescriptorSnapshot
+            and type(mount_id) is int
+            and mount_id > 0
+            and fact.device == snapshot.device
+            and fact.inode == snapshot.inode
+            and fact.uid == snapshot.uid
+            and fact.mode == snapshot.mode
+            and fact.link_count == snapshot.link_count
+            and fact.mount_id == mount_id
+        )
+
+    def seal(self) -> None:
+        self._require_building()
+        _require(
+            self._live_capability_record is None
+            and self._pending_publication is None
+            and not self._poisoned_descriptors
+            and not self._owner_quarantine
+            and not self._untransferred_raw_quarantine
+            and all(
+                authority_record.state is _Generation6RNamespaceOwnerState.CLOSED
+                and type(authority_record.close_receipt) is _Generation6RNamespaceReceipt
+                and authority_record.close_receipt.issuer_identity == self._issuer_identity
+                and authority_record.close_receipt.token_serial is None
+                and authority_record.close_receipt.authority_serial
+                == authority_record.binding.authority.serial
+                and authority_record.close_receipt.event == "OWNED_CURSOR_CLOSED"
+                and any(candidate is authority_record.close_receipt for candidate in self._receipts)
+                for authority_record in self._authority_records_by_serial.values()
+                if authority_record.binding.kind is _Generation6RNamespaceAuthorityKind.OWNED_CURSOR
+            )
+            and self._namespace_owner_contexts.keys() == self._namespace_owner_tokens.keys()
+            and all(
+                type(owner_context) is _Generation6RNamespaceOwnerContext
+                and type(owner_context.binding) is _Generation6RNamespaceOwnerContextBinding
+                and owner_context.binding.issuer_identity == self._issuer_identity
+                and type(owner_context.binding.serial) is int
+                and owner_context.binding.serial > 0
+                and owner_context.binding.owner_identity == owner_identity
+                and id(owner_context.binding.owner) == owner_identity
+                and owner_context.binding.descriptor_token
+                is self._namespace_owner_tokens.get(owner_identity)
+                and owner_context.binding.token_generation
+                == owner_context.binding.descriptor_token.generation
+                and owner_context.state is _Generation6RNamespaceContextState.CLOSED
+                and owner_context.capability_record is None
+                and type(owner_context.close_receipt) is _Generation6RNamespaceReceipt
+                and owner_context.close_receipt.token_serial is None
+                and owner_context.close_receipt.authority_serial
+                == owner_context.authority_record.binding.authority.serial
+                and owner_context.close_receipt.event
+                in (
+                    {
+                        "OWNED_CURSOR_ABORT_CLOSED",
+                        "OWNED_CURSOR_CLOSED",
+                    }
+                    if owner_context.binding.purpose
+                    is _Generation6RNamespaceOwnerPurpose.OWNED_CURSOR
+                    else {
+                        "ENTRY_HANDLE_ABORT_CLOSED",
+                        "SEALED_ENTRY_HANDLE_CLOSED",
+                        "SEALED_ENTRY_ABORT_CLOSED",
+                    }
+                )
+                and any(candidate is owner_context.close_receipt for candidate in self._receipts)
+                for owner_identity, owner_context in self._namespace_owner_contexts.items()
+            )
+            and all(
+                (record := self._descriptor_ledger._records_by_owner_identity.get(owner_identity))
+                is not None
+                and record.token is descriptor_token
+                and record.state is _Generation6RDescriptorState.CLOSE_SUCCEEDED
+                and record.owner.terminal
+                and descriptor_token.descriptor
+                not in self._descriptor_ledger._uncertain_descriptors
+                and not any(
+                    candidate is record.owner
+                    for candidate in self._descriptor_ledger._registration_quarantine
+                )
+                for owner_identity, descriptor_token in self._namespace_owner_tokens.items()
+            )
+            and all(
+                type(group_name) is str
+                and group_name != ""
+                and type(members) is list
+                and len(members) == 2
+                and members[0] is not members[1]
+                and members[0].kind is _Generation6RNamespaceNodeKind.HARDLINK
+                and members[1].kind is _Generation6RNamespaceNodeKind.HARDLINK
+                and members[0].hardlink_group == group_name
+                and members[1].hardlink_group == group_name
+                and members[0].link_count == members[1].link_count == 2
+                and members[0].device == members[1].device
+                and members[0].inode == members[1].inode
+                and members[0].uid == members[1].uid
+                and members[0].mode == members[1].mode
+                and members[0].mount_id == members[1].mount_id
+                and (
+                    members[0].parent_authority is not members[1].parent_authority
+                    or members[0].name != members[1].name
+                )
+                and all(
+                    self._name_facts_by_key.get((member.parent_authority.serial, member.name))
+                    is member
+                    for member in members
+                )
+                for group_name, members in self._hardlink_groups.items()
+            )
+            and all(
+                fact.kind is not _Generation6RNamespaceNodeKind.HARDLINK
+                or (
+                    type(fact.hardlink_group) is str
+                    and any(
+                        candidate is fact
+                        for candidate in self._hardlink_groups.get(
+                            fact.hardlink_group,
+                            [],
+                        )
+                    )
+                )
+                for fact in self._name_facts_by_key.values()
+            ),
+            "R namespace owned cursors are not sealed",
+        )
+        seal_marker = object()
+        self._begin_publication(seal_marker)
+        try:
+            self._append_receipt(
+                token_serial=None,
+                authority_serial=None,
+                event="NAMESPACE_SEALED",
+            )
+            self._phase = _Generation6RNamespacePhase.SEALED
+            self._finish_publication(seal_marker)
+        except BaseException:
+            self._fail_publication(seal_marker)
+            raise
+
+    def _require_teardown_authorization(self) -> None:
+        _require(
+            self._phase is _Generation6RNamespacePhase.TEARDOWN_ACTIVE
+            and self._descriptor_ledger._scope_active
+            and self._live_capability_record is None
+            and self._pending_publication is None
+            and not self._poisoned_descriptors
+            and not self._owner_quarantine
+            and not self._untransferred_raw_quarantine
+            and all(
+                type(context) is _Generation6RNamespaceOwnerContext
+                and context.state is _Generation6RNamespaceContextState.CLOSED
+                for context in self._namespace_owner_contexts.values()
+            ),
+            "R namespace teardown authorization is unavailable",
+        )
+        self._require_dependencies()
+        self._require_clean_guard()
+
+    def _require_name_absent(
+        self,
+        authority: _Generation6RNamespaceDirectoryAuthority,
+        name: str,
+    ) -> str:
+        (
+            authority_record_before,
+            descriptor_record_before,
+            directory_descriptor,
+            _,
+        ) = self._reauthenticate_directory(authority)
+        exact_name, _ = _GENERATION6_R_NAMESPACE_CAPTURED_COMPONENT(
+            name,
+            label="R namespace absent entry name",
+        )
+        primary: BaseException | None = None
+        absent = False
+        try:
+            _GENERATION6_R_NAMESPACE_REAL_OS_STAT(
+                exact_name,
+                dir_fd=directory_descriptor,
+                follow_symlinks=False,
+            )
+        except OSError as error:
+            if type(error.errno) is int and error.errno == errno.ENOENT:
+                absent = True
+            else:
+                primary = error
+        except BaseException as error:
+            primary = error
+        else:
+            primary = ContractError("R namespace entry is present")
+        try:
+            (
+                authority_record_after,
+                descriptor_record_after,
+                directory_descriptor_after,
+                _,
+            ) = self._reauthenticate_directory(authority)
+            self._require_same_parent_proof(
+                authority,
+                authority_record_before,
+                descriptor_record_before,
+                directory_descriptor,
+                authority_record_after,
+                descriptor_record_after,
+                directory_descriptor_after,
+            )
+        except BaseException as post_error:
+            if primary is None:
+                primary = post_error
+            else:
+                primary.add_note(f"R namespace absence parent post-proof failed: {post_error!r}")
+        if primary is not None:
+            raise primary
+        _require(absent, "R namespace absence is not exact ENOENT")
+        return exact_name
+
+    def _require_live_capability_slot(self) -> None:
+        _require(
+            self._phase is _Generation6RNamespacePhase.TEARDOWN_ACTIVE
+            and self._live_capability_record is None
+            and self._pending_publication is None
+            and not self._poisoned_descriptors
+            and not self._owner_quarantine
+            and not self._untransferred_raw_quarantine
+            and all(
+                type(context) is _Generation6RNamespaceOwnerContext
+                and (
+                    context.state is _Generation6RNamespaceContextState.CLOSED
+                    or context.state is _Generation6RNamespaceContextState.LIVE
+                )
+                for context in self._namespace_owner_contexts.values()
+            ),
+            "R namespace live capability slot is unavailable",
+        )
+
+    def _require_receipt_binding(
+        self,
+        receipt: _Generation6RNamespaceReceipt | None,
+        *,
+        token_serial: int | None,
+        authority_serial: int | None,
+        event: str,
+    ) -> None:
+        _require(
+            type(receipt) is _Generation6RNamespaceReceipt,
+            "R namespace receipt type differs",
+        )
+        exact_receipt = cast(_Generation6RNamespaceReceipt, receipt)
+        _exact_keys(
+            vars(exact_receipt),
+            (
+                "serial",
+                "issuer_identity",
+                "token_serial",
+                "authority_serial",
+                "event",
+            ),
+            "R namespace receipt",
+        )
+        _require(
+            type(exact_receipt.serial) is int
+            and exact_receipt.serial > 0
+            and exact_receipt.issuer_identity == self._issuer_identity
+            and exact_receipt.token_serial == token_serial
+            and exact_receipt.authority_serial == authority_serial
+            and exact_receipt.event == event
+            and any(candidate is exact_receipt for candidate in self._receipts),
+            "R namespace receipt binding differs",
+        )
+
+    def _publish_capability(
+        self,
+        capability_record: _Generation6RNamespaceCapabilityRecord,
+        *,
+        event: str,
+    ) -> None:
+        self._require_live_capability_slot()
+        _require(
+            type(capability_record) is _Generation6RNamespaceCapabilityRecord,
+            "R namespace capability publication record type differs",
+        )
+        _exact_keys(
+            vars(capability_record),
+            (
+                "binding",
+                "state",
+                "owner_state",
+                "authorization_receipt",
+                "close_receipt",
+                "terminal_receipt",
+            ),
+            "R namespace capability publication record",
+        )
+        binding = capability_record.binding
+        _require(
+            type(binding) is _Generation6RNamespaceCapabilityBinding,
+            "R namespace capability publication binding type differs",
+        )
+        _exact_keys(
+            vars(binding),
+            (
+                "serial",
+                "issuer_identity",
+                "token",
+                "token_serial",
+                "token_issuer_identity",
+                "action",
+                "authority",
+                "authority_record",
+                "fact",
+                "name",
+                "path_owner",
+                "descriptor_token",
+                "owner_context",
+                "owner_state",
+                "destination_authority",
+                "destination_record",
+                "destination_name",
+            ),
+            "R namespace capability publication binding",
+        )
+        token_identity = id(binding.token)
+        owner_context = binding.owner_context
+        _require(
+            type(token_identity) is int
+            and token_identity > 0
+            and capability_record.state is _Generation6RNamespaceTokenState.AUTHORIZED
+            and capability_record.owner_state is binding.owner_state
+            and capability_record.authorization_receipt is None
+            and capability_record.close_receipt is None
+            and capability_record.terminal_receipt is None
+            and type(binding.token)
+            in {
+                _Generation6RNamespacePresentToken,
+                _Generation6RNamespaceAbsenceToken,
+                _Generation6RNamespaceRenameToken,
+            }
+            and binding.token_serial == binding.token.serial
+            and binding.token_issuer_identity == binding.token.issuer_identity
+            and binding.action is binding.token.action
+            and token_identity not in self._capability_records_by_identity
+            and binding.token_serial not in self._capability_records_by_serial,
+            "R namespace capability publication binding differs",
+        )
+        if type(binding.token) is _Generation6RNamespaceAbsenceToken:
+            _require(
+                owner_context is None
+                and binding.path_owner is None
+                and binding.descriptor_token is None
+                and binding.owner_state is None
+                and capability_record.owner_state is None,
+                "R namespace absence publication owner context differs",
+            )
+        else:
+            _require(
+                type(owner_context) is _Generation6RNamespaceOwnerContext
+                and type(binding.path_owner) is FdOwner
+                and type(binding.descriptor_token) is _Generation6ROwnerToken,
+                "R namespace mutation publication owner context type differs",
+            )
+            exact_owner_context = cast(_Generation6RNamespaceOwnerContext, owner_context)
+            exact_descriptor_token = cast(
+                _Generation6ROwnerToken,
+                binding.descriptor_token,
+            )
+            context_binding = exact_owner_context.binding
+            expected_purpose = (
+                _Generation6RNamespaceOwnerPurpose.PRESENT_TOKEN
+                if type(binding.token) is _Generation6RNamespacePresentToken
+                else _Generation6RNamespaceOwnerPurpose.RENAME_TOKEN
+            )
+            _require(
+                type(context_binding) is _Generation6RNamespaceOwnerContextBinding
+                and context_binding.issuer_identity == self._issuer_identity
+                and context_binding.owner is binding.path_owner
+                and context_binding.owner_identity == id(binding.path_owner)
+                and context_binding.descriptor_token is binding.descriptor_token
+                and context_binding.token_generation == exact_descriptor_token.generation
+                and context_binding.kind is _Generation6RNamespaceOwnerKind.ENTRY_HANDLE
+                and context_binding.purpose is expected_purpose
+                and context_binding.origin_authority_record is binding.authority_record
+                and exact_owner_context.authority_record is binding.authority_record
+                and exact_owner_context.state is _Generation6RNamespaceContextState.LIVE
+                and exact_owner_context.capability_record is None
+                and exact_owner_context.close_receipt is None
+                and self._namespace_owner_contexts.get(context_binding.owner_identity)
+                is exact_owner_context
+                and self._namespace_owner_tokens.get(context_binding.owner_identity)
+                is binding.descriptor_token
+                and binding.owner_state is _Generation6RNamespaceOwnerState.LIVE
+                and capability_record.owner_state is _Generation6RNamespaceOwnerState.LIVE,
+                "R namespace mutation publication owner context differs",
+            )
+        self._begin_publication(capability_record)
+        try:
+            if owner_context is not None:
+                owner_context.capability_record = capability_record
+                owner_context.state = _Generation6RNamespaceContextState.TRANSFERRED
+            authorization_receipt = self._append_receipt(
+                token_serial=binding.token_serial,
+                authority_serial=binding.authority.serial,
+                event=event,
+            )
+            capability_record.authorization_receipt = authorization_receipt
+            self._capability_records_by_identity[token_identity] = capability_record
+            self._capability_records_by_serial[binding.token_serial] = capability_record
+            self._live_capability_record = capability_record
+            self._finish_publication(capability_record)
+        except BaseException:
+            capability_record.state = _Generation6RNamespaceTokenState.UNCERTAIN
+            if owner_context is not None:
+                owner_context.state = _Generation6RNamespaceContextState.UNCERTAIN
+            self._fail_publication(capability_record)
+            raise
+
+    def _require_live_capability(
+        self,
+        token: _Generation6RNamespaceLiveToken,
+    ) -> _Generation6RNamespaceCapabilityRecord:
+        live_record = self._live_capability_record
+        try:
+            _require(
+                type(token)
+                in {
+                    _Generation6RNamespacePresentToken,
+                    _Generation6RNamespaceAbsenceToken,
+                    _Generation6RNamespaceRenameToken,
+                },
+                "R namespace live capability token type differs",
+            )
+            _exact_keys(
+                vars(token),
+                ("serial", "issuer_identity", "action"),
+                "R namespace public capability token",
+            )
+            token_identity = id(token)
+            _require(
+                self._phase is _Generation6RNamespacePhase.TEARDOWN_ACTIVE
+                and self._pending_publication is None
+                and not self._poisoned_descriptors
+                and not self._owner_quarantine
+                and not self._untransferred_raw_quarantine
+                and type(token_identity) is int
+                and token_identity > 0
+                and type(token.serial) is int
+                and token.serial > 0
+                and type(token.action) is _Generation6RNamespaceAction
+                and live_record is not None
+                and self._capability_records_by_identity.get(token_identity) is live_record
+                and self._capability_records_by_serial.get(token.serial) is live_record
+                and live_record.binding.token is token
+                and live_record.binding.token_serial == token.serial
+                and live_record.binding.token_issuer_identity == token.issuer_identity
+                and live_record.binding.action is token.action
+                and token.issuer_identity == self._issuer_identity
+                and live_record.state is _Generation6RNamespaceTokenState.AUTHORIZED,
+                "R namespace live capability identity differs",
+            )
+            exact_record = cast(_Generation6RNamespaceCapabilityRecord, live_record)
+            _exact_keys(
+                vars(exact_record),
+                (
+                    "binding",
+                    "state",
+                    "owner_state",
+                    "authorization_receipt",
+                    "close_receipt",
+                    "terminal_receipt",
+                ),
+                "R namespace capability record",
+            )
+            binding = exact_record.binding
+            _require(
+                type(binding) is _Generation6RNamespaceCapabilityBinding,
+                "R namespace capability binding type differs",
+            )
+            _exact_keys(
+                vars(binding),
+                (
+                    "serial",
+                    "issuer_identity",
+                    "token",
+                    "token_serial",
+                    "token_issuer_identity",
+                    "action",
+                    "authority",
+                    "authority_record",
+                    "fact",
+                    "name",
+                    "path_owner",
+                    "descriptor_token",
+                    "owner_context",
+                    "owner_state",
+                    "destination_authority",
+                    "destination_record",
+                    "destination_name",
+                ),
+                "R namespace capability binding",
+            )
+            if type(token) is _Generation6RNamespacePresentToken:
+                authorization_event = "PRESENT_TOKEN_AUTHORIZED"
+            elif type(token) is _Generation6RNamespaceAbsenceToken:
+                authorization_event = "ABSENCE_TOKEN_AUTHORIZED"
+            else:
+                authorization_event = "RENAME_TOKEN_AUTHORIZED"
+            _require(
+                type(binding.serial) is int
+                and binding.serial > 0
+                and binding.issuer_identity == self._issuer_identity
+                and binding.token is token
+                and binding.token_serial == token.serial
+                and binding.token_issuer_identity == token.issuer_identity
+                and binding.action is token.action
+                and type(binding.authority) is _Generation6RNamespaceDirectoryAuthority
+                and type(binding.authority_record) is _Generation6RNamespaceDirectoryRecord
+                and type(binding.name) is str
+                and binding.name != ""
+                and exact_record.close_receipt is None
+                and exact_record.terminal_receipt is None
+                and not any(
+                    candidate is exact_record for candidate in self._archived_capability_records
+                ),
+                "R namespace live capability record differs",
+            )
+            self._require_receipt_binding(
+                exact_record.authorization_receipt,
+                token_serial=binding.token_serial,
+                authority_serial=binding.authority.serial,
+                event=authorization_event,
+            )
+            authority_record, _, _ = self._require_authority(binding.authority)
+            _require(
+                authority_record is binding.authority_record
+                and binding.authority_record.binding.authority is binding.authority,
+                "R namespace capability authority record differs",
+            )
+            if type(token) is _Generation6RNamespaceAbsenceToken:
+                _require(
+                    binding.fact is None
+                    and type(binding.name) is str
+                    and binding.name != ""
+                    and binding.path_owner is None
+                    and binding.descriptor_token is None
+                    and binding.owner_context is None
+                    and binding.owner_state is None
+                    and exact_record.owner_state is None
+                    and binding.destination_authority is None
+                    and binding.destination_record is None
+                    and binding.destination_name is None,
+                    "R namespace absence capability fields differ",
+                )
+            else:
+                _require(
+                    type(binding.fact) is _Generation6RNamespaceNameFact,
+                    "R namespace present fact type differs",
+                )
+                self._require_name_fact(
+                    binding.authority,
+                    cast(_Generation6RNamespaceNameFact, binding.fact),
+                )
+                _require(
+                    binding.fact is not None
+                    and binding.fact.parent_authority is binding.authority
+                    and binding.name == binding.fact.name
+                    and type(binding.path_owner) is FdOwner
+                    and type(binding.descriptor_token) is _Generation6ROwnerToken
+                    and type(binding.owner_context) is _Generation6RNamespaceOwnerContext
+                    and binding.owner_state is _Generation6RNamespaceOwnerState.LIVE
+                    and exact_record.owner_state is _Generation6RNamespaceOwnerState.LIVE
+                    and self._namespace_owner_tokens.get(id(binding.path_owner))
+                    is binding.descriptor_token
+                    and self._namespace_owner_contexts.get(id(binding.path_owner))
+                    is binding.owner_context,
+                    "R namespace present capability fields differ",
+                )
+                owner_context = cast(
+                    _Generation6RNamespaceOwnerContext,
+                    binding.owner_context,
+                )
+                context_binding = owner_context.binding
+                expected_purpose = (
+                    _Generation6RNamespaceOwnerPurpose.PRESENT_TOKEN
+                    if type(token) is _Generation6RNamespacePresentToken
+                    else _Generation6RNamespaceOwnerPurpose.RENAME_TOKEN
+                )
+                _require(
+                    type(context_binding) is _Generation6RNamespaceOwnerContextBinding
+                    and context_binding.issuer_identity == self._issuer_identity
+                    and context_binding.owner is binding.path_owner
+                    and context_binding.owner_identity == id(binding.path_owner)
+                    and context_binding.descriptor_token is binding.descriptor_token
+                    and context_binding.token_generation == binding.descriptor_token.generation
+                    and context_binding.kind is _Generation6RNamespaceOwnerKind.ENTRY_HANDLE
+                    and context_binding.purpose is expected_purpose
+                    and context_binding.origin_authority_record is binding.authority_record
+                    and owner_context.authority_record is binding.authority_record
+                    and owner_context.state is _Generation6RNamespaceContextState.TRANSFERRED
+                    and owner_context.capability_record is exact_record
+                    and owner_context.close_receipt is None,
+                    "R namespace live capability owner context differs",
+                )
+                self._descriptor_ledger._authorize_live(
+                    cast(FdOwner, binding.path_owner),
+                    cast(_Generation6ROwnerToken, binding.descriptor_token),
+                )
+                if type(token) is _Generation6RNamespaceRenameToken:
+                    _require(
+                        binding.destination_authority is not None
+                        and binding.destination_record is not None
+                        and binding.destination_record.binding.authority
+                        is binding.destination_authority
+                        and type(binding.destination_name) is str
+                        and binding.destination_name != "",
+                        "R namespace rename destination fields differ",
+                    )
+                    destination_record, _, _ = self._require_authority(
+                        cast(
+                            _Generation6RNamespaceDirectoryAuthority,
+                            binding.destination_authority,
+                        )
+                    )
+                    _require(
+                        destination_record is binding.destination_record,
+                        "R namespace rename destination record differs",
+                    )
+                else:
+                    _require(
+                        binding.destination_authority is None
+                        and binding.destination_record is None
+                        and binding.destination_name is None,
+                        "R namespace present destination fields differ",
+                    )
+        except BaseException:
+            self._phase = _Generation6RNamespacePhase.UNCERTAIN
+            if type(live_record) is _Generation6RNamespaceCapabilityRecord:
+                live_record.state = _Generation6RNamespaceTokenState.UNCERTAIN
+                live_owner_context = live_record.binding.owner_context
+                if type(live_owner_context) is _Generation6RNamespaceOwnerContext:
+                    live_owner_context.state = _Generation6RNamespaceContextState.UNCERTAIN
+            raise
+        return exact_record
+
+    def _archive_capability(
+        self,
+        capability_record: _Generation6RNamespaceCapabilityRecord,
+    ) -> None:
+        binding = capability_record.binding
+        _require(
+            type(capability_record) is _Generation6RNamespaceCapabilityRecord
+            and type(binding) is _Generation6RNamespaceCapabilityBinding
+            and self._live_capability_record is capability_record
+            and self._capability_records_by_identity.get(id(binding.token)) is capability_record
+            and self._capability_records_by_serial.get(binding.token_serial) is capability_record
+            and capability_record.state is _Generation6RNamespaceTokenState.ATTEMPTED
+            and not any(
+                candidate is capability_record for candidate in self._archived_capability_records
+            ),
+            "R namespace capability archive binding differs",
+        )
+        if type(binding.token) is _Generation6RNamespaceAbsenceToken:
+            _require(
+                capability_record.owner_state is None and capability_record.close_receipt is None,
+                "R namespace absence terminal owner state differs",
+            )
+            terminal_event = "ABSENCE_TOKEN_ABANDONED"
+        else:
+            owner_context = binding.owner_context
+            _require(
+                capability_record.owner_state is _Generation6RNamespaceOwnerState.CLOSED
+                and type(owner_context) is _Generation6RNamespaceOwnerContext
+                and owner_context.state is _Generation6RNamespaceContextState.CLOSED
+                and owner_context.capability_record is capability_record
+                and owner_context.close_receipt is capability_record.close_receipt,
+                "R namespace mutation terminal owner state differs",
+            )
+            self._require_receipt_binding(
+                capability_record.close_receipt,
+                token_serial=binding.token_serial,
+                authority_serial=binding.authority.serial,
+                event="MUTATION_TOKEN_HANDLE_CLOSED",
+            )
+            terminal_event = "MUTATION_TOKEN_ABANDONED"
+        self._require_receipt_binding(
+            capability_record.terminal_receipt,
+            token_serial=binding.token_serial,
+            authority_serial=binding.authority.serial,
+            event=terminal_event,
+        )
+        self._archived_capability_records.append(capability_record)
+
+    def authorize_present(
+        self,
+        authority: _Generation6RNamespaceDirectoryAuthority,
+        fact: _Generation6RNamespaceNameFact,
+        action: _Generation6RNamespaceAction,
+    ) -> _Generation6RNamespacePresentToken:
+        self._require_teardown_authorization()
+        self._require_name_fact(authority, fact)
+        _require(
+            type(action) is _Generation6RNamespaceAction
+            and (
+                (
+                    action is _Generation6RNamespaceAction.RMDIR
+                    and fact.kind is _Generation6RNamespaceNodeKind.DIRECTORY
+                )
+                or (
+                    action is _Generation6RNamespaceAction.UNLINK
+                    and fact.kind is not _Generation6RNamespaceNodeKind.DIRECTORY
+                )
+            ),
+            "R namespace present action differs",
+        )
+        owner: FdOwner | None = None
+        descriptor_token: _Generation6ROwnerToken | None = None
+        owner_context: _Generation6RNamespaceOwnerContext | None = None
+        capability_record: _Generation6RNamespaceCapabilityRecord | None = None
+        try:
+            (
+                owner,
+                descriptor_token,
+                owner_context,
+                opened,
+                mount_id,
+                authority_record,
+                _,
+                _,
+            ) = self._acquire_name_owner(
+                authority,
+                fact.name,
+                purpose=_Generation6RNamespaceOwnerPurpose.PRESENT_TOKEN,
+                label=f"R namespace present token {fact.name}",
+            )
+            _require(
+                self._name_fact_matches(fact, opened, mount_id),
+                "R namespace present fact changed",
+            )
+            token = _Generation6RNamespacePresentToken(
+                self._issue_serial(),
+                self._issuer_identity,
+                action,
+            )
+            capability_record = _Generation6RNamespaceCapabilityRecord(
+                _Generation6RNamespaceCapabilityBinding(
+                    self._issue_serial(),
+                    self._issuer_identity,
+                    token,
+                    token.serial,
+                    token.issuer_identity,
+                    action,
+                    authority,
+                    authority_record,
+                    fact,
+                    fact.name,
+                    owner,
+                    descriptor_token,
+                    owner_context,
+                    _Generation6RNamespaceOwnerState.LIVE,
+                    None,
+                    None,
+                    None,
+                ),
+                _Generation6RNamespaceTokenState.AUTHORIZED,
+                _Generation6RNamespaceOwnerState.LIVE,
+                None,
+                None,
+                None,
+            )
+            self._publish_capability(
+                capability_record,
+                event="PRESENT_TOKEN_AUTHORIZED",
+            )
+            return token
+        except BaseException as primary:
+            if capability_record is not None:
+                capability_record.state = _Generation6RNamespaceTokenState.UNCERTAIN
+            if (
+                owner is not None
+                and descriptor_token is not None
+                and owner_context is not None
+                and not owner.terminal
+            ):
+                if self._phase is _Generation6RNamespacePhase.UNCERTAIN:
+                    self._retain_uncertain_owner(owner, descriptor_token.descriptor)
+                    if capability_record is not None:
+                        capability_record.owner_state = _Generation6RNamespaceOwnerState.UNCERTAIN
+                    owner_context.state = _Generation6RNamespaceContextState.UNCERTAIN
+                else:
+                    try:
+                        close_receipt = self._close_namespace_owner(
+                            owner,
+                            descriptor_token,
+                            owner_context,
+                            capability_record=None,
+                            event=_Generation6RNamespaceCloseEvent.PRESENT_TOKEN_ABORT_CLOSED,
+                        )
+                        if capability_record is not None:
+                            capability_record.close_receipt = close_receipt
+                            capability_record.owner_state = _Generation6RNamespaceOwnerState.CLOSED
+                    except BaseException as close_error:
+                        if capability_record is not None:
+                            capability_record.owner_state = (
+                                _Generation6RNamespaceOwnerState.UNCERTAIN
+                            )
+                        primary.add_note(f"R namespace present token close failed: {close_error!r}")
+            raise
+
+    def authorize_absence(
+        self,
+        authority: _Generation6RNamespaceDirectoryAuthority,
+        name: str,
+        action: _Generation6RNamespaceAction,
+    ) -> _Generation6RNamespaceAbsenceToken:
+        self._require_teardown_authorization()
+        _require(
+            type(action) is _Generation6RNamespaceAction
+            and (
+                action is _Generation6RNamespaceAction.UNLINK
+                or action is _Generation6RNamespaceAction.RMDIR
+            ),
+            "R namespace absence action differs",
+        )
+        exact_name = self._require_name_absent(authority, name)
+        authority_record, _, _ = self._require_authority(authority)
+        token = _Generation6RNamespaceAbsenceToken(
+            self._issue_serial(),
+            self._issuer_identity,
+            action,
+        )
+        capability_record = _Generation6RNamespaceCapabilityRecord(
+            _Generation6RNamespaceCapabilityBinding(
+                self._issue_serial(),
+                self._issuer_identity,
+                token,
+                token.serial,
+                token.issuer_identity,
+                action,
+                authority,
+                authority_record,
+                None,
+                exact_name,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+            _Generation6RNamespaceTokenState.AUTHORIZED,
+            None,
+            None,
+            None,
+            None,
+        )
+        self._publish_capability(
+            capability_record,
+            event="ABSENCE_TOKEN_AUTHORIZED",
+        )
+        return token
+
+    def authorize_rename(
+        self,
+        source_authority: _Generation6RNamespaceDirectoryAuthority,
+        source_fact: _Generation6RNamespaceNameFact,
+        destination_authority: _Generation6RNamespaceDirectoryAuthority,
+        destination_name: str,
+    ) -> _Generation6RNamespaceRenameToken:
+        self._require_teardown_authorization()
+        self._require_name_fact(source_authority, source_fact)
+        exact_destination_name = self._require_name_absent(
+            destination_authority,
+            destination_name,
+        )
+        source_record, _, _ = self._require_authority(source_authority)
+        destination_record, _, _ = self._require_authority(destination_authority)
+        _require(
+            source_record.binding.fact.mount_id == destination_record.binding.fact.mount_id,
+            "R namespace rename authorities cross mounts",
+        )
+        owner: FdOwner | None = None
+        descriptor_token: _Generation6ROwnerToken | None = None
+        owner_context: _Generation6RNamespaceOwnerContext | None = None
+        capability_record: _Generation6RNamespaceCapabilityRecord | None = None
+        try:
+            (
+                owner,
+                descriptor_token,
+                owner_context,
+                opened,
+                mount_id,
+                source_record_after_acquire,
+                source_descriptor_record_after_acquire,
+                source_descriptor_after_acquire,
+            ) = self._acquire_name_owner(
+                source_authority,
+                source_fact.name,
+                purpose=_Generation6RNamespaceOwnerPurpose.RENAME_TOKEN,
+                label=f"R namespace rename source {source_fact.name}",
+            )
+            _require(
+                self._name_fact_matches(source_fact, opened, mount_id),
+                "R namespace rename source fact changed",
+            )
+            exact_destination_name_after = self._require_name_absent(
+                destination_authority,
+                exact_destination_name,
+            )
+            _require(
+                exact_destination_name_after == exact_destination_name,
+                "R namespace rename destination proof changed",
+            )
+            (
+                source_record_final,
+                source_descriptor_record_final,
+                source_descriptor_final,
+                _,
+            ) = self._reauthenticate_directory(source_authority)
+            self._require_same_parent_proof(
+                source_authority,
+                source_record_after_acquire,
+                source_descriptor_record_after_acquire,
+                source_descriptor_after_acquire,
+                source_record_final,
+                source_descriptor_record_final,
+                source_descriptor_final,
+            )
+            token = _Generation6RNamespaceRenameToken(
+                self._issue_serial(),
+                self._issuer_identity,
+                _Generation6RNamespaceAction.RENAME,
+            )
+            capability_record = _Generation6RNamespaceCapabilityRecord(
+                _Generation6RNamespaceCapabilityBinding(
+                    self._issue_serial(),
+                    self._issuer_identity,
+                    token,
+                    token.serial,
+                    token.issuer_identity,
+                    _Generation6RNamespaceAction.RENAME,
+                    source_authority,
+                    source_record_final,
+                    source_fact,
+                    source_fact.name,
+                    owner,
+                    descriptor_token,
+                    owner_context,
+                    _Generation6RNamespaceOwnerState.LIVE,
+                    destination_authority,
+                    destination_record,
+                    exact_destination_name,
+                ),
+                _Generation6RNamespaceTokenState.AUTHORIZED,
+                _Generation6RNamespaceOwnerState.LIVE,
+                None,
+                None,
+                None,
+            )
+            self._publish_capability(
+                capability_record,
+                event="RENAME_TOKEN_AUTHORIZED",
+            )
+            return token
+        except BaseException as primary:
+            if capability_record is not None:
+                capability_record.state = _Generation6RNamespaceTokenState.UNCERTAIN
+            if (
+                owner is not None
+                and descriptor_token is not None
+                and owner_context is not None
+                and not owner.terminal
+            ):
+                if self._phase is _Generation6RNamespacePhase.UNCERTAIN:
+                    self._retain_uncertain_owner(owner, descriptor_token.descriptor)
+                    if capability_record is not None:
+                        capability_record.owner_state = _Generation6RNamespaceOwnerState.UNCERTAIN
+                    owner_context.state = _Generation6RNamespaceContextState.UNCERTAIN
+                else:
+                    try:
+                        close_receipt = self._close_namespace_owner(
+                            owner,
+                            descriptor_token,
+                            owner_context,
+                            capability_record=None,
+                            event=_Generation6RNamespaceCloseEvent.RENAME_TOKEN_ABORT_CLOSED,
+                        )
+                        if capability_record is not None:
+                            capability_record.close_receipt = close_receipt
+                            capability_record.owner_state = _Generation6RNamespaceOwnerState.CLOSED
+                    except BaseException as close_error:
+                        if capability_record is not None:
+                            capability_record.owner_state = (
+                                _Generation6RNamespaceOwnerState.UNCERTAIN
+                            )
+                        primary.add_note(f"R namespace rename token close failed: {close_error!r}")
+            raise
+
+    def abandon_token(self, token: _Generation6RNamespaceLiveToken) -> None:
+        capability_record = self._require_live_capability(token)
+        binding = capability_record.binding
+        capability_record.state = _Generation6RNamespaceTokenState.ATTEMPTED
+        if type(token) is _Generation6RNamespaceAbsenceToken:
+            try:
+                terminal_receipt = self._append_receipt(
+                    token_serial=binding.token_serial,
+                    authority_serial=binding.authority.serial,
+                    event="ABSENCE_TOKEN_ABANDONED",
+                )
+                capability_record.terminal_receipt = terminal_receipt
+                self._archive_capability(capability_record)
+                capability_record.state = _Generation6RNamespaceTokenState.CONSUMED
+                self._live_capability_record = None
+            except BaseException:
+                self._phase = _Generation6RNamespacePhase.UNCERTAIN
+                capability_record.state = _Generation6RNamespaceTokenState.UNCERTAIN
+                raise
+            return
+        path_owner = cast(FdOwner, binding.path_owner)
+        descriptor_token = cast(_Generation6ROwnerToken, binding.descriptor_token)
+        owner_context = cast(_Generation6RNamespaceOwnerContext, binding.owner_context)
+        owner_context.state = _Generation6RNamespaceContextState.ATTEMPTED
+        try:
+            close_receipt = self._close_namespace_owner(
+                path_owner,
+                descriptor_token,
+                owner_context,
+                capability_record=capability_record,
+                event=_Generation6RNamespaceCloseEvent.MUTATION_TOKEN_HANDLE_CLOSED,
+            )
+        except BaseException:
+            self._phase = _Generation6RNamespacePhase.UNCERTAIN
+            capability_record.state = _Generation6RNamespaceTokenState.UNCERTAIN
+            capability_record.owner_state = _Generation6RNamespaceOwnerState.UNCERTAIN
+            raise
+        capability_record.close_receipt = close_receipt
+        capability_record.owner_state = _Generation6RNamespaceOwnerState.CLOSED
+        try:
+            terminal_receipt = self._append_receipt(
+                token_serial=binding.token_serial,
+                authority_serial=binding.authority.serial,
+                event="MUTATION_TOKEN_ABANDONED",
+            )
+            capability_record.terminal_receipt = terminal_receipt
+            self._archive_capability(capability_record)
+            capability_record.state = _Generation6RNamespaceTokenState.CONSUMED
+            self._live_capability_record = None
+        except BaseException:
+            self._phase = _Generation6RNamespacePhase.UNCERTAIN
+            capability_record.state = _Generation6RNamespaceTokenState.UNCERTAIN
+            raise
+
+
 def _generation6_r_authority_source_gates(source: str) -> None:
     """Uncalled static proof for the deliberately integration-blocked R authority core."""
 
@@ -12260,6 +15250,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_selftest_r_case",
         "_Generation6RAuthorityLedger",
         "_Generation6RAuthorityScope",
+        "_Generation6RNamespaceJournal",
         "_generation6_r_socket_detach_handoff",
         "_generation6_r_authority_source_gates",
     }
@@ -12335,6 +15326,3298 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             )
         ),
         "R static process-reset FdOwner authority differs",
+    )
+
+    namespace_capture_values = {
+        "_GENERATION6_R_NAMESPACE_REAL_OS_STAT": "os.stat",
+        "_GENERATION6_R_NAMESPACE_REAL_OS_OPEN": "os.open",
+        "_GENERATION6_R_NAMESPACE_REAL_OS_FSTAT": "os.fstat",
+        "_GENERATION6_R_NAMESPACE_REAL_FCNTL": "fcntl.fcntl",
+        "_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT": "_snapshot_stat",
+        "_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD": "_snapshot_fd",
+        "_GENERATION6_R_NAMESPACE_CAPTURED_STABLE_DIRECTORY_MATCHES": ("_stable_directory_matches"),
+        "_GENERATION6_R_NAMESPACE_CAPTURED_MOUNT_ID": "_mount_id",
+        "_GENERATION6_R_NAMESPACE_CAPTURED_COMPONENT": "_component",
+        "_GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE": "FdOwner.require",
+        "_GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT": "stat.S_IFMT",
+        "_GENERATION6_R_NAMESPACE_CAPTURED_S_ISDIR": "stat.S_ISDIR",
+    }
+    namespace_capture_nodes: dict[str, ast.AnnAssign] = {}
+    observed_namespace_capture_names = {
+        node.target.id
+        for node in syntax.body
+        if isinstance(node, ast.AnnAssign)
+        and isinstance(node.target, ast.Name)
+        and node.target.id.startswith("_GENERATION6_R_NAMESPACE_")
+    }
+    _require(
+        observed_namespace_capture_names == set(namespace_capture_values),
+        "R namespace static capture inventory differs",
+    )
+    for name, expected_value in namespace_capture_values.items():
+        matches = tuple(
+            node
+            for node in syntax.body
+            if isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == name
+        )
+        _require(len(matches) == 1, f"R namespace static capture differs: {name}")
+        capture = matches[0]
+        _require(
+            isinstance(capture.annotation, ast.Name)
+            and capture.annotation.id == "Final"
+            and capture.value is not None
+            and ast.unparse(capture.value) == expected_value,
+            f"R namespace static capture binding differs: {name}",
+        )
+        namespace_capture_nodes[name] = capture
+    namespace_capture_rebindings = tuple(
+        (type(node).__name__, ast.unparse(target))
+        for node in ast.walk(syntax)
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr))
+        for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,))
+        if isinstance(target, ast.Name)
+        and target.id in namespace_capture_values
+        and node is not namespace_capture_nodes[target.id]
+    )
+    _require(
+        not namespace_capture_rebindings,
+        "R namespace static capture rebinding surface differs",
+    )
+
+    namespace_class_names = (
+        "_Generation6RNamespacePhase",
+        "_Generation6RNamespaceTokenState",
+        "_Generation6RNamespaceAction",
+        "_Generation6RNamespaceNodeKind",
+        "_Generation6RNamespaceAuthorityKind",
+        "_Generation6RNamespaceOwnerState",
+        "_Generation6RNamespaceOwnerKind",
+        "_Generation6RNamespaceOwnerPurpose",
+        "_Generation6RNamespaceContextState",
+        "_Generation6RNamespaceCloseEvent",
+        "_Generation6RNamespaceDirectoryFact",
+        "_Generation6RNamespaceNameFact",
+        "_Generation6RNamespaceDirectoryAuthority",
+        "_Generation6RNamespaceDirectoryBinding",
+        "_Generation6RNamespaceDirectoryRecord",
+        "_Generation6RNamespaceOwnerContextBinding",
+        "_Generation6RNamespaceOwnerContext",
+        "_Generation6RNamespacePresentToken",
+        "_Generation6RNamespaceAbsenceToken",
+        "_Generation6RNamespaceRenameToken",
+        "_Generation6RNamespaceCapabilityBinding",
+        "_Generation6RNamespaceCapabilityRecord",
+        "_Generation6RNamespaceReceipt",
+        "_Generation6RNamespaceJournal",
+    )
+    observed_namespace_class_names = tuple(
+        node.name
+        for node in syntax.body
+        if isinstance(node, ast.ClassDef) and node.name.startswith("_Generation6RNamespace")
+    )
+    _require(
+        observed_namespace_class_names == namespace_class_names,
+        "R namespace static class inventory differs",
+    )
+    namespace_classes = {name: top_class(name) for name in namespace_class_names}
+    namespace_phase_class = namespace_classes["_Generation6RNamespacePhase"]
+    _require(
+        all(
+            capture.lineno < namespace_phase_class.lineno
+            for capture in namespace_capture_nodes.values()
+        ),
+        "R namespace static capture/class ordering differs",
+    )
+
+    namespace_enum_members = {
+        "_Generation6RNamespacePhase": (
+            "BUILDING",
+            "SEALED",
+            "PATCH_ACTIVE",
+            "PATCH_RESTORED",
+            "TEARDOWN_ACTIVE",
+            "COMPLETE",
+            "UNCERTAIN",
+        ),
+        "_Generation6RNamespaceTokenState": (
+            "AUTHORIZED",
+            "ATTEMPTED",
+            "CONSUMED",
+            "UNCERTAIN",
+        ),
+        "_Generation6RNamespaceAction": ("UNLINK", "RMDIR", "RENAME"),
+        "_Generation6RNamespaceNodeKind": (
+            "DIRECTORY",
+            "REGULAR",
+            "SYMLINK",
+            "SOCKET",
+            "FIFO",
+            "HARDLINK",
+            "SPECIAL",
+        ),
+        "_Generation6RNamespaceAuthorityKind": (
+            "BORROWED_GUARD",
+            "OWNED_CURSOR",
+        ),
+        "_Generation6RNamespaceOwnerState": ("LIVE", "CLOSED", "UNCERTAIN"),
+        "_Generation6RNamespaceOwnerKind": ("OWNED_CURSOR", "ENTRY_HANDLE"),
+        "_Generation6RNamespaceOwnerPurpose": (
+            "OWNED_CURSOR",
+            "SEALED_ENTRY",
+            "PRESENT_TOKEN",
+            "RENAME_TOKEN",
+        ),
+        "_Generation6RNamespaceContextState": (
+            "OPENING",
+            "LIVE",
+            "TRANSFERRED",
+            "ATTEMPTED",
+            "CLOSED",
+            "UNCERTAIN",
+        ),
+        "_Generation6RNamespaceCloseEvent": (
+            "OWNED_CURSOR_ABORT_CLOSED",
+            "OWNED_CURSOR_CLOSED",
+            "ENTRY_HANDLE_ABORT_CLOSED",
+            "SEALED_ENTRY_HANDLE_CLOSED",
+            "SEALED_ENTRY_ABORT_CLOSED",
+            "PRESENT_TOKEN_ABORT_CLOSED",
+            "RENAME_TOKEN_ABORT_CLOSED",
+            "MUTATION_TOKEN_HANDLE_CLOSED",
+        ),
+    }
+    for name, expected_members in namespace_enum_members.items():
+        class_node = namespace_classes[name]
+        _require(
+            tuple(ast.unparse(base) for base in class_node.bases) == ("str", "Enum")
+            and enum_members(class_node) == tuple((member, member) for member in expected_members),
+            f"R namespace static enum differs: {name}",
+        )
+
+    def namespace_fields(name: str) -> tuple[str, ...]:
+        return tuple(
+            node.target.id
+            for node in namespace_classes[name].body
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+        )
+
+    expected_namespace_fields = {
+        "_Generation6RNamespaceDirectoryFact": (
+            "serial",
+            "issuer_identity",
+            "name",
+            "relative",
+            "device",
+            "inode",
+            "uid",
+            "mode",
+            "mount_id",
+        ),
+        "_Generation6RNamespaceNameFact": (
+            "serial",
+            "issuer_identity",
+            "parent_authority",
+            "name",
+            "kind",
+            "device",
+            "inode",
+            "uid",
+            "mode",
+            "link_count",
+            "mount_id",
+            "hardlink_group",
+        ),
+        "_Generation6RNamespaceDirectoryAuthority": ("serial", "issuer_identity"),
+        "_Generation6RNamespaceDirectoryBinding": (
+            "serial",
+            "issuer_identity",
+            "authority",
+            "kind",
+            "owner",
+            "owner_identity",
+            "fd_owner_identity",
+            "snapshot_identity",
+            "descriptor_token",
+            "fact",
+        ),
+        "_Generation6RNamespaceDirectoryRecord": (
+            "binding",
+            "state",
+            "close_receipt",
+        ),
+        "_Generation6RNamespaceOwnerContextBinding": (
+            "serial",
+            "issuer_identity",
+            "owner",
+            "owner_identity",
+            "descriptor_token",
+            "token_generation",
+            "kind",
+            "purpose",
+            "origin_authority_record",
+        ),
+        "_Generation6RNamespaceOwnerContext": (
+            "binding",
+            "authority_record",
+            "state",
+            "capability_record",
+            "close_receipt",
+        ),
+        "_Generation6RNamespacePresentToken": (
+            "serial",
+            "issuer_identity",
+            "action",
+        ),
+        "_Generation6RNamespaceAbsenceToken": (
+            "serial",
+            "issuer_identity",
+            "action",
+        ),
+        "_Generation6RNamespaceRenameToken": (
+            "serial",
+            "issuer_identity",
+            "action",
+        ),
+        "_Generation6RNamespaceCapabilityBinding": (
+            "serial",
+            "issuer_identity",
+            "token",
+            "token_serial",
+            "token_issuer_identity",
+            "action",
+            "authority",
+            "authority_record",
+            "fact",
+            "name",
+            "path_owner",
+            "descriptor_token",
+            "owner_context",
+            "owner_state",
+            "destination_authority",
+            "destination_record",
+            "destination_name",
+        ),
+        "_Generation6RNamespaceCapabilityRecord": (
+            "binding",
+            "state",
+            "owner_state",
+            "authorization_receipt",
+            "close_receipt",
+            "terminal_receipt",
+        ),
+        "_Generation6RNamespaceReceipt": (
+            "serial",
+            "issuer_identity",
+            "token_serial",
+            "authority_serial",
+            "event",
+        ),
+    }
+    expected_namespace_annotations = {
+        "_Generation6RNamespaceDirectoryFact": (
+            "int",
+            "int",
+            "str",
+            "tuple[str, ...]",
+            "int",
+            "int",
+            "int",
+            "int",
+            "int",
+        ),
+        "_Generation6RNamespaceNameFact": (
+            "int",
+            "int",
+            "_Generation6RNamespaceDirectoryAuthority",
+            "str",
+            "_Generation6RNamespaceNodeKind",
+            "int",
+            "int",
+            "int",
+            "int",
+            "int",
+            "int",
+            "str | None",
+        ),
+        "_Generation6RNamespaceDirectoryAuthority": ("int", "int"),
+        "_Generation6RNamespaceDirectoryBinding": (
+            "int",
+            "int",
+            "_Generation6RNamespaceDirectoryAuthority",
+            "_Generation6RNamespaceAuthorityKind",
+            "DirectoryOwner",
+            "int",
+            "int",
+            "int",
+            "_Generation6ROwnerToken",
+            "_Generation6RNamespaceDirectoryFact",
+        ),
+        "_Generation6RNamespaceDirectoryRecord": (
+            "_Generation6RNamespaceDirectoryBinding",
+            "_Generation6RNamespaceOwnerState",
+            "_Generation6RNamespaceReceipt | None",
+        ),
+        "_Generation6RNamespaceOwnerContextBinding": (
+            "int",
+            "int",
+            "FdOwner",
+            "int",
+            "_Generation6ROwnerToken",
+            "int",
+            "_Generation6RNamespaceOwnerKind",
+            "_Generation6RNamespaceOwnerPurpose",
+            "_Generation6RNamespaceDirectoryRecord",
+        ),
+        "_Generation6RNamespaceOwnerContext": (
+            "_Generation6RNamespaceOwnerContextBinding",
+            "_Generation6RNamespaceDirectoryRecord",
+            "_Generation6RNamespaceContextState",
+            "_Generation6RNamespaceCapabilityRecord | None",
+            "_Generation6RNamespaceReceipt | None",
+        ),
+        "_Generation6RNamespacePresentToken": (
+            "int",
+            "int",
+            "_Generation6RNamespaceAction",
+        ),
+        "_Generation6RNamespaceAbsenceToken": (
+            "int",
+            "int",
+            "_Generation6RNamespaceAction",
+        ),
+        "_Generation6RNamespaceRenameToken": (
+            "int",
+            "int",
+            "_Generation6RNamespaceAction",
+        ),
+        "_Generation6RNamespaceCapabilityBinding": (
+            "int",
+            "int",
+            "_Generation6RNamespaceLiveToken",
+            "int",
+            "int",
+            "_Generation6RNamespaceAction",
+            "_Generation6RNamespaceDirectoryAuthority",
+            "_Generation6RNamespaceDirectoryRecord",
+            "_Generation6RNamespaceNameFact | None",
+            "str",
+            "FdOwner | None",
+            "_Generation6ROwnerToken | None",
+            "_Generation6RNamespaceOwnerContext | None",
+            "_Generation6RNamespaceOwnerState | None",
+            "_Generation6RNamespaceDirectoryAuthority | None",
+            "_Generation6RNamespaceDirectoryRecord | None",
+            "str | None",
+        ),
+        "_Generation6RNamespaceCapabilityRecord": (
+            "_Generation6RNamespaceCapabilityBinding",
+            "_Generation6RNamespaceTokenState",
+            "_Generation6RNamespaceOwnerState | None",
+            "_Generation6RNamespaceReceipt | None",
+            "_Generation6RNamespaceReceipt | None",
+            "_Generation6RNamespaceReceipt | None",
+        ),
+        "_Generation6RNamespaceReceipt": (
+            "int",
+            "int",
+            "int | None",
+            "int | None",
+            "str",
+        ),
+    }
+    frozen_namespace_classes = {
+        "_Generation6RNamespaceDirectoryFact",
+        "_Generation6RNamespaceNameFact",
+        "_Generation6RNamespaceDirectoryAuthority",
+        "_Generation6RNamespaceDirectoryBinding",
+        "_Generation6RNamespaceOwnerContextBinding",
+        "_Generation6RNamespacePresentToken",
+        "_Generation6RNamespaceAbsenceToken",
+        "_Generation6RNamespaceRenameToken",
+        "_Generation6RNamespaceCapabilityBinding",
+        "_Generation6RNamespaceReceipt",
+    }
+    mutable_namespace_record_classes = {
+        "_Generation6RNamespaceDirectoryRecord",
+        "_Generation6RNamespaceOwnerContext",
+        "_Generation6RNamespaceCapabilityRecord",
+    }
+    for name, expected_fields in expected_namespace_fields.items():
+        class_node = namespace_classes[name]
+        decorators = tuple(ast.unparse(value) for value in class_node.decorator_list)
+        expected_decorators = (
+            ("dataclass(frozen=True, eq=False)",)
+            if name in frozen_namespace_classes
+            else ("dataclass(eq=False)",)
+        )
+        _require(
+            namespace_fields(name) == expected_fields
+            and tuple(
+                ast.unparse(node.annotation)
+                for node in class_node.body
+                if isinstance(node, ast.AnnAssign)
+            )
+            == expected_namespace_annotations[name]
+            and decorators == expected_decorators
+            and not class_node.bases
+            and not class_node.keywords
+            and len(class_node.body) == len(expected_fields)
+            and all(
+                isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and node.simple == 1
+                and node.value is None
+                for node in class_node.body
+            ),
+            f"R namespace static identity class differs: {name}",
+        )
+    _require(
+        set(expected_namespace_fields)
+        == frozen_namespace_classes | mutable_namespace_record_classes,
+        "R namespace static frozen/private record split differs",
+    )
+
+    namespace_aliases = tuple(
+        node
+        for node in syntax.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "_Generation6RNamespaceLiveToken"
+            for target in node.targets
+        )
+    )
+    _require(
+        len(namespace_aliases) == 1
+        and ast.unparse(namespace_aliases[0].value)
+        == (
+            "_Generation6RNamespacePresentToken | "
+            "_Generation6RNamespaceAbsenceToken | "
+            "_Generation6RNamespaceRenameToken"
+        ),
+        "R namespace static live-token union differs",
+    )
+
+    namespace_journal = namespace_classes["_Generation6RNamespaceJournal"]
+    namespace_method_inventory = (
+        "__init__",
+        "_require_dependencies",
+        "_issue_serial",
+        "_append_receipt",
+        "_begin_publication",
+        "_finish_publication",
+        "_fail_publication",
+        "_require_clean_guard",
+        "_require_building",
+        "_copy_directory_fact",
+        "_register_authority",
+        "_require_authority",
+        "_reauthenticate_directory",
+        "register_borrowed_directory",
+        "_retain_uncertain_owner",
+        "_reconcile_mount_poison",
+        "_namespace_mount_id",
+        "_close_namespace_owner",
+        "_retain_untransferred_raw",
+        "_open_namespace_owner",
+        "_require_same_parent_proof",
+        "open_owned_cursor",
+        "close_owned_cursor",
+        "_acquire_name_owner",
+        "_validate_node_kind",
+        "_copy_name_fact",
+        "_register_name_fact",
+        "seal_name",
+        "_require_name_fact",
+        "_name_fact_matches",
+        "seal",
+        "_require_teardown_authorization",
+        "_require_name_absent",
+        "_require_live_capability_slot",
+        "_require_receipt_binding",
+        "_publish_capability",
+        "_require_live_capability",
+        "_archive_capability",
+        "authorize_present",
+        "authorize_absence",
+        "authorize_rename",
+        "abandon_token",
+    )
+    observed_namespace_methods = tuple(
+        node.name for node in namespace_journal.body if isinstance(node, ast.FunctionDef)
+    )
+    _require(
+        observed_namespace_methods == namespace_method_inventory,
+        "R namespace static journal method inventory differs",
+    )
+    namespace_methods = {
+        name: class_method(namespace_journal, name) for name in namespace_method_inventory
+    }
+    namespace_source = ast.unparse(namespace_journal)
+    bundle_start = namespace_capture_nodes["_GENERATION6_R_NAMESPACE_REAL_OS_STAT"].lineno
+    _require(
+        type(namespace_journal.end_lineno) is int,
+        "R namespace static bundle end differs",
+    )
+    bundle_end = cast(int, namespace_journal.end_lineno)
+    namespace_bundle_nodes = tuple(
+        node for node in syntax.body if bundle_start <= node.lineno <= bundle_end
+    )
+    observed_bundle_inventory = tuple(
+        (
+            f"capture:{node.target.id}"
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+            else (
+                f"class:{node.name}"
+                if isinstance(node, ast.ClassDef)
+                else (
+                    "alias:_Generation6RNamespaceLiveToken"
+                    if isinstance(node, ast.Assign)
+                    and any(
+                        isinstance(target, ast.Name)
+                        and target.id == "_Generation6RNamespaceLiveToken"
+                        for target in node.targets
+                    )
+                    else f"unexpected:{type(node).__name__}"
+                )
+            )
+        )
+        for node in namespace_bundle_nodes
+    )
+    expected_bundle_inventory = (
+        "capture:_GENERATION6_R_NAMESPACE_REAL_OS_STAT",
+        "capture:_GENERATION6_R_NAMESPACE_REAL_OS_OPEN",
+        "capture:_GENERATION6_R_NAMESPACE_REAL_OS_FSTAT",
+        "capture:_GENERATION6_R_NAMESPACE_REAL_FCNTL",
+        "capture:_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT",
+        "capture:_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD",
+        "capture:_GENERATION6_R_NAMESPACE_CAPTURED_STABLE_DIRECTORY_MATCHES",
+        "capture:_GENERATION6_R_NAMESPACE_CAPTURED_MOUNT_ID",
+        "capture:_GENERATION6_R_NAMESPACE_CAPTURED_COMPONENT",
+        "capture:_GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE",
+        "capture:_GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT",
+        "capture:_GENERATION6_R_NAMESPACE_CAPTURED_S_ISDIR",
+        "class:_Generation6RNamespacePhase",
+        "class:_Generation6RNamespaceTokenState",
+        "class:_Generation6RNamespaceAction",
+        "class:_Generation6RNamespaceNodeKind",
+        "class:_Generation6RNamespaceAuthorityKind",
+        "class:_Generation6RNamespaceOwnerState",
+        "class:_Generation6RNamespaceOwnerKind",
+        "class:_Generation6RNamespaceOwnerPurpose",
+        "class:_Generation6RNamespaceContextState",
+        "class:_Generation6RNamespaceCloseEvent",
+        "class:_Generation6RNamespaceDirectoryFact",
+        "class:_Generation6RNamespaceNameFact",
+        "class:_Generation6RNamespaceDirectoryAuthority",
+        "class:_Generation6RNamespaceDirectoryBinding",
+        "class:_Generation6RNamespaceDirectoryRecord",
+        "class:_Generation6RNamespaceOwnerContextBinding",
+        "class:_Generation6RNamespaceOwnerContext",
+        "class:_Generation6RNamespacePresentToken",
+        "class:_Generation6RNamespaceAbsenceToken",
+        "class:_Generation6RNamespaceRenameToken",
+        "alias:_Generation6RNamespaceLiveToken",
+        "class:_Generation6RNamespaceCapabilityBinding",
+        "class:_Generation6RNamespaceCapabilityRecord",
+        "class:_Generation6RNamespaceReceipt",
+        "class:_Generation6RNamespaceJournal",
+    )
+    normalized_bundle_source = "\n".join(source.splitlines()[bundle_start - 1 : bundle_end]) + "\n"
+    bundle_domain = b"TASK-064\0GEN6\0R-A1a\0source-v1\0"
+    bundle_preimage = bundle_domain + normalized_bundle_source.encode("utf-8")
+    bundle_digest = hashlib.sha256(bundle_preimage).hexdigest()
+    _require(
+        bundle_start == 11744
+        and bundle_end == 14729
+        and observed_bundle_inventory == expected_bundle_inventory
+        and namespace_bundle_nodes[0]
+        is namespace_capture_nodes["_GENERATION6_R_NAMESPACE_REAL_OS_STAT"]
+        and namespace_bundle_nodes[-1] is namespace_journal
+        and all(
+            type(node.end_lineno) is int
+            and node.end_lineno < namespace_bundle_nodes[index + 1].lineno
+            for index, node in enumerate(namespace_bundle_nodes[:-1])
+        )
+        and len(bundle_preimage) == 127985
+        and bundle_digest == "d17d88981e65319bad919061b77114a4c4624b980a1d68398296be5454c9d189",
+        "R namespace static reviewed source-bundle digest differs",
+    )
+    self_aliases_by_method: dict[str, set[str]] = {}
+    self_alias_assignments: list[tuple[str, str, str]] = []
+    self_alias_calls: list[tuple[str, str]] = []
+    for method_name, method in namespace_methods.items():
+        aliases = {"self"}
+        alias_candidates = tuple(
+            node
+            for node in ast.walk(method)
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr))
+            and node.value is not None
+        )
+        alias_changed = True
+        while alias_changed:
+            alias_changed = False
+            for node in alias_candidates:
+                alias_targets = (
+                    tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,)
+                )
+                if isinstance(node.value, ast.Name) and node.value.id in aliases:
+                    for target in alias_targets:
+                        if not (isinstance(target, ast.Name) and target.id == "self"):
+                            self_alias_assignments.append(
+                                (method_name, ast.unparse(target), node.value.id)
+                            )
+                        if isinstance(target, ast.Name) and target.id not in aliases:
+                            aliases.add(target.id)
+                            alias_changed = True
+        self_aliases_by_method[method_name] = aliases
+        self_alias_calls.extend(
+            (method_name, ast.unparse(call.func))
+            for call in calls(method)
+            if isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id in aliases.difference({"self"})
+        )
+    _require(
+        all(aliases == {"self"} for aliases in self_aliases_by_method.values())
+        and not self_alias_assignments
+        and not self_alias_calls,
+        "R namespace static self-alias surface differs",
+    )
+
+    def assignment_lines(
+        node: ast.AST,
+        target_source: str,
+        value_source: str | None = None,
+    ) -> tuple[int, ...]:
+        result: list[int] = []
+        for candidate in ast.walk(node):
+            targets: tuple[ast.expr, ...]
+            value: ast.expr | None
+            if isinstance(candidate, ast.Assign):
+                targets = tuple(candidate.targets)
+                value = candidate.value
+            elif isinstance(candidate, (ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+                targets = (candidate.target,)
+                value = candidate.value
+            else:
+                continue
+            if any(ast.unparse(target) == target_source for target in targets) and (
+                value_source is None or (value is not None and ast.unparse(value) == value_source)
+            ):
+                result.append(candidate.lineno)
+        return tuple(sorted(result))
+
+    def selected_call_lines(node: ast.AST, target: str) -> tuple[int, ...]:
+        return tuple(
+            sorted(call.lineno for call in calls(node) if ast.unparse(call.func) == target)
+        )
+
+    def one_line(lines: tuple[int, ...], label: str) -> int:
+        _require(len(lines) == 1, f"R namespace static line inventory differs: {label}")
+        return lines[0]
+
+    def namespace_caller_multiset(target: str) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                method_name
+                for method_name, method in namespace_methods.items()
+                for call in calls(method)
+                if ast.unparse(call.func) == target
+            )
+        )
+
+    expected_namespace_caller_multisets = {
+        "self._register_authority": (
+            "open_owned_cursor",
+            "register_borrowed_directory",
+        ),
+        "self._register_name_fact": ("seal_name",),
+        "self._publish_capability": (
+            "authorize_absence",
+            "authorize_present",
+            "authorize_rename",
+        ),
+        "self._archive_capability": ("abandon_token", "abandon_token"),
+        "self._append_receipt": (
+            "_close_namespace_owner",
+            "_publish_capability",
+            "_register_authority",
+            "_register_name_fact",
+            "abandon_token",
+            "abandon_token",
+            "seal",
+        ),
+        "self._begin_publication": (
+            "_publish_capability",
+            "_register_authority",
+            "_register_name_fact",
+            "seal",
+        ),
+        "self._finish_publication": (
+            "_publish_capability",
+            "_register_authority",
+            "_register_name_fact",
+            "seal",
+        ),
+        "self._fail_publication": (
+            "_publish_capability",
+            "_register_authority",
+            "_register_name_fact",
+            "seal",
+        ),
+    }
+    _require(
+        all(
+            namespace_caller_multiset(target) == expected_callers
+            for target, expected_callers in expected_namespace_caller_multisets.items()
+        ),
+        "R namespace static helper caller multisets differ",
+    )
+
+    namespace_init = namespace_methods["__init__"]
+    namespace_init_targets = {
+        ast.unparse(target)
+        for node in ast.walk(namespace_init)
+        if isinstance(node, (ast.Assign, ast.AnnAssign))
+        for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,))
+        if ast.unparse(target).startswith("self._")
+    }
+    _require(
+        namespace_init_targets
+        == {
+            "self._issuer",
+            "self._issuer_identity",
+            "self._descriptor_ledger",
+            "self._guard",
+            "self._phase",
+            "self._next_serial",
+            "self._authority_records_by_serial",
+            "self._authority_records_by_identity",
+            "self._authority_records_by_owner_identity",
+            "self._directory_facts_by_serial",
+            "self._name_facts_by_key",
+            "self._hardlink_groups",
+            "self._capability_records_by_serial",
+            "self._capability_records_by_identity",
+            "self._live_capability_record",
+            "self._archived_capability_records",
+            "self._pending_publication",
+            "self._poisoned_descriptors",
+            "self._namespace_owner_tokens",
+            "self._namespace_owner_contexts",
+            "self._owner_quarantine",
+            "self._untransferred_raw_quarantine",
+            "self._receipts",
+        },
+        "R namespace static private registry inventory differs",
+    )
+    dependency_method = namespace_methods["_require_dependencies"]
+    dependency_source = ast.unparse(dependency_method)
+    expected_dependency_terms = (
+        "type(initializer_closure) is tuple",
+        "len(initializer_closure) == 1",
+        "initializer_closure[0].cell_contents is self._descriptor_ledger",
+        "os.stat is _GENERATION6_R_NAMESPACE_REAL_OS_STAT",
+        "os.open is _GENERATION6_R_NAMESPACE_REAL_OS_OPEN",
+        "os.fstat is _GENERATION6_R_NAMESPACE_REAL_OS_FSTAT",
+        "fcntl.fcntl is _GENERATION6_R_NAMESPACE_REAL_FCNTL",
+        "_snapshot_stat is _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT",
+        "_snapshot_fd is _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD",
+        "_stable_directory_matches is _GENERATION6_R_NAMESPACE_CAPTURED_STABLE_DIRECTORY_MATCHES",
+        "_mount_id is _GENERATION6_R_NAMESPACE_CAPTURED_MOUNT_ID",
+        "_component is _GENERATION6_R_NAMESPACE_CAPTURED_COMPONENT",
+        "FdOwner.require is _GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE",
+        "stat.S_IFMT is _GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT",
+        "stat.S_ISDIR is _GENERATION6_R_NAMESPACE_CAPTURED_S_ISDIR",
+    )
+    dependency_initializer = dependency_method.body[0]
+    dependency_guard_statement = dependency_method.body[1]
+    _require(
+        len(dependency_method.body) == 2
+        and isinstance(dependency_initializer, ast.Assign)
+        and tuple(ast.unparse(target) for target in dependency_initializer.targets)
+        == ("initializer_closure",)
+        and ast.unparse(dependency_initializer.value)
+        == "getattr(FdOwner.__init__, '__closure__', None)"
+        and isinstance(dependency_guard_statement, ast.Expr)
+        and isinstance(dependency_guard_statement.value, ast.Call)
+        and ast.unparse(dependency_guard_statement.value.func) == "_require"
+        and len(dependency_guard_statement.value.args) == 2
+        and not dependency_guard_statement.value.keywords
+        and isinstance(dependency_guard_statement.value.args[0], ast.BoolOp)
+        and isinstance(dependency_guard_statement.value.args[0].op, ast.And)
+        and tuple(ast.unparse(term) for term in dependency_guard_statement.value.args[0].values)
+        == expected_dependency_terms
+        and isinstance(dependency_guard_statement.value.args[1], ast.Constant)
+        and dependency_guard_statement.value.args[1].value
+        == "R namespace read-only dependency identity differs"
+        and all(
+            dependency_source.count(capture_name) == 1 for capture_name in namespace_capture_values
+        ),
+        "R namespace static dependency binding differs",
+    )
+
+    phase_writes: list[tuple[str, str, str]] = []
+    for candidate in ast.walk(namespace_journal):
+        targets: tuple[ast.expr, ...]
+        value: ast.expr | None
+        if isinstance(candidate, ast.Assign):
+            targets = tuple(candidate.targets)
+            value = candidate.value
+        elif isinstance(candidate, (ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+            targets = (candidate.target,)
+            value = candidate.value
+        else:
+            continue
+        for target in targets:
+            target_source = ast.unparse(target)
+            if target_source == "self._phase":
+                phase_writes.append(
+                    (
+                        type(candidate).__name__,
+                        target_source,
+                        "" if value is None else ast.unparse(value),
+                    )
+                )
+    phase_store_nodes = tuple(
+        node
+        for node in ast.walk(namespace_journal)
+        if isinstance(node, ast.Attribute)
+        and ast.unparse(node) == "self._phase"
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+    )
+    phase_subscript_writes = tuple(
+        node
+        for node in ast.walk(namespace_journal)
+        if isinstance(node, ast.Subscript)
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+        and "_phase" in ast.unparse(node)
+    )
+    phase_setter_calls = tuple(
+        call
+        for call in calls(namespace_journal)
+        if ast.unparse(call.func) in {"setattr", "object.__setattr__", "self.__setattr__"}
+        and any("_phase" in ast.unparse(argument) for argument in call.args)
+    )
+    vars_self_calls = tuple(
+        call
+        for call in calls(namespace_journal)
+        if ast.unparse(call.func) == "vars"
+        and any(ast.unparse(argument) == "self" for argument in call.args)
+    )
+    allowed_phase_values = {
+        "_Generation6RNamespacePhase.BUILDING",
+        "_Generation6RNamespacePhase.SEALED",
+        "_Generation6RNamespacePhase.UNCERTAIN",
+    }
+    _require(
+        bool(phase_writes)
+        and all(
+            kind == "Assign" and target == "self._phase" and value in allowed_phase_values
+            for kind, target, value in phase_writes
+        )
+        and sum(value.endswith(".BUILDING") for _, _, value in phase_writes) == 1
+        and sum(value.endswith(".SEALED") for _, _, value in phase_writes) == 1
+        and sum(value.endswith(".UNCERTAIN") for _, _, value in phase_writes) >= 10
+        and len(phase_store_nodes) == len(phase_writes)
+        and all(isinstance(node.ctx, ast.Store) for node in phase_store_nodes)
+        and sorted(node.lineno for node in phase_store_nodes)
+        == sorted(
+            node.lineno
+            for node in ast.walk(namespace_journal)
+            if isinstance(node, ast.Assign)
+            and any(ast.unparse(target) == "self._phase" for target in node.targets)
+        )
+        and not phase_subscript_writes
+        and not phase_setter_calls
+        and not vars_self_calls
+        and "self.__dict__" not in namespace_source,
+        "R namespace static phase write surface differs",
+    )
+    teardown_references = {
+        name: sum(
+            ast.unparse(node) == "_Generation6RNamespacePhase.TEARDOWN_ACTIVE"
+            for node in ast.walk(method)
+            if isinstance(node, ast.Attribute)
+        )
+        for name, method in namespace_methods.items()
+    }
+    _require(
+        {name: count for name, count in teardown_references.items() if count}
+        == {
+            "_require_teardown_authorization": 1,
+            "_require_live_capability_slot": 1,
+            "_require_live_capability": 1,
+        }
+        and not any(
+            fragment in name.lower()
+            for name in namespace_method_inventory
+            for fragment in ("activate", "transition", "enter_teardown")
+        ),
+        "R namespace static teardown activation block differs",
+    )
+
+    for comparison in (
+        node for node in ast.walk(namespace_journal) if isinstance(node, ast.Compare)
+    ):
+        compared_source = (
+            ast.unparse(comparison.left),
+            *(ast.unparse(value) for value in comparison.comparators),
+        )
+        if any(
+            f"{enum_name}." in value
+            for value in compared_source
+            for enum_name in namespace_enum_members
+        ):
+            _require(
+                all(isinstance(operator, (ast.Is, ast.IsNot)) for operator in comparison.ops),
+                "R namespace static enum comparison differs",
+            )
+
+    require_authority_source = ast.unparse(namespace_methods["_require_authority"])
+    require_live_source = ast.unparse(namespace_methods["_require_live_capability"])
+    _require(
+        "vars(authority)" in require_authority_source
+        and "('serial', 'issuer_identity')" in require_authority_source
+        and "self._authority_records_by_identity.get(authority_identity)"
+        in require_authority_source
+        and "self._authority_records_by_serial.get(authority.serial)" in require_authority_source
+        and "self._authority_records_by_owner_identity.get(binding.owner_identity)"
+        in require_authority_source
+        and "binding.owner_identity == id(binding.owner)" in require_authority_source
+        and "binding.fd_owner_identity == id(binding.owner.fd)" in require_authority_source
+        and "binding.snapshot_identity == id(binding.owner.snapshot)" in require_authority_source
+        and "self._descriptor_ledger._authorize_live(binding.owner.fd, binding.descriptor_token)"
+        in require_authority_source
+        and "vars(token)" in require_live_source
+        and "vars(exact_record)" in require_live_source
+        and "vars(binding)" in require_live_source
+        and "self._capability_records_by_identity.get(token_identity) is live_record"
+        in require_live_source
+        and "self._capability_records_by_serial.get(token.serial) is live_record"
+        in require_live_source
+        and "live_record.binding.token is token" in require_live_source
+        and "self._namespace_owner_tokens.get(id(binding.path_owner)) is binding.descriptor_token"
+        in require_live_source
+        and "self._namespace_owner_contexts.get(id(binding.path_owner)) is binding.owner_context"
+        in require_live_source
+        and "owner_context.state is _Generation6RNamespaceContextState.TRANSFERRED"
+        in require_live_source
+        and "owner_context.capability_record is exact_record" in require_live_source
+        and "self._descriptor_ledger._authorize_live" in require_live_source
+        and "destination_record is binding.destination_record" in require_live_source
+        and "self._phase = _Generation6RNamespacePhase.UNCERTAIN" in require_live_source
+        and "live_record.state = _Generation6RNamespaceTokenState.UNCERTAIN" in require_live_source,
+        "R namespace static exact frozen identity reauthorization differs",
+    )
+    public_attribute_writes = tuple(
+        ast.unparse(target)
+        for node in ast.walk(namespace_journal)
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr))
+        for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,))
+        if ast.unparse(target).startswith(("token.", "authority.", "fact."))
+    )
+    _require(
+        not public_attribute_writes,
+        "R namespace static public identity mutation surface differs",
+    )
+    protected_identity_attributes = {
+        "_issuer",
+        "_issuer_identity",
+        "_descriptor_ledger",
+        "_guard",
+    }
+    protected_identity_writes = tuple(
+        (method_name, ast.unparse(node))
+        for method_name, method in namespace_methods.items()
+        if method_name != "__init__"
+        for node in ast.walk(method)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "self"
+        and node.attr in protected_identity_attributes
+    )
+    next_serial_writers = tuple(
+        method_name
+        for method_name, method in namespace_methods.items()
+        if method_name != "__init__"
+        for node in ast.walk(method)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+        and ast.unparse(node) == "self._next_serial"
+    )
+    issue_serial = namespace_methods["_issue_serial"]
+    issue_serial_returns = tuple(
+        ast.unparse(node.value)
+        for node in ast.walk(issue_serial)
+        if isinstance(node, ast.Return) and node.value is not None
+    )
+    namespace_dynamic_attribute_writes = tuple(
+        ast.unparse(call)
+        for call in calls(namespace_journal)
+        if ast.unparse(call.func)
+        in {
+            "delattr",
+            "object.__setattr__",
+            "setattr",
+            "self.__setattr__",
+            "type.__setattr__",
+        }
+    )
+    frozen_alias_names = {
+        argument.arg
+        for method in namespace_methods.values()
+        for argument in (*method.args.args, *method.args.kwonlyargs)
+        if argument.annotation is not None
+        and ast.unparse(argument.annotation).replace(" | None", "") in frozen_namespace_classes
+    }
+    frozen_alias_names.update(
+        {
+            "authority",
+            "authority_binding",
+            "binding",
+            "capability_binding",
+            "context_binding",
+            "destination_authority",
+            "fact",
+            "parent_authority",
+            "parent_binding",
+            "source_authority",
+            "source_fact",
+            "token",
+        }
+    )
+    alias_candidates = tuple(
+        node
+        for method in namespace_methods.values()
+        for node in ast.walk(method)
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr))
+    )
+    alias_changed = True
+    while alias_changed:
+        alias_changed = False
+        for node in alias_candidates:
+            targets = tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,)
+            value = node.value
+            aliases_frozen = (
+                (isinstance(value, ast.Name) and value.id in frozen_alias_names)
+                or (
+                    isinstance(value, ast.Attribute)
+                    and value.attr in {"authority", "binding", "fact", "token"}
+                )
+                or (
+                    isinstance(value, ast.Call)
+                    and ast.unparse(value.func) in frozen_namespace_classes
+                )
+            )
+            if aliases_frozen:
+                for target in targets:
+                    if isinstance(target, ast.Name) and target.id not in frozen_alias_names:
+                        frozen_alias_names.add(target.id)
+                        alias_changed = True
+    frozen_attribute_writes = tuple(
+        ast.unparse(node)
+        for method in namespace_methods.values()
+        for node in ast.walk(method)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+        and (
+            (isinstance(node.value, ast.Name) and node.value.id in frozen_alias_names)
+            or ".binding." in ast.unparse(node)
+        )
+    )
+    vars_subscript_writes = tuple(
+        ast.unparse(node)
+        for node in ast.walk(namespace_journal)
+        if isinstance(node, ast.Subscript)
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+        and isinstance(node.value, ast.Call)
+        and ast.unparse(node.value.func) == "vars"
+    )
+    _require(
+        not protected_identity_writes
+        and next_serial_writers == ("_issue_serial",)
+        and assignment_lines(issue_serial, "self._next_serial", "serial + 1")
+        == (one_line(assignment_lines(issue_serial, "self._next_serial"), "serial writer"),)
+        and issue_serial_returns == ("serial",)
+        and not namespace_dynamic_attribute_writes
+        and not frozen_attribute_writes
+        and not vars_subscript_writes,
+        "R namespace static immutable authority surface differs",
+    )
+    mutable_record_fields = {
+        "authority_record",
+        "authorization_receipt",
+        "capability_record",
+        "close_receipt",
+        "owner_state",
+        "state",
+        "terminal_receipt",
+    }
+    mutable_record_writes = tuple(
+        sorted(
+            (
+                method_name,
+                ast.unparse(target),
+                "" if value is None else ast.unparse(value),
+            )
+            for method_name, method in namespace_methods.items()
+            for node in ast.walk(method)
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr))
+            for targets, value in (
+                (
+                    tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,),
+                    node.value,
+                ),
+            )
+            for target in targets
+            if isinstance(target, ast.Attribute)
+            and isinstance(target.value, ast.Name)
+            and target.value.id != "self"
+            and target.attr in mutable_record_fields
+        )
+    )
+    expected_mutable_record_writes = tuple(
+        sorted(
+            (
+                (
+                    "_acquire_name_owner",
+                    "owner_context.state",
+                    "_Generation6RNamespaceContextState.LIVE",
+                ),
+                (
+                    "_close_namespace_owner",
+                    "accepted_context.state",
+                    "_Generation6RNamespaceContextState.UNCERTAIN",
+                ),
+                ("_close_namespace_owner", "owner_context.close_receipt", "close_receipt"),
+                (
+                    "_close_namespace_owner",
+                    "owner_context.state",
+                    "_Generation6RNamespaceContextState.ATTEMPTED",
+                ),
+                (
+                    "_close_namespace_owner",
+                    "owner_context.state",
+                    "_Generation6RNamespaceContextState.CLOSED",
+                ),
+                (
+                    "_open_namespace_owner",
+                    "owner_context.state",
+                    "_Generation6RNamespaceContextState.UNCERTAIN",
+                ),
+                (
+                    "_publish_capability",
+                    "capability_record.authorization_receipt",
+                    "authorization_receipt",
+                ),
+                (
+                    "_publish_capability",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.UNCERTAIN",
+                ),
+                ("_publish_capability", "owner_context.capability_record", "capability_record"),
+                (
+                    "_publish_capability",
+                    "owner_context.state",
+                    "_Generation6RNamespaceContextState.TRANSFERRED",
+                ),
+                (
+                    "_publish_capability",
+                    "owner_context.state",
+                    "_Generation6RNamespaceContextState.UNCERTAIN",
+                ),
+                (
+                    "_register_authority",
+                    "authority_record.state",
+                    "_Generation6RNamespaceOwnerState.UNCERTAIN",
+                ),
+                ("_register_authority", "owner_context.authority_record", "authority_record"),
+                (
+                    "_register_authority",
+                    "owner_context.state",
+                    "_Generation6RNamespaceContextState.UNCERTAIN",
+                ),
+                (
+                    "_require_live_capability",
+                    "live_owner_context.state",
+                    "_Generation6RNamespaceContextState.UNCERTAIN",
+                ),
+                (
+                    "_require_live_capability",
+                    "live_record.state",
+                    "_Generation6RNamespaceTokenState.UNCERTAIN",
+                ),
+                ("authorize_present", "capability_record.close_receipt", "close_receipt"),
+                (
+                    "authorize_present",
+                    "capability_record.owner_state",
+                    "_Generation6RNamespaceOwnerState.CLOSED",
+                ),
+                (
+                    "authorize_present",
+                    "capability_record.owner_state",
+                    "_Generation6RNamespaceOwnerState.UNCERTAIN",
+                ),
+                (
+                    "authorize_present",
+                    "capability_record.owner_state",
+                    "_Generation6RNamespaceOwnerState.UNCERTAIN",
+                ),
+                (
+                    "authorize_present",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.UNCERTAIN",
+                ),
+                (
+                    "authorize_present",
+                    "owner_context.state",
+                    "_Generation6RNamespaceContextState.UNCERTAIN",
+                ),
+                ("authorize_rename", "capability_record.close_receipt", "close_receipt"),
+                (
+                    "authorize_rename",
+                    "capability_record.owner_state",
+                    "_Generation6RNamespaceOwnerState.CLOSED",
+                ),
+                (
+                    "authorize_rename",
+                    "capability_record.owner_state",
+                    "_Generation6RNamespaceOwnerState.UNCERTAIN",
+                ),
+                (
+                    "authorize_rename",
+                    "capability_record.owner_state",
+                    "_Generation6RNamespaceOwnerState.UNCERTAIN",
+                ),
+                (
+                    "authorize_rename",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.UNCERTAIN",
+                ),
+                (
+                    "authorize_rename",
+                    "owner_context.state",
+                    "_Generation6RNamespaceContextState.UNCERTAIN",
+                ),
+                ("abandon_token", "capability_record.close_receipt", "close_receipt"),
+                (
+                    "abandon_token",
+                    "capability_record.owner_state",
+                    "_Generation6RNamespaceOwnerState.CLOSED",
+                ),
+                (
+                    "abandon_token",
+                    "capability_record.owner_state",
+                    "_Generation6RNamespaceOwnerState.UNCERTAIN",
+                ),
+                (
+                    "abandon_token",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.ATTEMPTED",
+                ),
+                (
+                    "abandon_token",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.CONSUMED",
+                ),
+                (
+                    "abandon_token",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.CONSUMED",
+                ),
+                (
+                    "abandon_token",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.UNCERTAIN",
+                ),
+                (
+                    "abandon_token",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.UNCERTAIN",
+                ),
+                (
+                    "abandon_token",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.UNCERTAIN",
+                ),
+                ("abandon_token", "capability_record.terminal_receipt", "terminal_receipt"),
+                ("abandon_token", "capability_record.terminal_receipt", "terminal_receipt"),
+                (
+                    "abandon_token",
+                    "owner_context.state",
+                    "_Generation6RNamespaceContextState.ATTEMPTED",
+                ),
+                ("close_owned_cursor", "authority_record.close_receipt", "close_receipt"),
+                (
+                    "close_owned_cursor",
+                    "authority_record.state",
+                    "_Generation6RNamespaceOwnerState.CLOSED",
+                ),
+                (
+                    "close_owned_cursor",
+                    "authority_record.state",
+                    "_Generation6RNamespaceOwnerState.UNCERTAIN",
+                ),
+                (
+                    "open_owned_cursor",
+                    "owner_context.state",
+                    "_Generation6RNamespaceContextState.LIVE",
+                ),
+            )
+        )
+    )
+    _require(
+        mutable_record_writes == expected_mutable_record_writes,
+        "R namespace static mutable-record writer matrix differs",
+    )
+
+    def registry_subscript_stores(registry: str) -> tuple[tuple[str, str], ...]:
+        return tuple(
+            (method_name, ast.unparse(node))
+            for method_name, method in namespace_methods.items()
+            for node in ast.walk(method)
+            if isinstance(node, ast.Subscript)
+            and isinstance(node.ctx, (ast.Store, ast.Del))
+            and ast.unparse(node.value) == f"self.{registry}"
+        )
+
+    expected_registry_subscript_stores = {
+        "_directory_facts_by_serial": (
+            "_register_authority",
+            "self._directory_facts_by_serial[fact.serial]",
+        ),
+        "_authority_records_by_serial": (
+            "_register_authority",
+            "self._authority_records_by_serial[authority.serial]",
+        ),
+        "_authority_records_by_identity": (
+            "_register_authority",
+            "self._authority_records_by_identity[id(authority)]",
+        ),
+        "_authority_records_by_owner_identity": (
+            "_register_authority",
+            "self._authority_records_by_owner_identity[owner_identity]",
+        ),
+        "_name_facts_by_key": (
+            "_register_name_fact",
+            "self._name_facts_by_key[fact.parent_authority.serial, fact.name]",
+        ),
+        "_capability_records_by_identity": (
+            "_publish_capability",
+            "self._capability_records_by_identity[token_identity]",
+        ),
+        "_capability_records_by_serial": (
+            "_publish_capability",
+            "self._capability_records_by_serial[binding.token_serial]",
+        ),
+        "_namespace_owner_tokens": (
+            "_open_namespace_owner",
+            "self._namespace_owner_tokens[owner_identity]",
+        ),
+        "_namespace_owner_contexts": (
+            "_open_namespace_owner",
+            "self._namespace_owner_contexts[owner_identity]",
+        ),
+    }
+    _require(
+        all(
+            registry_subscript_stores(registry) == (expected_store,)
+            for registry, expected_store in expected_registry_subscript_stores.items()
+        ),
+        "R namespace static private registry store allowlist differs",
+    )
+
+    protected_registries = {
+        *expected_registry_subscript_stores,
+        "_hardlink_groups",
+        "_archived_capability_records",
+        "_poisoned_descriptors",
+        "_owner_quarantine",
+        "_untransferred_raw_quarantine",
+        "_receipts",
+    }
+    whole_registry_stores = tuple(
+        (method_name, ast.unparse(node))
+        for method_name, method in namespace_methods.items()
+        if method_name != "__init__"
+        for node in ast.walk(method)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+        and node.attr in protected_registries
+    )
+    live_slot_store_methods = tuple(
+        method_name
+        for method_name, method in namespace_methods.items()
+        if method_name != "__init__"
+        for node in ast.walk(method)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+        and ast.unparse(node) == "self._live_capability_record"
+    )
+    pending_store_methods = tuple(
+        method_name
+        for method_name, method in namespace_methods.items()
+        if method_name != "__init__"
+        for node in ast.walk(method)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+        and ast.unparse(node) == "self._pending_publication"
+    )
+    registry_setter_calls = tuple(
+        call
+        for call in calls(namespace_journal)
+        if ast.unparse(call.func) in {"setattr", "object.__setattr__", "self.__setattr__"}
+        and any(
+            registry in ast.unparse(argument)
+            for argument in call.args
+            for registry in (
+                *protected_registries,
+                "_live_capability_record",
+                "_pending_publication",
+            )
+        )
+    )
+    registry_mutator_calls = tuple(
+        call
+        for call in calls(namespace_journal)
+        if isinstance(call.func, ast.Attribute)
+        and call.func.attr
+        in {
+            "__delitem__",
+            "__setitem__",
+            "clear",
+            "discard",
+            "pop",
+            "popitem",
+            "remove",
+            "setdefault",
+            "update",
+        }
+        and any(registry in ast.unparse(call) for registry in protected_registries)
+        and ast.unparse(call.func) != "self._hardlink_groups.setdefault"
+    )
+    direct_registry_method_calls = tuple(
+        (method_name, ast.unparse(call.func))
+        for method_name, method in namespace_methods.items()
+        for call in calls(method)
+        if isinstance(call.func, ast.Attribute)
+        and isinstance(call.func.value, ast.Attribute)
+        and isinstance(call.func.value.value, ast.Name)
+        and call.func.value.value.id == "self"
+        and call.func.value.attr in protected_registries
+        and call.func.attr
+        in {
+            "__delitem__",
+            "__iadd__",
+            "__ior__",
+            "__setitem__",
+            "add",
+            "append",
+            "clear",
+            "discard",
+            "extend",
+            "insert",
+            "intersection_update",
+            "pop",
+            "popitem",
+            "remove",
+            "reverse",
+            "setdefault",
+            "sort",
+            "symmetric_difference_update",
+            "update",
+        }
+    )
+    expected_direct_registry_method_calls = (
+        ("_append_receipt", "self._receipts.append"),
+        ("_archive_capability", "self._archived_capability_records.append"),
+        ("_close_namespace_owner", "self._owner_quarantine.append"),
+        ("_close_namespace_owner", "self._poisoned_descriptors.add"),
+        ("_reconcile_mount_poison", "self._owner_quarantine.append"),
+        ("_register_name_fact", "self._hardlink_groups.setdefault"),
+        ("_retain_uncertain_owner", "self._owner_quarantine.append"),
+        ("_retain_uncertain_owner", "self._poisoned_descriptors.add"),
+        ("_retain_untransferred_raw", "self._owner_quarantine.append"),
+        ("_retain_untransferred_raw", "self._poisoned_descriptors.add"),
+        ("_retain_untransferred_raw", "self._untransferred_raw_quarantine.append"),
+    )
+    registry_alias_assignments = tuple(
+        (method_name, ast.unparse(target), ast.unparse(node.value))
+        for method_name, method in namespace_methods.items()
+        for node in ast.walk(method)
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr))
+        for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,))
+        if isinstance(node.value, ast.Attribute)
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "self"
+        and node.value.attr in protected_registries
+        and ast.unparse(target) != ast.unparse(node.value)
+    )
+    registry_dynamic_access_calls = tuple(
+        ast.unparse(call)
+        for call in calls(namespace_journal)
+        if ast.unparse(call.func) in {"getattr", "setattr", "delattr", "vars"}
+        and any(ast.unparse(argument) == "self" for argument in call.args)
+        and any(registry in ast.unparse(call) for registry in protected_registries)
+    )
+    _require(
+        not whole_registry_stores
+        and not registry_setter_calls
+        and not registry_mutator_calls
+        and tuple(sorted(direct_registry_method_calls))
+        == tuple(sorted(expected_direct_registry_method_calls))
+        and not registry_alias_assignments
+        and not registry_dynamic_access_calls
+        and live_slot_store_methods.count("_publish_capability") == 1
+        and live_slot_store_methods.count("abandon_token") == 2
+        and len(live_slot_store_methods) == 3
+        and pending_store_methods == ("_begin_publication", "_finish_publication")
+        and call_targets(namespace_methods["_register_name_fact"]).count(
+            "self._hardlink_groups.setdefault"
+        )
+        == 1
+        and call_targets(namespace_methods["_archive_capability"]).count(
+            "self._archived_capability_records.append"
+        )
+        == 1
+        and call_targets(namespace_methods["_append_receipt"]).count("self._receipts.append") == 1,
+        "R namespace static strong registry ownership differs",
+    )
+
+    public_return_contracts = {
+        "register_borrowed_directory": (
+            "_Generation6RNamespaceDirectoryAuthority",
+            ("self._register_authority",),
+        ),
+        "open_owned_cursor": (
+            "_Generation6RNamespaceDirectoryAuthority",
+            ("self._register_authority",),
+        ),
+        "close_owned_cursor": ("None", ()),
+        "seal_name": ("_Generation6RNamespaceNameFact", ("fact",)),
+        "seal": ("None", ()),
+        "authorize_present": (
+            "_Generation6RNamespacePresentToken",
+            ("token",),
+        ),
+        "authorize_absence": (
+            "_Generation6RNamespaceAbsenceToken",
+            ("token",),
+        ),
+        "authorize_rename": (
+            "_Generation6RNamespaceRenameToken",
+            ("token",),
+        ),
+        "abandon_token": ("None", ("None",)),
+    }
+    private_type_names = {
+        "_Generation6RNamespaceDirectoryBinding",
+        "_Generation6RNamespaceDirectoryRecord",
+        "_Generation6RNamespaceOwnerContextBinding",
+        "_Generation6RNamespaceOwnerContext",
+        "_Generation6RNamespaceCapabilityBinding",
+        "_Generation6RNamespaceCapabilityRecord",
+    }
+    for method_name, (expected_annotation, expected_returns) in public_return_contracts.items():
+        method = namespace_methods[method_name]
+        observed_returns = tuple(
+            (
+                "None"
+                if node.value is None
+                else (
+                    ast.unparse(node.value.func)
+                    if isinstance(node.value, ast.Call)
+                    else ast.unparse(node.value)
+                )
+            )
+            for node in ast.walk(method)
+            if isinstance(node, ast.Return)
+        )
+        _require(
+            method.returns is not None
+            and ast.unparse(method.returns) == expected_annotation
+            and observed_returns == expected_returns
+            and expected_annotation not in private_type_names
+            and not any(
+                private_name in ast.unparse(node.value)
+                for node in ast.walk(method)
+                if isinstance(node, ast.Return) and node.value is not None
+                for private_name in private_type_names
+            ),
+            f"R namespace static public return contract differs: {method_name}",
+        )
+    public_parameter_contracts = {
+        "register_borrowed_directory": (("directory", "DirectoryOwner"),),
+        "open_owned_cursor": (
+            ("parent_authority", "_Generation6RNamespaceDirectoryAuthority"),
+            ("name", "str"),
+        ),
+        "close_owned_cursor": (("authority", "_Generation6RNamespaceDirectoryAuthority"),),
+        "seal_name": (
+            ("authority", "_Generation6RNamespaceDirectoryAuthority"),
+            ("name", "str"),
+            ("kind", "_Generation6RNamespaceNodeKind"),
+            ("hardlink_group", "str | None"),
+        ),
+        "seal": (),
+        "authorize_present": (
+            ("authority", "_Generation6RNamespaceDirectoryAuthority"),
+            ("fact", "_Generation6RNamespaceNameFact"),
+            ("action", "_Generation6RNamespaceAction"),
+        ),
+        "authorize_absence": (
+            ("authority", "_Generation6RNamespaceDirectoryAuthority"),
+            ("name", "str"),
+            ("action", "_Generation6RNamespaceAction"),
+        ),
+        "authorize_rename": (
+            ("source_authority", "_Generation6RNamespaceDirectoryAuthority"),
+            ("source_fact", "_Generation6RNamespaceNameFact"),
+            ("destination_authority", "_Generation6RNamespaceDirectoryAuthority"),
+            ("destination_name", "str"),
+        ),
+        "abandon_token": (("token", "_Generation6RNamespaceLiveToken"),),
+    }
+    for method_name, expected_parameters in public_parameter_contracts.items():
+        method = namespace_methods[method_name]
+        observed_parameters = tuple(
+            (argument.arg, "" if argument.annotation is None else ast.unparse(argument.annotation))
+            for argument in (*method.args.args[1:], *method.args.kwonlyargs)
+        )
+        _require(
+            observed_parameters == expected_parameters
+            and not method.args.vararg
+            and not method.args.kwarg
+            and all(
+                forbidden not in argument_name.lower()
+                for argument_name, _ in observed_parameters
+                for forbidden in ("descriptor", "fd", "path")
+            )
+            and all(annotation not in {"int", "Path"} for _, annotation in observed_parameters),
+            f"R namespace static public parameter contract differs: {method_name}",
+        )
+
+    def local_name_assignments(method: ast.FunctionDef, name: str) -> tuple[ast.AST, ...]:
+        return tuple(
+            node
+            for node in ast.walk(method)
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr, ast.AugAssign))
+            and any(
+                isinstance(target, ast.Name) and target.id == name
+                for target in (
+                    tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,)
+                )
+            )
+        )
+
+    register_authority_method = namespace_methods["_register_authority"]
+    register_authority_returns = tuple(
+        ast.unparse(node.value)
+        for node in ast.walk(register_authority_method)
+        if isinstance(node, ast.Return) and node.value is not None
+    )
+    authority_assignments = local_name_assignments(register_authority_method, "authority")
+    copy_name_method = namespace_methods["_copy_name_fact"]
+    copy_name_returns = tuple(
+        node.value
+        for node in ast.walk(copy_name_method)
+        if isinstance(node, ast.Return) and node.value is not None
+    )
+    seal_fact_assignments = local_name_assignments(namespace_methods["seal_name"], "fact")
+    token_constructor_contracts = {
+        "authorize_present": "_Generation6RNamespacePresentToken",
+        "authorize_absence": "_Generation6RNamespaceAbsenceToken",
+        "authorize_rename": "_Generation6RNamespaceRenameToken",
+    }
+    _require(
+        register_authority_method.returns is not None
+        and ast.unparse(register_authority_method.returns)
+        == "_Generation6RNamespaceDirectoryAuthority"
+        and register_authority_returns == ("authority",)
+        and len(authority_assignments) == 1
+        and isinstance(authority_assignments[0], ast.Assign)
+        and isinstance(authority_assignments[0].value, ast.Call)
+        and ast.unparse(authority_assignments[0].value.func)
+        == "_Generation6RNamespaceDirectoryAuthority"
+        and len(copy_name_returns) == 1
+        and isinstance(copy_name_returns[0], ast.Call)
+        and ast.unparse(copy_name_returns[0].func) == "_Generation6RNamespaceNameFact"
+        and len(seal_fact_assignments) == 2
+        and isinstance(seal_fact_assignments[0], ast.AnnAssign)
+        and seal_fact_assignments[0].value is not None
+        and ast.unparse(seal_fact_assignments[0].value) == "None"
+        and isinstance(seal_fact_assignments[1], ast.Assign)
+        and isinstance(seal_fact_assignments[1].value, ast.Call)
+        and ast.unparse(seal_fact_assignments[1].value.func) == "self._copy_name_fact"
+        and all(
+            (assignments := local_name_assignments(namespace_methods[method_name], "token"))
+            and len(assignments) == 1
+            and isinstance(assignments[0], ast.Assign)
+            and isinstance(assignments[0].value, ast.Call)
+            and ast.unparse(assignments[0].value.func) == constructor
+            and tuple(
+                ast.unparse(node.value)
+                for node in ast.walk(namespace_methods[method_name])
+                if isinstance(node, ast.Return) and node.value is not None
+            )
+            == ("token",)
+            for method_name, constructor in token_constructor_contracts.items()
+        )
+        and "cast(" not in ast.unparse(register_authority_method)
+        and "cast(" not in ast.unparse(copy_name_method),
+        "R namespace static exact public object provenance differs",
+    )
+
+    open_owner = namespace_methods["_open_namespace_owner"]
+    open_owner_source = ast.unparse(open_owner)
+    journal_open_calls = tuple(
+        call
+        for call in calls(namespace_journal)
+        if ast.unparse(call.func) == "_GENERATION6_R_NAMESPACE_REAL_OS_OPEN"
+    )
+    raw_open_line = one_line(
+        selected_call_lines(open_owner, "_GENERATION6_R_NAMESPACE_REAL_OS_OPEN"),
+        "namespace raw open",
+    )
+    owner_shell_line = one_line(
+        selected_call_lines(open_owner, "object.__new__"),
+        "namespace owner shell",
+    )
+    label_line = one_line(selected_call_lines(open_owner, "_ascii"), "namespace open label")
+    raw_sentinel_lines = assignment_lines(open_owner, "raw_descriptor", "_PID_SENTINEL")
+    accepted_sentinel_lines = assignment_lines(open_owner, "accepted_descriptor", "_PID_SENTINEL")
+    transfer_line = one_line(
+        assignment_lines(open_owner, "accepted_descriptor", "raw_descriptor"),
+        "namespace raw transfer",
+    )
+    initialize_line = one_line(
+        selected_call_lines(open_owner, "FdOwner.__init__"),
+        "namespace accepted initialization",
+    )
+    open_transactions = tuple(
+        node
+        for node in ast.walk(open_owner)
+        if isinstance(node, ast.Try)
+        and any(
+            ast.unparse(call.func) == "_GENERATION6_R_NAMESPACE_REAL_OS_OPEN"
+            for call in calls(node)
+        )
+    )
+    _require(
+        len(open_transactions) == 1,
+        "R namespace static dominant raw transaction inventory differs",
+    )
+    open_transaction = open_transactions[0]
+    open_transaction_source = "\n".join(ast.unparse(node) for node in open_transaction.body)
+    open_handlers = tuple(
+        handler
+        for handler in open_transaction.handlers
+        if handler.type is not None and ast.unparse(handler.type) == "BaseException"
+    )
+    initialization_transactions = tuple(
+        node
+        for statement in open_transaction.body
+        for node in ast.walk(statement)
+        if isinstance(node, ast.Try) and call_targets(node).count("FdOwner.__init__") == 1
+    )
+    _require(
+        len(initialization_transactions) == 1,
+        "R namespace static accepted initialization transaction inventory differs",
+    )
+    initialization_transaction = initialization_transactions[0]
+    initialization_handlers = tuple(
+        handler
+        for handler in initialization_transaction.handlers
+        if handler.type is not None and ast.unparse(handler.type) == "BaseException"
+    )
+    _require(
+        len(initialization_handlers) == 1,
+        "R namespace static accepted initialization handler inventory differs",
+    )
+    initialization_handler = initialization_handlers[0]
+    initialization_handler_source = ast.unparse(initialization_handler)
+    raw_validation_lines = tuple(
+        call.lineno
+        for call in calls(open_owner)
+        if ast.unparse(call.func) == "_require"
+        and "type(raw_descriptor) is int and raw_descriptor > 2" in ast.unparse(call)
+    )
+    token_for_owner_line = one_line(
+        selected_call_lines(open_owner, "self._descriptor_ledger.token_for_owner"),
+        "namespace accepted token lookup",
+    )
+    adopted_authorize_line = one_line(
+        selected_call_lines(open_owner, "self._descriptor_ledger._authorize_live"),
+        "namespace accepted ledger authorization",
+    )
+    owner_map_line = registry_subscript_stores("_namespace_owner_tokens")[0][1]
+    owner_map_store_line = one_line(
+        assignment_lines(open_owner, owner_map_line),
+        "namespace adopted owner map publication",
+    )
+    owner_context_map_line = registry_subscript_stores("_namespace_owner_contexts")[0][1]
+    owner_context_map_store_line = one_line(
+        assignment_lines(open_owner, owner_context_map_line),
+        "namespace adopted owner context publication",
+    )
+    owner_context_create_line = one_line(
+        tuple(
+            node.lineno
+            for node in ast.walk(open_owner)
+            if isinstance(node, ast.Assign)
+            and any(ast.unparse(target) == "owner_context" for target in node.targets)
+            and isinstance(node.value, ast.Call)
+            and ast.unparse(node.value.func) == "_Generation6RNamespaceOwnerContext"
+        ),
+        "namespace adopted owner context creation",
+    )
+
+    def exact_raw_finalizer(statement: ast.stmt, descriptor_name: str) -> bool:
+        if (
+            not isinstance(statement, ast.If)
+            or ast.unparse(statement.test) != f"{descriptor_name} is not _PID_SENTINEL"
+            or len(statement.body) != 1
+            or statement.orelse
+        ):
+            return False
+        expression = statement.body[0]
+        if not isinstance(expression, ast.Expr) or not isinstance(expression.value, ast.Call):
+            return False
+        call = expression.value
+        return (
+            ast.unparse(call.func) == "self._retain_untransferred_raw"
+            and tuple(ast.unparse(argument) for argument in call.args) == ("owner", descriptor_name)
+            and not call.keywords
+        )
+
+    _require(
+        len(journal_open_calls) == 1
+        and journal_open_calls[0].lineno == raw_open_line
+        and tuple(ast.unparse(argument) for argument in journal_open_calls[0].args)
+        == ("name", "flags")
+        and tuple(keyword.arg for keyword in journal_open_calls[0].keywords) == ("dir_fd",)
+        and ast.unparse(journal_open_calls[0].keywords[0].value) == "directory_descriptor"
+        and len(raw_sentinel_lines) == 2
+        and len(accepted_sentinel_lines) == 3
+        and label_line < owner_shell_line < raw_sentinel_lines[0]
+        and raw_sentinel_lines[0] < accepted_sentinel_lines[0] < raw_open_line
+        and raw_open_line < transfer_line < raw_sentinel_lines[1] < initialize_line
+        and initialize_line < accepted_sentinel_lines[-1]
+        and len(raw_validation_lines) == 1
+        and raw_open_line < raw_validation_lines[0] < transfer_line
+        and open_owner.body[-2] is open_transaction
+        and isinstance(open_owner.body[-1], ast.Return)
+        and isinstance(open_owner.body[-1].value, ast.Tuple)
+        and tuple(ast.unparse(element) for element in open_owner.body[-1].value.elts)
+        == ("owner", "descriptor_token", "owner_context")
+        and all(
+            fragment in open_transaction_source
+            for fragment in (
+                "raw_descriptor = _GENERATION6_R_NAMESPACE_REAL_OS_OPEN",
+                "accepted_descriptor = raw_descriptor",
+                "raw_descriptor = _PID_SENTINEL",
+                "FdOwner.__init__",
+                "accepted_descriptor = _PID_SENTINEL",
+                "self._descriptor_ledger.token_for_owner(owner)",
+                "self._descriptor_ledger._authorize_live(owner, descriptor_token)",
+                f"{owner_context_map_line} = owner_context",
+                f"{owner_map_line} = descriptor_token",
+            )
+        )
+        and not open_transaction.orelse
+        and len(open_transaction.handlers) == len(open_handlers) == 1
+        and "self._retain_uncertain_owner(owner, owner.descriptor)" in ast.unparse(open_handlers[0])
+        and "primary.add_note" in ast.unparse(open_handlers[0])
+        and isinstance(open_handlers[0].body[-1], ast.Raise)
+        and open_handlers[0].body[-1].exc is None
+        and not initialization_transaction.orelse
+        and not initialization_transaction.finalbody
+        and len(initialization_transaction.handlers) == len(initialization_handlers) == 1
+        and call_targets(initialization_transaction).count("FdOwner.__init__") == 1
+        and "self._descriptor_ledger._registration_quarantine" in initialization_handler_source
+        and "self._descriptor_ledger._uncertain_descriptors" in initialization_handler_source
+        and call_targets(initialization_handler).count("self._retain_uncertain_owner") == 1
+        and one_line(
+            selected_call_lines(initialization_handler, "self._retain_uncertain_owner"),
+            "accepted initialization retention",
+        )
+        < one_line(
+            assignment_lines(
+                initialization_handler,
+                "accepted_descriptor",
+                "_PID_SENTINEL",
+            ),
+            "accepted initialization handler clear",
+        )
+        and isinstance(initialization_handler.body[-1], ast.Raise)
+        and initialization_handler.body[-1].exc is None
+        and initialize_line
+        < accepted_sentinel_lines[-1]
+        < token_for_owner_line
+        < adopted_authorize_line
+        < owner_context_create_line
+        < owner_context_map_store_line
+        < owner_map_store_line
+        and len(open_transaction.finalbody) == 2
+        and exact_raw_finalizer(open_transaction.finalbody[0], "raw_descriptor")
+        and exact_raw_finalizer(
+            open_transaction.finalbody[1],
+            "accepted_descriptor",
+        )
+        and call_targets(open_transaction).count("self._retain_untransferred_raw") == 2
+        and "not vars(owner)" in open_owner_source
+        and "self._descriptor_ledger._registration_quarantine" in open_owner_source
+        and "self._descriptor_ledger._uncertain_descriptors" in open_owner_source
+        and "self._descriptor_ledger.token_for_owner(owner)" in open_owner_source
+        and "self._descriptor_ledger._authorize_live(owner, descriptor_token)" in open_owner_source
+        and "self._namespace_owner_contexts[owner_identity] = owner_context" in open_owner_source
+        and "self._namespace_owner_tokens[owner_identity] = descriptor_token" in open_owner_source
+        and "owner_context.state = _Generation6RNamespaceContextState.UNCERTAIN"
+        in ast.unparse(open_handlers[0])
+        and "_GENERATION6_R_REAL_OS_CLOSE" not in call_targets(open_owner),
+        "R namespace static raw-to-accepted transaction differs",
+    )
+    helper_callers = {
+        name
+        for name, method in namespace_methods.items()
+        if selected_call_lines(method, "self._open_namespace_owner")
+    }
+    open_helper_calls = {
+        name: tuple(
+            call for call in calls(method) if ast.unparse(call.func) == "self._open_namespace_owner"
+        )
+        for name, method in namespace_methods.items()
+        if selected_call_lines(method, "self._open_namespace_owner")
+    }
+    acquire_helper_calls = {
+        name: tuple(
+            call for call in calls(method) if ast.unparse(call.func) == "self._acquire_name_owner"
+        )
+        for name, method in namespace_methods.items()
+        if selected_call_lines(method, "self._acquire_name_owner")
+    }
+    expected_acquire_purpose = {
+        "seal_name": "_Generation6RNamespaceOwnerPurpose.SEALED_ENTRY",
+        "authorize_present": "_Generation6RNamespaceOwnerPurpose.PRESENT_TOKEN",
+        "authorize_rename": "_Generation6RNamespaceOwnerPurpose.RENAME_TOKEN",
+    }
+    _require(
+        helper_callers == {"open_owned_cursor", "_acquire_name_owner"}
+        and all(len(caller_calls) == 1 for caller_calls in open_helper_calls.values())
+        and all(
+            len(call.args) == 5
+            and tuple(keyword.arg for keyword in call.keywords) == ("purpose", "label")
+            for caller_calls in open_helper_calls.values()
+            for call in caller_calls
+        )
+        and ast.unparse(open_helper_calls["open_owned_cursor"][0].keywords[0].value)
+        == "_Generation6RNamespaceOwnerPurpose.OWNED_CURSOR"
+        and ast.unparse(open_helper_calls["open_owned_cursor"][0].args[4])
+        == "os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC"
+        and ast.unparse(open_helper_calls["_acquire_name_owner"][0].keywords[0].value) == "purpose"
+        and ast.unparse(open_helper_calls["_acquire_name_owner"][0].args[4])
+        == "os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC"
+        and set(acquire_helper_calls) == set(expected_acquire_purpose)
+        and all(len(caller_calls) == 1 for caller_calls in acquire_helper_calls.values())
+        and all(
+            tuple(keyword.arg for keyword in caller_calls[0].keywords) == ("purpose", "label")
+            and ast.unparse(caller_calls[0].keywords[0].value) == expected_acquire_purpose[name]
+            for name, caller_calls in acquire_helper_calls.items()
+        )
+        and "os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC"
+        in ast.unparse(namespace_methods["open_owned_cursor"])
+        and "os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC"
+        in ast.unparse(namespace_methods["_acquire_name_owner"]),
+        "R namespace static open-helper caller inventory differs",
+    )
+    retain_raw_source = ast.unparse(namespace_methods["_retain_untransferred_raw"])
+    _require(
+        "self._phase = _Generation6RNamespacePhase.UNCERTAIN" in retain_raw_source
+        and "self._untransferred_raw_quarantine.append(raw_descriptor)" in retain_raw_source
+        and "type(raw_descriptor) is int and raw_descriptor > 2" in retain_raw_source
+        and "self._poisoned_descriptors.add(raw_descriptor)" in retain_raw_source
+        and "self._owner_quarantine.append(owner)" in retain_raw_source
+        and all(
+            "_untransferred_raw_quarantine" in ast.unparse(namespace_methods[name])
+            for name in (
+                "_require_building",
+                "seal",
+                "_require_teardown_authorization",
+                "_require_live_capability_slot",
+                "_require_live_capability",
+            )
+        ),
+        "R namespace static untransferred raw quarantine differs",
+    )
+
+    mount_wrapper = namespace_methods["_namespace_mount_id"]
+    mount_wrapper_source = ast.unparse(mount_wrapper)
+    journal_mount_calls = tuple(
+        call
+        for call in calls(namespace_journal)
+        if ast.unparse(call.func) == "_GENERATION6_R_NAMESPACE_CAPTURED_MOUNT_ID"
+    )
+    mount_wrapper_callers = {
+        name
+        for name, method in namespace_methods.items()
+        if selected_call_lines(method, "self._namespace_mount_id")
+    }
+    reconcile_mount_source = ast.unparse(namespace_methods["_reconcile_mount_poison"])
+    mount_transactions = tuple(node for node in mount_wrapper.body if isinstance(node, ast.Try))
+    _require(
+        len(mount_transactions) == 1,
+        "R namespace static mount transaction inventory differs",
+    )
+    mount_transaction = mount_transactions[0]
+    mount_handlers = tuple(
+        handler
+        for handler in mount_transaction.handlers
+        if handler.type is not None and ast.unparse(handler.type) == "BaseException"
+    )
+    _require(
+        len(journal_mount_calls) == 1
+        and journal_mount_calls[0].lineno
+        == one_line(
+            selected_call_lines(mount_wrapper, "_GENERATION6_R_NAMESPACE_CAPTURED_MOUNT_ID"),
+            "namespace captured mount",
+        )
+        and len(mount_wrapper.body) == 4
+        and mount_wrapper.body[1] is mount_transaction
+        and call_targets(mount_transaction).count("_GENERATION6_R_NAMESPACE_CAPTURED_MOUNT_ID") == 1
+        and not any(
+            ast.unparse(call.func) == "self._reconcile_mount_poison"
+            for statement in mount_transaction.body
+            for call in calls(statement)
+        )
+        and not mount_transaction.orelse
+        and not mount_transaction.finalbody
+        and len(mount_transaction.handlers) == len(mount_handlers) == 1
+        and call_targets(mount_handlers[0]).count("self._reconcile_mount_poison") == 1
+        and isinstance(mount_handlers[0].body[-1], ast.Raise)
+        and mount_handlers[0].body[-1].exc is None
+        and isinstance(mount_wrapper.body[2], ast.Expr)
+        and isinstance(mount_wrapper.body[2].value, ast.Call)
+        and ast.unparse(mount_wrapper.body[2].value.func) == "self._reconcile_mount_poison"
+        and tuple(ast.unparse(argument) for argument in mount_wrapper.body[2].value.args)
+        == ("before", "None")
+        and isinstance(mount_wrapper.body[3], ast.Return)
+        and isinstance(mount_wrapper.body[3].value, ast.Name)
+        and mount_wrapper.body[3].value.id == "mount_id"
+        and call_targets(mount_wrapper).count("self._reconcile_mount_poison") == 2
+        and "before = frozenset(self._poisoned_descriptors)" in mount_wrapper_source
+        and "except BaseException as primary" in mount_wrapper_source
+        and "self._phase = _Generation6RNamespacePhase.UNCERTAIN" in reconcile_mount_source
+        and "self._owner_quarantine.append(descriptor_record.owner)" in reconcile_mount_source
+        and mount_wrapper_callers
+        == {
+            "_reauthenticate_directory",
+            "register_borrowed_directory",
+            "open_owned_cursor",
+            "_acquire_name_owner",
+        },
+        "R namespace static mount poison reconciliation differs",
+    )
+    expected_fcntl_callers = {
+        "_reauthenticate_directory",
+        "register_borrowed_directory",
+        "open_owned_cursor",
+        "_acquire_name_owner",
+    }
+    fcntl_calls_by_method = {
+        name: tuple(
+            call
+            for call in calls(method)
+            if ast.unparse(call.func) == "_GENERATION6_R_NAMESPACE_REAL_FCNTL"
+        )
+        for name, method in namespace_methods.items()
+        if selected_call_lines(method, "_GENERATION6_R_NAMESPACE_REAL_FCNTL")
+    }
+    _require(
+        set(fcntl_calls_by_method) == expected_fcntl_callers
+        and all(len(method_calls) == 2 for method_calls in fcntl_calls_by_method.values())
+        and all(
+            len(call.args) == 2 and not call.keywords and ast.unparse(call.args[0]) == "descriptor"
+            for method_calls in fcntl_calls_by_method.values()
+            for call in method_calls
+        )
+        and all(
+            tuple(sorted(ast.unparse(call.args[1]) for call in method_calls))
+            == ("fcntl.F_GETFD", "fcntl.F_GETFL")
+            for method_calls in fcntl_calls_by_method.values()
+        )
+        and "F_DUPFD" not in namespace_source,
+        "R namespace static exact fcntl authority differs",
+    )
+
+    close_owner_method = namespace_methods["_close_namespace_owner"]
+    close_owner_source = ast.unparse(close_owner_method)
+    close_call_line = one_line(
+        selected_call_lines(close_owner_method, "self._descriptor_ledger.close_owner_once"),
+        "namespace accepted close",
+    )
+    close_authorize_line = one_line(
+        selected_call_lines(close_owner_method, "self._descriptor_ledger._authorize_live"),
+        "namespace close authorization",
+    )
+    close_transactions = tuple(
+        node
+        for node in ast.walk(close_owner_method)
+        if isinstance(node, ast.Try)
+        and call_targets(node).count("self._descriptor_ledger.close_owner_once") == 1
+    )
+    _require(
+        len(close_transactions) == 1,
+        "R namespace static dominant close transaction inventory differs",
+    )
+    close_transaction = close_transactions[0]
+    close_body_source = "\n".join(ast.unparse(node) for node in close_transaction.body)
+    close_handlers = tuple(
+        handler
+        for handler in close_transaction.handlers
+        if handler.type is not None and ast.unparse(handler.type) == "BaseException"
+    )
+    close_context_attempted_line = one_line(
+        assignment_lines(
+            close_owner_method,
+            "owner_context.state",
+            "_Generation6RNamespaceContextState.ATTEMPTED",
+        ),
+        "namespace close context attempted",
+    )
+    close_receipt_line = one_line(
+        assignment_lines(close_owner_method, "close_receipt"),
+        "namespace close receipt",
+    )
+    close_context_receipt_line = one_line(
+        assignment_lines(close_owner_method, "owner_context.close_receipt", "close_receipt"),
+        "namespace close context receipt binding",
+    )
+    close_context_closed_line = one_line(
+        assignment_lines(
+            close_owner_method,
+            "owner_context.state",
+            "_Generation6RNamespaceContextState.CLOSED",
+        ),
+        "namespace close context closed",
+    )
+    close_token_binding_line = one_line(
+        assignment_lines(
+            close_owner_method,
+            "token_serial",
+            "capability_binding.token_serial",
+        ),
+        "namespace close capability token serial",
+    )
+    close_append_calls = tuple(
+        call
+        for call in calls(close_owner_method)
+        if ast.unparse(call.func) == "self._append_receipt"
+    )
+    close_positional_parameters = tuple(argument.arg for argument in close_owner_method.args.args)
+    close_keyword_parameters = tuple(
+        argument.arg for argument in close_owner_method.args.kwonlyargs
+    )
+    _require(
+        close_authorize_line < close_call_line
+        and close_owner_method.body[-1] is close_transaction
+        and close_positional_parameters == ("self", "owner", "descriptor_token", "owner_context")
+        and close_keyword_parameters == ("capability_record", "event")
+        and not close_owner_method.args.vararg
+        and not close_owner_method.args.kwarg
+        and call_targets(close_transaction).count("self._descriptor_ledger._authorize_live") == 1
+        and call_targets(close_transaction).count("self._descriptor_ledger.close_owner_once") == 1
+        and call_targets(close_transaction).count("self._append_receipt") == 1
+        and call_targets(close_transaction).count("self._require_dependencies") == 1
+        and "self._namespace_owner_tokens.get(owner_identity) is descriptor_token"
+        in close_body_source
+        and "self._namespace_owner_contexts.get(owner_identity) is owner_context"
+        in close_body_source
+        and "authority_record = owner_context.authority_record" in close_body_source
+        and "authority_serial = authority_record.binding.authority.serial" in close_body_source
+        and "capability_binding.owner_context is owner_context" in close_body_source
+        and "owner_context.capability_record is capability_record" in close_body_source
+        and close_token_binding_line < close_authorize_line
+        and "record.state is _Generation6RDescriptorState.CLOSE_SUCCEEDED" in close_body_source
+        and close_context_attempted_line < close_call_line
+        and "close_verified = True" in close_body_source
+        and close_call_line < close_receipt_line < close_context_receipt_line
+        and close_context_receipt_line < close_context_closed_line
+        and isinstance(close_transaction.body[-1], ast.Return)
+        and isinstance(close_transaction.body[-1].value, ast.Name)
+        and close_transaction.body[-1].value.id == "close_receipt"
+        and close_context_closed_line < close_transaction.body[-1].lineno
+        and not close_transaction.orelse
+        and not close_transaction.finalbody
+        and len(close_transaction.handlers) == len(close_handlers) == 1
+        and "self._phase = _Generation6RNamespacePhase.UNCERTAIN" in ast.unparse(close_handlers[0])
+        and "self._owner_quarantine.append(owner)" in ast.unparse(close_handlers[0])
+        and "accepted_context.state = _Generation6RNamespaceContextState.UNCERTAIN"
+        in ast.unparse(close_handlers[0])
+        and "self._poisoned_descriptors.add(descriptor)" in ast.unparse(close_handlers[0])
+        and isinstance(close_handlers[0].body[-1], ast.Raise)
+        and close_handlers[0].body[-1].exc is None
+        and "self._namespace_owner_tokens.get(owner_identity) is descriptor_token"
+        in close_owner_source
+        and "self._namespace_owner_contexts.get(owner_identity) is owner_context"
+        in close_owner_source
+        and "record.owner is owner" in close_owner_source
+        and "record.token is descriptor_token" in close_owner_source
+        and "record.state is _Generation6RDescriptorState.LIVE" in close_owner_source
+        and "record.state is _Generation6RDescriptorState.CLOSE_SUCCEEDED" in close_owner_source
+        and "record.close_attempts == 1" in close_owner_source
+        and "self._phase = _Generation6RNamespacePhase.UNCERTAIN" in close_owner_source
+        and "self._owner_quarantine.append(owner)" in close_owner_source
+        and "self._poisoned_descriptors.add(descriptor)" in close_owner_source
+        and "event=event.value" in close_owner_source
+        and len(close_append_calls) == 1
+        and not close_append_calls[0].args
+        and tuple(keyword.arg for keyword in close_append_calls[0].keywords)
+        == ("token_serial", "authority_serial", "event")
+        and tuple(ast.unparse(keyword.value) for keyword in close_append_calls[0].keywords)
+        == ("token_serial", "authority_serial", "event.value")
+        and "token_serial" not in close_keyword_parameters
+        and "authority_serial" not in close_keyword_parameters
+        and "_ascii(event" not in close_owner_source
+        and bool(selected_call_lines(close_owner_method, "self._append_receipt"))
+        and "_GENERATION6_R_REAL_OS_CLOSE" not in call_targets(close_owner_method)
+        and call_targets(namespace_journal).count("self._descriptor_ledger.close_owner_once") == 1,
+        "R namespace static exact close authority differs",
+    )
+    namespace_close_calls = tuple(
+        call
+        for call in calls(namespace_journal)
+        if ast.unparse(call.func) == "self._close_namespace_owner"
+    )
+    close_calls_by_caller = {
+        name: tuple(
+            call
+            for call in calls(method)
+            if ast.unparse(call.func) == "self._close_namespace_owner"
+        )
+        for name, method in namespace_methods.items()
+        if selected_call_lines(method, "self._close_namespace_owner")
+    }
+    expected_close_events_by_caller = {
+        "open_owned_cursor": ("_Generation6RNamespaceCloseEvent.OWNED_CURSOR_ABORT_CLOSED",),
+        "close_owned_cursor": ("_Generation6RNamespaceCloseEvent.OWNED_CURSOR_CLOSED",),
+        "_acquire_name_owner": ("_Generation6RNamespaceCloseEvent.ENTRY_HANDLE_ABORT_CLOSED",),
+        "seal_name": (
+            "_Generation6RNamespaceCloseEvent.SEALED_ENTRY_HANDLE_CLOSED",
+            "_Generation6RNamespaceCloseEvent.SEALED_ENTRY_ABORT_CLOSED",
+        ),
+        "authorize_present": ("_Generation6RNamespaceCloseEvent.PRESENT_TOKEN_ABORT_CLOSED",),
+        "authorize_rename": ("_Generation6RNamespaceCloseEvent.RENAME_TOKEN_ABORT_CLOSED",),
+        "abandon_token": ("_Generation6RNamespaceCloseEvent.MUTATION_TOKEN_HANDLE_CLOSED",),
+    }
+    observed_close_events_by_caller = {
+        name: tuple(
+            next(
+                (ast.unparse(keyword.value) for keyword in call.keywords if keyword.arg == "event"),
+                "",
+            )
+            for call in caller_calls
+        )
+        for name, caller_calls in close_calls_by_caller.items()
+    }
+    seal_name_method = namespace_methods["seal_name"]
+    seal_name_close_lines = selected_call_lines(seal_name_method, "self._close_namespace_owner")
+    sealed_owner_none_lines = assignment_lines(seal_name_method, "owner", "None")
+    sealed_token_none_lines = assignment_lines(seal_name_method, "descriptor_token", "None")
+    sealed_context_none_lines = assignment_lines(seal_name_method, "owner_context", "None")
+    _require(
+        len(namespace_close_calls) == 8
+        and observed_close_events_by_caller == expected_close_events_by_caller
+        and all(
+            len(call.args) == 3
+            and tuple(keyword.arg for keyword in call.keywords) == ("capability_record", "event")
+            and "context" in ast.unparse(call.args[2])
+            and ast.unparse(call.keywords[0].value)
+            == ("capability_record" if name == "abandon_token" else "None")
+            for name, caller_calls in close_calls_by_caller.items()
+            for call in caller_calls
+        )
+        and len(seal_name_close_lines) == 2
+        and len(sealed_owner_none_lines) == 2
+        and len(sealed_token_none_lines) == 2
+        and len(sealed_context_none_lines) == 2
+        and sealed_owner_none_lines[-1] < seal_name_close_lines[0]
+        and sealed_token_none_lines[-1] < seal_name_close_lines[0]
+        and sealed_context_none_lines[-1] < seal_name_close_lines[0]
+        and all(
+            not any(
+                isinstance(candidate, (ast.For, ast.AsyncFor, ast.While))
+                for candidate in ast.walk(method)
+            )
+            for method in namespace_methods.values()
+            if selected_call_lines(method, "self._close_namespace_owner")
+        ),
+        "R namespace static no-retry close topology differs",
+    )
+
+    def require_pathname_bracket(
+        method_name: str,
+    ) -> None:
+        method = namespace_methods[method_name]
+        reauth_lines = selected_call_lines(method, "self._reauthenticate_directory")
+        stat_lines = selected_call_lines(method, "_GENERATION6_R_NAMESPACE_REAL_OS_STAT")
+        open_lines = selected_call_lines(method, "self._open_namespace_owner")
+        mount_lines = selected_call_lines(method, "self._namespace_mount_id")
+        fcntl_lines = selected_call_lines(method, "_GENERATION6_R_NAMESPACE_REAL_FCNTL")
+        identity_lines = tuple(
+            call.lineno
+            for call in calls(method)
+            if ast.unparse(call.func) == "_require"
+            and "named_before == opened == named_after" in ast.unparse(call)
+        )
+        proof_line = one_line(
+            selected_call_lines(method, "self._require_same_parent_proof"),
+            f"{method_name} parent proof",
+        )
+        _require(
+            len(reauth_lines) == 2
+            and len(stat_lines) == 2
+            and len(open_lines) == len(mount_lines) == len(identity_lines) == 1
+            and len(fcntl_lines) == 2
+            and reauth_lines[0]
+            < stat_lines[0]
+            < open_lines[0]
+            < stat_lines[1]
+            < mount_lines[0]
+            < min(fcntl_lines)
+            <= max(fcntl_lines)
+            < identity_lines[0]
+            < reauth_lines[1]
+            < proof_line,
+            f"R namespace static pathname parent bracket differs: {method_name}",
+        )
+
+    def require_exact_stat_calls(
+        method_name: str,
+        expected_name: str,
+        expected_directory_descriptor: str,
+        expected_count: int,
+    ) -> None:
+        stat_calls = tuple(
+            call
+            for call in calls(namespace_methods[method_name])
+            if ast.unparse(call.func) == "_GENERATION6_R_NAMESPACE_REAL_OS_STAT"
+        )
+        _require(
+            len(stat_calls) == expected_count
+            and all(
+                tuple(ast.unparse(argument) for argument in call.args) == (expected_name,)
+                and tuple(keyword.arg for keyword in call.keywords) == ("dir_fd", "follow_symlinks")
+                and ast.unparse(call.keywords[0].value) == expected_directory_descriptor
+                and isinstance(call.keywords[1].value, ast.Constant)
+                and call.keywords[1].value.value is False
+                for call in stat_calls
+            ),
+            f"R namespace static exact pathname stat differs: {method_name}",
+        )
+
+    require_pathname_bracket("open_owned_cursor")
+    require_pathname_bracket("_acquire_name_owner")
+    require_exact_stat_calls("open_owned_cursor", "exact_name", "parent_descriptor", 2)
+    require_exact_stat_calls(
+        "_acquire_name_owner",
+        "exact_name",
+        "directory_descriptor",
+        2,
+    )
+    require_exact_stat_calls(
+        "_require_name_absent",
+        "exact_name",
+        "directory_descriptor",
+        1,
+    )
+    absent_reauth_lines = selected_call_lines(
+        namespace_methods["_require_name_absent"],
+        "self._reauthenticate_directory",
+    )
+    absent_stat_line = one_line(
+        selected_call_lines(
+            namespace_methods["_require_name_absent"],
+            "_GENERATION6_R_NAMESPACE_REAL_OS_STAT",
+        ),
+        "absence pathname proof",
+    )
+    absent_parent_line = one_line(
+        selected_call_lines(
+            namespace_methods["_require_name_absent"],
+            "self._require_same_parent_proof",
+        ),
+        "absence parent post-proof",
+    )
+    _require(
+        len(absent_reauth_lines) == 2
+        and absent_reauth_lines[0] < absent_stat_line < absent_reauth_lines[1] < absent_parent_line,
+        "R namespace static absence parent bracket differs",
+    )
+    open_cursor_method = namespace_methods["open_owned_cursor"]
+    acquire_name_method = namespace_methods["_acquire_name_owner"]
+    absent_method = namespace_methods["_require_name_absent"]
+    _require(
+        call_targets(open_cursor_method).count("_GENERATION6_R_NAMESPACE_REAL_OS_STAT") == 2
+        and call_targets(acquire_name_method).count("_GENERATION6_R_NAMESPACE_REAL_OS_STAT") == 2
+        and "named_before == opened == named_after" in ast.unparse(open_cursor_method)
+        and "named_before == opened == named_after" in ast.unparse(acquire_name_method)
+        and "primary.add_note" in ast.unparse(absent_method)
+        and "type(error.errno) is int and error.errno == errno.ENOENT" in ast.unparse(absent_method)
+        and selected_call_lines(open_cursor_method, "self._require_same_parent_proof")[0]
+        < selected_call_lines(open_cursor_method, "self._register_authority")[0],
+        "R namespace static pathname proof details differ",
+    )
+
+    rename_method = namespace_methods["authorize_rename"]
+    rename_absence_lines = selected_call_lines(rename_method, "self._require_name_absent")
+    rename_acquire_line = one_line(
+        selected_call_lines(rename_method, "self._acquire_name_owner"),
+        "rename source acquisition",
+    )
+    rename_final_source_line = one_line(
+        selected_call_lines(rename_method, "self._reauthenticate_directory"),
+        "rename final source proof",
+    )
+    rename_source_proof_line = one_line(
+        selected_call_lines(rename_method, "self._require_same_parent_proof"),
+        "rename pinned source proof",
+    )
+    rename_token_line = one_line(
+        selected_call_lines(rename_method, "_Generation6RNamespaceRenameToken"),
+        "rename token construction",
+    )
+    rename_publish_line = one_line(
+        selected_call_lines(rename_method, "self._publish_capability"),
+        "rename publication",
+    )
+    _require(
+        len(rename_absence_lines) == 2
+        and rename_absence_lines[0]
+        < rename_acquire_line
+        < rename_absence_lines[1]
+        < rename_final_source_line
+        < rename_source_proof_line
+        < rename_token_line
+        < rename_publish_line
+        and "exact_destination_name_after == exact_destination_name" in ast.unparse(rename_method),
+        "R namespace static rename reproof ordering differs",
+    )
+
+    append_receipt_source = ast.unparse(namespace_methods["_append_receipt"])
+    begin_publication_source = ast.unparse(namespace_methods["_begin_publication"])
+    finish_publication = namespace_methods["_finish_publication"]
+    finish_publication_source = ast.unparse(finish_publication)
+    fail_publication = namespace_methods["_fail_publication"]
+    fail_publication_source = ast.unparse(fail_publication)
+    _require(
+        "except BaseException" in append_receipt_source
+        and "self._phase = _Generation6RNamespacePhase.UNCERTAIN" in append_receipt_source
+        and "self._receipts.append(receipt)" in append_receipt_source
+        and "self._pending_publication = value" in begin_publication_source
+        and "self._pending_publication is not value" in finish_publication_source
+        and "self._pending_publication = None" in finish_publication_source
+        and "self._phase = _Generation6RNamespacePhase.UNCERTAIN" in fail_publication_source
+        and "self._pending_publication is value" in fail_publication_source
+        and not assignment_lines(fail_publication, "self._pending_publication", "None"),
+        "R namespace static receipt/publication terminality differs",
+    )
+
+    publication_body_fragments = {
+        "_register_authority": (
+            "owner_context.authority_record = authority_record",
+            "self._directory_facts_by_serial[fact.serial] = fact",
+            "self._authority_records_by_serial[authority.serial] = authority_record",
+            "self._authority_records_by_identity[id(authority)] = authority_record",
+            "self._authority_records_by_owner_identity[owner_identity] = authority_record",
+        ),
+        "_register_name_fact": (
+            "group.append(fact)",
+            "self._name_facts_by_key",
+        ),
+        "_publish_capability": (
+            "owner_context.capability_record = capability_record",
+            "owner_context.state = _Generation6RNamespaceContextState.TRANSFERRED",
+            "capability_record.authorization_receipt = authorization_receipt",
+            "self._capability_records_by_identity[token_identity] = capability_record",
+            "self._capability_records_by_serial[binding.token_serial] = capability_record",
+            "self._live_capability_record = capability_record",
+        ),
+        "seal": ("self._phase = _Generation6RNamespacePhase.SEALED",),
+    }
+    publication_failure_fragments = {
+        "_register_authority": (
+            "authority_record.state = _Generation6RNamespaceOwnerState.UNCERTAIN",
+            "owner_context.state = _Generation6RNamespaceContextState.UNCERTAIN",
+        ),
+        "_register_name_fact": (),
+        "_publish_capability": (
+            "capability_record.state = _Generation6RNamespaceTokenState.UNCERTAIN",
+            "owner_context.state = _Generation6RNamespaceContextState.UNCERTAIN",
+        ),
+        "seal": (),
+    }
+    for publication_name, required_fragments in publication_body_fragments.items():
+        publication_method = namespace_methods[publication_name]
+        begin_line = one_line(
+            selected_call_lines(publication_method, "self._begin_publication"),
+            f"{publication_name} publication begin",
+        )
+        finish_line = one_line(
+            selected_call_lines(publication_method, "self._finish_publication"),
+            f"{publication_name} publication finish",
+        )
+        fail_line = one_line(
+            selected_call_lines(publication_method, "self._fail_publication"),
+            f"{publication_name} publication fail",
+        )
+        receipt_lines = selected_call_lines(publication_method, "self._append_receipt")
+        transaction_candidates = tuple(
+            node
+            for node in ast.walk(publication_method)
+            if isinstance(node, ast.Try)
+            and call_targets(node).count("self._append_receipt") == 1
+            and call_targets(node).count("self._finish_publication") == 1
+        )
+        _require(
+            len(transaction_candidates) == 1,
+            f"R namespace static publication try inventory differs: {publication_name}",
+        )
+        transaction = transaction_candidates[0]
+        transaction_source = "\n".join(ast.unparse(node) for node in transaction.body)
+        transaction_body_targets = tuple(
+            ast.unparse(call.func) for statement in transaction.body for call in calls(statement)
+        )
+        fail_handlers = tuple(
+            handler
+            for handler in transaction.handlers
+            if handler.type is not None
+            and ast.unparse(handler.type) == "BaseException"
+            and call_targets(handler).count("self._fail_publication") == 1
+        )
+        _require(
+            len(receipt_lines) == 1
+            and begin_line < transaction.lineno <= receipt_lines[0] < finish_line
+            and transaction_body_targets.count("self._append_receipt") == 1
+            and transaction_body_targets.count("self._finish_publication") == 1
+            and "self._fail_publication" not in transaction_body_targets
+            and all(fragment in transaction_source for fragment in required_fragments)
+            and not transaction.orelse
+            and not transaction.finalbody
+            and len(transaction.handlers) == len(fail_handlers) == 1
+            and all(
+                fragment in ast.unparse(fail_handlers[0])
+                for fragment in publication_failure_fragments[publication_name]
+            )
+            and isinstance(fail_handlers[0].body[-1], ast.Raise)
+            and fail_handlers[0].body[-1].exc is None
+            and fail_line
+            == one_line(
+                selected_call_lines(fail_handlers[0], "self._fail_publication"),
+                f"{publication_name} dominant publication failure",
+            ),
+            f"R namespace static publication transaction differs: {publication_name}",
+        )
+    register_authority_source = ast.unparse(namespace_methods["_register_authority"])
+    register_name_source = ast.unparse(namespace_methods["_register_name_fact"])
+    publish_capability = namespace_methods["_publish_capability"]
+    publish_capability_source = ast.unparse(publish_capability)
+    publish_receipt_line = one_line(
+        selected_call_lines(publish_capability, "self._append_receipt"),
+        "capability authorization receipt",
+    )
+    publish_identity_line = one_line(
+        assignment_lines(
+            publish_capability,
+            "self._capability_records_by_identity[token_identity]",
+        ),
+        "capability identity index",
+    )
+    publish_serial_line = one_line(
+        assignment_lines(
+            publish_capability,
+            "self._capability_records_by_serial[binding.token_serial]",
+        ),
+        "capability serial index",
+    )
+    publish_live_line = one_line(
+        assignment_lines(
+            publish_capability,
+            "self._live_capability_record",
+            "capability_record",
+        ),
+        "capability live slot",
+    )
+    publish_context_record_line = one_line(
+        assignment_lines(
+            publish_capability,
+            "owner_context.capability_record",
+            "capability_record",
+        ),
+        "capability owner context transfer",
+    )
+    publish_context_state_line = one_line(
+        assignment_lines(
+            publish_capability,
+            "owner_context.state",
+            "_Generation6RNamespaceContextState.TRANSFERRED",
+        ),
+        "capability owner context transferred state",
+    )
+    register_authority = namespace_methods["_register_authority"]
+    register_context_line = one_line(
+        assignment_lines(
+            register_authority,
+            "owner_context.authority_record",
+            "authority_record",
+        ),
+        "owned authority context transfer",
+    )
+    register_fact_line = one_line(
+        assignment_lines(register_authority, "self._directory_facts_by_serial[fact.serial]"),
+        "owned authority fact publication",
+    )
+    _require(
+        "self._authority_records_by_identity[id(authority)] = authority_record"
+        in register_authority_source
+        and "self._authority_records_by_serial[authority.serial] = authority_record"
+        in register_authority_source
+        and "authority_record.state = _Generation6RNamespaceOwnerState.UNCERTAIN"
+        in register_authority_source
+        and register_context_line < register_fact_line
+        and "owner_context.state = _Generation6RNamespaceContextState.UNCERTAIN"
+        in register_authority_source
+        and "self._name_facts_by_key[" in register_name_source
+        and "group.append(fact)" in register_name_source
+        and "self._fail_publication(fact)" in register_name_source
+        and publish_context_record_line
+        < publish_context_state_line
+        < publish_receipt_line
+        < publish_identity_line
+        < publish_serial_line
+        < publish_live_line
+        and "capability_record.state = _Generation6RNamespaceTokenState.UNCERTAIN"
+        in publish_capability_source
+        and "owner_context.state = _Generation6RNamespaceContextState.UNCERTAIN"
+        in publish_capability_source,
+        "R namespace static indexed publication ordering differs",
+    )
+    authorization_publish_events = {
+        "authorize_present": "PRESENT_TOKEN_AUTHORIZED",
+        "authorize_absence": "ABSENCE_TOKEN_AUTHORIZED",
+        "authorize_rename": "RENAME_TOKEN_AUTHORIZED",
+    }
+    for authorization_name, expected_event in authorization_publish_events.items():
+        authorization_method = namespace_methods[authorization_name]
+        publish_calls = tuple(
+            call
+            for call in calls(authorization_method)
+            if ast.unparse(call.func) == "self._publish_capability"
+        )
+        publish_line = one_line(
+            selected_call_lines(authorization_method, "self._publish_capability"),
+            f"{authorization_name} publication",
+        )
+        token_return_lines = tuple(
+            node.lineno
+            for node in ast.walk(authorization_method)
+            if isinstance(node, ast.Return)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "token"
+        )
+        _require(
+            len(publish_calls) == 1
+            and tuple(ast.unparse(argument) for argument in publish_calls[0].args)
+            == ("capability_record",)
+            and tuple(keyword.arg for keyword in publish_calls[0].keywords) == ("event",)
+            and isinstance(publish_calls[0].keywords[0].value, ast.Constant)
+            and publish_calls[0].keywords[0].value.value == expected_event
+            and len(token_return_lines) == 1
+            and publish_line < token_return_lines[0],
+            f"R namespace static token return publication differs: {authorization_name}",
+        )
+
+    receipt_binding_source = ast.unparse(namespace_methods["_require_receipt_binding"])
+    archive_method = namespace_methods["_archive_capability"]
+    archive_source = ast.unparse(archive_method)
+    _require(
+        "any(candidate is exact_receipt for candidate in self._receipts)" in receipt_binding_source
+        and "exact_receipt.token_serial == token_serial" in receipt_binding_source
+        and "exact_receipt.authority_serial == authority_serial" in receipt_binding_source
+        and "exact_receipt.event == event" in receipt_binding_source
+        and "self._capability_records_by_identity.get(id(binding.token)) is capability_record"
+        in archive_source
+        and "self._capability_records_by_serial.get(binding.token_serial) is capability_record"
+        in archive_source
+        and "capability_record.state is _Generation6RNamespaceTokenState.ATTEMPTED"
+        in archive_source
+        and call_targets(archive_method).count("self._require_receipt_binding") == 2
+        and "owner_context.state is _Generation6RNamespaceContextState.CLOSED" in archive_source
+        and "owner_context.capability_record is capability_record" in archive_source
+        and "owner_context.close_receipt is capability_record.close_receipt" in archive_source
+        and "self._archived_capability_records.append(capability_record)" in archive_source,
+        "R namespace static exact terminal archive differs",
+    )
+
+    abandon_method = namespace_methods["abandon_token"]
+    abandon_source = ast.unparse(abandon_method)
+    abandon_require_line = one_line(
+        selected_call_lines(abandon_method, "self._require_live_capability"),
+        "abandon live reauthorization",
+    )
+    abandon_attempt_line = one_line(
+        assignment_lines(
+            abandon_method,
+            "capability_record.state",
+            "_Generation6RNamespaceTokenState.ATTEMPTED",
+        ),
+        "abandon attempted state",
+    )
+    abandon_close_line = one_line(
+        selected_call_lines(abandon_method, "self._close_namespace_owner"),
+        "abandon accepted close",
+    )
+    abandon_context_attempt_line = one_line(
+        assignment_lines(
+            abandon_method,
+            "owner_context.state",
+            "_Generation6RNamespaceContextState.ATTEMPTED",
+        ),
+        "abandon owner context attempted state",
+    )
+    abandon_receipt_lines = selected_call_lines(abandon_method, "self._append_receipt")
+    abandon_terminal_lines = assignment_lines(abandon_method, "capability_record.terminal_receipt")
+    abandon_archive_lines = selected_call_lines(abandon_method, "self._archive_capability")
+    abandon_consumed_lines = assignment_lines(
+        abandon_method,
+        "capability_record.state",
+        "_Generation6RNamespaceTokenState.CONSUMED",
+    )
+    abandon_release_lines = assignment_lines(abandon_method, "self._live_capability_record", "None")
+    absence_branches = tuple(
+        node
+        for node in abandon_method.body
+        if isinstance(node, ast.If)
+        and ast.unparse(node.test) == "type(token) is _Generation6RNamespaceAbsenceToken"
+    )
+    top_level_abandon_tries = tuple(
+        node for node in abandon_method.body if isinstance(node, ast.Try)
+    )
+    _require(
+        len(absence_branches) == 1 and len(top_level_abandon_tries) == 2,
+        "R namespace static abandonment branch inventory differs",
+    )
+    absence_branch = absence_branches[0]
+    abandon_close_transaction = top_level_abandon_tries[0]
+    mutation_terminal_transaction = top_level_abandon_tries[1]
+    _require(
+        len(absence_branch.body) == 2
+        and isinstance(absence_branch.body[0], ast.Try)
+        and isinstance(absence_branch.body[1], ast.Return)
+        and absence_branch.body[1].value is None,
+        "R namespace static absence abandonment topology differs",
+    )
+    absence_terminal_transaction = cast(ast.Try, absence_branch.body[0])
+    absence_handlers = tuple(
+        handler
+        for handler in absence_terminal_transaction.handlers
+        if handler.type is not None and ast.unparse(handler.type) == "BaseException"
+    )
+    abandon_close_handlers = tuple(
+        handler
+        for handler in abandon_close_transaction.handlers
+        if handler.type is not None and ast.unparse(handler.type) == "BaseException"
+    )
+    mutation_terminal_handlers = tuple(
+        handler
+        for handler in mutation_terminal_transaction.handlers
+        if handler.type is not None and ast.unparse(handler.type) == "BaseException"
+    )
+    _require(
+        len(absence_handlers)
+        == len(abandon_close_handlers)
+        == len(mutation_terminal_handlers)
+        == 1,
+        "R namespace static abandonment handler inventory differs",
+    )
+    absence_terminal_source = "\n".join(
+        ast.unparse(node) for node in absence_terminal_transaction.body
+    )
+    mutation_terminal_source = "\n".join(
+        ast.unparse(node) for node in mutation_terminal_transaction.body
+    )
+    close_receipt_store_line = one_line(
+        assignment_lines(abandon_method, "capability_record.close_receipt"),
+        "abandon close receipt binding",
+    )
+    closed_owner_store_line = one_line(
+        assignment_lines(
+            abandon_method,
+            "capability_record.owner_state",
+            "_Generation6RNamespaceOwnerState.CLOSED",
+        ),
+        "abandon closed owner binding",
+    )
+    _require(
+        abandon_require_line
+        < abandon_attempt_line
+        < abandon_context_attempt_line
+        < abandon_close_line
+        and abandon_attempt_line < absence_branch.lineno
+        and call_targets(absence_branch).count("self._close_namespace_owner") == 0
+        and call_targets(absence_terminal_transaction).count("self._append_receipt") == 1
+        and call_targets(absence_terminal_transaction).count("self._archive_capability") == 1
+        and all(
+            fragment in absence_terminal_source
+            for fragment in (
+                "ABSENCE_TOKEN_ABANDONED",
+                "capability_record.terminal_receipt = terminal_receipt",
+                "capability_record.state = _Generation6RNamespaceTokenState.CONSUMED",
+                "self._live_capability_record = None",
+            )
+        )
+        and not absence_terminal_transaction.orelse
+        and not absence_terminal_transaction.finalbody
+        and len(absence_terminal_transaction.handlers) == 1
+        and "self._phase = _Generation6RNamespacePhase.UNCERTAIN"
+        in ast.unparse(absence_handlers[0])
+        and "capability_record.state = _Generation6RNamespaceTokenState.UNCERTAIN"
+        in ast.unparse(absence_handlers[0])
+        and isinstance(absence_handlers[0].body[-1], ast.Raise)
+        and absence_handlers[0].body[-1].exc is None
+        and absence_branch.body[1].lineno < abandon_close_line
+        and call_targets(abandon_close_transaction).count("self._close_namespace_owner") == 1
+        and not abandon_close_transaction.orelse
+        and not abandon_close_transaction.finalbody
+        and len(abandon_close_transaction.handlers) == 1
+        and "self._phase = _Generation6RNamespacePhase.UNCERTAIN"
+        in ast.unparse(abandon_close_handlers[0])
+        and "capability_record.state = _Generation6RNamespaceTokenState.UNCERTAIN"
+        in ast.unparse(abandon_close_handlers[0])
+        and "capability_record.owner_state" in ast.unparse(abandon_close_handlers[0])
+        and isinstance(abandon_close_handlers[0].body[-1], ast.Raise)
+        and abandon_close_handlers[0].body[-1].exc is None
+        and abandon_close_line
+        < close_receipt_store_line
+        < closed_owner_store_line
+        < mutation_terminal_transaction.lineno
+        and call_targets(mutation_terminal_transaction).count("self._append_receipt") == 1
+        and call_targets(mutation_terminal_transaction).count("self._archive_capability") == 1
+        and all(
+            fragment in mutation_terminal_source
+            for fragment in (
+                "MUTATION_TOKEN_ABANDONED",
+                "capability_record.terminal_receipt = terminal_receipt",
+                "capability_record.state = _Generation6RNamespaceTokenState.CONSUMED",
+                "self._live_capability_record = None",
+            )
+        )
+        and not mutation_terminal_transaction.orelse
+        and not mutation_terminal_transaction.finalbody
+        and len(mutation_terminal_transaction.handlers) == 1
+        and "self._phase = _Generation6RNamespacePhase.UNCERTAIN"
+        in ast.unparse(mutation_terminal_handlers[0])
+        and "capability_record.state = _Generation6RNamespaceTokenState.UNCERTAIN"
+        in ast.unparse(mutation_terminal_handlers[0])
+        and isinstance(mutation_terminal_handlers[0].body[-1], ast.Raise)
+        and mutation_terminal_handlers[0].body[-1].exc is None
+        and len(abandon_receipt_lines)
+        == len(abandon_terminal_lines)
+        == len(abandon_archive_lines)
+        == len(abandon_consumed_lines)
+        == len(abandon_release_lines)
+        == 2
+        and all(
+            receipt_line < terminal_line < archive_line < consumed_line < release_line
+            for (
+                receipt_line,
+                terminal_line,
+                archive_line,
+                consumed_line,
+                release_line,
+            ) in zip(
+                abandon_receipt_lines,
+                abandon_terminal_lines,
+                abandon_archive_lines,
+                abandon_consumed_lines,
+                abandon_release_lines,
+                strict=True,
+            )
+        )
+        and "capability_record.close_receipt = close_receipt" in abandon_source
+        and "capability_record.owner_state = _Generation6RNamespaceOwnerState.CLOSED"
+        in abandon_source
+        and abandon_close_line < abandon_receipt_lines[1]
+        and abandon_source.count("self._phase = _Generation6RNamespacePhase.UNCERTAIN") == 3
+        and abandon_source.count(
+            "capability_record.state = _Generation6RNamespaceTokenState.UNCERTAIN"
+        )
+        == 3,
+        "R namespace static abandonment terminal ordering differs",
+    )
+
+    validate_node_kind = namespace_methods["_validate_node_kind"]
+    validate_kind_source = ast.unparse(validate_node_kind)
+    seal_method = namespace_methods["seal"]
+    seal_source = ast.unparse(seal_method)
+    _require(
+        call_targets(validate_node_kind).count("_GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT") == 1
+        and "snapshot.link_count == 2" in validate_kind_source
+        and "candidate.uid == fact.uid" in register_name_source
+        and "candidate.mode == fact.mode" in register_name_source
+        and "len(members) == 2" in seal_source
+        and "members[0].uid == members[1].uid" in seal_source
+        and "members[0].mode == members[1].mode" in seal_source
+        and "members[0].device == members[1].device" in seal_source
+        and "members[0].inode == members[1].inode" in seal_source
+        and "members[0].mount_id == members[1].mount_id" in seal_source
+        and "self._pending_publication is None" in seal_source
+        and "not self._owner_quarantine" in seal_source
+        and "not self._untransferred_raw_quarantine" in seal_source
+        and "self._namespace_owner_contexts.keys() == self._namespace_owner_tokens.keys()"
+        in seal_source
+        and "owner_context.state is _Generation6RNamespaceContextState.CLOSED" in seal_source
+        and "owner_context.capability_record is None" in seal_source
+        and "owner_context.close_receipt.token_serial is None" in seal_source,
+        "R namespace static hardlink/seal exactness differs",
+    )
+    seal_receipt_line = one_line(
+        selected_call_lines(seal_method, "self._append_receipt"),
+        "namespace seal receipt",
+    )
+    seal_phase_line = one_line(
+        assignment_lines(
+            seal_method,
+            "self._phase",
+            "_Generation6RNamespacePhase.SEALED",
+        ),
+        "namespace sealed phase",
+    )
+    _require(
+        seal_receipt_line < seal_phase_line
+        and "record.state is _Generation6RDescriptorState.CLOSE_SUCCEEDED" in seal_source
+        and "record.owner.terminal" in seal_source
+        and "authority_record.close_receipt.event == 'OWNED_CURSOR_CLOSED'" in seal_source,
+        "R namespace static seal boundary differs",
+    )
+
+    forbidden_collection_removals = tuple(
+        call
+        for call in calls(namespace_journal)
+        if isinstance(call.func, ast.Attribute)
+        and call.func.attr in {"clear", "discard", "pop", "remove"}
+        and any(
+            registry in ast.unparse(call.func.value)
+            for registry in (
+                "_authority_records_",
+                "_capability_records_",
+                "_directory_facts_by_serial",
+                "_name_facts_by_key",
+                "_hardlink_groups",
+                "_namespace_owner_tokens",
+                "_namespace_owner_contexts",
+                "_archived_capability_records",
+                "_poisoned_descriptors",
+                "_owner_quarantine",
+                "_untransferred_raw_quarantine",
+                "_receipts",
+            )
+        )
+    )
+    destructive_call_attributes = {
+        "chmod",
+        "chown",
+        "copy",
+        "copy2",
+        "copyfile",
+        "copytree",
+        "copy_file_range",
+        "fchmod",
+        "fchown",
+        "fremovexattr",
+        "fsetxattr",
+        "ftruncate",
+        "lchmod",
+        "lchown",
+        "link",
+        "makedirs",
+        "mkdir",
+        "mkfifo",
+        "mknod",
+        "move",
+        "posix_fallocate",
+        "pwrite",
+        "pwritev",
+        "remove",
+        "removedirs",
+        "removexattr",
+        "rename",
+        "renames",
+        "replace",
+        "rmdir",
+        "rmtree",
+        "setxattr",
+        "sendfile",
+        "splice",
+        "symlink",
+        "touch",
+        "truncate",
+        "unlink",
+        "write",
+        "write_bytes",
+        "write_text",
+        "writev",
+    }
+    forbidden_mutation_calls = tuple(
+        call
+        for call in calls(namespace_journal)
+        if (isinstance(call.func, ast.Attribute) and call.func.attr in destructive_call_attributes)
+        or ast.unparse(call.func) in {"open", "io.open"}
+    )
+    sensitive_descriptor_attributes = {
+        "close",
+        "close_once",
+        "detach",
+        "dup",
+        "dup2",
+        "dup3",
+        "open",
+        "openat",
+        "remove",
+        "rename",
+        "replace",
+        "rmdir",
+        "unlink",
+    }
+    alternate_descriptor_calls = tuple(
+        ast.unparse(call.func)
+        for call in calls(namespace_journal)
+        if (
+            isinstance(call.func, ast.Attribute)
+            and call.func.attr in sensitive_descriptor_attributes
+            and ast.unparse(call.func) != "self._descriptor_ledger.close_owner_once"
+        )
+        or ast.unparse(call.func)
+        in {
+            "_GENERATION6_R_REAL_OS_CLOSE",
+            "open",
+            "type.__call__",
+        }
+    )
+    alternate_descriptor_aliases = tuple(
+        ast.unparse(node)
+        for node in ast.walk(namespace_journal)
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr))
+        and node.value is not None
+        and (
+            (
+                isinstance(node.value, ast.Attribute)
+                and node.value.attr in sensitive_descriptor_attributes
+            )
+            or ast.unparse(node.value)
+            in {
+                "_GENERATION6_R_REAL_OS_CLOSE",
+                "_GENERATION6_R_NAMESPACE_REAL_OS_OPEN",
+            }
+        )
+    )
+    dynamic_descriptor_routes = tuple(
+        ast.unparse(call)
+        for call in calls(namespace_journal)
+        if ast.unparse(call.func) in {"getattr", "operator.attrgetter"}
+        and any(
+            isinstance(argument, ast.Constant)
+            and isinstance(argument.value, str)
+            and argument.value in sensitive_descriptor_attributes
+            for argument in call.args
+        )
+    )
+    fd_adopting_constructors = tuple(
+        ast.unparse(call.func)
+        for call in calls(namespace_journal)
+        if ast.unparse(call.func)
+        in {
+            "contextlib.closing",
+            "io.FileIO",
+            "os.fdopen",
+            "socket.fromfd",
+            "socket.socket",
+        }
+    )
+    ownership_field_writes = tuple(
+        ast.unparse(node)
+        for node in ast.walk(namespace_journal)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+        and node.attr
+        in {
+            "descriptor",
+            "fd",
+            "label",
+            "mount_id",
+            "name",
+            "path",
+            "snapshot",
+            "terminal",
+        }
+    )
+    protected_namespace_type_names = {
+        *namespace_class_names,
+        "DirectoryOwner",
+        "FdOwner",
+        "PrivateRoot",
+    }
+    namespace_type_rebindings = tuple(
+        ast.unparse(target)
+        for node in syntax.body
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr))
+        for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,))
+        if isinstance(target, ast.Name) and target.id in protected_namespace_type_names
+    )
+    _require(
+        not forbidden_collection_removals
+        and not forbidden_mutation_calls
+        and not alternate_descriptor_calls
+        and not alternate_descriptor_aliases
+        and not dynamic_descriptor_routes
+        and not fd_adopting_constructors
+        and not ownership_field_writes
+        and not namespace_type_rebindings
+        and call_targets(namespace_journal).count("_GENERATION6_R_NAMESPACE_REAL_OS_OPEN") == 1
+        and call_targets(namespace_journal).count("self._descriptor_ledger.close_owner_once") == 1
+        and "ReplacementPlan" not in namespace_source
+        and "replacement" not in namespace_source.lower()
+        and "subject" not in namespace_source.lower(),
+        "R namespace static read-only/strong-reference surface differs",
+    )
+
+    namespace_constructor_names = set(namespace_class_names)
+    namespace_public_calls = {
+        "register_borrowed_directory",
+        "open_owned_cursor",
+        "close_owned_cursor",
+        "seal_name",
+        "seal",
+        "authorize_present",
+        "authorize_absence",
+        "authorize_rename",
+        "abandon_token",
+    }
+    namespace_gate_function = top_function("_generation6_r_authority_source_gates")
+    external_scope_nodes = tuple(
+        node
+        for node in syntax.body
+        if node not in namespace_bundle_nodes and node is not namespace_gate_function
+    )
+    protected_global_names = {
+        *namespace_capture_values,
+        *namespace_class_names,
+        "_Generation6RNamespaceLiveToken",
+    }
+    sensitive_dynamic_names = protected_global_names | namespace_public_calls
+    sensitive_string_aliases = {
+        target.id
+        for node in ast.walk(syntax)
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr))
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+        and node.value.value in sensitive_dynamic_names
+        for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,))
+        if isinstance(target, ast.Name)
+    }
+
+    def sensitive_key(node: ast.expr) -> bool:
+        return (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and node.value in sensitive_dynamic_names
+        ) or (isinstance(node, ast.Name) and node.id in sensitive_string_aliases)
+
+    protected_external_name_loads = tuple(
+        node.id
+        for scope in external_scope_nodes
+        for node in ast.walk(scope)
+        if isinstance(node, ast.Name)
+        and isinstance(node.ctx, ast.Load)
+        and node.id in protected_global_names
+    )
+    protected_external_name_writes = tuple(
+        (type(node.ctx).__name__, node.id)
+        for scope in external_scope_nodes
+        for node in ast.walk(scope)
+        if isinstance(node, ast.Name)
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+        and node.id in protected_global_names
+    )
+    protected_external_attributes = tuple(
+        ast.unparse(node)
+        for scope in external_scope_nodes
+        for node in ast.walk(scope)
+        if isinstance(node, ast.Attribute) and node.attr in protected_global_names
+    )
+    protected_dynamic_subscripts = tuple(
+        ast.unparse(node)
+        for scope in external_scope_nodes
+        for node in ast.walk(scope)
+        if isinstance(node, ast.Subscript) and sensitive_key(node.slice)
+    )
+    protected_dynamic_calls = tuple(
+        ast.unparse(call)
+        for scope in external_scope_nodes
+        for call in calls(scope)
+        if (
+            ast.unparse(call.func)
+            in {
+                "delattr",
+                "dict.__setitem__",
+                "getattr",
+                "operator.setitem",
+                "setattr",
+                "type.__setattr__",
+            }
+            or (
+                isinstance(call.func, ast.Attribute)
+                and call.func.attr
+                in {
+                    "__getitem__",
+                    "__setitem__",
+                    "get",
+                    "pop",
+                    "setdefault",
+                    "update",
+                }
+            )
+        )
+        and any(sensitive_key(argument) for argument in call.args)
+    )
+    protected_exec_calls = tuple(
+        ast.unparse(call.func)
+        for scope in external_scope_nodes
+        for call in calls(scope)
+        if ast.unparse(call.func) in {"eval", "exec"}
+    )
+    external_namespace_calls = tuple(
+        call
+        for node in syntax.body
+        if node not in namespace_classes.values() and node is not namespace_gate_function
+        for call in calls(node)
+    )
+    _require(
+        not protected_external_name_loads
+        and not protected_external_name_writes
+        and not protected_external_attributes
+        and not protected_dynamic_subscripts
+        and not protected_dynamic_calls
+        and not protected_exec_calls
+        and not any(
+            ast.unparse(call.func) in namespace_constructor_names
+            or (isinstance(call.func, ast.Attribute) and call.func.attr in namespace_public_calls)
+            for call in external_namespace_calls
+        ),
+        "R namespace static integration block has an external call site",
     )
 
 
