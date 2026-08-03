@@ -11738,12 +11738,14 @@ class _Generation6RAuthorityScope:
             raise restored
 
 
-# R-AUTH-NAMESPACE A1a is an uncalled, read-only authorization foundation.  Its
-# conclusions are limited to the controlled single-threaded, quiescent self-test;
-# it makes no atomicity or hostile pathname-race claim.
+# R-AUTH-NAMESPACE A1b is an uncalled, integration-blocked REGULAR-file UNLINK
+# consumer scaffold for the controlled single-threaded, quiescent self-test world;
+# it makes no atomicity, hostile pathname-race, or nested-teardown usability claim.
 _GENERATION6_R_NAMESPACE_REAL_OS_STAT: Final = os.stat
 _GENERATION6_R_NAMESPACE_REAL_OS_OPEN: Final = os.open
 _GENERATION6_R_NAMESPACE_REAL_OS_FSTAT: Final = os.fstat
+_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK: Final = os.unlink
+_GENERATION6_R_NAMESPACE_REAL_OS_GETUID: Final = os.getuid
 _GENERATION6_R_NAMESPACE_REAL_FCNTL: Final = fcntl.fcntl
 _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT: Final = _snapshot_stat
 _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD: Final = _snapshot_fd
@@ -11753,6 +11755,7 @@ _GENERATION6_R_NAMESPACE_CAPTURED_COMPONENT: Final = _component
 _GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE: Final = FdOwner.require
 _GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT: Final = stat.S_IFMT
 _GENERATION6_R_NAMESPACE_CAPTURED_S_ISDIR: Final = stat.S_ISDIR
+_GENERATION6_R_NAMESPACE_CAPTURED_S_ISREG: Final = stat.S_ISREG
 
 
 class _Generation6RNamespacePhase(str, Enum):  # noqa: UP042 - exact str-enum contract
@@ -11837,6 +11840,21 @@ class _Generation6RNamespaceCloseEvent(str, Enum):  # noqa: UP042 - exact contra
     PRESENT_TOKEN_ABORT_CLOSED = "PRESENT_TOKEN_ABORT_CLOSED"
     RENAME_TOKEN_ABORT_CLOSED = "RENAME_TOKEN_ABORT_CLOSED"
     MUTATION_TOKEN_HANDLE_CLOSED = "MUTATION_TOKEN_HANDLE_CLOSED"
+
+
+class _Generation6RNamespaceMutationPermitState(  # noqa: UP042 - exact contract
+    str, Enum
+):
+    AUTHORIZED = "AUTHORIZED"
+    ATTEMPTED = "ATTEMPTED"
+    CONSUMED = "CONSUMED"
+    UNCERTAIN = "UNCERTAIN"
+
+
+class _Generation6RNamespaceTerminalEvent(str, Enum):  # noqa: UP042 - exact contract
+    ABSENCE_TOKEN_ABANDONED = "ABSENCE_TOKEN_ABANDONED"
+    MUTATION_TOKEN_ABANDONED = "MUTATION_TOKEN_ABANDONED"
+    PRESENT_UNLINK_CONSUMED = "PRESENT_UNLINK_CONSUMED"
 
 
 @dataclass(frozen=True, eq=False)
@@ -11938,6 +11956,12 @@ class _Generation6RNamespaceRenameToken:
     action: _Generation6RNamespaceAction
 
 
+@dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceMutationPermit:
+    serial: int
+    issuer_identity: int
+
+
 _Generation6RNamespaceLiveToken = (
     _Generation6RNamespacePresentToken
     | _Generation6RNamespaceAbsenceToken
@@ -11972,7 +11996,60 @@ class _Generation6RNamespaceCapabilityRecord:
     state: _Generation6RNamespaceTokenState
     owner_state: _Generation6RNamespaceOwnerState | None
     authorization_receipt: _Generation6RNamespaceReceipt | None
+    armed_receipt: _Generation6RNamespaceReceipt | None
     close_receipt: _Generation6RNamespaceReceipt | None
+    terminal_receipt: _Generation6RNamespaceReceipt | None
+
+
+@dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceUnlinkPreproof:
+    capability_record: _Generation6RNamespaceCapabilityRecord
+    capability_binding: _Generation6RNamespaceCapabilityBinding
+    token: _Generation6RNamespacePresentToken
+    token_serial: int
+    action: _Generation6RNamespaceAction
+    authority: _Generation6RNamespaceDirectoryAuthority
+    authority_record: _Generation6RNamespaceDirectoryRecord
+    parent_binding: _Generation6RNamespaceDirectoryBinding
+    name: str
+    parent_descriptor: int
+    parent_snapshot: DescriptorSnapshot
+    path_owner: FdOwner
+    owner_context: _Generation6RNamespaceOwnerContext
+    owner_context_binding: _Generation6RNamespaceOwnerContextBinding
+    descriptor_token: _Generation6ROwnerToken
+    target_descriptor: int
+    target_snapshot: DescriptorSnapshot
+    target_mount_id: int
+    current_uid: int
+
+
+@dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceMutationPermitBinding:
+    serial: int
+    issuer_identity: int
+    permit: _Generation6RNamespaceMutationPermit
+    permit_serial: int
+    permit_issuer_identity: int
+    capability_record: _Generation6RNamespaceCapabilityRecord
+    capability_binding: _Generation6RNamespaceCapabilityBinding
+    capability_token: _Generation6RNamespacePresentToken
+    capability_token_serial: int
+    capability_token_issuer_identity: int
+    action: _Generation6RNamespaceAction
+    name: str
+    authority: _Generation6RNamespaceDirectoryAuthority
+    authority_serial: int
+    authority_record: _Generation6RNamespaceDirectoryRecord
+    preproof: _Generation6RNamespaceUnlinkPreproof
+    preproof_identity: int
+
+
+@dataclass(eq=False)
+class _Generation6RNamespaceMutationPermitRecord:
+    binding: _Generation6RNamespaceMutationPermitBinding
+    state: _Generation6RNamespaceMutationPermitState
+    authorization_receipt: _Generation6RNamespaceReceipt | None
     terminal_receipt: _Generation6RNamespaceReceipt | None
 
 
@@ -11986,7 +12063,7 @@ class _Generation6RNamespaceReceipt:
 
 
 class _Generation6RNamespaceJournal:
-    """Strong, private A1a registry with no mutation or activation surface."""
+    """Strong, private A1 journal with no activation or runtime call surface."""
 
     def __init__(
         self,
@@ -12022,6 +12099,17 @@ class _Generation6RNamespaceJournal:
         self._capability_records_by_identity: dict[int, _Generation6RNamespaceCapabilityRecord] = {}
         self._live_capability_record: _Generation6RNamespaceCapabilityRecord | None = None
         self._archived_capability_records: list[_Generation6RNamespaceCapabilityRecord] = []
+        self._mutation_permit_records_by_serial: dict[
+            int, _Generation6RNamespaceMutationPermitRecord
+        ] = {}
+        self._mutation_permit_records_by_identity: dict[
+            int, _Generation6RNamespaceMutationPermitRecord
+        ] = {}
+        self._live_mutation_permit_record: _Generation6RNamespaceMutationPermitRecord | None = None
+        self._archived_mutation_permit_records: list[
+            _Generation6RNamespaceMutationPermitRecord
+        ] = []
+        self._mutation_issuance_faulted = False
         self._pending_publication: object | None = None
         self._poisoned_descriptors: set[int] = set()
         self._namespace_owner_tokens: dict[int, _Generation6ROwnerToken] = {}
@@ -12045,6 +12133,8 @@ class _Generation6RNamespaceJournal:
             and os.stat is _GENERATION6_R_NAMESPACE_REAL_OS_STAT
             and os.open is _GENERATION6_R_NAMESPACE_REAL_OS_OPEN
             and os.fstat is _GENERATION6_R_NAMESPACE_REAL_OS_FSTAT
+            and os.unlink is _GENERATION6_R_NAMESPACE_REAL_OS_UNLINK
+            and os.getuid is _GENERATION6_R_NAMESPACE_REAL_OS_GETUID
             and fcntl.fcntl is _GENERATION6_R_NAMESPACE_REAL_FCNTL
             and _snapshot_stat is _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT
             and _snapshot_fd is _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD
@@ -12054,8 +12144,9 @@ class _Generation6RNamespaceJournal:
             and _component is _GENERATION6_R_NAMESPACE_CAPTURED_COMPONENT
             and FdOwner.require is _GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE
             and stat.S_IFMT is _GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT
-            and stat.S_ISDIR is _GENERATION6_R_NAMESPACE_CAPTURED_S_ISDIR,
-            "R namespace read-only dependency identity differs",
+            and stat.S_ISDIR is _GENERATION6_R_NAMESPACE_CAPTURED_S_ISDIR
+            and stat.S_ISREG is _GENERATION6_R_NAMESPACE_CAPTURED_S_ISREG,
+            "R namespace dependency identity differs",
         )
 
     def _issue_serial(self) -> int:
@@ -12683,6 +12774,7 @@ class _Generation6RNamespaceJournal:
         *,
         capability_record: _Generation6RNamespaceCapabilityRecord | None,
         event: _Generation6RNamespaceCloseEvent,
+        issuance_preproof: _Generation6RNamespaceUnlinkPreproof | None = None,
     ) -> _Generation6RNamespaceReceipt:
         record: _Generation6ROwnerRecord | None = None
         close_verified = False
@@ -12698,11 +12790,20 @@ class _Generation6RNamespaceJournal:
                     capability_record is None
                     or type(capability_record) is _Generation6RNamespaceCapabilityRecord
                 )
+                and (
+                    issuance_preproof is None
+                    or type(issuance_preproof) is _Generation6RNamespaceUnlinkPreproof
+                )
                 and type(event) is _Generation6RNamespaceCloseEvent
                 and type(owner_identity) is int
                 and owner_identity > 0
-                and self._namespace_owner_tokens.get(owner_identity) is descriptor_token
-                and self._namespace_owner_contexts.get(owner_identity) is owner_context,
+                and (
+                    issuance_preproof is not None
+                    or (
+                        self._namespace_owner_tokens.get(owner_identity) is descriptor_token
+                        and self._namespace_owner_contexts.get(owner_identity) is owner_context
+                    )
+                ),
                 "R namespace close inputs differ",
             )
             _exact_keys(
@@ -12716,7 +12817,11 @@ class _Generation6RNamespaceJournal:
                 ),
                 "R namespace close owner context",
             )
-            context_binding = owner_context.binding
+            context_binding = (
+                issuance_preproof.owner_context_binding
+                if issuance_preproof is not None
+                else owner_context.binding
+            )
             _require(
                 type(context_binding) is _Generation6RNamespaceOwnerContextBinding,
                 "R namespace close owner context binding type differs",
@@ -12736,14 +12841,21 @@ class _Generation6RNamespaceJournal:
                 ),
                 "R namespace close owner context binding",
             )
-            authority_record = owner_context.authority_record
+            authority_record = (
+                issuance_preproof.authority_record
+                if issuance_preproof is not None
+                else owner_context.authority_record
+            )
             _require(
                 type(authority_record) is _Generation6RNamespaceDirectoryRecord,
                 "R namespace close authority record type differs",
             )
-            exact_authority_record, _, _ = self._require_authority(
-                authority_record.binding.authority
-            )
+            if issuance_preproof is None:
+                exact_authority_record, _, _ = self._require_authority(
+                    authority_record.binding.authority
+                )
+            else:
+                exact_authority_record = authority_record
             _require(
                 context_binding.issuer_identity == self._issuer_identity
                 and type(context_binding.serial) is int
@@ -12762,6 +12874,10 @@ class _Generation6RNamespaceJournal:
                 "R namespace close owner context differs",
             )
             if capability_record is None:
+                _require(
+                    issuance_preproof is None,
+                    "R namespace authority-only close has an issuance preproof",
+                )
                 token_serial: int | None = None
                 _require(
                     owner_context.capability_record is None,
@@ -12828,32 +12944,59 @@ class _Generation6RNamespaceJournal:
                         "R namespace entry close purpose differs",
                     )
             else:
-                capability_binding = capability_record.binding
-                _require(
-                    event is _Generation6RNamespaceCloseEvent.MUTATION_TOKEN_HANDLE_CLOSED
-                    and self._live_capability_record is capability_record
-                    and self._capability_records_by_identity.get(id(capability_binding.token))
-                    is capability_record
-                    and self._capability_records_by_serial.get(capability_binding.token_serial)
-                    is capability_record
-                    and capability_record.state is _Generation6RNamespaceTokenState.ATTEMPTED
-                    and capability_record.owner_state is _Generation6RNamespaceOwnerState.LIVE
-                    and capability_binding.authority_record is authority_record
-                    and capability_binding.path_owner is owner
-                    and capability_binding.descriptor_token is descriptor_token
-                    and capability_binding.owner_context is owner_context
-                    and owner_context.capability_record is capability_record
-                    and owner_context.state is _Generation6RNamespaceContextState.ATTEMPTED
-                    and context_binding.kind is _Generation6RNamespaceOwnerKind.ENTRY_HANDLE
-                    and (
-                        context_binding.purpose is _Generation6RNamespaceOwnerPurpose.PRESENT_TOKEN
-                        or context_binding.purpose
-                        is _Generation6RNamespaceOwnerPurpose.RENAME_TOKEN
-                    ),
-                    "R namespace capability close context differs",
+                capability_binding = (
+                    issuance_preproof.capability_binding
+                    if issuance_preproof is not None
+                    else capability_record.binding
                 )
+                if issuance_preproof is None:
+                    _require(
+                        event is _Generation6RNamespaceCloseEvent.MUTATION_TOKEN_HANDLE_CLOSED
+                        and self._live_capability_record is capability_record
+                        and self._capability_records_by_identity.get(id(capability_binding.token))
+                        is capability_record
+                        and self._capability_records_by_serial.get(capability_binding.token_serial)
+                        is capability_record
+                        and capability_record.state is _Generation6RNamespaceTokenState.ATTEMPTED
+                        and capability_record.owner_state is _Generation6RNamespaceOwnerState.LIVE
+                        and capability_binding.authority_record is authority_record
+                        and capability_binding.path_owner is owner
+                        and capability_binding.descriptor_token is descriptor_token
+                        and capability_binding.owner_context is owner_context
+                        and owner_context.capability_record is capability_record
+                        and owner_context.state is _Generation6RNamespaceContextState.ATTEMPTED
+                        and context_binding.kind is _Generation6RNamespaceOwnerKind.ENTRY_HANDLE
+                        and (
+                            context_binding.purpose
+                            is _Generation6RNamespaceOwnerPurpose.PRESENT_TOKEN
+                            or context_binding.purpose
+                            is _Generation6RNamespaceOwnerPurpose.RENAME_TOKEN
+                        ),
+                        "R namespace capability close context differs",
+                    )
+                else:
+                    _require(
+                        self._mutation_issuance_faulted
+                        and issuance_preproof.capability_record is capability_record
+                        and issuance_preproof.path_owner is owner
+                        and issuance_preproof.descriptor_token is descriptor_token
+                        and issuance_preproof.owner_context is owner_context
+                        and issuance_preproof.owner_context_binding is context_binding
+                        and issuance_preproof.authority_record is authority_record
+                        and capability_record.state is _Generation6RNamespaceTokenState.ATTEMPTED
+                        and owner_context.state is _Generation6RNamespaceContextState.ATTEMPTED
+                        and context_binding.kind is _Generation6RNamespaceOwnerKind.ENTRY_HANDLE
+                        and context_binding.purpose
+                        is _Generation6RNamespaceOwnerPurpose.PRESENT_TOKEN
+                        and event is _Generation6RNamespaceCloseEvent.MUTATION_TOKEN_HANDLE_CLOSED,
+                        "R namespace invalid-issuance close context differs",
+                    )
                 token_serial = capability_binding.token_serial
-            authority_serial = authority_record.binding.authority.serial
+            authority_serial = (
+                issuance_preproof.authority.serial
+                if issuance_preproof is not None
+                else authority_record.binding.authority.serial
+            )
             record = self._descriptor_ledger._authorize_live(owner, descriptor_token)
             descriptor = descriptor_token.descriptor
             _require(
@@ -12878,29 +13021,47 @@ class _Generation6RNamespaceJournal:
                 "R namespace descriptor close result differs",
             )
             close_verified = True
+            owner_context.state = _Generation6RNamespaceContextState.CLOSED
+            if capability_record is not None:
+                capability_record.owner_state = _Generation6RNamespaceOwnerState.CLOSED
             close_receipt = self._append_receipt(
                 token_serial=token_serial,
                 authority_serial=authority_serial,
                 event=event.value,
             )
             owner_context.close_receipt = close_receipt
-            owner_context.state = _Generation6RNamespaceContextState.CLOSED
+            if capability_record is not None:
+                capability_record.close_receipt = close_receipt
             return close_receipt
         except BaseException as primary:
             self._phase = _Generation6RNamespacePhase.UNCERTAIN
             accepted_context = (
                 self._namespace_owner_contexts.get(id(owner)) if type(owner) is FdOwner else None
             )
-            if type(accepted_context) is _Generation6RNamespaceOwnerContext:
-                accepted_context.state = _Generation6RNamespaceContextState.UNCERTAIN
-            if type(owner) is FdOwner and not any(
-                candidate is owner for candidate in self._owner_quarantine
-            ):
-                self._owner_quarantine.append(owner)
-            if not close_verified and type(descriptor_token) is _Generation6ROwnerToken:
-                descriptor = descriptor_token.descriptor
-                if type(descriptor) is int and descriptor > 2:
-                    self._poisoned_descriptors.add(descriptor)
+            if not close_verified:
+                if type(accepted_context) is _Generation6RNamespaceOwnerContext:
+                    accepted_context.state = _Generation6RNamespaceContextState.UNCERTAIN
+                if type(owner) is FdOwner and not any(
+                    candidate is owner for candidate in self._owner_quarantine
+                ):
+                    self._owner_quarantine.append(owner)
+                if type(descriptor_token) is _Generation6ROwnerToken:
+                    descriptor = descriptor_token.descriptor
+                    if type(descriptor) is int and descriptor > 2:
+                        self._poisoned_descriptors.add(descriptor)
+            else:
+                _require(
+                    accepted_context is owner_context
+                    and owner_context.state is _Generation6RNamespaceContextState.CLOSED
+                    and type(owner.terminal) is bool
+                    and owner.terminal
+                    and owner.descriptor == -1
+                    and (
+                        capability_record is None
+                        or capability_record.owner_state is _Generation6RNamespaceOwnerState.CLOSED
+                    ),
+                    "R namespace verified close truth differs",
+                )
             if (
                 record is not None
                 and record.state is _Generation6RDescriptorState.CLOSE_UNCERTAIN
@@ -12909,6 +13070,44 @@ class _Generation6RNamespaceJournal:
             ):
                 primary.add_note("R namespace accepted ledger omitted its uncertain descriptor")
             raise
+
+    def _namespace_owner_close_verified(
+        self,
+        owner: FdOwner,
+        descriptor_token: _Generation6ROwnerToken,
+        owner_context: _Generation6RNamespaceOwnerContext,
+    ) -> bool:
+        if (
+            type(owner) is not FdOwner
+            or type(descriptor_token) is not _Generation6ROwnerToken
+            or type(owner_context) is not _Generation6RNamespaceOwnerContext
+        ):
+            return False
+        owner_identity = id(owner)
+        record = self._descriptor_ledger._records_by_owner_identity.get(owner_identity)
+        context_binding = owner_context.binding
+        return (
+            type(context_binding) is _Generation6RNamespaceOwnerContextBinding
+            and type(owner_identity) is int
+            and owner_identity > 0
+            and self._namespace_owner_contexts.get(owner_identity) is owner_context
+            and self._namespace_owner_tokens.get(owner_identity) is descriptor_token
+            and context_binding.owner is owner
+            and context_binding.owner_identity == owner_identity
+            and context_binding.descriptor_token is descriptor_token
+            and context_binding.token_generation == descriptor_token.generation
+            and descriptor_token.owner_identity == owner_identity
+            and type(record) is _Generation6ROwnerRecord
+            and record.owner is owner
+            and record.token is descriptor_token
+            and record.state is _Generation6RDescriptorState.CLOSE_SUCCEEDED
+            and record.close_attempts == 1
+            and record.detached_descriptor == descriptor_token.descriptor
+            and type(owner.terminal) is bool
+            and owner.terminal
+            and owner.descriptor == -1
+            and owner_context.state is _Generation6RNamespaceContextState.CLOSED
+        )
 
     def _retain_untransferred_raw(self, owner: FdOwner, raw_descriptor: object) -> None:
         self._phase = _Generation6RNamespacePhase.UNCERTAIN
@@ -13262,7 +13461,15 @@ class _Generation6RNamespaceJournal:
                 event=_Generation6RNamespaceCloseEvent.OWNED_CURSOR_CLOSED,
             )
         except BaseException:
-            authority_record.state = _Generation6RNamespaceOwnerState.UNCERTAIN
+            authority_record.state = (
+                _Generation6RNamespaceOwnerState.CLOSED
+                if self._namespace_owner_close_verified(
+                    binding.owner.fd,
+                    binding.descriptor_token,
+                    cast(_Generation6RNamespaceOwnerContext, owner_context),
+                )
+                else _Generation6RNamespaceOwnerState.UNCERTAIN
+            )
             raise
         authority_record.close_receipt = close_receipt
         authority_record.state = _Generation6RNamespaceOwnerState.CLOSED
@@ -13897,6 +14104,8 @@ class _Generation6RNamespaceJournal:
         _require(
             self._phase is _Generation6RNamespacePhase.TEARDOWN_ACTIVE
             and self._live_capability_record is None
+            and self._live_mutation_permit_record is None
+            and not self._mutation_issuance_faulted
             and self._pending_publication is None
             and not self._poisoned_descriptors
             and not self._owner_quarantine
@@ -13912,6 +14121,28 @@ class _Generation6RNamespaceJournal:
             "R namespace live capability slot is unavailable",
         )
 
+    def _receipt_binding_matches(
+        self,
+        receipt: _Generation6RNamespaceReceipt | None,
+        *,
+        token_serial: int | None,
+        authority_serial: int | None,
+        event: str,
+    ) -> bool:
+        if type(receipt) is not _Generation6RNamespaceReceipt:
+            return False
+        return (
+            set(vars(receipt))
+            == {"serial", "issuer_identity", "token_serial", "authority_serial", "event"}
+            and type(receipt.serial) is int
+            and receipt.serial > 0
+            and receipt.issuer_identity == self._issuer_identity
+            and receipt.token_serial == token_serial
+            and receipt.authority_serial == authority_serial
+            and receipt.event == event
+            and any(candidate is receipt for candidate in self._receipts)
+        )
+
     def _require_receipt_binding(
         self,
         receipt: _Generation6RNamespaceReceipt | None,
@@ -13921,29 +14152,12 @@ class _Generation6RNamespaceJournal:
         event: str,
     ) -> None:
         _require(
-            type(receipt) is _Generation6RNamespaceReceipt,
-            "R namespace receipt type differs",
-        )
-        exact_receipt = cast(_Generation6RNamespaceReceipt, receipt)
-        _exact_keys(
-            vars(exact_receipt),
-            (
-                "serial",
-                "issuer_identity",
-                "token_serial",
-                "authority_serial",
-                "event",
+            self._receipt_binding_matches(
+                receipt,
+                token_serial=token_serial,
+                authority_serial=authority_serial,
+                event=event,
             ),
-            "R namespace receipt",
-        )
-        _require(
-            type(exact_receipt.serial) is int
-            and exact_receipt.serial > 0
-            and exact_receipt.issuer_identity == self._issuer_identity
-            and exact_receipt.token_serial == token_serial
-            and exact_receipt.authority_serial == authority_serial
-            and exact_receipt.event == event
-            and any(candidate is exact_receipt for candidate in self._receipts),
             "R namespace receipt binding differs",
         )
 
@@ -13965,6 +14179,7 @@ class _Generation6RNamespaceJournal:
                 "state",
                 "owner_state",
                 "authorization_receipt",
+                "armed_receipt",
                 "close_receipt",
                 "terminal_receipt",
             ),
@@ -14006,6 +14221,7 @@ class _Generation6RNamespaceJournal:
             and capability_record.state is _Generation6RNamespaceTokenState.AUTHORIZED
             and capability_record.owner_state is binding.owner_state
             and capability_record.authorization_receipt is None
+            and capability_record.armed_receipt is None
             and capability_record.close_receipt is None
             and capability_record.terminal_receipt is None
             and type(binding.token)
@@ -14116,6 +14332,8 @@ class _Generation6RNamespaceJournal:
             _require(
                 self._phase is _Generation6RNamespacePhase.TEARDOWN_ACTIVE
                 and self._pending_publication is None
+                and self._live_mutation_permit_record is None
+                and not self._mutation_issuance_faulted
                 and not self._poisoned_descriptors
                 and not self._owner_quarantine
                 and not self._untransferred_raw_quarantine
@@ -14143,6 +14361,7 @@ class _Generation6RNamespaceJournal:
                     "state",
                     "owner_state",
                     "authorization_receipt",
+                    "armed_receipt",
                     "close_receipt",
                     "terminal_receipt",
                 ),
@@ -14194,6 +14413,7 @@ class _Generation6RNamespaceJournal:
                 and type(binding.authority_record) is _Generation6RNamespaceDirectoryRecord
                 and type(binding.name) is str
                 and binding.name != ""
+                and exact_record.armed_receipt is None
                 and exact_record.close_receipt is None
                 and exact_record.terminal_receipt is None
                 and not any(
@@ -14319,14 +14539,902 @@ class _Generation6RNamespaceJournal:
             raise
         return exact_record
 
+    def _preauthorize_present_unlink(
+        self,
+        capability_record: _Generation6RNamespaceCapabilityRecord,
+        token: _Generation6RNamespacePresentToken,
+    ) -> _Generation6RNamespaceUnlinkPreproof:
+        binding = capability_record.binding
+        fact = binding.fact
+        path_owner = binding.path_owner
+        descriptor_token = binding.descriptor_token
+        owner_context = binding.owner_context
+        _require(
+            type(capability_record) is _Generation6RNamespaceCapabilityRecord
+            and self._live_capability_record is capability_record
+            and capability_record.state is _Generation6RNamespaceTokenState.AUTHORIZED
+            and capability_record.owner_state is _Generation6RNamespaceOwnerState.LIVE
+            and type(token) is _Generation6RNamespacePresentToken
+            and binding.token is token
+            and binding.token_serial == token.serial
+            and binding.token_issuer_identity == token.issuer_identity
+            and binding.action is _Generation6RNamespaceAction.UNLINK
+            and token.action is _Generation6RNamespaceAction.UNLINK
+            and type(fact) is _Generation6RNamespaceNameFact
+            and fact.kind is _Generation6RNamespaceNodeKind.REGULAR
+            and fact.link_count == 1
+            and fact.hardlink_group is None
+            and binding.name == fact.name
+            and type(path_owner) is FdOwner
+            and type(descriptor_token) is _Generation6ROwnerToken
+            and type(owner_context) is _Generation6RNamespaceOwnerContext
+            and owner_context.state is _Generation6RNamespaceContextState.TRANSFERRED
+            and owner_context.capability_record is capability_record
+            and owner_context.close_receipt is None
+            and capability_record.armed_receipt is None
+            and capability_record.close_receipt is None
+            and capability_record.terminal_receipt is None
+            and self._live_mutation_permit_record is None
+            and not self._mutation_issuance_faulted,
+            "R namespace unlink preauthorization inputs differ",
+        )
+        exact_fact = cast(_Generation6RNamespaceNameFact, fact)
+        exact_path_owner = cast(FdOwner, path_owner)
+        exact_descriptor_token = cast(_Generation6ROwnerToken, descriptor_token)
+        exact_owner_context = cast(_Generation6RNamespaceOwnerContext, owner_context)
+        owner_context_binding = exact_owner_context.binding
+        _require(
+            type(owner_context_binding) is _Generation6RNamespaceOwnerContextBinding
+            and owner_context_binding.owner is exact_path_owner
+            and owner_context_binding.owner_identity == id(exact_path_owner)
+            and owner_context_binding.descriptor_token is exact_descriptor_token
+            and owner_context_binding.token_generation == exact_descriptor_token.generation,
+            "R namespace unlink owner-context preproof differs",
+        )
+        (
+            parent_record_before,
+            parent_descriptor_record_before,
+            parent_descriptor,
+            parent_before,
+        ) = self._reauthenticate_directory(binding.authority)
+        target_record = self._descriptor_ledger._authorize_live(
+            exact_path_owner,
+            exact_descriptor_token,
+        )
+        target_descriptor = _GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE(exact_path_owner)
+        named_snapshot = _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT(
+            _GENERATION6_R_NAMESPACE_REAL_OS_STAT(
+                binding.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+        )
+        target_snapshot = _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD(target_descriptor)
+        target_mount_id = self._namespace_mount_id(
+            target_descriptor,
+            excluded_descriptors=(parent_descriptor,),
+        )
+        current_uid = _GENERATION6_R_NAMESPACE_REAL_OS_GETUID()
+        target_descriptor_flags = _GENERATION6_R_NAMESPACE_REAL_FCNTL(
+            target_descriptor,
+            fcntl.F_GETFD,
+        )
+        target_status_flags = _GENERATION6_R_NAMESPACE_REAL_FCNTL(
+            target_descriptor,
+            fcntl.F_GETFL,
+        )
+        (
+            parent_record_after,
+            parent_descriptor_record_after,
+            parent_descriptor_after,
+            parent_after,
+        ) = self._reauthenticate_directory(binding.authority)
+        self._require_same_parent_proof(
+            binding.authority,
+            parent_record_before,
+            parent_descriptor_record_before,
+            parent_descriptor,
+            parent_record_after,
+            parent_descriptor_record_after,
+            parent_descriptor_after,
+        )
+        _require(
+            parent_record_after is binding.authority_record
+            and parent_before == parent_after
+            and target_record.owner is exact_path_owner
+            and target_record.token is exact_descriptor_token
+            and target_record.state is _Generation6RDescriptorState.LIVE
+            and target_descriptor == exact_descriptor_token.descriptor
+            and target_descriptor != parent_descriptor
+            and exact_descriptor_token.snapshot == target_snapshot
+            and named_snapshot == target_snapshot
+            and self._name_fact_matches(exact_fact, target_snapshot, target_mount_id)
+            and exact_fact.device == target_snapshot.device
+            and exact_fact.inode == target_snapshot.inode
+            and exact_fact.uid == target_snapshot.uid
+            and exact_fact.mode == target_snapshot.mode
+            and exact_fact.mount_id == target_mount_id
+            and exact_fact.link_count == target_snapshot.link_count == 1
+            and type(current_uid) is int
+            and current_uid >= 0
+            and parent_after.uid == current_uid
+            and target_snapshot.uid == current_uid
+            and _GENERATION6_R_NAMESPACE_CAPTURED_S_ISREG(target_snapshot.mode)
+            and _GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT(target_snapshot.mode) == stat.S_IFREG
+            and target_snapshot.mode & SPECIAL_PERMISSION_BITS == 0
+            and type(target_descriptor_flags) is int
+            and target_descriptor_flags == fcntl.FD_CLOEXEC
+            and target_descriptor_flags == exact_descriptor_token.fd_flags
+            and type(target_status_flags) is int
+            and target_status_flags >= 0
+            and target_status_flags == exact_descriptor_token.status_flags
+            and target_status_flags & os.O_ACCMODE == os.O_RDONLY
+            and target_status_flags & os.O_PATH == os.O_PATH,
+            "R namespace unlink final preproof differs",
+        )
+        return _Generation6RNamespaceUnlinkPreproof(
+            capability_record,
+            binding,
+            token,
+            token.serial,
+            _Generation6RNamespaceAction.UNLINK,
+            binding.authority,
+            parent_record_after,
+            parent_record_after.binding,
+            binding.name,
+            parent_descriptor_after,
+            parent_after,
+            exact_path_owner,
+            exact_owner_context,
+            owner_context_binding,
+            exact_descriptor_token,
+            target_descriptor,
+            target_snapshot,
+            target_mount_id,
+            current_uid,
+        )
+
+    def _postauthorize_present_unlink(
+        self,
+        preproof: _Generation6RNamespaceUnlinkPreproof,
+    ) -> None:
+        absent = False
+        try:
+            _GENERATION6_R_NAMESPACE_REAL_OS_STAT(
+                preproof.name,
+                dir_fd=preproof.parent_descriptor,
+                follow_symlinks=False,
+            )
+        except OSError as error:
+            if type(error.errno) is int and error.errno == errno.ENOENT:
+                absent = True
+            else:
+                raise
+        target_record = self._descriptor_ledger._authorize_live(
+            preproof.path_owner,
+            preproof.descriptor_token,
+        )
+        target_descriptor = _GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE(preproof.path_owner)
+        target_after = _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD(target_descriptor)
+        target_mount_after = self._namespace_mount_id(
+            target_descriptor,
+            excluded_descriptors=(preproof.parent_descriptor,),
+        )
+        (
+            parent_record_after,
+            _,
+            parent_descriptor_after,
+            parent_after,
+        ) = self._reauthenticate_directory(preproof.authority)
+        target_before = preproof.target_snapshot
+        parent_before = preproof.parent_snapshot
+        _require(
+            absent
+            and target_record.owner is preproof.path_owner
+            and target_record.token is preproof.descriptor_token
+            and target_record.state is _Generation6RDescriptorState.LIVE
+            and target_descriptor == preproof.target_descriptor
+            and parent_record_after is preproof.authority_record
+            and parent_descriptor_after == preproof.parent_descriptor
+            and _GENERATION6_R_NAMESPACE_CAPTURED_STABLE_DIRECTORY_MATCHES(
+                parent_after,
+                parent_before,
+                require_link_count=True,
+            )
+            and parent_after.link_count == parent_before.link_count
+            and target_before.link_count == 1
+            and target_after.device == target_before.device
+            and target_after.inode == target_before.inode
+            and target_after.uid == target_before.uid
+            and target_after.mode == target_before.mode
+            and _GENERATION6_R_NAMESPACE_CAPTURED_S_ISREG(target_after.mode)
+            and _GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT(target_after.mode) == stat.S_IFREG
+            and target_after.mode & SPECIAL_PERMISSION_BITS == 0
+            and target_after.link_count == 0
+            and target_mount_after == preproof.target_mount_id,
+            "R namespace unlink exact postproof differs",
+        )
+
+    def _issue_a2_mutation_permit(
+        self,
+        capability_record: _Generation6RNamespaceCapabilityRecord,
+        preproof: _Generation6RNamespaceUnlinkPreproof,
+    ) -> _Generation6RNamespaceMutationPermit:
+        raise ContractError("R namespace A2 mutation permit authority is blocked")
+
+    def _preproof_parent_authority_matches(
+        self,
+        preproof: _Generation6RNamespaceUnlinkPreproof,
+    ) -> bool:
+        if type(preproof) is not _Generation6RNamespaceUnlinkPreproof:
+            return False
+        authority = preproof.authority
+        authority_record = preproof.authority_record
+        parent_binding = preproof.parent_binding
+        if (
+            type(authority) is not _Generation6RNamespaceDirectoryAuthority
+            or type(authority_record) is not _Generation6RNamespaceDirectoryRecord
+            or type(parent_binding) is not _Generation6RNamespaceDirectoryBinding
+            or type(parent_binding.owner) is not DirectoryOwner
+            or type(parent_binding.owner.fd) is not FdOwner
+            or type(parent_binding.descriptor_token) is not _Generation6ROwnerToken
+        ):
+            return False
+        parent_owner = parent_binding.owner.fd
+        parent_token = parent_binding.descriptor_token
+        parent_owner_identity = id(parent_owner)
+        parent_descriptor_record = self._descriptor_ledger._records_by_owner_identity.get(
+            parent_owner_identity
+        )
+        parent_snapshot = preproof.parent_snapshot
+        parent_fact = parent_binding.fact
+        if (
+            authority_record.binding is not parent_binding
+            or type(parent_binding.owner.snapshot) is not DescriptorSnapshot
+            or type(parent_token.snapshot) is not DescriptorSnapshot
+            or type(parent_snapshot) is not DescriptorSnapshot
+            or type(parent_fact) is not _Generation6RNamespaceDirectoryFact
+            or type(parent_binding.owner.mount_id) is not int
+            or type(parent_binding.owner.name) is not str
+            or type(parent_token.ordinal) is not int
+            or type(parent_token.generation) is not int
+            or type(parent_token.descriptor) is not int
+        ):
+            return False
+        return (
+            parent_binding.authority is authority
+            and authority.issuer_identity == self._issuer_identity
+            and type(authority.serial) is int
+            and authority.serial > 0
+            and parent_binding.issuer_identity == self._issuer_identity
+            and type(parent_binding.serial) is int
+            and parent_binding.serial > 0
+            and self._authority_records_by_identity.get(id(authority)) is authority_record
+            and self._authority_records_by_serial.get(authority.serial) is authority_record
+            and self._authority_records_by_owner_identity.get(id(parent_binding.owner))
+            is authority_record
+            and authority_record.state is _Generation6RNamespaceOwnerState.LIVE
+            and authority_record.close_receipt is None
+            and parent_binding.owner_identity == id(parent_binding.owner)
+            and parent_binding.fd_owner_identity == parent_owner_identity
+            and parent_binding.snapshot_identity == id(parent_binding.owner.snapshot)
+            and _GENERATION6_R_NAMESPACE_CAPTURED_STABLE_DIRECTORY_MATCHES(
+                parent_binding.owner.snapshot,
+                parent_token.snapshot,
+                require_link_count=False,
+            )
+            and _GENERATION6_R_NAMESPACE_CAPTURED_STABLE_DIRECTORY_MATCHES(
+                parent_binding.owner.snapshot,
+                parent_snapshot,
+                require_link_count=False,
+            )
+            and parent_binding.owner.mount_id == parent_binding.fact.mount_id
+            and parent_binding.owner.fd is parent_owner
+            and type(parent_owner_identity) is int
+            and parent_owner_identity > 0
+            and type(parent_descriptor_record) is _Generation6ROwnerRecord
+            and parent_descriptor_record.owner is parent_owner
+            and parent_descriptor_record.token is parent_token
+            and parent_descriptor_record.state is _Generation6RDescriptorState.LIVE
+            and self._descriptor_ledger._records_by_ordinal.get(parent_token.ordinal)
+            is parent_descriptor_record
+            and self._descriptor_ledger._current_by_descriptor.get(parent_token.descriptor)
+            is parent_token
+            and self._descriptor_ledger._generation_by_descriptor.get(parent_token.descriptor)
+            == parent_token.generation
+            and type(parent_owner.terminal) is bool
+            and not parent_owner.terminal
+            and parent_owner.descriptor == parent_token.descriptor
+            and parent_owner.descriptor == preproof.parent_descriptor
+            and type(parent_snapshot) is DescriptorSnapshot
+            and parent_fact.device == parent_snapshot.device
+            and parent_fact.inode == parent_snapshot.inode
+            and parent_fact.uid == parent_snapshot.uid
+            and parent_fact.mode == parent_snapshot.mode
+            and parent_fact.mount_id == parent_binding.owner.mount_id
+            and self._directory_facts_by_serial.get(parent_fact.serial) is parent_fact
+        )
+
+    def _postissuer_capability_matches(
+        self,
+        capability_record: _Generation6RNamespaceCapabilityRecord,
+        preproof: _Generation6RNamespaceUnlinkPreproof,
+    ) -> bool:
+        if (
+            type(capability_record) is not _Generation6RNamespaceCapabilityRecord
+            or type(preproof) is not _Generation6RNamespaceUnlinkPreproof
+        ):
+            return False
+        capability_binding = preproof.capability_binding
+        owner_context = preproof.owner_context
+        owner_context_binding = preproof.owner_context_binding
+        token = preproof.token
+        path_owner = preproof.path_owner
+        descriptor_token = preproof.descriptor_token
+        authorization_receipt = capability_record.authorization_receipt
+        if (
+            type(capability_binding) is not _Generation6RNamespaceCapabilityBinding
+            or type(owner_context) is not _Generation6RNamespaceOwnerContext
+            or type(owner_context_binding) is not _Generation6RNamespaceOwnerContextBinding
+            or type(token) is not _Generation6RNamespacePresentToken
+            or type(path_owner) is not FdOwner
+            or type(descriptor_token) is not _Generation6ROwnerToken
+            or type(authorization_receipt) is not _Generation6RNamespaceReceipt
+        ):
+            return False
+        token_identity = id(token)
+        owner_identity = id(path_owner)
+        descriptor_record = self._descriptor_ledger._records_by_owner_identity.get(owner_identity)
+        return (
+            self._phase is _Generation6RNamespacePhase.TEARDOWN_ACTIVE
+            and self._pending_publication is None
+            and not self._mutation_issuance_faulted
+            and not self._poisoned_descriptors
+            and not self._owner_quarantine
+            and not self._untransferred_raw_quarantine
+            and self._preproof_parent_authority_matches(preproof)
+            and self._live_capability_record is capability_record
+            and self._capability_records_by_identity.get(token_identity) is capability_record
+            and self._capability_records_by_serial.get(preproof.token_serial) is capability_record
+            and preproof.capability_record is capability_record
+            and capability_record.binding is capability_binding
+            and capability_record.state is _Generation6RNamespaceTokenState.AUTHORIZED
+            and capability_record.owner_state is _Generation6RNamespaceOwnerState.LIVE
+            and capability_record.armed_receipt is None
+            and capability_record.close_receipt is None
+            and capability_record.terminal_receipt is None
+            and capability_binding.token is token
+            and capability_binding.issuer_identity == self._issuer_identity
+            and type(capability_binding.serial) is int
+            and capability_binding.serial > 0
+            and capability_binding.token_serial == preproof.token_serial == token.serial
+            and capability_binding.token_issuer_identity == token.issuer_identity
+            and capability_binding.action is preproof.action
+            and capability_binding.action is _Generation6RNamespaceAction.UNLINK
+            and capability_binding.authority is preproof.authority
+            and capability_binding.authority_record is preproof.authority_record
+            and self._authority_records_by_identity.get(id(preproof.authority))
+            is preproof.authority_record
+            and self._authority_records_by_serial.get(preproof.authority.serial)
+            is preproof.authority_record
+            and type(capability_binding.fact) is _Generation6RNamespaceNameFact
+            and self._name_facts_by_key.get((preproof.authority.serial, preproof.name))
+            is capability_binding.fact
+            and capability_binding.name == preproof.name
+            and capability_binding.path_owner is path_owner
+            and capability_binding.descriptor_token is descriptor_token
+            and capability_binding.owner_context is owner_context
+            and capability_binding.owner_state is _Generation6RNamespaceOwnerState.LIVE
+            and capability_binding.destination_authority is None
+            and capability_binding.destination_record is None
+            and capability_binding.destination_name is None
+            and owner_context.binding is owner_context_binding
+            and owner_context.authority_record is preproof.authority_record
+            and owner_context.state is _Generation6RNamespaceContextState.TRANSFERRED
+            and owner_context.capability_record is capability_record
+            and owner_context.close_receipt is None
+            and owner_context_binding.owner is path_owner
+            and owner_context_binding.owner_identity == owner_identity
+            and owner_context_binding.descriptor_token is descriptor_token
+            and owner_context_binding.token_generation == descriptor_token.generation
+            and owner_context_binding.kind is _Generation6RNamespaceOwnerKind.ENTRY_HANDLE
+            and owner_context_binding.purpose is _Generation6RNamespaceOwnerPurpose.PRESENT_TOKEN
+            and owner_context_binding.origin_authority_record is preproof.authority_record
+            and self._namespace_owner_contexts.get(owner_identity) is owner_context
+            and self._namespace_owner_tokens.get(owner_identity) is descriptor_token
+            and type(descriptor_record) is _Generation6ROwnerRecord
+            and descriptor_record.owner is path_owner
+            and descriptor_record.token is descriptor_token
+            and descriptor_record.state is _Generation6RDescriptorState.LIVE
+            and self._descriptor_ledger._records_by_ordinal.get(descriptor_token.ordinal)
+            is descriptor_record
+            and self._descriptor_ledger._current_by_descriptor.get(descriptor_token.descriptor)
+            is descriptor_token
+            and self._descriptor_ledger._generation_by_descriptor.get(descriptor_token.descriptor)
+            == descriptor_token.generation
+            and type(path_owner.terminal) is bool
+            and not path_owner.terminal
+            and path_owner.descriptor == descriptor_token.descriptor
+            and type(authorization_receipt.serial) is int
+            and authorization_receipt.serial > 0
+            and authorization_receipt.issuer_identity == self._issuer_identity
+            and authorization_receipt.token_serial == token.serial
+            and authorization_receipt.authority_serial == preproof.authority.serial
+            and authorization_receipt.event == "PRESENT_TOKEN_AUTHORIZED"
+            and any(candidate is authorization_receipt for candidate in self._receipts)
+        )
+
+    def _terminal_unlink_capability_matches(
+        self,
+        capability_record: _Generation6RNamespaceCapabilityRecord,
+        preproof: _Generation6RNamespaceUnlinkPreproof,
+    ) -> bool:
+        if (
+            type(capability_record) is not _Generation6RNamespaceCapabilityRecord
+            or type(preproof) is not _Generation6RNamespaceUnlinkPreproof
+        ):
+            return False
+        capability_binding = preproof.capability_binding
+        owner_context = preproof.owner_context
+        token = preproof.token
+        if (
+            type(capability_binding) is not _Generation6RNamespaceCapabilityBinding
+            or type(owner_context) is not _Generation6RNamespaceOwnerContext
+            or type(token) is not _Generation6RNamespacePresentToken
+        ):
+            return False
+        return (
+            self._phase is _Generation6RNamespacePhase.TEARDOWN_ACTIVE
+            and self._pending_publication is None
+            and not self._mutation_issuance_faulted
+            and not self._poisoned_descriptors
+            and not self._owner_quarantine
+            and not self._untransferred_raw_quarantine
+            and self._preproof_parent_authority_matches(preproof)
+            and self._live_capability_record is capability_record
+            and self._capability_records_by_identity.get(id(token)) is capability_record
+            and self._capability_records_by_serial.get(preproof.token_serial) is capability_record
+            and preproof.capability_record is capability_record
+            and capability_record.binding is capability_binding
+            and capability_record.state is _Generation6RNamespaceTokenState.ATTEMPTED
+            and capability_record.owner_state is _Generation6RNamespaceOwnerState.CLOSED
+            and capability_binding.token is token
+            and capability_binding.token_serial == preproof.token_serial == token.serial
+            and capability_binding.token_issuer_identity == token.issuer_identity
+            and capability_binding.action is _Generation6RNamespaceAction.UNLINK
+            and capability_binding.authority is preproof.authority
+            and capability_binding.authority_record is preproof.authority_record
+            and capability_binding.name == preproof.name
+            and capability_binding.path_owner is preproof.path_owner
+            and capability_binding.descriptor_token is preproof.descriptor_token
+            and capability_binding.owner_context is owner_context
+            and owner_context.binding is preproof.owner_context_binding
+            and owner_context.authority_record is preproof.authority_record
+            and owner_context.state is _Generation6RNamespaceContextState.CLOSED
+            and owner_context.capability_record is capability_record
+            and owner_context.close_receipt is capability_record.close_receipt
+            and self._namespace_owner_close_verified(
+                preproof.path_owner,
+                preproof.descriptor_token,
+                owner_context,
+            )
+            and self._receipt_binding_matches(
+                capability_record.authorization_receipt,
+                token_serial=preproof.token_serial,
+                authority_serial=preproof.authority.serial,
+                event="PRESENT_TOKEN_AUTHORIZED",
+            )
+            and self._receipt_binding_matches(
+                capability_record.armed_receipt,
+                token_serial=preproof.token_serial,
+                authority_serial=preproof.authority.serial,
+                event="PRESENT_UNLINK_ARMED",
+            )
+            and self._receipt_binding_matches(
+                capability_record.close_receipt,
+                token_serial=preproof.token_serial,
+                authority_serial=preproof.authority.serial,
+                event="MUTATION_TOKEN_HANDLE_CLOSED",
+            )
+            and self._receipt_binding_matches(
+                capability_record.terminal_receipt,
+                token_serial=preproof.token_serial,
+                authority_serial=preproof.authority.serial,
+                event=_Generation6RNamespaceTerminalEvent.PRESENT_UNLINK_CONSUMED.value,
+            )
+            and not any(
+                candidate is capability_record for candidate in self._archived_capability_records
+            )
+        )
+
+    def _trusted_live_mutation_permit(
+        self,
+        capability_record: _Generation6RNamespaceCapabilityRecord,
+        preproof: _Generation6RNamespaceUnlinkPreproof,
+        *,
+        expected_state: _Generation6RNamespaceMutationPermitState,
+    ) -> _Generation6RNamespaceMutationPermitRecord | None:
+        if expected_state is _Generation6RNamespaceMutationPermitState.AUTHORIZED:
+            lifecycle_matches = self._postissuer_capability_matches(
+                capability_record,
+                preproof,
+            )
+        elif expected_state is _Generation6RNamespaceMutationPermitState.ATTEMPTED:
+            lifecycle_matches = self._terminal_unlink_capability_matches(
+                capability_record,
+                preproof,
+            )
+        else:
+            return None
+        if not lifecycle_matches:
+            return None
+        live_record = self._live_mutation_permit_record
+        if type(live_record) is not _Generation6RNamespaceMutationPermitRecord:
+            return None
+        binding = live_record.binding
+        if type(binding) is not _Generation6RNamespaceMutationPermitBinding:
+            return None
+        permit = binding.permit
+        authorization_receipt = live_record.authorization_receipt
+        capability_binding = preproof.capability_binding
+        if (
+            type(permit) is not _Generation6RNamespaceMutationPermit
+            or type(authorization_receipt) is not _Generation6RNamespaceReceipt
+            or set(vars(live_record))
+            != {"binding", "state", "authorization_receipt", "terminal_receipt"}
+            or set(vars(binding))
+            != {
+                "serial",
+                "issuer_identity",
+                "permit",
+                "permit_serial",
+                "permit_issuer_identity",
+                "capability_record",
+                "capability_binding",
+                "capability_token",
+                "capability_token_serial",
+                "capability_token_issuer_identity",
+                "action",
+                "name",
+                "authority",
+                "authority_serial",
+                "authority_record",
+                "preproof",
+                "preproof_identity",
+            }
+            or set(vars(permit)) != {"serial", "issuer_identity"}
+            or set(vars(authorization_receipt))
+            != {"serial", "issuer_identity", "token_serial", "authority_serial", "event"}
+        ):
+            return None
+        permit_identity = id(permit)
+        if not (
+            live_record.state is expected_state
+            and (
+                live_record.terminal_receipt is None
+                or type(live_record.terminal_receipt) is _Generation6RNamespaceReceipt
+            )
+            and not self._mutation_issuance_faulted
+            and type(binding.serial) is int
+            and binding.serial > 0
+            and binding.issuer_identity == self._issuer_identity
+            and binding.permit is permit
+            and type(permit_identity) is int
+            and permit_identity > 0
+            and type(permit.serial) is int
+            and permit.serial > 0
+            and permit.issuer_identity == self._issuer_identity
+            and binding.permit_serial == permit.serial
+            and binding.permit_issuer_identity == permit.issuer_identity
+            and self._mutation_permit_records_by_identity.get(permit_identity) is live_record
+            and self._mutation_permit_records_by_serial.get(binding.permit_serial) is live_record
+            and binding.capability_record is capability_record
+            and binding.capability_binding is capability_binding
+            and binding.capability_token is preproof.token
+            and binding.capability_token is capability_binding.token
+            and binding.capability_token_serial == preproof.token_serial
+            and binding.capability_token_serial == capability_binding.token_serial
+            and binding.capability_token_issuer_identity == capability_binding.token_issuer_identity
+            and binding.action is _Generation6RNamespaceAction.UNLINK
+            and binding.action is capability_binding.action
+            and binding.name == preproof.name == capability_binding.name
+            and binding.authority is preproof.authority
+            and binding.authority is capability_binding.authority
+            and binding.authority_serial == capability_binding.authority.serial
+            and binding.authority_record is preproof.authority_record
+            and binding.authority_record is capability_binding.authority_record
+            and binding.preproof is preproof
+            and binding.preproof_identity == id(preproof)
+            and type(authorization_receipt.serial) is int
+            and authorization_receipt.serial > 0
+            and authorization_receipt.issuer_identity == self._issuer_identity
+            and authorization_receipt.token_serial == permit.serial
+            and authorization_receipt.authority_serial == binding.authority_serial
+            and authorization_receipt.event == "MUTATION_PERMIT_AUTHORIZED"
+            and any(candidate is authorization_receipt for candidate in self._receipts)
+            and not any(
+                candidate is live_record for candidate in self._archived_mutation_permit_records
+            )
+        ):
+            return None
+        return live_record
+
+    def _require_returned_mutation_permit(
+        self,
+        permit: _Generation6RNamespaceMutationPermit,
+        capability_record: _Generation6RNamespaceCapabilityRecord,
+        preproof: _Generation6RNamespaceUnlinkPreproof,
+    ) -> _Generation6RNamespaceMutationPermitRecord:
+        trusted_record = self._trusted_live_mutation_permit(
+            capability_record,
+            preproof,
+            expected_state=_Generation6RNamespaceMutationPermitState.AUTHORIZED,
+        )
+        _require(
+            type(permit) is _Generation6RNamespaceMutationPermit
+            and trusted_record is not None
+            and trusted_record.binding.permit is permit
+            and trusted_record.binding.permit_serial == permit.serial
+            and trusted_record.binding.permit_issuer_identity == permit.issuer_identity
+            and trusted_record.terminal_receipt is None,
+            "R namespace returned mutation permit differs",
+        )
+        return cast(_Generation6RNamespaceMutationPermitRecord, trusted_record)
+
+    def _fail_present_unlink_preproof(
+        self,
+        capability_record: _Generation6RNamespaceCapabilityRecord,
+        capability_binding: _Generation6RNamespaceCapabilityBinding,
+        primary: BaseException,
+    ) -> None:
+        owner_context = cast(
+            _Generation6RNamespaceOwnerContext,
+            capability_binding.owner_context,
+        )
+        path_owner = cast(FdOwner, capability_binding.path_owner)
+        descriptor_token = cast(
+            _Generation6ROwnerToken,
+            capability_binding.descriptor_token,
+        )
+        capability_record.state = _Generation6RNamespaceTokenState.ATTEMPTED
+        owner_context.state = _Generation6RNamespaceContextState.ATTEMPTED
+        try:
+            self._close_namespace_owner(
+                path_owner,
+                descriptor_token,
+                owner_context,
+                capability_record=capability_record,
+                event=_Generation6RNamespaceCloseEvent.MUTATION_TOKEN_HANDLE_CLOSED,
+            )
+        except BaseException as close_error:
+            primary.add_note(f"R namespace unlink preproof close failed: {close_error!r}")
+        self._phase = _Generation6RNamespacePhase.UNCERTAIN
+        capability_record.state = _Generation6RNamespaceTokenState.UNCERTAIN
+        if owner_context.state is not _Generation6RNamespaceContextState.CLOSED:
+            capability_record.owner_state = _Generation6RNamespaceOwnerState.UNCERTAIN
+
+    def _fail_invalid_mutation_permit(
+        self,
+        capability_record: _Generation6RNamespaceCapabilityRecord,
+        preproof: _Generation6RNamespaceUnlinkPreproof,
+        primary: BaseException,
+    ) -> None:
+        try:
+            trusted_permit_record = self._trusted_live_mutation_permit(
+                capability_record,
+                preproof,
+                expected_state=_Generation6RNamespaceMutationPermitState.AUTHORIZED,
+            )
+        except BaseException as probe_error:
+            primary.add_note(f"R namespace invalid permit trust probe failed: {probe_error!r}")
+            trusted_permit_record = None
+        owner_context = preproof.owner_context
+        path_owner = preproof.path_owner
+        descriptor_token = preproof.descriptor_token
+        self._mutation_issuance_faulted = True
+        capability_record.state = _Generation6RNamespaceTokenState.ATTEMPTED
+        owner_context.state = _Generation6RNamespaceContextState.ATTEMPTED
+        if trusted_permit_record is not None:
+            trusted_permit_record.state = _Generation6RNamespaceMutationPermitState.UNCERTAIN
+        try:
+            self._close_namespace_owner(
+                path_owner,
+                descriptor_token,
+                owner_context,
+                capability_record=capability_record,
+                event=_Generation6RNamespaceCloseEvent.MUTATION_TOKEN_HANDLE_CLOSED,
+                issuance_preproof=preproof,
+            )
+        except BaseException as close_error:
+            primary.add_note(f"R namespace invalid permit owner close failed: {close_error!r}")
+        self._phase = _Generation6RNamespacePhase.UNCERTAIN
+        capability_record.state = _Generation6RNamespaceTokenState.UNCERTAIN
+        if owner_context.state is not _Generation6RNamespaceContextState.CLOSED:
+            capability_record.owner_state = _Generation6RNamespaceOwnerState.UNCERTAIN
+
+    def _fail_present_unlink_attempt(
+        self,
+        capability_record: _Generation6RNamespaceCapabilityRecord,
+        permit_record: _Generation6RNamespaceMutationPermitRecord,
+        primary: BaseException,
+        *,
+        close_started: bool,
+    ) -> None:
+        binding = capability_record.binding
+        owner_context = cast(_Generation6RNamespaceOwnerContext, binding.owner_context)
+        if not close_started:
+            try:
+                self._close_namespace_owner(
+                    cast(FdOwner, binding.path_owner),
+                    cast(_Generation6ROwnerToken, binding.descriptor_token),
+                    owner_context,
+                    capability_record=capability_record,
+                    event=_Generation6RNamespaceCloseEvent.MUTATION_TOKEN_HANDLE_CLOSED,
+                )
+            except BaseException as close_error:
+                primary.add_note(f"R namespace unlink owner close failed: {close_error!r}")
+        self._phase = _Generation6RNamespacePhase.UNCERTAIN
+        capability_record.state = _Generation6RNamespaceTokenState.UNCERTAIN
+        permit_record.state = _Generation6RNamespaceMutationPermitState.UNCERTAIN
+        if owner_context.state is not _Generation6RNamespaceContextState.CLOSED:
+            capability_record.owner_state = _Generation6RNamespaceOwnerState.UNCERTAIN
+
+    def _fail_present_unlink_terminal(
+        self,
+        capability_record: _Generation6RNamespaceCapabilityRecord,
+        permit_record: _Generation6RNamespaceMutationPermitRecord,
+    ) -> None:
+        owner_context = cast(
+            _Generation6RNamespaceOwnerContext,
+            capability_record.binding.owner_context,
+        )
+        _require(
+            owner_context.state is _Generation6RNamespaceContextState.CLOSED
+            and capability_record.owner_state is _Generation6RNamespaceOwnerState.CLOSED,
+            "R namespace unlink terminal close truth differs",
+        )
+        self._phase = _Generation6RNamespacePhase.UNCERTAIN
+        capability_record.state = _Generation6RNamespaceTokenState.UNCERTAIN
+        permit_record.state = _Generation6RNamespaceMutationPermitState.UNCERTAIN
+
+    def _archive_mutation_permit(
+        self,
+        permit_record: _Generation6RNamespaceMutationPermitRecord,
+        capability_record: _Generation6RNamespaceCapabilityRecord,
+        preproof: _Generation6RNamespaceUnlinkPreproof,
+    ) -> None:
+        trusted_record = self._trusted_live_mutation_permit(
+            capability_record,
+            preproof,
+            expected_state=_Generation6RNamespaceMutationPermitState.ATTEMPTED,
+        )
+        binding = permit_record.binding
+        _require(
+            trusted_record is permit_record
+            and permit_record.terminal_receipt is not None
+            and capability_record.state is _Generation6RNamespaceTokenState.ATTEMPTED
+            and capability_record.terminal_receipt is not None
+            and capability_record.armed_receipt is not None,
+            "R namespace mutation permit archive binding differs",
+        )
+        self._require_receipt_binding(
+            capability_record.armed_receipt,
+            token_serial=preproof.token_serial,
+            authority_serial=binding.authority_serial,
+            event="PRESENT_UNLINK_ARMED",
+        )
+        self._require_receipt_binding(
+            permit_record.terminal_receipt,
+            token_serial=binding.permit_serial,
+            authority_serial=binding.authority_serial,
+            event="MUTATION_PERMIT_CONSUMED",
+        )
+        self._require_receipt_binding(
+            capability_record.terminal_receipt,
+            token_serial=preproof.token_serial,
+            authority_serial=binding.authority_serial,
+            event=_Generation6RNamespaceTerminalEvent.PRESENT_UNLINK_CONSUMED.value,
+        )
+        self._archived_mutation_permit_records.append(permit_record)
+
+    def consume_present(self, token: _Generation6RNamespacePresentToken) -> None:
+        capability_record = self._require_live_capability(token)
+        binding = capability_record.binding
+        _require(
+            type(token) is _Generation6RNamespacePresentToken
+            and token.action is _Generation6RNamespaceAction.UNLINK
+            and binding.action is _Generation6RNamespaceAction.UNLINK
+            and type(binding.fact) is _Generation6RNamespaceNameFact
+            and binding.fact.kind is _Generation6RNamespaceNodeKind.REGULAR,
+            "R namespace unlink consumer action differs",
+        )
+        try:
+            preproof = self._preauthorize_present_unlink(capability_record, token)
+        except BaseException as primary:
+            self._fail_present_unlink_preproof(capability_record, binding, primary)
+            raise
+        permit = self._issue_a2_mutation_permit(capability_record, preproof)
+        try:
+            permit_record = self._require_returned_mutation_permit(
+                permit,
+                capability_record,
+                preproof,
+            )
+        except BaseException as primary:
+            self._fail_invalid_mutation_permit(capability_record, preproof, primary)
+            raise
+        owner_context = cast(_Generation6RNamespaceOwnerContext, binding.owner_context)
+        capability_record.state = _Generation6RNamespaceTokenState.ATTEMPTED
+        owner_context.state = _Generation6RNamespaceContextState.ATTEMPTED
+        permit_record.state = _Generation6RNamespaceMutationPermitState.ATTEMPTED
+        close_started = False
+        try:
+            armed_receipt = self._append_receipt(
+                token_serial=binding.token_serial,
+                authority_serial=binding.authority.serial,
+                event="PRESENT_UNLINK_ARMED",
+            )
+            capability_record.armed_receipt = armed_receipt
+            unlink_result = _GENERATION6_R_NAMESPACE_REAL_OS_UNLINK(
+                binding.name,
+                dir_fd=preproof.parent_descriptor,
+            )
+            _require(unlink_result is None, "R namespace unlink result differs")
+            self._postauthorize_present_unlink(preproof)
+            close_started = True
+            self._close_namespace_owner(
+                cast(FdOwner, binding.path_owner),
+                cast(_Generation6ROwnerToken, binding.descriptor_token),
+                owner_context,
+                capability_record=capability_record,
+                event=_Generation6RNamespaceCloseEvent.MUTATION_TOKEN_HANDLE_CLOSED,
+            )
+        except BaseException as primary:
+            self._fail_present_unlink_attempt(
+                capability_record,
+                permit_record,
+                primary,
+                close_started=close_started,
+            )
+            raise
+        try:
+            permit_terminal_receipt = self._append_receipt(
+                token_serial=permit.serial,
+                authority_serial=binding.authority.serial,
+                event="MUTATION_PERMIT_CONSUMED",
+            )
+            permit_record.terminal_receipt = permit_terminal_receipt
+            capability_terminal_receipt = self._append_receipt(
+                token_serial=binding.token_serial,
+                authority_serial=binding.authority.serial,
+                event=_Generation6RNamespaceTerminalEvent.PRESENT_UNLINK_CONSUMED.value,
+            )
+            capability_record.terminal_receipt = capability_terminal_receipt
+            self._archive_mutation_permit(permit_record, capability_record, preproof)
+            self._archive_capability(
+                capability_record,
+                event=_Generation6RNamespaceTerminalEvent.PRESENT_UNLINK_CONSUMED,
+            )
+            permit_record.state = _Generation6RNamespaceMutationPermitState.CONSUMED
+            capability_record.state = _Generation6RNamespaceTokenState.CONSUMED
+            self._live_mutation_permit_record = None
+            self._live_capability_record = None
+        except BaseException:
+            self._fail_present_unlink_terminal(capability_record, permit_record)
+            raise
+        return None
+
     def _archive_capability(
         self,
         capability_record: _Generation6RNamespaceCapabilityRecord,
+        *,
+        event: _Generation6RNamespaceTerminalEvent,
     ) -> None:
         binding = capability_record.binding
         _require(
             type(capability_record) is _Generation6RNamespaceCapabilityRecord
             and type(binding) is _Generation6RNamespaceCapabilityBinding
+            and type(event) is _Generation6RNamespaceTerminalEvent
             and self._live_capability_record is capability_record
             and self._capability_records_by_identity.get(id(binding.token)) is capability_record
             and self._capability_records_by_serial.get(binding.token_serial) is capability_record
@@ -14338,10 +15446,12 @@ class _Generation6RNamespaceJournal:
         )
         if type(binding.token) is _Generation6RNamespaceAbsenceToken:
             _require(
-                capability_record.owner_state is None and capability_record.close_receipt is None,
+                event is _Generation6RNamespaceTerminalEvent.ABSENCE_TOKEN_ABANDONED
+                and capability_record.owner_state is None
+                and capability_record.armed_receipt is None
+                and capability_record.close_receipt is None,
                 "R namespace absence terminal owner state differs",
             )
-            terminal_event = "ABSENCE_TOKEN_ABANDONED"
         else:
             owner_context = binding.owner_context
             _require(
@@ -14358,12 +15468,31 @@ class _Generation6RNamespaceJournal:
                 authority_serial=binding.authority.serial,
                 event="MUTATION_TOKEN_HANDLE_CLOSED",
             )
-            terminal_event = "MUTATION_TOKEN_ABANDONED"
+            if event is _Generation6RNamespaceTerminalEvent.PRESENT_UNLINK_CONSUMED:
+                _require(
+                    type(binding.token) is _Generation6RNamespacePresentToken
+                    and binding.action is _Generation6RNamespaceAction.UNLINK
+                    and type(binding.fact) is _Generation6RNamespaceNameFact
+                    and binding.fact.kind is _Generation6RNamespaceNodeKind.REGULAR,
+                    "R namespace unlink terminal action differs",
+                )
+                self._require_receipt_binding(
+                    capability_record.armed_receipt,
+                    token_serial=binding.token_serial,
+                    authority_serial=binding.authority.serial,
+                    event="PRESENT_UNLINK_ARMED",
+                )
+            else:
+                _require(
+                    event is _Generation6RNamespaceTerminalEvent.MUTATION_TOKEN_ABANDONED
+                    and capability_record.armed_receipt is None,
+                    "R namespace abandoned mutation terminal action differs",
+                )
         self._require_receipt_binding(
             capability_record.terminal_receipt,
             token_serial=binding.token_serial,
             authority_serial=binding.authority.serial,
-            event=terminal_event,
+            event=event.value,
         )
         self._archived_capability_records.append(capability_record)
 
@@ -14443,6 +15572,7 @@ class _Generation6RNamespaceJournal:
                 None,
                 None,
                 None,
+                None,
             )
             self._publish_capability(
                 capability_record,
@@ -14478,7 +15608,13 @@ class _Generation6RNamespaceJournal:
                     except BaseException as close_error:
                         if capability_record is not None:
                             capability_record.owner_state = (
-                                _Generation6RNamespaceOwnerState.UNCERTAIN
+                                _Generation6RNamespaceOwnerState.CLOSED
+                                if self._namespace_owner_close_verified(
+                                    owner,
+                                    descriptor_token,
+                                    owner_context,
+                                )
+                                else _Generation6RNamespaceOwnerState.UNCERTAIN
                             )
                         primary.add_note(f"R namespace present token close failed: {close_error!r}")
             raise
@@ -14526,6 +15662,7 @@ class _Generation6RNamespaceJournal:
                 None,
             ),
             _Generation6RNamespaceTokenState.AUTHORIZED,
+            None,
             None,
             None,
             None,
@@ -14633,6 +15770,7 @@ class _Generation6RNamespaceJournal:
                 None,
                 None,
                 None,
+                None,
             )
             self._publish_capability(
                 capability_record,
@@ -14668,7 +15806,13 @@ class _Generation6RNamespaceJournal:
                     except BaseException as close_error:
                         if capability_record is not None:
                             capability_record.owner_state = (
-                                _Generation6RNamespaceOwnerState.UNCERTAIN
+                                _Generation6RNamespaceOwnerState.CLOSED
+                                if self._namespace_owner_close_verified(
+                                    owner,
+                                    descriptor_token,
+                                    owner_context,
+                                )
+                                else _Generation6RNamespaceOwnerState.UNCERTAIN
                             )
                         primary.add_note(f"R namespace rename token close failed: {close_error!r}")
             raise
@@ -14682,10 +15826,13 @@ class _Generation6RNamespaceJournal:
                 terminal_receipt = self._append_receipt(
                     token_serial=binding.token_serial,
                     authority_serial=binding.authority.serial,
-                    event="ABSENCE_TOKEN_ABANDONED",
+                    event=_Generation6RNamespaceTerminalEvent.ABSENCE_TOKEN_ABANDONED.value,
                 )
                 capability_record.terminal_receipt = terminal_receipt
-                self._archive_capability(capability_record)
+                self._archive_capability(
+                    capability_record,
+                    event=_Generation6RNamespaceTerminalEvent.ABSENCE_TOKEN_ABANDONED,
+                )
                 capability_record.state = _Generation6RNamespaceTokenState.CONSUMED
                 self._live_capability_record = None
             except BaseException:
@@ -14708,7 +15855,15 @@ class _Generation6RNamespaceJournal:
         except BaseException:
             self._phase = _Generation6RNamespacePhase.UNCERTAIN
             capability_record.state = _Generation6RNamespaceTokenState.UNCERTAIN
-            capability_record.owner_state = _Generation6RNamespaceOwnerState.UNCERTAIN
+            capability_record.owner_state = (
+                _Generation6RNamespaceOwnerState.CLOSED
+                if self._namespace_owner_close_verified(
+                    path_owner,
+                    descriptor_token,
+                    owner_context,
+                )
+                else _Generation6RNamespaceOwnerState.UNCERTAIN
+            )
             raise
         capability_record.close_receipt = close_receipt
         capability_record.owner_state = _Generation6RNamespaceOwnerState.CLOSED
@@ -14716,10 +15871,13 @@ class _Generation6RNamespaceJournal:
             terminal_receipt = self._append_receipt(
                 token_serial=binding.token_serial,
                 authority_serial=binding.authority.serial,
-                event="MUTATION_TOKEN_ABANDONED",
+                event=_Generation6RNamespaceTerminalEvent.MUTATION_TOKEN_ABANDONED.value,
             )
             capability_record.terminal_receipt = terminal_receipt
-            self._archive_capability(capability_record)
+            self._archive_capability(
+                capability_record,
+                event=_Generation6RNamespaceTerminalEvent.MUTATION_TOKEN_ABANDONED,
+            )
             capability_record.state = _Generation6RNamespaceTokenState.CONSUMED
             self._live_capability_record = None
         except BaseException:
@@ -15332,6 +16490,8 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_GENERATION6_R_NAMESPACE_REAL_OS_STAT": "os.stat",
         "_GENERATION6_R_NAMESPACE_REAL_OS_OPEN": "os.open",
         "_GENERATION6_R_NAMESPACE_REAL_OS_FSTAT": "os.fstat",
+        "_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK": "os.unlink",
+        "_GENERATION6_R_NAMESPACE_REAL_OS_GETUID": "os.getuid",
         "_GENERATION6_R_NAMESPACE_REAL_FCNTL": "fcntl.fcntl",
         "_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT": "_snapshot_stat",
         "_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD": "_snapshot_fd",
@@ -15341,6 +16501,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE": "FdOwner.require",
         "_GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT": "stat.S_IFMT",
         "_GENERATION6_R_NAMESPACE_CAPTURED_S_ISDIR": "stat.S_ISDIR",
+        "_GENERATION6_R_NAMESPACE_CAPTURED_S_ISREG": "stat.S_ISREG",
     }
     namespace_capture_nodes: dict[str, ast.AnnAssign] = {}
     observed_namespace_capture_names = {
@@ -15397,6 +16558,8 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_Generation6RNamespaceOwnerPurpose",
         "_Generation6RNamespaceContextState",
         "_Generation6RNamespaceCloseEvent",
+        "_Generation6RNamespaceMutationPermitState",
+        "_Generation6RNamespaceTerminalEvent",
         "_Generation6RNamespaceDirectoryFact",
         "_Generation6RNamespaceNameFact",
         "_Generation6RNamespaceDirectoryAuthority",
@@ -15407,8 +16570,12 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_Generation6RNamespacePresentToken",
         "_Generation6RNamespaceAbsenceToken",
         "_Generation6RNamespaceRenameToken",
+        "_Generation6RNamespaceMutationPermit",
         "_Generation6RNamespaceCapabilityBinding",
         "_Generation6RNamespaceCapabilityRecord",
+        "_Generation6RNamespaceUnlinkPreproof",
+        "_Generation6RNamespaceMutationPermitBinding",
+        "_Generation6RNamespaceMutationPermitRecord",
         "_Generation6RNamespaceReceipt",
         "_Generation6RNamespaceJournal",
     )
@@ -15486,6 +16653,17 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "PRESENT_TOKEN_ABORT_CLOSED",
             "RENAME_TOKEN_ABORT_CLOSED",
             "MUTATION_TOKEN_HANDLE_CLOSED",
+        ),
+        "_Generation6RNamespaceMutationPermitState": (
+            "AUTHORIZED",
+            "ATTEMPTED",
+            "CONSUMED",
+            "UNCERTAIN",
+        ),
+        "_Generation6RNamespaceTerminalEvent": (
+            "ABSENCE_TOKEN_ABANDONED",
+            "MUTATION_TOKEN_ABANDONED",
+            "PRESENT_UNLINK_CONSUMED",
         ),
     }
     for name, expected_members in namespace_enum_members.items():
@@ -15580,6 +16758,10 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "issuer_identity",
             "action",
         ),
+        "_Generation6RNamespaceMutationPermit": (
+            "serial",
+            "issuer_identity",
+        ),
         "_Generation6RNamespaceCapabilityBinding": (
             "serial",
             "issuer_identity",
@@ -15604,7 +16786,54 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "state",
             "owner_state",
             "authorization_receipt",
+            "armed_receipt",
             "close_receipt",
+            "terminal_receipt",
+        ),
+        "_Generation6RNamespaceUnlinkPreproof": (
+            "capability_record",
+            "capability_binding",
+            "token",
+            "token_serial",
+            "action",
+            "authority",
+            "authority_record",
+            "parent_binding",
+            "name",
+            "parent_descriptor",
+            "parent_snapshot",
+            "path_owner",
+            "owner_context",
+            "owner_context_binding",
+            "descriptor_token",
+            "target_descriptor",
+            "target_snapshot",
+            "target_mount_id",
+            "current_uid",
+        ),
+        "_Generation6RNamespaceMutationPermitBinding": (
+            "serial",
+            "issuer_identity",
+            "permit",
+            "permit_serial",
+            "permit_issuer_identity",
+            "capability_record",
+            "capability_binding",
+            "capability_token",
+            "capability_token_serial",
+            "capability_token_issuer_identity",
+            "action",
+            "name",
+            "authority",
+            "authority_serial",
+            "authority_record",
+            "preproof",
+            "preproof_identity",
+        ),
+        "_Generation6RNamespaceMutationPermitRecord": (
+            "binding",
+            "state",
+            "authorization_receipt",
             "terminal_receipt",
         ),
         "_Generation6RNamespaceReceipt": (
@@ -15692,6 +16921,10 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "int",
             "_Generation6RNamespaceAction",
         ),
+        "_Generation6RNamespaceMutationPermit": (
+            "int",
+            "int",
+        ),
         "_Generation6RNamespaceCapabilityBinding": (
             "int",
             "int",
@@ -15718,6 +16951,53 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "_Generation6RNamespaceReceipt | None",
             "_Generation6RNamespaceReceipt | None",
             "_Generation6RNamespaceReceipt | None",
+            "_Generation6RNamespaceReceipt | None",
+        ),
+        "_Generation6RNamespaceUnlinkPreproof": (
+            "_Generation6RNamespaceCapabilityRecord",
+            "_Generation6RNamespaceCapabilityBinding",
+            "_Generation6RNamespacePresentToken",
+            "int",
+            "_Generation6RNamespaceAction",
+            "_Generation6RNamespaceDirectoryAuthority",
+            "_Generation6RNamespaceDirectoryRecord",
+            "_Generation6RNamespaceDirectoryBinding",
+            "str",
+            "int",
+            "DescriptorSnapshot",
+            "FdOwner",
+            "_Generation6RNamespaceOwnerContext",
+            "_Generation6RNamespaceOwnerContextBinding",
+            "_Generation6ROwnerToken",
+            "int",
+            "DescriptorSnapshot",
+            "int",
+            "int",
+        ),
+        "_Generation6RNamespaceMutationPermitBinding": (
+            "int",
+            "int",
+            "_Generation6RNamespaceMutationPermit",
+            "int",
+            "int",
+            "_Generation6RNamespaceCapabilityRecord",
+            "_Generation6RNamespaceCapabilityBinding",
+            "_Generation6RNamespacePresentToken",
+            "int",
+            "int",
+            "_Generation6RNamespaceAction",
+            "str",
+            "_Generation6RNamespaceDirectoryAuthority",
+            "int",
+            "_Generation6RNamespaceDirectoryRecord",
+            "_Generation6RNamespaceUnlinkPreproof",
+            "int",
+        ),
+        "_Generation6RNamespaceMutationPermitRecord": (
+            "_Generation6RNamespaceMutationPermitBinding",
+            "_Generation6RNamespaceMutationPermitState",
+            "_Generation6RNamespaceReceipt | None",
+            "_Generation6RNamespaceReceipt | None",
         ),
         "_Generation6RNamespaceReceipt": (
             "int",
@@ -15736,13 +17016,17 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_Generation6RNamespacePresentToken",
         "_Generation6RNamespaceAbsenceToken",
         "_Generation6RNamespaceRenameToken",
+        "_Generation6RNamespaceMutationPermit",
         "_Generation6RNamespaceCapabilityBinding",
+        "_Generation6RNamespaceUnlinkPreproof",
+        "_Generation6RNamespaceMutationPermitBinding",
         "_Generation6RNamespaceReceipt",
     }
     mutable_namespace_record_classes = {
         "_Generation6RNamespaceDirectoryRecord",
         "_Generation6RNamespaceOwnerContext",
         "_Generation6RNamespaceCapabilityRecord",
+        "_Generation6RNamespaceMutationPermitRecord",
     }
     for name, expected_fields in expected_namespace_fields.items():
         class_node = namespace_classes[name]
@@ -15819,6 +17103,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_reconcile_mount_poison",
         "_namespace_mount_id",
         "_close_namespace_owner",
+        "_namespace_owner_close_verified",
         "_retain_untransferred_raw",
         "_open_namespace_owner",
         "_require_same_parent_proof",
@@ -15835,9 +17120,24 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_require_teardown_authorization",
         "_require_name_absent",
         "_require_live_capability_slot",
+        "_receipt_binding_matches",
         "_require_receipt_binding",
         "_publish_capability",
         "_require_live_capability",
+        "_preauthorize_present_unlink",
+        "_postauthorize_present_unlink",
+        "_issue_a2_mutation_permit",
+        "_preproof_parent_authority_matches",
+        "_postissuer_capability_matches",
+        "_terminal_unlink_capability_matches",
+        "_trusted_live_mutation_permit",
+        "_require_returned_mutation_permit",
+        "_fail_present_unlink_preproof",
+        "_fail_invalid_mutation_permit",
+        "_fail_present_unlink_attempt",
+        "_fail_present_unlink_terminal",
+        "_archive_mutation_permit",
+        "consume_present",
         "_archive_capability",
         "authorize_present",
         "authorize_absence",
@@ -15889,6 +17189,8 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "capture:_GENERATION6_R_NAMESPACE_REAL_OS_STAT",
         "capture:_GENERATION6_R_NAMESPACE_REAL_OS_OPEN",
         "capture:_GENERATION6_R_NAMESPACE_REAL_OS_FSTAT",
+        "capture:_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK",
+        "capture:_GENERATION6_R_NAMESPACE_REAL_OS_GETUID",
         "capture:_GENERATION6_R_NAMESPACE_REAL_FCNTL",
         "capture:_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT",
         "capture:_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD",
@@ -15898,6 +17200,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "capture:_GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE",
         "capture:_GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT",
         "capture:_GENERATION6_R_NAMESPACE_CAPTURED_S_ISDIR",
+        "capture:_GENERATION6_R_NAMESPACE_CAPTURED_S_ISREG",
         "class:_Generation6RNamespacePhase",
         "class:_Generation6RNamespaceTokenState",
         "class:_Generation6RNamespaceAction",
@@ -15908,6 +17211,8 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "class:_Generation6RNamespaceOwnerPurpose",
         "class:_Generation6RNamespaceContextState",
         "class:_Generation6RNamespaceCloseEvent",
+        "class:_Generation6RNamespaceMutationPermitState",
+        "class:_Generation6RNamespaceTerminalEvent",
         "class:_Generation6RNamespaceDirectoryFact",
         "class:_Generation6RNamespaceNameFact",
         "class:_Generation6RNamespaceDirectoryAuthority",
@@ -15918,19 +17223,23 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "class:_Generation6RNamespacePresentToken",
         "class:_Generation6RNamespaceAbsenceToken",
         "class:_Generation6RNamespaceRenameToken",
+        "class:_Generation6RNamespaceMutationPermit",
         "alias:_Generation6RNamespaceLiveToken",
         "class:_Generation6RNamespaceCapabilityBinding",
         "class:_Generation6RNamespaceCapabilityRecord",
+        "class:_Generation6RNamespaceUnlinkPreproof",
+        "class:_Generation6RNamespaceMutationPermitBinding",
+        "class:_Generation6RNamespaceMutationPermitRecord",
         "class:_Generation6RNamespaceReceipt",
         "class:_Generation6RNamespaceJournal",
     )
     normalized_bundle_source = "\n".join(source.splitlines()[bundle_start - 1 : bundle_end]) + "\n"
-    bundle_domain = b"TASK-064\0GEN6\0R-A1a.1\0source-v1\0"
+    bundle_domain = b"TASK-064\0GEN6\0R-A1b\0source-v1\0"
     bundle_preimage = bundle_domain + normalized_bundle_source.encode("utf-8")
     bundle_digest = hashlib.sha256(bundle_preimage).hexdigest()
     _require(
         bundle_start == 11744
-        and bundle_end == 14729
+        and bundle_end == 15886
         and observed_bundle_inventory == expected_bundle_inventory
         and namespace_bundle_nodes[0]
         is namespace_capture_nodes["_GENERATION6_R_NAMESPACE_REAL_OS_STAT"]
@@ -15940,8 +17249,8 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             and node.end_lineno < namespace_bundle_nodes[index + 1].lineno
             for index, node in enumerate(namespace_bundle_nodes[:-1])
         )
-        and len(bundle_preimage) == 127981
-        and bundle_digest == "1af8e55ac6cc9d04d23ebb425556932d987fac10a306c5e0d9c0e15488a2e408",
+        and len(bundle_preimage) == 184_666
+        and bundle_digest == "9626aa8c7de3b51870250434127c77f66c4eb587406f2acde5ff513135004984",
         "R namespace static reviewed source-bundle digest differs",
     )
     self_aliases_by_method: dict[str, set[str]] = {}
@@ -16039,7 +17348,11 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "authorize_present",
             "authorize_rename",
         ),
-        "self._archive_capability": ("abandon_token", "abandon_token"),
+        "self._archive_capability": (
+            "abandon_token",
+            "abandon_token",
+            "consume_present",
+        ),
         "self._append_receipt": (
             "_close_namespace_owner",
             "_publish_capability",
@@ -16047,6 +17360,9 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "_register_name_fact",
             "abandon_token",
             "abandon_token",
+            "consume_present",
+            "consume_present",
+            "consume_present",
             "seal",
         ),
         "self._begin_publication": (
@@ -16067,6 +17383,35 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "_register_name_fact",
             "seal",
         ),
+        "self._issue_a2_mutation_permit": ("consume_present",),
+        "self._preauthorize_present_unlink": ("consume_present",),
+        "self._postauthorize_present_unlink": ("consume_present",),
+        "self._require_returned_mutation_permit": ("consume_present",),
+        "self._archive_mutation_permit": ("consume_present",),
+        "self._trusted_live_mutation_permit": (
+            "_archive_mutation_permit",
+            "_fail_invalid_mutation_permit",
+            "_require_returned_mutation_permit",
+        ),
+        "self._preproof_parent_authority_matches": (
+            "_postissuer_capability_matches",
+            "_terminal_unlink_capability_matches",
+        ),
+        "self._namespace_owner_close_verified": (
+            "_terminal_unlink_capability_matches",
+            "abandon_token",
+            "authorize_present",
+            "authorize_rename",
+            "close_owned_cursor",
+        ),
+        "self._receipt_binding_matches": (
+            "_require_receipt_binding",
+            "_terminal_unlink_capability_matches",
+            "_terminal_unlink_capability_matches",
+            "_terminal_unlink_capability_matches",
+            "_terminal_unlink_capability_matches",
+        ),
+        "self.consume_present": (),
     }
     _require(
         all(
@@ -16103,6 +17448,11 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "self._capability_records_by_identity",
             "self._live_capability_record",
             "self._archived_capability_records",
+            "self._mutation_permit_records_by_serial",
+            "self._mutation_permit_records_by_identity",
+            "self._live_mutation_permit_record",
+            "self._archived_mutation_permit_records",
+            "self._mutation_issuance_faulted",
             "self._pending_publication",
             "self._poisoned_descriptors",
             "self._namespace_owner_tokens",
@@ -16122,6 +17472,8 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "os.stat is _GENERATION6_R_NAMESPACE_REAL_OS_STAT",
         "os.open is _GENERATION6_R_NAMESPACE_REAL_OS_OPEN",
         "os.fstat is _GENERATION6_R_NAMESPACE_REAL_OS_FSTAT",
+        "os.unlink is _GENERATION6_R_NAMESPACE_REAL_OS_UNLINK",
+        "os.getuid is _GENERATION6_R_NAMESPACE_REAL_OS_GETUID",
         "fcntl.fcntl is _GENERATION6_R_NAMESPACE_REAL_FCNTL",
         "_snapshot_stat is _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT",
         "_snapshot_fd is _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD",
@@ -16131,6 +17483,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "FdOwner.require is _GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE",
         "stat.S_IFMT is _GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT",
         "stat.S_ISDIR is _GENERATION6_R_NAMESPACE_CAPTURED_S_ISDIR",
+        "stat.S_ISREG is _GENERATION6_R_NAMESPACE_CAPTURED_S_ISREG",
     )
     dependency_initializer = dependency_method.body[0]
     dependency_guard_statement = dependency_method.body[1]
@@ -16152,7 +17505,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         == expected_dependency_terms
         and isinstance(dependency_guard_statement.value.args[1], ast.Constant)
         and dependency_guard_statement.value.args[1].value
-        == "R namespace read-only dependency identity differs"
+        == "R namespace dependency identity differs"
         and all(
             dependency_source.count(capture_name) == 1 for capture_name in namespace_capture_values
         ),
@@ -16247,9 +17600,11 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     _require(
         {name: count for name, count in teardown_references.items() if count}
         == {
+            "_postissuer_capability_matches": 1,
             "_require_teardown_authorization": 1,
             "_require_live_capability_slot": 1,
             "_require_live_capability": 1,
+            "_terminal_unlink_capability_matches": 1,
         }
         and not any(
             fragment in name.lower()
@@ -16449,6 +17804,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "R namespace static immutable authority surface differs",
     )
     mutable_record_fields = {
+        "armed_receipt",
         "authority_record",
         "authorization_receipt",
         "capability_record",
@@ -16670,8 +18026,290 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             )
         )
     )
+    a1b_writer_methods = {
+        "_close_namespace_owner",
+        "_fail_present_unlink_preproof",
+        "_fail_invalid_mutation_permit",
+        "_fail_present_unlink_attempt",
+        "_fail_present_unlink_terminal",
+        "consume_present",
+        "close_owned_cursor",
+        "authorize_present",
+        "authorize_rename",
+        "abandon_token",
+    }
+    expected_a1b_mutable_record_writes = tuple(
+        sorted(
+            (
+                (
+                    "_close_namespace_owner",
+                    "accepted_context.state",
+                    "_Generation6RNamespaceContextState.UNCERTAIN",
+                ),
+                ("_close_namespace_owner", "owner_context.close_receipt", "close_receipt"),
+                (
+                    "_close_namespace_owner",
+                    "owner_context.state",
+                    "_Generation6RNamespaceContextState.ATTEMPTED",
+                ),
+                (
+                    "_close_namespace_owner",
+                    "owner_context.state",
+                    "_Generation6RNamespaceContextState.CLOSED",
+                ),
+                (
+                    "_close_namespace_owner",
+                    "capability_record.close_receipt",
+                    "close_receipt",
+                ),
+                (
+                    "_close_namespace_owner",
+                    "capability_record.owner_state",
+                    "_Generation6RNamespaceOwnerState.CLOSED",
+                ),
+                (
+                    "_fail_present_unlink_preproof",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.ATTEMPTED",
+                ),
+                (
+                    "_fail_present_unlink_preproof",
+                    "owner_context.state",
+                    "_Generation6RNamespaceContextState.ATTEMPTED",
+                ),
+                (
+                    "_fail_present_unlink_preproof",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.UNCERTAIN",
+                ),
+                (
+                    "_fail_present_unlink_preproof",
+                    "capability_record.owner_state",
+                    "_Generation6RNamespaceOwnerState.UNCERTAIN",
+                ),
+                (
+                    "_fail_invalid_mutation_permit",
+                    "trusted_permit_record.state",
+                    "_Generation6RNamespaceMutationPermitState.UNCERTAIN",
+                ),
+                (
+                    "_fail_invalid_mutation_permit",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.ATTEMPTED",
+                ),
+                (
+                    "_fail_invalid_mutation_permit",
+                    "owner_context.state",
+                    "_Generation6RNamespaceContextState.ATTEMPTED",
+                ),
+                (
+                    "_fail_invalid_mutation_permit",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.UNCERTAIN",
+                ),
+                (
+                    "_fail_invalid_mutation_permit",
+                    "capability_record.owner_state",
+                    "_Generation6RNamespaceOwnerState.UNCERTAIN",
+                ),
+                (
+                    "_fail_present_unlink_attempt",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.UNCERTAIN",
+                ),
+                (
+                    "_fail_present_unlink_attempt",
+                    "permit_record.state",
+                    "_Generation6RNamespaceMutationPermitState.UNCERTAIN",
+                ),
+                (
+                    "_fail_present_unlink_attempt",
+                    "capability_record.owner_state",
+                    "_Generation6RNamespaceOwnerState.UNCERTAIN",
+                ),
+                (
+                    "_fail_present_unlink_terminal",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.UNCERTAIN",
+                ),
+                (
+                    "_fail_present_unlink_terminal",
+                    "permit_record.state",
+                    "_Generation6RNamespaceMutationPermitState.UNCERTAIN",
+                ),
+                (
+                    "consume_present",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.ATTEMPTED",
+                ),
+                (
+                    "consume_present",
+                    "owner_context.state",
+                    "_Generation6RNamespaceContextState.ATTEMPTED",
+                ),
+                (
+                    "consume_present",
+                    "permit_record.state",
+                    "_Generation6RNamespaceMutationPermitState.ATTEMPTED",
+                ),
+                ("consume_present", "capability_record.armed_receipt", "armed_receipt"),
+                (
+                    "consume_present",
+                    "permit_record.terminal_receipt",
+                    "permit_terminal_receipt",
+                ),
+                (
+                    "consume_present",
+                    "capability_record.terminal_receipt",
+                    "capability_terminal_receipt",
+                ),
+                (
+                    "consume_present",
+                    "permit_record.state",
+                    "_Generation6RNamespaceMutationPermitState.CONSUMED",
+                ),
+                (
+                    "consume_present",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.CONSUMED",
+                ),
+                ("close_owned_cursor", "authority_record.close_receipt", "close_receipt"),
+                (
+                    "close_owned_cursor",
+                    "authority_record.state",
+                    "_Generation6RNamespaceOwnerState.CLOSED",
+                ),
+                (
+                    "close_owned_cursor",
+                    "authority_record.state",
+                    (
+                        "_Generation6RNamespaceOwnerState.CLOSED if "
+                        "self._namespace_owner_close_verified(owner, descriptor_token, "
+                        "owner_context) else _Generation6RNamespaceOwnerState.UNCERTAIN"
+                    ),
+                ),
+                ("authorize_present", "capability_record.close_receipt", "close_receipt"),
+                (
+                    "authorize_present",
+                    "capability_record.owner_state",
+                    "_Generation6RNamespaceOwnerState.CLOSED",
+                ),
+                (
+                    "authorize_present",
+                    "capability_record.owner_state",
+                    "_Generation6RNamespaceOwnerState.UNCERTAIN",
+                ),
+                (
+                    "authorize_present",
+                    "capability_record.owner_state",
+                    (
+                        "_Generation6RNamespaceOwnerState.CLOSED if "
+                        "self._namespace_owner_close_verified(owner, descriptor_token, "
+                        "owner_context) else _Generation6RNamespaceOwnerState.UNCERTAIN"
+                    ),
+                ),
+                (
+                    "authorize_present",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.UNCERTAIN",
+                ),
+                (
+                    "authorize_present",
+                    "owner_context.state",
+                    "_Generation6RNamespaceContextState.UNCERTAIN",
+                ),
+                ("authorize_rename", "capability_record.close_receipt", "close_receipt"),
+                (
+                    "authorize_rename",
+                    "capability_record.owner_state",
+                    "_Generation6RNamespaceOwnerState.CLOSED",
+                ),
+                (
+                    "authorize_rename",
+                    "capability_record.owner_state",
+                    "_Generation6RNamespaceOwnerState.UNCERTAIN",
+                ),
+                (
+                    "authorize_rename",
+                    "capability_record.owner_state",
+                    (
+                        "_Generation6RNamespaceOwnerState.CLOSED if "
+                        "self._namespace_owner_close_verified(owner, descriptor_token, "
+                        "owner_context) else _Generation6RNamespaceOwnerState.UNCERTAIN"
+                    ),
+                ),
+                (
+                    "authorize_rename",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.UNCERTAIN",
+                ),
+                (
+                    "authorize_rename",
+                    "owner_context.state",
+                    "_Generation6RNamespaceContextState.UNCERTAIN",
+                ),
+                ("abandon_token", "capability_record.close_receipt", "close_receipt"),
+                (
+                    "abandon_token",
+                    "capability_record.owner_state",
+                    "_Generation6RNamespaceOwnerState.CLOSED",
+                ),
+                (
+                    "abandon_token",
+                    "capability_record.owner_state",
+                    (
+                        "_Generation6RNamespaceOwnerState.CLOSED if "
+                        "self._namespace_owner_close_verified(path_owner, descriptor_token, "
+                        "owner_context) else _Generation6RNamespaceOwnerState.UNCERTAIN"
+                    ),
+                ),
+                (
+                    "abandon_token",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.ATTEMPTED",
+                ),
+                (
+                    "abandon_token",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.CONSUMED",
+                ),
+                (
+                    "abandon_token",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.CONSUMED",
+                ),
+                (
+                    "abandon_token",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.UNCERTAIN",
+                ),
+                (
+                    "abandon_token",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.UNCERTAIN",
+                ),
+                (
+                    "abandon_token",
+                    "capability_record.state",
+                    "_Generation6RNamespaceTokenState.UNCERTAIN",
+                ),
+                ("abandon_token", "capability_record.terminal_receipt", "terminal_receipt"),
+                ("abandon_token", "capability_record.terminal_receipt", "terminal_receipt"),
+                (
+                    "abandon_token",
+                    "owner_context.state",
+                    "_Generation6RNamespaceContextState.ATTEMPTED",
+                ),
+            )
+        )
+    )
     _require(
-        mutable_record_writes == expected_mutable_record_writes,
+        tuple(write for write in mutable_record_writes if write[0] not in a1b_writer_methods)
+        == tuple(
+            write for write in expected_mutable_record_writes if write[0] not in a1b_writer_methods
+        )
+        and tuple(write for write in mutable_record_writes if write[0] in a1b_writer_methods)
+        == expected_a1b_mutable_record_writes,
         "R namespace static mutable-record writer matrix differs",
     )
 
@@ -16732,6 +18370,9 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     )
 
     protected_registries = {
+        "_mutation_permit_records_by_serial",
+        "_mutation_permit_records_by_identity",
+        "_archived_mutation_permit_records",
         *expected_registry_subscript_stores,
         "_hardlink_groups",
         "_archived_capability_records",
@@ -16835,6 +18476,10 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     expected_direct_registry_method_calls = (
         ("_append_receipt", "self._receipts.append"),
         ("_archive_capability", "self._archived_capability_records.append"),
+        (
+            "_archive_mutation_permit",
+            "self._archived_mutation_permit_records.append",
+        ),
         ("_close_namespace_owner", "self._owner_quarantine.append"),
         ("_close_namespace_owner", "self._poisoned_descriptors.add"),
         ("_reconcile_mount_poison", "self._owner_quarantine.append"),
@@ -16873,8 +18518,9 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         and not registry_alias_assignments
         and not registry_dynamic_access_calls
         and live_slot_store_methods.count("_publish_capability") == 1
+        and live_slot_store_methods.count("consume_present") == 1
         and live_slot_store_methods.count("abandon_token") == 2
-        and len(live_slot_store_methods) == 3
+        and len(live_slot_store_methods) == 4
         and pending_store_methods == ("_begin_publication", "_finish_publication")
         and call_targets(namespace_methods["_register_name_fact"]).count(
             "self._hardlink_groups.setdefault"
@@ -16912,9 +18558,14 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "_Generation6RNamespaceRenameToken",
             ("token",),
         ),
+        "consume_present": ("None", ("None",)),
         "abandon_token": ("None", ("None",)),
     }
     private_type_names = {
+        "_Generation6RNamespaceMutationPermit",
+        "_Generation6RNamespaceMutationPermitBinding",
+        "_Generation6RNamespaceMutationPermitRecord",
+        "_Generation6RNamespaceUnlinkPreproof",
         "_Generation6RNamespaceDirectoryBinding",
         "_Generation6RNamespaceDirectoryRecord",
         "_Generation6RNamespaceOwnerContextBinding",
@@ -16980,6 +18631,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             ("destination_authority", "_Generation6RNamespaceDirectoryAuthority"),
             ("destination_name", "str"),
         ),
+        "consume_present": (("token", "_Generation6RNamespacePresentToken"),),
         "abandon_token": (("token", "_Generation6RNamespaceLiveToken"),),
     }
     for method_name, expected_parameters in public_parameter_contracts.items():
@@ -17400,6 +19052,11 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         name
         for name, method in namespace_methods.items()
         if selected_call_lines(method, "self._namespace_mount_id")
+        and name
+        not in {
+            "_preauthorize_present_unlink",
+            "_postauthorize_present_unlink",
+        }
     }
     reconcile_mount_source = ast.unparse(namespace_methods["_reconcile_mount_poison"])
     mount_transactions = tuple(node for node in mount_wrapper.body if isinstance(node, ast.Try))
@@ -17457,6 +19114,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "R namespace static mount poison reconciliation differs",
     )
     expected_fcntl_callers = {
+        "_preauthorize_present_unlink",
         "_reauthenticate_directory",
         "register_borrowed_directory",
         "open_owned_cursor",
@@ -17471,19 +19129,30 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         for name, method in namespace_methods.items()
         if selected_call_lines(method, "_GENERATION6_R_NAMESPACE_REAL_FCNTL")
     }
+    inherited_fcntl_callers = expected_fcntl_callers - {"_preauthorize_present_unlink"}
+    preauthorize_fcntl_calls = fcntl_calls_by_method.get("_preauthorize_present_unlink", ())
     _require(
         set(fcntl_calls_by_method) == expected_fcntl_callers
         and all(len(method_calls) == 2 for method_calls in fcntl_calls_by_method.values())
         and all(
             len(call.args) == 2 and not call.keywords and ast.unparse(call.args[0]) == "descriptor"
-            for method_calls in fcntl_calls_by_method.values()
-            for call in method_calls
+            for method_name in inherited_fcntl_callers
+            for call in fcntl_calls_by_method.get(method_name, ())
+        )
+        and len(preauthorize_fcntl_calls) == 2
+        and all(
+            len(call.args) == 2
+            and not call.keywords
+            and ast.unparse(call.args[0]) == "target_descriptor"
+            for call in preauthorize_fcntl_calls
         )
         and all(
             tuple(sorted(ast.unparse(call.args[1]) for call in method_calls))
             == ("fcntl.F_GETFD", "fcntl.F_GETFL")
             for method_calls in fcntl_calls_by_method.values()
         )
+        and tuple(ast.unparse(call.args[1]) for call in preauthorize_fcntl_calls)
+        == ("fcntl.F_GETFD", "fcntl.F_GETFL")
         and "F_DUPFD" not in namespace_source,
         "R namespace static exact fcntl authority differs",
     )
@@ -17560,7 +19229,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         close_authorize_line < close_call_line
         and close_owner_method.body[-1] is close_transaction
         and close_positional_parameters == ("self", "owner", "descriptor_token", "owner_context")
-        and close_keyword_parameters == ("capability_record", "event")
+        and close_keyword_parameters == ("capability_record", "event", "issuance_preproof")
         and not close_owner_method.args.vararg
         and not close_owner_method.args.kwarg
         and call_targets(close_transaction).count("self._descriptor_ledger._authorize_live") == 1
@@ -17571,16 +19240,24 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         in close_body_source
         and "self._namespace_owner_contexts.get(owner_identity) is owner_context"
         in close_body_source
-        and "authority_record = owner_context.authority_record" in close_body_source
-        and "authority_serial = authority_record.binding.authority.serial" in close_body_source
+        and (
+            "authority_record = issuance_preproof.authority_record if "
+            "issuance_preproof is not None else owner_context.authority_record"
+        )
+        in close_body_source
+        and (
+            "authority_serial = issuance_preproof.authority.serial if "
+            "issuance_preproof is not None else authority_record.binding.authority.serial"
+        )
+        in close_body_source
         and "capability_binding.owner_context is owner_context" in close_body_source
         and "owner_context.capability_record is capability_record" in close_body_source
         and close_token_binding_line < close_authorize_line
         and "record.state is _Generation6RDescriptorState.CLOSE_SUCCEEDED" in close_body_source
         and close_context_attempted_line < close_call_line
         and "close_verified = True" in close_body_source
-        and close_call_line < close_receipt_line < close_context_receipt_line
-        and close_context_receipt_line < close_context_closed_line
+        and close_call_line < close_context_closed_line < close_receipt_line
+        and close_receipt_line < close_context_receipt_line
         and isinstance(close_transaction.body[-1], ast.Return)
         and isinstance(close_transaction.body[-1].value, ast.Name)
         and close_transaction.body[-1].value.id == "close_receipt"
@@ -17647,6 +19324,16 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "authorize_present": ("_Generation6RNamespaceCloseEvent.PRESENT_TOKEN_ABORT_CLOSED",),
         "authorize_rename": ("_Generation6RNamespaceCloseEvent.RENAME_TOKEN_ABORT_CLOSED",),
         "abandon_token": ("_Generation6RNamespaceCloseEvent.MUTATION_TOKEN_HANDLE_CLOSED",),
+        "_fail_present_unlink_preproof": (
+            "_Generation6RNamespaceCloseEvent.MUTATION_TOKEN_HANDLE_CLOSED",
+        ),
+        "_fail_invalid_mutation_permit": (
+            "_Generation6RNamespaceCloseEvent.MUTATION_TOKEN_HANDLE_CLOSED",
+        ),
+        "_fail_present_unlink_attempt": (
+            "_Generation6RNamespaceCloseEvent.MUTATION_TOKEN_HANDLE_CLOSED",
+        ),
+        "consume_present": ("_Generation6RNamespaceCloseEvent.MUTATION_TOKEN_HANDLE_CLOSED",),
     }
     observed_close_events_by_caller = {
         name: tuple(
@@ -17664,14 +19351,30 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     sealed_token_none_lines = assignment_lines(seal_name_method, "descriptor_token", "None")
     sealed_context_none_lines = assignment_lines(seal_name_method, "owner_context", "None")
     _require(
-        len(namespace_close_calls) == 8
+        len(namespace_close_calls) == 12
         and observed_close_events_by_caller == expected_close_events_by_caller
         and all(
             len(call.args) == 3
-            and tuple(keyword.arg for keyword in call.keywords) == ("capability_record", "event")
+            and tuple(keyword.arg for keyword in call.keywords)
+            == (
+                ("capability_record", "event", "issuance_preproof")
+                if name == "_fail_invalid_mutation_permit"
+                else ("capability_record", "event")
+            )
             and "context" in ast.unparse(call.args[2])
             and ast.unparse(call.keywords[0].value)
-            == ("capability_record" if name == "abandon_token" else "None")
+            == (
+                "capability_record"
+                if name
+                in {
+                    "abandon_token",
+                    "_fail_present_unlink_preproof",
+                    "_fail_invalid_mutation_permit",
+                    "_fail_present_unlink_attempt",
+                    "consume_present",
+                }
+                else "None"
+            )
             for name, caller_calls in close_calls_by_caller.items()
             for call in caller_calls
         )
@@ -18076,20 +19779,23 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         )
 
     receipt_binding_source = ast.unparse(namespace_methods["_require_receipt_binding"])
+    receipt_matcher_source = ast.unparse(namespace_methods["_receipt_binding_matches"])
     archive_method = namespace_methods["_archive_capability"]
     archive_source = ast.unparse(archive_method)
     _require(
-        "any(candidate is exact_receipt for candidate in self._receipts)" in receipt_binding_source
-        and "exact_receipt.token_serial == token_serial" in receipt_binding_source
-        and "exact_receipt.authority_serial == authority_serial" in receipt_binding_source
-        and "exact_receipt.event == event" in receipt_binding_source
+        "self._receipt_binding_matches" in receipt_binding_source
+        and "any(candidate is receipt for candidate in self._receipts)" in receipt_matcher_source
+        and "receipt.token_serial == token_serial" in receipt_matcher_source
+        and "receipt.authority_serial == authority_serial" in receipt_matcher_source
+        and "receipt.event == event" in receipt_matcher_source
         and "self._capability_records_by_identity.get(id(binding.token)) is capability_record"
         in archive_source
         and "self._capability_records_by_serial.get(binding.token_serial) is capability_record"
         in archive_source
         and "capability_record.state is _Generation6RNamespaceTokenState.ATTEMPTED"
         in archive_source
-        and call_targets(archive_method).count("self._require_receipt_binding") == 2
+        and call_targets(archive_method).count("self._require_receipt_binding") == 3
+        and "type(event) is _Generation6RNamespaceTerminalEvent" in archive_source
         and "owner_context.state is _Generation6RNamespaceContextState.CLOSED" in archive_source
         and "owner_context.capability_record is capability_record" in archive_source
         and "owner_context.close_receipt is capability_record.close_receipt" in archive_source
@@ -18412,6 +20118,23 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         if (isinstance(call.func, ast.Attribute) and call.func.attr in destructive_call_attributes)
         or ast.unparse(call.func) in {"open", "io.open"}
     )
+    approved_unlink_calls = tuple(
+        call
+        for call in calls(namespace_journal)
+        if ast.unparse(call.func) == "_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK"
+    )
+    _require(
+        len(approved_unlink_calls) == 1
+        and approved_unlink_calls[0] in tuple(ast.walk(namespace_methods["consume_present"]))
+        and tuple(ast.unparse(argument) for argument in approved_unlink_calls[0].args)
+        == ("binding.name",)
+        and tuple(
+            (keyword.arg, ast.unparse(keyword.value))
+            for keyword in approved_unlink_calls[0].keywords
+        )
+        == (("dir_fd", "preproof.parent_descriptor"),),
+        "R namespace static sole captured unlink allowance differs",
+    )
     sensitive_descriptor_attributes = {
         "close",
         "close_once",
@@ -18530,6 +20253,795 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     )
 
     namespace_constructor_names = set(namespace_class_names)
+
+    def assignment_values(
+        node: ast.AST,
+        target_source: str,
+    ) -> tuple[tuple[int, str], ...]:
+        result: list[tuple[int, str]] = []
+        for candidate in ast.walk(node):
+            targets: tuple[ast.expr, ...]
+            value: ast.expr | None
+            if isinstance(candidate, ast.Assign):
+                targets = tuple(candidate.targets)
+                value = candidate.value
+            elif isinstance(candidate, (ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+                targets = (candidate.target,)
+                value = candidate.value
+            else:
+                continue
+            if value is not None and any(
+                ast.unparse(target) == target_source for target in targets
+            ):
+                result.append((candidate.lineno, ast.unparse(value)))
+        return tuple(sorted(result))
+
+    def a1b_selected_call_lines(node: ast.AST, target: str) -> tuple[int, ...]:
+        return tuple(
+            sorted(call.lineno for call in calls(node) if ast.unparse(call.func) == target)
+        )
+
+    def exact_callers(target: str) -> tuple[str, ...]:
+        return tuple(
+            method_name
+            for method_name, method in namespace_methods.items()
+            for call in calls(method)
+            if ast.unparse(call.func) == f"self.{target}"
+        )
+
+    namespace_calls = tuple(call for method in namespace_methods.values() for call in calls(method))
+    permit_constructor_names = {
+        "_Generation6RNamespaceMutationPermit",
+        "_Generation6RNamespaceMutationPermitBinding",
+        "_Generation6RNamespaceMutationPermitRecord",
+    }
+    permit_constructor_calls = tuple(
+        ast.unparse(call.func)
+        for call in namespace_calls
+        if ast.unparse(call.func) in permit_constructor_names
+    )
+    permit_index_names = {
+        "self._mutation_permit_records_by_serial",
+        "self._mutation_permit_records_by_identity",
+    }
+    permit_index_writes = tuple(
+        (method_name, ast.unparse(node))
+        for method_name, method in namespace_methods.items()
+        for node in ast.walk(method)
+        if isinstance(node, ast.Subscript)
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+        and ast.unparse(node.value) in permit_index_names
+    )
+    permit_index_mutators = tuple(
+        (method_name, ast.unparse(call))
+        for method_name, method in namespace_methods.items()
+        for call in calls(method)
+        if isinstance(call.func, ast.Attribute)
+        and ast.unparse(call.func.value) in permit_index_names
+        and call.func.attr in {"clear", "pop", "popitem", "setdefault", "update", "__setitem__"}
+    )
+    live_permit_assignments = tuple(
+        (method_name, value)
+        for method_name, method in namespace_methods.items()
+        for _, value in assignment_values(method, "self._live_mutation_permit_record")
+    )
+    permit_archive_appends = tuple(
+        method_name
+        for method_name, method in namespace_methods.items()
+        for call in calls(method)
+        if ast.unparse(call.func) == "self._archived_mutation_permit_records.append"
+    )
+    issuance_fault_assignments = tuple(
+        (method_name, value)
+        for method_name, method in namespace_methods.items()
+        for _, value in assignment_values(method, "self._mutation_issuance_faulted")
+    )
+    _require(
+        not permit_constructor_calls
+        and not permit_index_writes
+        and not permit_index_mutators
+        and live_permit_assignments == (("__init__", "None"), ("consume_present", "None"))
+        and permit_archive_appends == ("_archive_mutation_permit",)
+        and issuance_fault_assignments
+        == (("__init__", "False"), ("_fail_invalid_mutation_permit", "True")),
+        "R namespace A1b inert permit authority differs",
+    )
+
+    expected_critical_callers = {
+        "_issue_a2_mutation_permit": ("consume_present",),
+        "_preauthorize_present_unlink": ("consume_present",),
+        "_postauthorize_present_unlink": ("consume_present",),
+        "_require_returned_mutation_permit": ("consume_present",),
+        "_archive_mutation_permit": ("consume_present",),
+        "_trusted_live_mutation_permit": (
+            "_require_returned_mutation_permit",
+            "_fail_invalid_mutation_permit",
+            "_archive_mutation_permit",
+        ),
+        "_preproof_parent_authority_matches": (
+            "_postissuer_capability_matches",
+            "_terminal_unlink_capability_matches",
+        ),
+        "_namespace_owner_close_verified": (
+            "close_owned_cursor",
+            "_terminal_unlink_capability_matches",
+            "authorize_present",
+            "authorize_rename",
+            "abandon_token",
+        ),
+        "_archive_capability": (
+            "consume_present",
+            "abandon_token",
+            "abandon_token",
+        ),
+    }
+    _require(
+        all(exact_callers(name) == callers for name, callers in expected_critical_callers.items()),
+        "R namespace A1b critical caller graph differs",
+    )
+
+    preauthorize = namespace_methods["_preauthorize_present_unlink"]
+    preauthorize_source = ast.unparse(preauthorize)
+    preauthorize_targets = call_targets(preauthorize)
+    preauthorize_writes = tuple(
+        ast.unparse(node)
+        for node in ast.walk(preauthorize)
+        if (isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)))
+        or (isinstance(node, ast.Subscript) and isinstance(node.ctx, (ast.Store, ast.Del)))
+    )
+    _require(
+        not preauthorize_writes
+        and preauthorize_targets.count("self._reauthenticate_directory") == 2
+        and preauthorize_targets.count("self._descriptor_ledger._authorize_live") == 1
+        and preauthorize_targets.count("_GENERATION6_R_NAMESPACE_REAL_OS_STAT") == 1
+        and preauthorize_targets.count("_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT") == 1
+        and preauthorize_targets.count("_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD") == 1
+        and preauthorize_targets.count("_GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE") == 1
+        and preauthorize_targets.count("_GENERATION6_R_NAMESPACE_REAL_OS_GETUID") == 1
+        and preauthorize_targets.count("_GENERATION6_R_NAMESPACE_REAL_FCNTL") == 2
+        and preauthorize_targets.count("self._namespace_mount_id") == 1
+        and preauthorize_targets.count("self._require_same_parent_proof") == 1
+        and preauthorize_targets.count("self._name_fact_matches") == 1
+        and preauthorize_targets.count("_GENERATION6_R_NAMESPACE_CAPTURED_S_ISREG") == 1
+        and preauthorize_targets.count("_GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT") == 1
+        and preauthorize_targets.count("_Generation6RNamespaceUnlinkPreproof") == 1
+        and all(
+            fragment in preauthorize_source
+            for fragment in (
+                "type(token) is _Generation6RNamespacePresentToken",
+                "binding.action is _Generation6RNamespaceAction.UNLINK",
+                "fact.kind is _Generation6RNamespaceNodeKind.REGULAR",
+                "fact.link_count == 1",
+                "fact.hardlink_group is None",
+                "self._live_mutation_permit_record is None",
+                "not self._mutation_issuance_faulted",
+                "follow_symlinks=False",
+                "target_descriptor != parent_descriptor",
+                "named_snapshot == target_snapshot",
+                "exact_fact.link_count == target_snapshot.link_count == 1",
+                "parent_after.uid == current_uid",
+                "target_snapshot.uid == current_uid",
+                "target_snapshot.mode & SPECIAL_PERMISSION_BITS == 0",
+                "target_status_flags & os.O_PATH == os.O_PATH",
+            )
+        )
+        and "self._append_receipt" not in preauthorize_targets
+        and "self._issue_serial" not in preauthorize_targets
+        and "self._close_namespace_owner" not in preauthorize_targets
+        and "_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK" not in preauthorize_targets,
+        "R namespace A1b pure unlink preproof differs",
+    )
+
+    postauthorize = namespace_methods["_postauthorize_present_unlink"]
+    postauthorize_source = ast.unparse(postauthorize)
+    postauthorize_targets = call_targets(postauthorize)
+    _require(
+        postauthorize_targets.count("_GENERATION6_R_NAMESPACE_REAL_OS_STAT") == 1
+        and postauthorize_targets.count("self._descriptor_ledger._authorize_live") == 1
+        and postauthorize_targets.count("_GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE") == 1
+        and postauthorize_targets.count("_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD") == 1
+        and postauthorize_targets.count("self._namespace_mount_id") == 1
+        and postauthorize_targets.count("self._reauthenticate_directory") == 1
+        and postauthorize_targets.count(
+            "_GENERATION6_R_NAMESPACE_CAPTURED_STABLE_DIRECTORY_MATCHES"
+        )
+        == 1
+        and postauthorize_targets.count("_GENERATION6_R_NAMESPACE_CAPTURED_S_ISREG") == 1
+        and postauthorize_targets.count("_GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT") == 1
+        and "except OSError as error" in postauthorize_source
+        and "type(error.errno) is int and error.errno == errno.ENOENT" in postauthorize_source
+        and "parent_after.link_count == parent_before.link_count" in postauthorize_source
+        and "target_before.link_count == 1" in postauthorize_source
+        and "target_after.device == target_before.device" in postauthorize_source
+        and "target_after.inode == target_before.inode" in postauthorize_source
+        and "target_after.uid == target_before.uid" in postauthorize_source
+        and "target_after.mode == target_before.mode" in postauthorize_source
+        and "target_after.link_count == 0" in postauthorize_source
+        and "target_mount_after == preproof.target_mount_id" in postauthorize_source
+        and "self._name_fact_matches" not in postauthorize_targets
+        and "_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK" not in postauthorize_targets,
+        "R namespace A1b exact unlink postproof differs",
+    )
+
+    permit_issuer = namespace_methods["_issue_a2_mutation_permit"]
+    _require(
+        len(permit_issuer.body) == 1
+        and isinstance(permit_issuer.body[0], ast.Raise)
+        and ast.unparse(permit_issuer.body[0])
+        == "raise ContractError('R namespace A2 mutation permit authority is blocked')"
+        and assignment_values(permit_issuer, "self._next_serial") == (),
+        "R namespace A1b blocked A2 issuer differs",
+    )
+
+    parent_match_source = ast.unparse(namespace_methods["_preproof_parent_authority_matches"])
+    postissuer_source = ast.unparse(namespace_methods["_postissuer_capability_matches"])
+    terminal_match_source = ast.unparse(namespace_methods["_terminal_unlink_capability_matches"])
+    trusted_permit = namespace_methods["_trusted_live_mutation_permit"]
+    trusted_source = ast.unparse(trusted_permit)
+    returned_permit = namespace_methods["_require_returned_mutation_permit"]
+    returned_source = ast.unparse(returned_permit)
+    _require(
+        all(
+            fragment in parent_match_source
+            for fragment in (
+                "type(preproof) is not _Generation6RNamespaceUnlinkPreproof",
+                "authority_record.binding is not parent_binding",
+                "self._authority_records_by_identity.get(id(authority)) is authority_record",
+                "self._authority_records_by_serial.get(authority.serial) is authority_record",
+                "authority_record.state is _Generation6RNamespaceOwnerState.LIVE",
+                "authority_record.close_receipt is None",
+                "self._descriptor_ledger._records_by_owner_identity.get",
+                "self._descriptor_ledger._records_by_ordinal.get",
+                "self._descriptor_ledger._current_by_descriptor.get",
+                "self._descriptor_ledger._generation_by_descriptor.get",
+            )
+        )
+        and all(
+            fragment in postissuer_source
+            for fragment in (
+                "self._live_capability_record is capability_record",
+                "preproof.capability_record is capability_record",
+                "capability_record.state is _Generation6RNamespaceTokenState.AUTHORIZED",
+                "owner_context.state is _Generation6RNamespaceContextState.TRANSFERRED",
+                "descriptor_record.state is _Generation6RDescriptorState.LIVE",
+                "authorization_receipt.event == 'PRESENT_TOKEN_AUTHORIZED'",
+            )
+        )
+        and all(
+            fragment in terminal_match_source
+            for fragment in (
+                "capability_record.state is _Generation6RNamespaceTokenState.ATTEMPTED",
+                "capability_record.owner_state is _Generation6RNamespaceOwnerState.CLOSED",
+                "owner_context.state is _Generation6RNamespaceContextState.CLOSED",
+                "self._namespace_owner_close_verified",
+                "event='PRESENT_UNLINK_ARMED'",
+                "event='MUTATION_TOKEN_HANDLE_CLOSED'",
+                "_Generation6RNamespaceTerminalEvent.PRESENT_UNLINK_CONSUMED.value",
+            )
+        )
+        and trusted_source.index("live_record = self._live_mutation_permit_record")
+        < trusted_source.index("binding = live_record.binding")
+        < trusted_source.index("permit = binding.permit")
+        and all(
+            fragment in trusted_source
+            for fragment in (
+                "live_record.state is expected_state",
+                "binding.permit is permit",
+                "binding.permit_serial == permit.serial",
+                "binding.permit_issuer_identity == permit.issuer_identity",
+                "self._mutation_permit_records_by_identity.get(permit_identity) is live_record",
+                (
+                    "self._mutation_permit_records_by_serial.get(binding.permit_serial) "
+                    "is live_record"
+                ),
+                "binding.capability_record is capability_record",
+                "binding.capability_binding is capability_binding",
+                "binding.capability_token is preproof.token",
+                "binding.action is _Generation6RNamespaceAction.UNLINK",
+                "binding.name == preproof.name == capability_binding.name",
+                "binding.authority is preproof.authority",
+                "binding.authority_record is preproof.authority_record",
+                "binding.preproof is preproof",
+                "binding.preproof_identity == id(preproof)",
+                "authorization_receipt.event == 'MUTATION_PERMIT_AUTHORIZED'",
+            )
+        )
+        and ".get(permit.serial)" not in trusted_source
+        and returned_source.index("self._trusted_live_mutation_permit")
+        < returned_source.index("_require(")
+        and "trusted_record.binding.permit is permit" in returned_source
+        and "trusted_record.binding.permit_serial == permit.serial" in returned_source
+        and "trusted_record.binding.permit_issuer_identity == permit.issuer_identity"
+        in returned_source
+        and not any(
+            isinstance(node, (ast.Attribute, ast.Subscript))
+            and isinstance(node.ctx, (ast.Store, ast.Del))
+            for node in ast.walk(returned_permit)
+        ),
+        "R namespace A1b returned-permit trust proof differs",
+    )
+
+    failure_method_names = (
+        "_fail_present_unlink_preproof",
+        "_fail_invalid_mutation_permit",
+        "_fail_present_unlink_attempt",
+        "_fail_present_unlink_terminal",
+    )
+    failure_methods = tuple(namespace_methods[name] for name in failure_method_names)
+    failure_close_counts = tuple(
+        call_targets(method).count("self._close_namespace_owner") for method in failure_methods
+    )
+    failure_sources = {name: ast.unparse(namespace_methods[name]) for name in failure_method_names}
+    invalid_close_calls = tuple(
+        call
+        for call in calls(namespace_methods["_fail_invalid_mutation_permit"])
+        if ast.unparse(call.func) == "self._close_namespace_owner"
+    )
+    attempt_if_tests = tuple(
+        ast.unparse(node.test)
+        for node in namespace_methods["_fail_present_unlink_attempt"].body
+        if isinstance(node, ast.If)
+    )
+    _require(
+        failure_close_counts == (1, 1, 1, 0)
+        and all(
+            "_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK" not in call_targets(method)
+            and "self._append_receipt" not in call_targets(method)
+            and "self._archive_capability" not in call_targets(method)
+            and "self._archive_mutation_permit" not in call_targets(method)
+            for method in failure_methods
+        )
+        and "capability_record.state = _Generation6RNamespaceTokenState.ATTEMPTED"
+        in failure_sources["_fail_present_unlink_preproof"]
+        and "owner_context.state = _Generation6RNamespaceContextState.ATTEMPTED"
+        in failure_sources["_fail_present_unlink_preproof"]
+        and "self._mutation_issuance_faulted = True"
+        in failure_sources["_fail_invalid_mutation_permit"]
+        and "trusted_permit_record.state = _Generation6RNamespaceMutationPermitState.UNCERTAIN"
+        in failure_sources["_fail_invalid_mutation_permit"]
+        and len(invalid_close_calls) == 1
+        and tuple(
+            (keyword.arg, ast.unparse(keyword.value)) for keyword in invalid_close_calls[0].keywords
+        )[-1]
+        == ("issuance_preproof", "preproof")
+        and "not close_started" in attempt_if_tests
+        and "owner_context.state is not _Generation6RNamespaceContextState.CLOSED"
+        in failure_sources["_fail_present_unlink_attempt"]
+        and "_close_namespace_owner" not in failure_sources["_fail_present_unlink_terminal"],
+        "R namespace A1b unlink failure topology differs",
+    )
+
+    close_owner = namespace_methods["_close_namespace_owner"]
+    close_source = ast.unparse(close_owner)
+    physical_close_lines = a1b_selected_call_lines(
+        close_owner, "self._descriptor_ledger.close_owner_once"
+    )
+    close_receipt_lines = a1b_selected_call_lines(close_owner, "self._append_receipt")
+    close_verified_true = assignment_values(close_owner, "close_verified")
+    context_closed = assignment_values(close_owner, "owner_context.state")
+    owner_closed = assignment_values(close_owner, "capability_record.owner_state")
+    context_receipt = assignment_values(close_owner, "owner_context.close_receipt")
+    capability_close_receipt = assignment_values(close_owner, "capability_record.close_receipt")
+    close_guard_nodes = tuple(
+        node
+        for node in ast.walk(close_owner)
+        if isinstance(node, ast.If) and ast.unparse(node.test) == "not close_verified"
+    )
+    close_verified_helper = namespace_methods["_namespace_owner_close_verified"]
+    close_verified_source = ast.unparse(close_verified_helper)
+    _require(
+        len(physical_close_lines) == len(close_receipt_lines) == 1
+        and close_verified_true[0][1] == "False"
+        and close_verified_true[-1][1] == "True"
+        and physical_close_lines[0] < close_verified_true[-1][0]
+        and close_verified_true[-1][0]
+        < next(
+            line
+            for line, value in context_closed
+            if value == "_Generation6RNamespaceContextState.CLOSED"
+        )
+        < next(
+            line
+            for line, value in owner_closed
+            if value == "_Generation6RNamespaceOwnerState.CLOSED"
+        )
+        < close_receipt_lines[0]
+        < context_receipt[0][0]
+        < capability_close_receipt[0][0]
+        and len(close_guard_nodes) == 1
+        and all(
+            fragment in ast.unparse(close_guard_nodes[0])
+            for fragment in (
+                "accepted_context.state = _Generation6RNamespaceContextState.UNCERTAIN",
+                "self._owner_quarantine.append(owner)",
+                "self._poisoned_descriptors.add(descriptor)",
+                "else:",
+                "owner_context.state is _Generation6RNamespaceContextState.CLOSED",
+                "capability_record.owner_state is _Generation6RNamespaceOwnerState.CLOSED",
+            )
+        )
+        and all(
+            fragment in close_source
+            for fragment in (
+                "close_verified = True",
+                "record.state is _Generation6RDescriptorState.CLOSE_SUCCEEDED",
+                "record.close_attempts == 1",
+                "owner.terminal",
+                "owner.descriptor == -1",
+                (
+                    "authority_serial = issuance_preproof.authority.serial "
+                    "if issuance_preproof is not None"
+                ),
+            )
+        )
+        and all(
+            fragment in close_verified_source
+            for fragment in (
+                "type(owner) is not FdOwner",
+                "self._namespace_owner_contexts.get(owner_identity) is owner_context",
+                "self._namespace_owner_tokens.get(owner_identity) is descriptor_token",
+                "record.state is _Generation6RDescriptorState.CLOSE_SUCCEEDED",
+                "record.close_attempts == 1",
+                "owner_context.state is _Generation6RNamespaceContextState.CLOSED",
+            )
+        )
+        and call_targets(namespace_journal).count("self._descriptor_ledger.close_owner_once") == 1,
+        "R namespace A1b verified-close ordering differs",
+    )
+
+    receipt_matcher = namespace_methods["_receipt_binding_matches"]
+    receipt_matcher_source = ast.unparse(receipt_matcher)
+    require_receipt = namespace_methods["_require_receipt_binding"]
+    _require(
+        all(
+            fragment in receipt_matcher_source
+            for fragment in (
+                "type(receipt) is not _Generation6RNamespaceReceipt",
+                "receipt.issuer_identity == self._issuer_identity",
+                "receipt.token_serial == token_serial",
+                "receipt.authority_serial == authority_serial",
+                "receipt.event == event",
+                "candidate is receipt for candidate in self._receipts",
+            )
+        )
+        and call_targets(require_receipt).count("self._receipt_binding_matches") == 1,
+        "R namespace A1b receipt proof differs",
+    )
+
+    consume_present = namespace_methods["consume_present"]
+    consume_source = ast.unparse(consume_present)
+    consume_tries = tuple(node for node in consume_present.body if isinstance(node, ast.Try))
+    issuer_calls = tuple(
+        call
+        for call in calls(consume_present)
+        if ast.unparse(call.func) == "self._issue_a2_mutation_permit"
+    )
+    unlink_calls = tuple(
+        call
+        for call in namespace_calls
+        if ast.unparse(call.func) == "_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK"
+    )
+    consume_append_calls = tuple(
+        ast.unparse(call)
+        for call in calls(consume_present)
+        if ast.unparse(call.func) == "self._append_receipt"
+    )
+    consume_close_lines = a1b_selected_call_lines(consume_present, "self._close_namespace_owner")
+    consume_archive_permit_lines = a1b_selected_call_lines(
+        consume_present, "self._archive_mutation_permit"
+    )
+    consume_archive_capability_lines = a1b_selected_call_lines(
+        consume_present, "self._archive_capability"
+    )
+    consume_unlink_lines = a1b_selected_call_lines(
+        consume_present, "_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK"
+    )
+    consume_postproof_lines = a1b_selected_call_lines(
+        consume_present, "self._postauthorize_present_unlink"
+    )
+    cap_attempted = assignment_values(consume_present, "capability_record.state")
+    context_attempted = assignment_values(consume_present, "owner_context.state")
+    permit_states = assignment_values(consume_present, "permit_record.state")
+    armed_assignments = assignment_values(consume_present, "capability_record.armed_receipt")
+    permit_terminal_assignments = assignment_values(
+        consume_present, "permit_record.terminal_receipt"
+    )
+    capability_terminal_assignments = assignment_values(
+        consume_present, "capability_record.terminal_receipt"
+    )
+    permit_slot_clear = assignment_values(consume_present, "self._live_mutation_permit_record")
+    capability_slot_clear = assignment_values(consume_present, "self._live_capability_record")
+    _require(
+        len(consume_tries) == 4
+        and len(issuer_calls) == 1
+        and not any(issuer_calls[0] in tuple(ast.walk(try_node)) for try_node in consume_tries)
+        and a1b_selected_call_lines(consume_present, "self._preauthorize_present_unlink")[0]
+        < issuer_calls[0].lineno
+        < a1b_selected_call_lines(consume_present, "self._require_returned_mutation_permit")[0]
+        and len(unlink_calls) == 1
+        and unlink_calls[0] in tuple(ast.walk(consume_present))
+        and tuple(ast.unparse(argument) for argument in unlink_calls[0].args) == ("binding.name",)
+        and tuple((keyword.arg, ast.unparse(keyword.value)) for keyword in unlink_calls[0].keywords)
+        == (("dir_fd", "preproof.parent_descriptor"),)
+        and not any(
+            isinstance(node, (ast.For, ast.AsyncFor, ast.While))
+            for node in ast.walk(consume_present)
+        )
+        and call_targets(consume_present).count("self.consume_present") == 0
+        and exact_callers("consume_present") == ()
+        and tuple(value for _, value in cap_attempted)
+        == (
+            "_Generation6RNamespaceTokenState.ATTEMPTED",
+            "_Generation6RNamespaceTokenState.CONSUMED",
+        )
+        and tuple(value for _, value in context_attempted)
+        == ("_Generation6RNamespaceContextState.ATTEMPTED",)
+        and tuple(value for _, value in permit_states)
+        == (
+            "_Generation6RNamespaceMutationPermitState.ATTEMPTED",
+            "_Generation6RNamespaceMutationPermitState.CONSUMED",
+        )
+        and len(consume_append_calls) == 3
+        and "event='PRESENT_UNLINK_ARMED'" in consume_append_calls[0]
+        and "token_serial=permit.serial" in consume_append_calls[1]
+        and "event='MUTATION_PERMIT_CONSUMED'" in consume_append_calls[1]
+        and "token_serial=binding.token_serial" in consume_append_calls[2]
+        and ("event=_Generation6RNamespaceTerminalEvent.PRESENT_UNLINK_CONSUMED.value")
+        in consume_append_calls[2]
+        and tuple(value for _, value in armed_assignments) == ("armed_receipt",)
+        and len(consume_unlink_lines)
+        == len(consume_postproof_lines)
+        == len(consume_close_lines)
+        == 1
+        and armed_assignments[0][0]
+        < consume_unlink_lines[0]
+        < consume_postproof_lines[0]
+        < consume_close_lines[0]
+        < permit_terminal_assignments[0][0]
+        < capability_terminal_assignments[0][0]
+        < consume_archive_permit_lines[0]
+        < consume_archive_capability_lines[0]
+        < permit_states[-1][0]
+        < cap_attempted[-1][0]
+        < permit_slot_clear[0][0]
+        < capability_slot_clear[0][0]
+        and tuple(value for _, value in permit_slot_clear) == ("None",)
+        and tuple(value for _, value in capability_slot_clear) == ("None",)
+        and "_require(unlink_result is None" in consume_source
+        and "errno.ENOENT" not in ast.unparse(consume_tries[2])
+        and ast.unparse(consume_present.body[-1]) == "return None",
+        "R namespace A1b one-shot unlink consumer ordering differs",
+    )
+
+    archive_permit = namespace_methods["_archive_mutation_permit"]
+    archive_permit_source = ast.unparse(archive_permit)
+    archive_capability = namespace_methods["_archive_capability"]
+    archive_capability_source = ast.unparse(archive_capability)
+    _require(
+        call_targets(archive_permit).count("self._trusted_live_mutation_permit") == 1
+        and "expected_state=_Generation6RNamespaceMutationPermitState.ATTEMPTED"
+        in archive_permit_source
+        and call_targets(archive_permit).count("self._require_receipt_binding") == 3
+        and call_targets(archive_permit).count("self._archived_mutation_permit_records.append") == 1
+        and all(
+            fragment in archive_capability_source
+            for fragment in (
+                "type(event) is _Generation6RNamespaceTerminalEvent",
+                "_Generation6RNamespaceTerminalEvent.ABSENCE_TOKEN_ABANDONED",
+                "_Generation6RNamespaceTerminalEvent.MUTATION_TOKEN_ABANDONED",
+                "_Generation6RNamespaceTerminalEvent.PRESENT_UNLINK_CONSUMED",
+                "capability_record.armed_receipt is None",
+                "binding.fact.kind is _Generation6RNamespaceNodeKind.REGULAR",
+                "self._archived_capability_records.append(capability_record)",
+            )
+        )
+        and call_targets(archive_capability).count("self._require_receipt_binding") == 3,
+        "R namespace A1b typed archive proof differs",
+    )
+
+    authorize_present = namespace_methods["authorize_present"]
+    authorize_present_source = ast.unparse(authorize_present)
+    present_direct_calls = tuple(
+        ast.unparse(node.value.func)
+        for node in authorize_present.body[:3]
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+    )
+    _require(
+        present_direct_calls
+        == (
+            "self._require_teardown_authorization",
+            "self._require_name_fact",
+            "_require",
+        )
+        and (
+            "action is _Generation6RNamespaceAction.RMDIR and "
+            "fact.kind is _Generation6RNamespaceNodeKind.DIRECTORY or "
+            "(action is _Generation6RNamespaceAction.UNLINK and "
+            "fact.kind is _Generation6RNamespaceNodeKind.REGULAR)"
+        )
+        in authorize_present_source
+        and "fact.kind is not _Generation6RNamespaceNodeKind.DIRECTORY"
+        not in authorize_present_source
+        and call_targets(namespace_methods["authorize_absence"]).count(
+            "_Generation6RNamespaceAbsenceToken"
+        )
+        == 1
+        and call_targets(namespace_methods["authorize_rename"]).count(
+            "_Generation6RNamespaceRenameToken"
+        )
+        == 1
+        and "consume_absence" not in namespace_method_inventory
+        and "consume_rename" not in namespace_method_inventory
+        and "consume_rmdir" not in namespace_method_inventory,
+        "R namespace A1b preserved authorization predicates differ",
+    )
+
+    phase_assignments = tuple(
+        (method_name, value)
+        for method_name, method in namespace_methods.items()
+        for _, value in assignment_values(method, "self._phase")
+    )
+    _require(
+        bool(phase_assignments)
+        and all(
+            value
+            in {
+                "_Generation6RNamespacePhase.BUILDING",
+                "_Generation6RNamespacePhase.SEALED",
+                "_Generation6RNamespacePhase.UNCERTAIN",
+            }
+            for _, value in phase_assignments
+        )
+        and not any("TEARDOWN_ACTIVE" in value for _, value in phase_assignments),
+        "R namespace A1b phase remains integration-blocked",
+    )
+
+    a2_budget_readiness = False
+    a2_budget_prerequisites = (
+        "strong-budget-record",
+        "strong-budget-epoch",
+        "scan-attempt-metering",
+        "yield-metering",
+        "nofollow-stat-attempt-metering",
+        "open-attempt-metering",
+        "fstat-attempt-metering",
+        "mount-attempt-metering",
+        "time-sample-metering",
+        "preproof-attempt-metering",
+        "postproof-attempt-metering",
+        "unlink-attempt-metering",
+    )
+    a2_rmdir_readiness = False
+    a2_rmdir_prerequisites = (
+        "authenticated-empty-inventory",
+        "current-inventory-cursor",
+    )
+    _require(
+        type(a2_budget_readiness) is bool
+        and not a2_budget_readiness
+        and a2_budget_prerequisites
+        == (
+            "strong-budget-record",
+            "strong-budget-epoch",
+            "scan-attempt-metering",
+            "yield-metering",
+            "nofollow-stat-attempt-metering",
+            "open-attempt-metering",
+            "fstat-attempt-metering",
+            "mount-attempt-metering",
+            "time-sample-metering",
+            "preproof-attempt-metering",
+            "postproof-attempt-metering",
+            "unlink-attempt-metering",
+        )
+        and type(a2_rmdir_readiness) is bool
+        and not a2_rmdir_readiness
+        and a2_rmdir_prerequisites
+        == (
+            "authenticated-empty-inventory",
+            "current-inventory-cursor",
+        )
+        and all(
+            fragment not in namespace_source
+            for fragment in (
+                "_Generation6RNamespaceBudgetRecord",
+                "_Generation6RNamespaceBudgetEpoch",
+                "_Generation6RNamespaceInventoryCursor",
+                "_Generation6RNamespaceEmptyInventory",
+                "consume_rmdir",
+            )
+        ),
+        "R namespace A1b A2 budget/RMDIR readiness must remain statically false",
+    )
+
+    permanent_collection_names = {
+        "self._authority_records_by_serial",
+        "self._authority_records_by_identity",
+        "self._authority_records_by_owner_identity",
+        "self._directory_facts_by_serial",
+        "self._name_facts_by_key",
+        "self._hardlink_groups",
+        "self._capability_records_by_serial",
+        "self._capability_records_by_identity",
+        "self._archived_capability_records",
+        "self._mutation_permit_records_by_serial",
+        "self._mutation_permit_records_by_identity",
+        "self._archived_mutation_permit_records",
+        "self._namespace_owner_tokens",
+        "self._namespace_owner_contexts",
+        "self._receipts",
+    }
+    a1b_forbidden_collection_removals: tuple[str, ...] = tuple(
+        ast.unparse(call)
+        for call in namespace_calls
+        if isinstance(call.func, ast.Attribute)
+        and ast.unparse(call.func.value) in permanent_collection_names
+        and call.func.attr in {"clear", "discard", "pop", "popitem", "remove", "__delitem__"}
+    )
+    forbidden_collection_deletes = tuple(
+        ast.unparse(node)
+        for method in namespace_methods.values()
+        for node in ast.walk(method)
+        if isinstance(node, ast.Subscript)
+        and isinstance(node.ctx, ast.Del)
+        and ast.unparse(node.value) in permanent_collection_names
+    )
+    destructive_targets = {
+        "os.unlink",
+        "os.rmdir",
+        "os.remove",
+        "os.rename",
+        "os.replace",
+        "Path.unlink",
+        "pathlib.Path.unlink",
+        "shutil.rmtree",
+        "ctypes.CDLL",
+        "ctypes.PyDLL",
+        "syscall",
+    }
+    forbidden_destructive_calls = tuple(
+        ast.unparse(call.func)
+        for call in namespace_calls
+        if ast.unparse(call.func) in destructive_targets
+    )
+    forbidden_destructive_aliases = tuple(
+        ast.unparse(node)
+        for method in namespace_methods.values()
+        for node in ast.walk(method)
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr))
+        and node.value is not None
+        and ast.unparse(node.value)
+        in {
+            "_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK",
+            *destructive_targets,
+        }
+    )
+    namespace_event_strings = tuple(
+        node.value
+        for method in namespace_methods.values()
+        for node in ast.walk(method)
+        if isinstance(node, ast.Constant) and type(node.value) is str
+    )
+    _require(
+        not a1b_forbidden_collection_removals
+        and not forbidden_collection_deletes
+        and not forbidden_destructive_calls
+        and not forbidden_destructive_aliases
+        and call_targets(namespace_journal).count("_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK") == 1
+        and not any(
+            "RMDIR_" in value or "RMDIR_CONSUMED" in value or "PRESENT_RMDIR" in value
+            for value in namespace_event_strings
+        )
+        and "_GENERATION6_R_NAMESPACE_REAL_OS_RMDIR" not in namespace_source
+        and "os.remove" not in namespace_source
+        and "os.rename(" not in namespace_source
+        and "os.replace" not in namespace_source
+        and "pathlib" not in namespace_source.lower()
+        and "shutil" not in namespace_source.lower()
+        and "syscall" not in namespace_source.lower(),
+        "R namespace A1b destructive/strong-reference surface differs",
+    )
+
     namespace_public_calls = {
         "register_borrowed_directory",
         "open_owned_cursor",
@@ -18539,6 +21051,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "authorize_present",
         "authorize_absence",
         "authorize_rename",
+        "consume_present",
         "abandon_token",
     }
     namespace_gate_function = top_function("_generation6_r_authority_source_gates")
@@ -18653,6 +21166,31 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             for call in external_namespace_calls
         ),
         "R namespace static integration block has an external call site",
+    )
+    _require(
+        type(namespace_gate_function.end_lineno) is int,
+        "R namespace A1b gate end differs",
+    )
+    gate_start = namespace_gate_function.lineno
+    gate_end = cast(int, namespace_gate_function.end_lineno)
+    expected_gate_digest = "a8ae42c4ee87d3fc872468460e6ff975ef1aba4ede534f6c8046c03846c962e0"
+    normalized_gate_source = "\n".join(source.splitlines()[gate_start - 1 : gate_end]) + "\n"
+    _require(
+        normalized_gate_source.count(expected_gate_digest) == 1,
+        "R namespace A1b gate digest token differs",
+    )
+    normalized_gate_source = normalized_gate_source.replace(
+        expected_gate_digest,
+        "0" * 64,
+    )
+    gate_domain = b"TASK-064\0GEN6\0R-A1b\0gate-v1\0"
+    gate_digest = hashlib.sha256(gate_domain + normalized_gate_source.encode("utf-8")).hexdigest()
+    namespace_gate_index = syntax.body.index(namespace_gate_function)
+    _require(
+        gate_start == 15889
+        and syntax.body[namespace_gate_index + 1] is top_function("_selftest_r_case")
+        and gate_digest == expected_gate_digest,
+        "R namespace A1b reviewed gate digest differs",
     )
 
 
