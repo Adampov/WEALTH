@@ -11742,6 +11742,7 @@ class _Generation6RAuthorityScope:
 # consumer scaffold for the controlled single-threaded, quiescent self-test world;
 # it makes no atomicity, hostile pathname-race, or nested-teardown usability claim.
 # R-AUTH-NAMESPACE A2a adds only an inert, strongly bound cleanup-budget foundation.
+# R-AUTH-NAMESPACE A2b adds only inert inventory-evidence identity vocabulary.
 _GENERATION6_R_NAMESPACE_REAL_OS_STAT: Final = os.stat
 _GENERATION6_R_NAMESPACE_REAL_OS_OPEN: Final = os.open
 _GENERATION6_R_NAMESPACE_REAL_OS_FSTAT: Final = os.fstat
@@ -12102,6 +12103,18 @@ class _Generation6RNamespaceCleanupBudgetEpoch:
 
 
 @dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceInventoryCursor:
+    serial: int
+    issuer_identity: int
+
+
+@dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceEmptyInventory:
+    serial: int
+    issuer_identity: int
+
+
+@dataclass(frozen=True, eq=False)
 class _Generation6RNamespaceReceipt:
     serial: int
     issuer_identity: int
@@ -12124,7 +12137,7 @@ class _Generation6RNamespaceCleanupBudgetRecord:
 
 
 class _Generation6RNamespaceJournal:
-    """Strong, private A1/A2a journal with no activation or runtime call surface."""
+    """Strong, private A1/A2b journal with no activation or runtime call surface."""
 
     def __init__(
         self,
@@ -16959,6 +16972,8 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_Generation6RNamespaceMutationPermitBinding",
         "_Generation6RNamespaceMutationPermitRecord",
         "_Generation6RNamespaceCleanupBudgetEpoch",
+        "_Generation6RNamespaceInventoryCursor",
+        "_Generation6RNamespaceEmptyInventory",
         "_Generation6RNamespaceReceipt",
         "_Generation6RNamespaceCleanupBudgetRecord",
         "_Generation6RNamespaceJournal",
@@ -17254,6 +17269,14 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "max_encoded_name_bytes",
             "max_operations",
         ),
+        "_Generation6RNamespaceInventoryCursor": (
+            "serial",
+            "issuer_identity",
+        ),
+        "_Generation6RNamespaceEmptyInventory": (
+            "serial",
+            "issuer_identity",
+        ),
         "_Generation6RNamespaceReceipt": (
             "serial",
             "issuer_identity",
@@ -17438,6 +17461,14 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "int",
             "int",
         ),
+        "_Generation6RNamespaceInventoryCursor": (
+            "int",
+            "int",
+        ),
+        "_Generation6RNamespaceEmptyInventory": (
+            "int",
+            "int",
+        ),
         "_Generation6RNamespaceReceipt": (
             "int",
             "int",
@@ -17471,6 +17502,8 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_Generation6RNamespaceUnlinkPreproof",
         "_Generation6RNamespaceMutationPermitBinding",
         "_Generation6RNamespaceCleanupBudgetEpoch",
+        "_Generation6RNamespaceInventoryCursor",
+        "_Generation6RNamespaceEmptyInventory",
         "_Generation6RNamespaceReceipt",
     }
     mutable_namespace_record_classes = {
@@ -17697,17 +17730,19 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "class:_Generation6RNamespaceMutationPermitBinding",
         "class:_Generation6RNamespaceMutationPermitRecord",
         "class:_Generation6RNamespaceCleanupBudgetEpoch",
+        "class:_Generation6RNamespaceInventoryCursor",
+        "class:_Generation6RNamespaceEmptyInventory",
         "class:_Generation6RNamespaceReceipt",
         "class:_Generation6RNamespaceCleanupBudgetRecord",
         "class:_Generation6RNamespaceJournal",
     )
     normalized_bundle_source = "\n".join(source.splitlines()[bundle_start - 1 : bundle_end]) + "\n"
-    bundle_domain = b"TASK-064\0GEN6\0R-A2a\0source-v1\0"
+    bundle_domain = b"TASK-064\0GEN6\0R-A2b\0source-v1\0"
     bundle_preimage = bundle_domain + normalized_bundle_source.encode("utf-8")
     bundle_digest = hashlib.sha256(bundle_preimage).hexdigest()
     _require(
-        bundle_start == 11745
-        and bundle_end == 16252
+        bundle_start == 11746
+        and bundle_end == 16265
         and observed_bundle_inventory == expected_bundle_inventory
         and namespace_bundle_nodes[0]
         is namespace_capture_nodes["_GENERATION6_R_NAMESPACE_REAL_OS_STAT"]
@@ -17717,9 +17752,9 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             and node.end_lineno < namespace_bundle_nodes[index + 1].lineno
             for index, node in enumerate(namespace_bundle_nodes[:-1])
         )
-        and len(bundle_preimage) == 201_509
-        and bundle_digest == "2de22bfddc8ee8e1acc6cd1d59e568d24b40f17dc4e5b3b93e5cabe158334e30",
-        "R namespace A2a reviewed source-bundle digest differs",
+        and len(bundle_preimage) == 201_752
+        and bundle_digest == "33c9ba84245f7114c384fba9620bb6c0a385c974d99cc7c0e6a03ad794e85a97",
+        "R namespace A2b reviewed source-bundle digest differs",
     )
     self_aliases_by_method: dict[str, set[str]] = {}
     self_alias_assignments: list[tuple[str, str, str]] = []
@@ -20860,6 +20895,10 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     )
 
     namespace_constructor_names = set(namespace_class_names)
+    inventory_vocabulary_constructor_names = {
+        "_Generation6RNamespaceInventoryCursor",
+        "_Generation6RNamespaceEmptyInventory",
+    }
 
     def assignment_values(
         node: ast.AST,
@@ -20897,6 +20936,15 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         )
 
     namespace_calls = tuple(call for method in namespace_methods.values() for call in calls(method))
+    inventory_vocabulary_constructor_calls = tuple(
+        ast.unparse(call.func)
+        for call in full_calls
+        if ast.unparse(call.func) in inventory_vocabulary_constructor_names
+    )
+    _require(
+        not inventory_vocabulary_constructor_calls,
+        "R namespace A2b inventory vocabulary must remain inert",
+    )
     permit_constructor_names = {
         "_Generation6RNamespaceMutationPermit",
         "_Generation6RNamespaceMutationPermitBinding",
@@ -21876,6 +21924,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     )
 
     a2_budget_foundation_present = True
+    a2_inventory_vocabulary_present = True
     a2_budget_readiness = False
     a2_budget_prerequisites = (
         "scan-attempt-metering",
@@ -21897,6 +21946,8 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     _require(
         type(a2_budget_foundation_present) is bool
         and a2_budget_foundation_present
+        and type(a2_inventory_vocabulary_present) is bool
+        and a2_inventory_vocabulary_present
         and type(a2_budget_readiness) is bool
         and not a2_budget_readiness
         and a2_budget_prerequisites
@@ -21920,6 +21971,13 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "current-inventory-cursor",
         )
         and all(
+            name in namespace_classes
+            for name in (
+                "_Generation6RNamespaceInventoryCursor",
+                "_Generation6RNamespaceEmptyInventory",
+            )
+        )
+        and all(
             fragment not in namespace_source
             for fragment in (
                 "_Generation6RNamespaceInventoryCursor",
@@ -21936,7 +21994,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
                 "_charge_cleanup_budget",
             )
         ),
-        "R namespace A2a budget/RMDIR readiness must remain statically false",
+        "R namespace A2b budget/RMDIR readiness must remain statically false",
     )
 
     permanent_collection_names = {
@@ -22156,28 +22214,28 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     )
     _require(
         type(namespace_gate_function.end_lineno) is int,
-        "R namespace A2a gate end differs",
+        "R namespace A2b gate end differs",
     )
     gate_start = namespace_gate_function.lineno
     gate_end = cast(int, namespace_gate_function.end_lineno)
-    expected_gate_digest = "9b4d94d877a2e3e9028f3408682a6fb17e31eb6d76a914ab441745dfaacede94"
+    expected_gate_digest = "809f211ce7f787cf63bbecd7db67e656e2bdc2a503ccdd9f6fe82ef5f3743687"
     normalized_gate_source = "\n".join(source.splitlines()[gate_start - 1 : gate_end]) + "\n"
     _require(
         normalized_gate_source.count(expected_gate_digest) == 1,
-        "R namespace A2a gate digest token differs",
+        "R namespace A2b gate digest token differs",
     )
     normalized_gate_source = normalized_gate_source.replace(
         expected_gate_digest,
         "0" * 64,
     )
-    gate_domain = b"TASK-064\0GEN6\0R-A2a\0gate-v1\0"
+    gate_domain = b"TASK-064\0GEN6\0R-A2b\0gate-v1\0"
     gate_digest = hashlib.sha256(gate_domain + normalized_gate_source.encode("utf-8")).hexdigest()
     namespace_gate_index = syntax.body.index(namespace_gate_function)
     _require(
-        gate_start == 16255
+        gate_start == 16268
         and syntax.body[namespace_gate_index + 1] is top_function("_selftest_r_case")
         and gate_digest == expected_gate_digest,
-        "R namespace A2a reviewed gate digest differs",
+        "R namespace A2b reviewed gate digest differs",
     )
 
 
