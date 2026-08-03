@@ -11741,12 +11741,19 @@ class _Generation6RAuthorityScope:
 # R-AUTH-NAMESPACE A1b is an uncalled, integration-blocked REGULAR-file UNLINK
 # consumer scaffold for the controlled single-threaded, quiescent self-test world;
 # it makes no atomicity, hostile pathname-race, or nested-teardown usability claim.
+# R-AUTH-NAMESPACE A2a adds only an inert, strongly bound cleanup-budget foundation.
 _GENERATION6_R_NAMESPACE_REAL_OS_STAT: Final = os.stat
 _GENERATION6_R_NAMESPACE_REAL_OS_OPEN: Final = os.open
 _GENERATION6_R_NAMESPACE_REAL_OS_FSTAT: Final = os.fstat
 _GENERATION6_R_NAMESPACE_REAL_OS_UNLINK: Final = os.unlink
 _GENERATION6_R_NAMESPACE_REAL_OS_GETUID: Final = os.getuid
 _GENERATION6_R_NAMESPACE_REAL_FCNTL: Final = fcntl.fcntl
+_GENERATION6_R_NAMESPACE_REAL_MONOTONIC_NS: Final = time.monotonic_ns
+_GENERATION6_R_NAMESPACE_CLEANUP_MAX_DEPTH: Final = 64
+_GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENTRIES: Final = 100_000
+_GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENCODED_NAME_BYTES: Final = 16_777_216
+_GENERATION6_R_NAMESPACE_CLEANUP_MAX_OPERATIONS: Final = 500_000
+_GENERATION6_R_NAMESPACE_CLEANUP_DEADLINE_NS: Final = 60_000_000_000
 _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT: Final = _snapshot_stat
 _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD: Final = _snapshot_fd
 _GENERATION6_R_NAMESPACE_CAPTURED_STABLE_DIRECTORY_MATCHES: Final = _stable_directory_matches
@@ -11849,6 +11856,35 @@ class _Generation6RNamespaceMutationPermitState(  # noqa: UP042 - exact contract
     ATTEMPTED = "ATTEMPTED"
     CONSUMED = "CONSUMED"
     UNCERTAIN = "UNCERTAIN"
+
+
+class _Generation6RNamespaceCleanupBudgetState(  # noqa: UP042 - exact contract
+    str, Enum
+):
+    ACTIVE = "ACTIVE"
+    EXHAUSTED = "EXHAUSTED"
+    UNCERTAIN = "UNCERTAIN"
+
+
+class _Generation6RNamespaceCleanupBudgetEvent(  # noqa: UP042 - exact contract
+    str, Enum
+):
+    ISSUED = "CLEANUP_BUDGET_ISSUED"
+    EXHAUSTED = "CLEANUP_BUDGET_EXHAUSTED"
+    UNCERTAIN = "CLEANUP_BUDGET_UNCERTAIN"
+
+
+_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE: Final = {
+    _Generation6RNamespaceCleanupBudgetState.ACTIVE: (
+        _Generation6RNamespaceCleanupBudgetEvent.ISSUED
+    ),
+    _Generation6RNamespaceCleanupBudgetState.EXHAUSTED: (
+        _Generation6RNamespaceCleanupBudgetEvent.EXHAUSTED
+    ),
+    _Generation6RNamespaceCleanupBudgetState.UNCERTAIN: (
+        _Generation6RNamespaceCleanupBudgetEvent.UNCERTAIN
+    ),
+}
 
 
 class _Generation6RNamespaceTerminalEvent(str, Enum):  # noqa: UP042 - exact contract
@@ -12054,6 +12090,18 @@ class _Generation6RNamespaceMutationPermitRecord:
 
 
 @dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceCleanupBudgetEpoch:
+    serial: int
+    issuer_identity: int
+    issued_ns: int
+    deadline_ns: int
+    max_depth: int
+    max_entries: int
+    max_encoded_name_bytes: int
+    max_operations: int
+
+
+@dataclass(frozen=True, eq=False)
 class _Generation6RNamespaceReceipt:
     serial: int
     issuer_identity: int
@@ -12062,8 +12110,21 @@ class _Generation6RNamespaceReceipt:
     event: str
 
 
+@dataclass(eq=False)
+class _Generation6RNamespaceCleanupBudgetRecord:
+    epoch: _Generation6RNamespaceCleanupBudgetEpoch
+    state: _Generation6RNamespaceCleanupBudgetState
+    depth_high_water: int
+    entry_count: int
+    encoded_name_bytes: int
+    operation_count: int
+    last_monotonic_ns: int
+    issuance_receipt: _Generation6RNamespaceReceipt | None
+    terminal_receipt: _Generation6RNamespaceReceipt | None
+
+
 class _Generation6RNamespaceJournal:
-    """Strong, private A1 journal with no activation or runtime call surface."""
+    """Strong, private A1/A2a journal with no activation or runtime call surface."""
 
     def __init__(
         self,
@@ -12110,6 +12171,14 @@ class _Generation6RNamespaceJournal:
             _Generation6RNamespaceMutationPermitRecord
         ] = []
         self._mutation_issuance_faulted = False
+        self._cleanup_budget_records_by_serial: dict[
+            int, _Generation6RNamespaceCleanupBudgetRecord
+        ] = {}
+        self._cleanup_budget_records_by_identity: dict[
+            int, _Generation6RNamespaceCleanupBudgetRecord
+        ] = {}
+        self._live_cleanup_budget_record: _Generation6RNamespaceCleanupBudgetRecord | None = None
+        self._cleanup_budget_faulted = False
         self._pending_publication: object | None = None
         self._poisoned_descriptors: set[int] = set()
         self._namespace_owner_tokens: dict[int, _Generation6ROwnerToken] = {}
@@ -12185,6 +12254,303 @@ class _Generation6RNamespaceJournal:
             self._phase = _Generation6RNamespacePhase.UNCERTAIN
             raise
         return receipt
+
+    def _read_cleanup_budget_clock(self) -> int:
+        try:
+            _require(
+                time.monotonic_ns is _GENERATION6_R_NAMESPACE_REAL_MONOTONIC_NS,
+                "R namespace cleanup budget clock identity differs",
+            )
+            now_ns = _GENERATION6_R_NAMESPACE_REAL_MONOTONIC_NS()
+            _require(
+                type(now_ns) is int and now_ns >= 0,
+                "R namespace cleanup budget clock value differs",
+            )
+        except BaseException as exc:
+            raise ContractError("R namespace cleanup budget clock differs") from exc
+        return now_ns
+
+    def _issue_cleanup_budget_epoch(self) -> _Generation6RNamespaceCleanupBudgetEpoch:
+        record: _Generation6RNamespaceCleanupBudgetRecord | None = None
+        try:
+            issuance_event = _GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE.get(
+                _Generation6RNamespaceCleanupBudgetState.ACTIVE
+            )
+            _require(
+                type(self._cleanup_budget_faulted) is bool
+                and not self._cleanup_budget_faulted
+                and type(self._cleanup_budget_records_by_serial) is dict
+                and not self._cleanup_budget_records_by_serial
+                and type(self._cleanup_budget_records_by_identity) is dict
+                and not self._cleanup_budget_records_by_identity
+                and self._live_cleanup_budget_record is None
+                and type(issuance_event) is _Generation6RNamespaceCleanupBudgetEvent
+                and issuance_event is _Generation6RNamespaceCleanupBudgetEvent.ISSUED
+                and type(_GENERATION6_R_NAMESPACE_CLEANUP_MAX_DEPTH) is int
+                and _GENERATION6_R_NAMESPACE_CLEANUP_MAX_DEPTH == 64
+                and type(_GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENTRIES) is int
+                and _GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENTRIES == 100_000
+                and type(_GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENCODED_NAME_BYTES) is int
+                and _GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENCODED_NAME_BYTES == 16_777_216
+                and type(_GENERATION6_R_NAMESPACE_CLEANUP_MAX_OPERATIONS) is int
+                and _GENERATION6_R_NAMESPACE_CLEANUP_MAX_OPERATIONS == 500_000
+                and type(_GENERATION6_R_NAMESPACE_CLEANUP_DEADLINE_NS) is int
+                and _GENERATION6_R_NAMESPACE_CLEANUP_DEADLINE_NS == 60_000_000_000,
+                "R namespace cleanup budget issue state differs",
+            )
+            exact_issuance_event = cast(
+                _Generation6RNamespaceCleanupBudgetEvent,
+                issuance_event,
+            )
+            issued_ns = self._read_cleanup_budget_clock()
+            epoch = _Generation6RNamespaceCleanupBudgetEpoch(
+                self._issue_serial(),
+                self._issuer_identity,
+                issued_ns,
+                issued_ns + _GENERATION6_R_NAMESPACE_CLEANUP_DEADLINE_NS,
+                _GENERATION6_R_NAMESPACE_CLEANUP_MAX_DEPTH,
+                _GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENTRIES,
+                _GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENCODED_NAME_BYTES,
+                _GENERATION6_R_NAMESPACE_CLEANUP_MAX_OPERATIONS,
+            )
+            record = _Generation6RNamespaceCleanupBudgetRecord(
+                epoch,
+                _Generation6RNamespaceCleanupBudgetState.ACTIVE,
+                0,
+                0,
+                0,
+                0,
+                issued_ns,
+                None,
+                None,
+            )
+            issuance_receipt = self._append_receipt(
+                token_serial=epoch.serial,
+                authority_serial=None,
+                event=exact_issuance_event.value,
+            )
+            record.issuance_receipt = issuance_receipt
+            self._cleanup_budget_records_by_identity[id(epoch)] = record
+            self._cleanup_budget_records_by_serial[epoch.serial] = record
+            self._live_cleanup_budget_record = record
+        except BaseException:
+            self._cleanup_budget_faulted = True
+            if type(record) is _Generation6RNamespaceCleanupBudgetRecord:
+                record.state = _Generation6RNamespaceCleanupBudgetState.UNCERTAIN
+            raise
+        return epoch
+
+    def _require_live_cleanup_budget(
+        self,
+        epoch: _Generation6RNamespaceCleanupBudgetEpoch,
+    ) -> _Generation6RNamespaceCleanupBudgetRecord:
+        live_record = self._live_cleanup_budget_record
+        _require(
+            type(self._cleanup_budget_faulted) is bool
+            and not self._cleanup_budget_faulted
+            and type(self._cleanup_budget_records_by_serial) is dict
+            and type(self._cleanup_budget_records_by_identity) is dict
+            and type(live_record) is _Generation6RNamespaceCleanupBudgetRecord,
+            "R namespace cleanup budget trusted live slot differs",
+        )
+        exact_record = cast(_Generation6RNamespaceCleanupBudgetRecord, live_record)
+        trusted_epoch = exact_record.epoch
+        _require(
+            type(trusted_epoch) is _Generation6RNamespaceCleanupBudgetEpoch,
+            "R namespace cleanup budget trusted epoch type differs",
+        )
+        trusted_epoch_identity = id(trusted_epoch)
+        issuance_receipt = exact_record.issuance_receipt
+        _exact_keys(
+            vars(trusted_epoch),
+            (
+                "serial",
+                "issuer_identity",
+                "issued_ns",
+                "deadline_ns",
+                "max_depth",
+                "max_entries",
+                "max_encoded_name_bytes",
+                "max_operations",
+            ),
+            "R namespace cleanup budget epoch",
+        )
+        _exact_keys(
+            vars(exact_record),
+            (
+                "epoch",
+                "state",
+                "depth_high_water",
+                "entry_count",
+                "encoded_name_bytes",
+                "operation_count",
+                "last_monotonic_ns",
+                "issuance_receipt",
+                "terminal_receipt",
+            ),
+            "R namespace cleanup budget record",
+        )
+        _require(
+            type(trusted_epoch_identity) is int
+            and trusted_epoch_identity > 0
+            and type(trusted_epoch.serial) is int
+            and trusted_epoch.serial > 0
+            and trusted_epoch.issuer_identity == self._issuer_identity
+            and type(trusted_epoch.issued_ns) is int
+            and trusted_epoch.issued_ns >= 0
+            and type(trusted_epoch.deadline_ns) is int
+            and trusted_epoch.deadline_ns
+            == trusted_epoch.issued_ns + _GENERATION6_R_NAMESPACE_CLEANUP_DEADLINE_NS
+            and type(trusted_epoch.max_depth) is int
+            and trusted_epoch.max_depth == _GENERATION6_R_NAMESPACE_CLEANUP_MAX_DEPTH
+            and type(trusted_epoch.max_entries) is int
+            and trusted_epoch.max_entries == _GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENTRIES
+            and type(trusted_epoch.max_encoded_name_bytes) is int
+            and trusted_epoch.max_encoded_name_bytes
+            == _GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENCODED_NAME_BYTES
+            and type(trusted_epoch.max_operations) is int
+            and trusted_epoch.max_operations == _GENERATION6_R_NAMESPACE_CLEANUP_MAX_OPERATIONS
+            and self._cleanup_budget_records_by_identity.get(trusted_epoch_identity) is exact_record
+            and self._cleanup_budget_records_by_serial.get(trusted_epoch.serial) is exact_record
+            and exact_record.state is _Generation6RNamespaceCleanupBudgetState.ACTIVE
+            and type(exact_record.depth_high_water) is int
+            and 0 <= exact_record.depth_high_water <= trusted_epoch.max_depth
+            and type(exact_record.entry_count) is int
+            and 0 <= exact_record.entry_count <= trusted_epoch.max_entries
+            and type(exact_record.encoded_name_bytes) is int
+            and 0 <= exact_record.encoded_name_bytes <= trusted_epoch.max_encoded_name_bytes
+            and type(exact_record.operation_count) is int
+            and 0 <= exact_record.operation_count <= trusted_epoch.max_operations
+            and type(exact_record.last_monotonic_ns) is int
+            and trusted_epoch.issued_ns <= exact_record.last_monotonic_ns
+            and exact_record.last_monotonic_ns < trusted_epoch.deadline_ns
+            and type(issuance_receipt) is _Generation6RNamespaceReceipt
+            and issuance_receipt.issuer_identity == self._issuer_identity
+            and issuance_receipt.token_serial == trusted_epoch.serial
+            and issuance_receipt.authority_serial is None
+            and issuance_receipt.event == _Generation6RNamespaceCleanupBudgetEvent.ISSUED.value
+            and exact_record.terminal_receipt is None,
+            "R namespace cleanup budget trusted evidence differs",
+        )
+        _require(
+            type(epoch) is _Generation6RNamespaceCleanupBudgetEpoch and epoch is trusted_epoch,
+            "R namespace cleanup budget caller identity differs",
+        )
+        return exact_record
+
+    def _terminalize_cleanup_budget(
+        self,
+        record: _Generation6RNamespaceCleanupBudgetRecord | None,
+        state: _Generation6RNamespaceCleanupBudgetState,
+    ) -> None:
+        terminal_state = (
+            _Generation6RNamespaceCleanupBudgetState.EXHAUSTED
+            if state is _Generation6RNamespaceCleanupBudgetState.EXHAUSTED
+            else _Generation6RNamespaceCleanupBudgetState.UNCERTAIN
+        )
+        self._cleanup_budget_faulted = True
+        if type(record) is _Generation6RNamespaceCleanupBudgetRecord:
+            record.state = terminal_state
+        try:
+            terminal_event = _GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE.get(
+                terminal_state
+            )
+            _require(
+                type(record) is _Generation6RNamespaceCleanupBudgetRecord
+                and type(terminal_event) is _Generation6RNamespaceCleanupBudgetEvent
+                and (
+                    (
+                        terminal_state is _Generation6RNamespaceCleanupBudgetState.EXHAUSTED
+                        and terminal_event is _Generation6RNamespaceCleanupBudgetEvent.EXHAUSTED
+                    )
+                    or (
+                        terminal_state is _Generation6RNamespaceCleanupBudgetState.UNCERTAIN
+                        and terminal_event is _Generation6RNamespaceCleanupBudgetEvent.UNCERTAIN
+                    )
+                )
+                and self._live_cleanup_budget_record is record,
+                "R namespace cleanup budget terminal state differs",
+            )
+            exact_terminal_event = cast(
+                _Generation6RNamespaceCleanupBudgetEvent,
+                terminal_event,
+            )
+            exact_record = cast(_Generation6RNamespaceCleanupBudgetRecord, record)
+            exact_epoch = exact_record.epoch
+            _require(
+                type(exact_epoch) is _Generation6RNamespaceCleanupBudgetEpoch
+                and self._cleanup_budget_records_by_identity.get(id(exact_epoch)) is exact_record
+                and self._cleanup_budget_records_by_serial.get(exact_epoch.serial) is exact_record
+                and exact_record.terminal_receipt is None,
+                "R namespace cleanup budget terminal binding differs",
+            )
+            terminal_receipt = self._append_receipt(
+                token_serial=exact_epoch.serial,
+                authority_serial=None,
+                event=exact_terminal_event.value,
+            )
+            exact_record.terminal_receipt = terminal_receipt
+            self._live_cleanup_budget_record = None
+        except BaseException:
+            self._cleanup_budget_faulted = True
+            if type(record) is _Generation6RNamespaceCleanupBudgetRecord:
+                record.state = _Generation6RNamespaceCleanupBudgetState.UNCERTAIN
+            raise
+
+    def _charge_cleanup_budget(
+        self,
+        epoch: _Generation6RNamespaceCleanupBudgetEpoch,
+        *,
+        next_depth: int,
+        entry_increment: int,
+        encoded_name_bytes_increment: int,
+    ) -> None:
+        trusted_record = self._live_cleanup_budget_record
+        terminal_state = _Generation6RNamespaceCleanupBudgetState.UNCERTAIN
+        try:
+            record = self._require_live_cleanup_budget(epoch)
+            trusted_record = record
+            _require(
+                type(next_depth) is int
+                and next_depth >= 0
+                and type(entry_increment) is int
+                and type(encoded_name_bytes_increment) is int
+                and (
+                    (entry_increment == 0 and encoded_name_bytes_increment == 0)
+                    or (entry_increment == 1 and 1 <= encoded_name_bytes_increment <= 255)
+                ),
+                "R namespace cleanup budget charge input differs",
+            )
+            projected_depth = (
+                next_depth if next_depth > record.depth_high_water else record.depth_high_water
+            )
+            projected_entries = record.entry_count + entry_increment
+            projected_encoded_name_bytes = record.encoded_name_bytes + encoded_name_bytes_increment
+            projected_operations = record.operation_count + 1
+            now_ns = self._read_cleanup_budget_clock()
+            _require(
+                now_ns >= record.last_monotonic_ns,
+                "R namespace cleanup budget clock regressed",
+            )
+            if (
+                projected_depth > record.epoch.max_depth
+                or projected_entries > record.epoch.max_entries
+                or projected_encoded_name_bytes > record.epoch.max_encoded_name_bytes
+                or projected_operations > record.epoch.max_operations
+                or now_ns >= record.epoch.deadline_ns
+            ):
+                terminal_state = _Generation6RNamespaceCleanupBudgetState.EXHAUSTED
+                raise ContractError("R namespace cleanup budget exhausted")
+            record.depth_high_water = projected_depth
+            record.entry_count = projected_entries
+            record.encoded_name_bytes = projected_encoded_name_bytes
+            record.operation_count = projected_operations
+            record.last_monotonic_ns = now_ns
+        except BaseException:
+            if type(self._cleanup_budget_faulted) is bool and self._cleanup_budget_faulted:
+                raise
+            self._terminalize_cleanup_budget(trusted_record, terminal_state)
+            raise
 
     def _begin_publication(self, value: object) -> None:
         if self._pending_publication is not None:
@@ -16493,6 +16859,20 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK": "os.unlink",
         "_GENERATION6_R_NAMESPACE_REAL_OS_GETUID": "os.getuid",
         "_GENERATION6_R_NAMESPACE_REAL_FCNTL": "fcntl.fcntl",
+        "_GENERATION6_R_NAMESPACE_REAL_MONOTONIC_NS": "time.monotonic_ns",
+        "_GENERATION6_R_NAMESPACE_CLEANUP_MAX_DEPTH": "64",
+        "_GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENTRIES": "100000",
+        "_GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENCODED_NAME_BYTES": "16777216",
+        "_GENERATION6_R_NAMESPACE_CLEANUP_MAX_OPERATIONS": "500000",
+        "_GENERATION6_R_NAMESPACE_CLEANUP_DEADLINE_NS": "60000000000",
+        "_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE": (
+            "{_Generation6RNamespaceCleanupBudgetState.ACTIVE: "
+            "_Generation6RNamespaceCleanupBudgetEvent.ISSUED, "
+            "_Generation6RNamespaceCleanupBudgetState.EXHAUSTED: "
+            "_Generation6RNamespaceCleanupBudgetEvent.EXHAUSTED, "
+            "_Generation6RNamespaceCleanupBudgetState.UNCERTAIN: "
+            "_Generation6RNamespaceCleanupBudgetEvent.UNCERTAIN}"
+        ),
         "_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT": "_snapshot_stat",
         "_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD": "_snapshot_fd",
         "_GENERATION6_R_NAMESPACE_CAPTURED_STABLE_DIRECTORY_MATCHES": ("_stable_directory_matches"),
@@ -16559,6 +16939,8 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_Generation6RNamespaceContextState",
         "_Generation6RNamespaceCloseEvent",
         "_Generation6RNamespaceMutationPermitState",
+        "_Generation6RNamespaceCleanupBudgetState",
+        "_Generation6RNamespaceCleanupBudgetEvent",
         "_Generation6RNamespaceTerminalEvent",
         "_Generation6RNamespaceDirectoryFact",
         "_Generation6RNamespaceNameFact",
@@ -16576,7 +16958,9 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_Generation6RNamespaceUnlinkPreproof",
         "_Generation6RNamespaceMutationPermitBinding",
         "_Generation6RNamespaceMutationPermitRecord",
+        "_Generation6RNamespaceCleanupBudgetEpoch",
         "_Generation6RNamespaceReceipt",
+        "_Generation6RNamespaceCleanupBudgetRecord",
         "_Generation6RNamespaceJournal",
     )
     observed_namespace_class_names = tuple(
@@ -16593,8 +16977,13 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     _require(
         all(
             capture.lineno < namespace_phase_class.lineno
-            for capture in namespace_capture_nodes.values()
-        ),
+            for name, capture in namespace_capture_nodes.items()
+            if name != "_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE"
+        )
+        and namespace_capture_nodes["_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE"].lineno
+        > namespace_classes["_Generation6RNamespaceCleanupBudgetEvent"].lineno
+        and namespace_capture_nodes["_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE"].lineno
+        < namespace_classes["_Generation6RNamespaceTerminalEvent"].lineno,
         "R namespace static capture/class ordering differs",
     )
 
@@ -16660,6 +17049,16 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "CONSUMED",
             "UNCERTAIN",
         ),
+        "_Generation6RNamespaceCleanupBudgetState": (
+            "ACTIVE",
+            "EXHAUSTED",
+            "UNCERTAIN",
+        ),
+        "_Generation6RNamespaceCleanupBudgetEvent": (
+            "ISSUED",
+            "EXHAUSTED",
+            "UNCERTAIN",
+        ),
         "_Generation6RNamespaceTerminalEvent": (
             "ABSENCE_TOKEN_ABANDONED",
             "MUTATION_TOKEN_ABANDONED",
@@ -16668,9 +17067,18 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     }
     for name, expected_members in namespace_enum_members.items():
         class_node = namespace_classes[name]
+        expected_values = tuple(
+            (
+                member,
+                f"CLEANUP_BUDGET_{member}"
+                if name == "_Generation6RNamespaceCleanupBudgetEvent"
+                else member,
+            )
+            for member in expected_members
+        )
         _require(
             tuple(ast.unparse(base) for base in class_node.bases) == ("str", "Enum")
-            and enum_members(class_node) == tuple((member, member) for member in expected_members),
+            and enum_members(class_node) == expected_values,
             f"R namespace static enum differs: {name}",
         )
 
@@ -16836,12 +17244,33 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "authorization_receipt",
             "terminal_receipt",
         ),
+        "_Generation6RNamespaceCleanupBudgetEpoch": (
+            "serial",
+            "issuer_identity",
+            "issued_ns",
+            "deadline_ns",
+            "max_depth",
+            "max_entries",
+            "max_encoded_name_bytes",
+            "max_operations",
+        ),
         "_Generation6RNamespaceReceipt": (
             "serial",
             "issuer_identity",
             "token_serial",
             "authority_serial",
             "event",
+        ),
+        "_Generation6RNamespaceCleanupBudgetRecord": (
+            "epoch",
+            "state",
+            "depth_high_water",
+            "entry_count",
+            "encoded_name_bytes",
+            "operation_count",
+            "last_monotonic_ns",
+            "issuance_receipt",
+            "terminal_receipt",
         ),
     }
     expected_namespace_annotations = {
@@ -16999,12 +17428,33 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "_Generation6RNamespaceReceipt | None",
             "_Generation6RNamespaceReceipt | None",
         ),
+        "_Generation6RNamespaceCleanupBudgetEpoch": (
+            "int",
+            "int",
+            "int",
+            "int",
+            "int",
+            "int",
+            "int",
+            "int",
+        ),
         "_Generation6RNamespaceReceipt": (
             "int",
             "int",
             "int | None",
             "int | None",
             "str",
+        ),
+        "_Generation6RNamespaceCleanupBudgetRecord": (
+            "_Generation6RNamespaceCleanupBudgetEpoch",
+            "_Generation6RNamespaceCleanupBudgetState",
+            "int",
+            "int",
+            "int",
+            "int",
+            "int",
+            "_Generation6RNamespaceReceipt | None",
+            "_Generation6RNamespaceReceipt | None",
         ),
     }
     frozen_namespace_classes = {
@@ -17020,6 +17470,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_Generation6RNamespaceCapabilityBinding",
         "_Generation6RNamespaceUnlinkPreproof",
         "_Generation6RNamespaceMutationPermitBinding",
+        "_Generation6RNamespaceCleanupBudgetEpoch",
         "_Generation6RNamespaceReceipt",
     }
     mutable_namespace_record_classes = {
@@ -17027,6 +17478,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_Generation6RNamespaceOwnerContext",
         "_Generation6RNamespaceCapabilityRecord",
         "_Generation6RNamespaceMutationPermitRecord",
+        "_Generation6RNamespaceCleanupBudgetRecord",
     }
     for name, expected_fields in expected_namespace_fields.items():
         class_node = namespace_classes[name]
@@ -17089,6 +17541,11 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_require_dependencies",
         "_issue_serial",
         "_append_receipt",
+        "_read_cleanup_budget_clock",
+        "_issue_cleanup_budget_epoch",
+        "_require_live_cleanup_budget",
+        "_terminalize_cleanup_budget",
+        "_charge_cleanup_budget",
         "_begin_publication",
         "_finish_publication",
         "_fail_publication",
@@ -17192,6 +17649,12 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "capture:_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK",
         "capture:_GENERATION6_R_NAMESPACE_REAL_OS_GETUID",
         "capture:_GENERATION6_R_NAMESPACE_REAL_FCNTL",
+        "capture:_GENERATION6_R_NAMESPACE_REAL_MONOTONIC_NS",
+        "capture:_GENERATION6_R_NAMESPACE_CLEANUP_MAX_DEPTH",
+        "capture:_GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENTRIES",
+        "capture:_GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENCODED_NAME_BYTES",
+        "capture:_GENERATION6_R_NAMESPACE_CLEANUP_MAX_OPERATIONS",
+        "capture:_GENERATION6_R_NAMESPACE_CLEANUP_DEADLINE_NS",
         "capture:_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT",
         "capture:_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD",
         "capture:_GENERATION6_R_NAMESPACE_CAPTURED_STABLE_DIRECTORY_MATCHES",
@@ -17212,6 +17675,9 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "class:_Generation6RNamespaceContextState",
         "class:_Generation6RNamespaceCloseEvent",
         "class:_Generation6RNamespaceMutationPermitState",
+        "class:_Generation6RNamespaceCleanupBudgetState",
+        "class:_Generation6RNamespaceCleanupBudgetEvent",
+        "capture:_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE",
         "class:_Generation6RNamespaceTerminalEvent",
         "class:_Generation6RNamespaceDirectoryFact",
         "class:_Generation6RNamespaceNameFact",
@@ -17230,16 +17696,18 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "class:_Generation6RNamespaceUnlinkPreproof",
         "class:_Generation6RNamespaceMutationPermitBinding",
         "class:_Generation6RNamespaceMutationPermitRecord",
+        "class:_Generation6RNamespaceCleanupBudgetEpoch",
         "class:_Generation6RNamespaceReceipt",
+        "class:_Generation6RNamespaceCleanupBudgetRecord",
         "class:_Generation6RNamespaceJournal",
     )
     normalized_bundle_source = "\n".join(source.splitlines()[bundle_start - 1 : bundle_end]) + "\n"
-    bundle_domain = b"TASK-064\0GEN6\0R-A1b\0source-v1\0"
+    bundle_domain = b"TASK-064\0GEN6\0R-A2a\0source-v1\0"
     bundle_preimage = bundle_domain + normalized_bundle_source.encode("utf-8")
     bundle_digest = hashlib.sha256(bundle_preimage).hexdigest()
     _require(
-        bundle_start == 11744
-        and bundle_end == 15886
+        bundle_start == 11745
+        and bundle_end == 16252
         and observed_bundle_inventory == expected_bundle_inventory
         and namespace_bundle_nodes[0]
         is namespace_capture_nodes["_GENERATION6_R_NAMESPACE_REAL_OS_STAT"]
@@ -17249,9 +17717,9 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             and node.end_lineno < namespace_bundle_nodes[index + 1].lineno
             for index, node in enumerate(namespace_bundle_nodes[:-1])
         )
-        and len(bundle_preimage) == 184_666
-        and bundle_digest == "9626aa8c7de3b51870250434127c77f66c4eb587406f2acde5ff513135004984",
-        "R namespace static reviewed source-bundle digest differs",
+        and len(bundle_preimage) == 201_509
+        and bundle_digest == "2de22bfddc8ee8e1acc6cd1d59e568d24b40f17dc4e5b3b93e5cabe158334e30",
+        "R namespace A2a reviewed source-bundle digest differs",
     )
     self_aliases_by_method: dict[str, set[str]] = {}
     self_alias_assignments: list[tuple[str, str, str]] = []
@@ -17355,9 +17823,11 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         ),
         "self._append_receipt": (
             "_close_namespace_owner",
+            "_issue_cleanup_budget_epoch",
             "_publish_capability",
             "_register_authority",
             "_register_name_fact",
+            "_terminalize_cleanup_budget",
             "abandon_token",
             "abandon_token",
             "consume_present",
@@ -17383,6 +17853,14 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "_register_name_fact",
             "seal",
         ),
+        "self._read_cleanup_budget_clock": (
+            "_charge_cleanup_budget",
+            "_issue_cleanup_budget_epoch",
+        ),
+        "self._require_live_cleanup_budget": ("_charge_cleanup_budget",),
+        "self._terminalize_cleanup_budget": ("_charge_cleanup_budget",),
+        "self._issue_cleanup_budget_epoch": (),
+        "self._charge_cleanup_budget": (),
         "self._issue_a2_mutation_permit": ("consume_present",),
         "self._preauthorize_present_unlink": ("consume_present",),
         "self._postauthorize_present_unlink": ("consume_present",),
@@ -17453,6 +17931,10 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "self._live_mutation_permit_record",
             "self._archived_mutation_permit_records",
             "self._mutation_issuance_faulted",
+            "self._cleanup_budget_records_by_serial",
+            "self._cleanup_budget_records_by_identity",
+            "self._live_cleanup_budget_record",
+            "self._cleanup_budget_faulted",
             "self._pending_publication",
             "self._poisoned_descriptors",
             "self._namespace_owner_tokens",
@@ -17507,7 +17989,30 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         and dependency_guard_statement.value.args[1].value
         == "R namespace dependency identity differs"
         and all(
-            dependency_source.count(capture_name) == 1 for capture_name in namespace_capture_values
+            dependency_source.count(capture_name) == 1
+            for capture_name in namespace_capture_values
+            if capture_name
+            not in {
+                "_GENERATION6_R_NAMESPACE_REAL_MONOTONIC_NS",
+                "_GENERATION6_R_NAMESPACE_CLEANUP_MAX_DEPTH",
+                "_GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENTRIES",
+                "_GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENCODED_NAME_BYTES",
+                "_GENERATION6_R_NAMESPACE_CLEANUP_MAX_OPERATIONS",
+                "_GENERATION6_R_NAMESPACE_CLEANUP_DEADLINE_NS",
+                "_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE",
+            }
+        )
+        and all(
+            capture_name not in dependency_source
+            for capture_name in (
+                "_GENERATION6_R_NAMESPACE_REAL_MONOTONIC_NS",
+                "_GENERATION6_R_NAMESPACE_CLEANUP_MAX_DEPTH",
+                "_GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENTRIES",
+                "_GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENCODED_NAME_BYTES",
+                "_GENERATION6_R_NAMESPACE_CLEANUP_MAX_OPERATIONS",
+                "_GENERATION6_R_NAMESPACE_CLEANUP_DEADLINE_NS",
+                "_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE",
+            )
         ),
         "R namespace static dependency binding differs",
     )
@@ -17672,7 +18177,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         for node in ast.walk(namespace_journal)
         if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr))
         for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,))
-        if ast.unparse(target).startswith(("token.", "authority.", "fact."))
+        if ast.unparse(target).startswith(("token.", "authority.", "fact.", "epoch."))
     )
     _require(
         not public_attribute_writes,
@@ -17809,6 +18314,12 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "authorization_receipt",
         "capability_record",
         "close_receipt",
+        "depth_high_water",
+        "encoded_name_bytes",
+        "entry_count",
+        "issuance_receipt",
+        "last_monotonic_ns",
+        "operation_count",
         "owner_state",
         "state",
         "terminal_receipt",
@@ -18303,13 +18814,70 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             )
         )
     )
+    a2a_writer_methods = {
+        "_issue_cleanup_budget_epoch",
+        "_terminalize_cleanup_budget",
+        "_charge_cleanup_budget",
+    }
+    expected_a2a_mutable_record_writes = tuple(
+        sorted(
+            (
+                ("_charge_cleanup_budget", "record.depth_high_water", "projected_depth"),
+                ("_charge_cleanup_budget", "record.entry_count", "projected_entries"),
+                (
+                    "_charge_cleanup_budget",
+                    "record.encoded_name_bytes",
+                    "projected_encoded_name_bytes",
+                ),
+                (
+                    "_charge_cleanup_budget",
+                    "record.operation_count",
+                    "projected_operations",
+                ),
+                ("_charge_cleanup_budget", "record.last_monotonic_ns", "now_ns"),
+                (
+                    "_issue_cleanup_budget_epoch",
+                    "record.issuance_receipt",
+                    "issuance_receipt",
+                ),
+                (
+                    "_issue_cleanup_budget_epoch",
+                    "record.state",
+                    "_Generation6RNamespaceCleanupBudgetState.UNCERTAIN",
+                ),
+                (
+                    "_terminalize_cleanup_budget",
+                    "exact_record.terminal_receipt",
+                    "terminal_receipt",
+                ),
+                (
+                    "_terminalize_cleanup_budget",
+                    "record.state",
+                    "terminal_state",
+                ),
+                (
+                    "_terminalize_cleanup_budget",
+                    "record.state",
+                    "_Generation6RNamespaceCleanupBudgetState.UNCERTAIN",
+                ),
+            )
+        )
+    )
     _require(
-        tuple(write for write in mutable_record_writes if write[0] not in a1b_writer_methods)
+        tuple(
+            write
+            for write in mutable_record_writes
+            if write[0] not in a1b_writer_methods | a2a_writer_methods
+        )
         == tuple(
-            write for write in expected_mutable_record_writes if write[0] not in a1b_writer_methods
+            write
+            for write in expected_mutable_record_writes
+            if write[0] not in a1b_writer_methods | a2a_writer_methods
         )
         and tuple(write for write in mutable_record_writes if write[0] in a1b_writer_methods)
-        == expected_a1b_mutable_record_writes,
+        == expected_a1b_mutable_record_writes
+        and tuple(write for write in mutable_record_writes if write[0] in a2a_writer_methods)
+        == expected_a2a_mutable_record_writes,
         "R namespace static mutable-record writer matrix differs",
     )
 
@@ -18351,6 +18919,14 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_capability_records_by_serial": (
             "_publish_capability",
             "self._capability_records_by_serial[binding.token_serial]",
+        ),
+        "_cleanup_budget_records_by_identity": (
+            "_issue_cleanup_budget_epoch",
+            "self._cleanup_budget_records_by_identity[id(epoch)]",
+        ),
+        "_cleanup_budget_records_by_serial": (
+            "_issue_cleanup_budget_epoch",
+            "self._cleanup_budget_records_by_serial[epoch.serial]",
         ),
         "_namespace_owner_tokens": (
             "_open_namespace_owner",
@@ -18399,6 +18975,22 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         and isinstance(node.ctx, (ast.Store, ast.Del))
         and ast.unparse(node) == "self._live_capability_record"
     )
+    cleanup_budget_live_slot_assignments = tuple(
+        (method_name, ast.unparse(node.value))
+        for method_name, method in namespace_methods.items()
+        for node in ast.walk(method)
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None
+        for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,))
+        if ast.unparse(target) == "self._live_cleanup_budget_record"
+    )
+    cleanup_budget_fault_assignments = tuple(
+        (method_name, ast.unparse(node.value))
+        for method_name, method in namespace_methods.items()
+        for node in ast.walk(method)
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None
+        for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,))
+        if ast.unparse(target) == "self._cleanup_budget_faulted"
+    )
     pending_store_methods = tuple(
         method_name
         for method_name, method in namespace_methods.items()
@@ -18418,6 +19010,8 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             for registry in (
                 *protected_registries,
                 "_live_capability_record",
+                "_live_cleanup_budget_record",
+                "_cleanup_budget_faulted",
                 "_pending_publication",
             )
         )
@@ -18521,6 +19115,19 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         and live_slot_store_methods.count("consume_present") == 1
         and live_slot_store_methods.count("abandon_token") == 2
         and len(live_slot_store_methods) == 4
+        and cleanup_budget_live_slot_assignments
+        == (
+            ("__init__", "None"),
+            ("_issue_cleanup_budget_epoch", "record"),
+            ("_terminalize_cleanup_budget", "None"),
+        )
+        and cleanup_budget_fault_assignments
+        == (
+            ("__init__", "False"),
+            ("_issue_cleanup_budget_epoch", "True"),
+            ("_terminalize_cleanup_budget", "True"),
+            ("_terminalize_cleanup_budget", "True"),
+        )
         and pending_store_methods == ("_begin_publication", "_finish_publication")
         and call_targets(namespace_methods["_register_name_fact"]).count(
             "self._hardlink_groups.setdefault"
@@ -20896,10 +21503,381 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "R namespace A1b phase remains integration-blocked",
     )
 
+    budget_clock = namespace_methods["_read_cleanup_budget_clock"]
+    budget_issue = namespace_methods["_issue_cleanup_budget_epoch"]
+    budget_require_live = namespace_methods["_require_live_cleanup_budget"]
+    budget_terminalize = namespace_methods["_terminalize_cleanup_budget"]
+    budget_charge = namespace_methods["_charge_cleanup_budget"]
+    budget_clock_source = ast.unparse(budget_clock)
+    budget_issue_source = ast.unparse(budget_issue)
+    budget_require_live_source = ast.unparse(budget_require_live)
+    budget_terminalize_source = ast.unparse(budget_terminalize)
+    budget_charge_source = ast.unparse(budget_charge)
+    _require(
+        tuple(argument.arg for argument in budget_clock.args.args) == ("self",)
+        and budget_clock.returns is not None
+        and ast.unparse(budget_clock.returns) == "int"
+        and tuple(argument.arg for argument in budget_issue.args.args) == ("self",)
+        and budget_issue.returns is not None
+        and ast.unparse(budget_issue.returns) == "_Generation6RNamespaceCleanupBudgetEpoch"
+        and tuple(argument.arg for argument in budget_require_live.args.args) == ("self", "epoch")
+        and budget_require_live.args.args[1].annotation is not None
+        and ast.unparse(budget_require_live.args.args[1].annotation)
+        == "_Generation6RNamespaceCleanupBudgetEpoch"
+        and budget_require_live.returns is not None
+        and ast.unparse(budget_require_live.returns) == "_Generation6RNamespaceCleanupBudgetRecord"
+        and tuple(argument.arg for argument in budget_terminalize.args.args)
+        == ("self", "record", "state")
+        and budget_terminalize.args.args[1].annotation is not None
+        and ast.unparse(budget_terminalize.args.args[1].annotation)
+        == "_Generation6RNamespaceCleanupBudgetRecord | None"
+        and budget_terminalize.args.args[2].annotation is not None
+        and ast.unparse(budget_terminalize.args.args[2].annotation)
+        == "_Generation6RNamespaceCleanupBudgetState"
+        and budget_terminalize.returns is not None
+        and ast.unparse(budget_terminalize.returns) == "None"
+        and tuple(argument.arg for argument in budget_charge.args.args) == ("self", "epoch")
+        and tuple(argument.arg for argument in budget_charge.args.kwonlyargs)
+        == ("next_depth", "entry_increment", "encoded_name_bytes_increment")
+        and all(default is None for default in budget_charge.args.kw_defaults)
+        and budget_charge.returns is not None
+        and ast.unparse(budget_charge.returns) == "None"
+        and all(
+            method.args.vararg is None and method.args.kwarg is None and not method.decorator_list
+            for method in (
+                budget_clock,
+                budget_issue,
+                budget_require_live,
+                budget_terminalize,
+                budget_charge,
+            )
+        ),
+        "R namespace A2a exact private API differs",
+    )
+    _require(
+        exact_callers("_issue_cleanup_budget_epoch") == ()
+        and exact_callers("_charge_cleanup_budget") == ()
+        and exact_callers("_read_cleanup_budget_clock")
+        == ("_issue_cleanup_budget_epoch", "_charge_cleanup_budget")
+        and exact_callers("_require_live_cleanup_budget") == ("_charge_cleanup_budget",)
+        and exact_callers("_terminalize_cleanup_budget") == ("_charge_cleanup_budget",)
+        and call_targets(budget_clock).count("_GENERATION6_R_NAMESPACE_REAL_MONOTONIC_NS") == 1
+        and call_targets(namespace_journal).count("_GENERATION6_R_NAMESPACE_REAL_MONOTONIC_NS") == 1
+        and "time.monotonic_ns is _GENERATION6_R_NAMESPACE_REAL_MONOTONIC_NS" in budget_clock_source
+        and "type(now_ns) is int and now_ns >= 0" in budget_clock_source
+        and "except BaseException as exc" in budget_clock_source
+        and "raise ContractError('R namespace cleanup budget clock differs') from exc"
+        in budget_clock_source
+        and "time.monotonic_ns"
+        not in "\n".join(
+            ast.unparse(method)
+            for name, method in namespace_methods.items()
+            if name != "_read_cleanup_budget_clock"
+        ),
+        "R namespace A2a budget-local clock differs",
+    )
+    budget_issue_try_nodes = tuple(node for node in budget_issue.body if isinstance(node, ast.Try))
+    _require(len(budget_issue_try_nodes) == 1, "R namespace A2a issue try differs")
+    budget_issue_try = budget_issue_try_nodes[0]
+    issue_clock_line = one_line(
+        a1b_selected_call_lines(budget_issue, "self._read_cleanup_budget_clock"),
+        "A2a issue clock",
+    )
+    issue_epoch_line = one_line(
+        a1b_selected_call_lines(
+            budget_issue,
+            "_Generation6RNamespaceCleanupBudgetEpoch",
+        ),
+        "A2a epoch construction",
+    )
+    issue_record_line = one_line(
+        a1b_selected_call_lines(
+            budget_issue,
+            "_Generation6RNamespaceCleanupBudgetRecord",
+        ),
+        "A2a record construction",
+    )
+    issue_receipt_line = one_line(
+        a1b_selected_call_lines(budget_issue, "self._append_receipt"),
+        "A2a issuance receipt",
+    )
+    issue_receipt_bind_line = one_line(
+        assignment_lines(budget_issue, "record.issuance_receipt", "issuance_receipt"),
+        "A2a issuance receipt binding",
+    )
+    issue_identity_store_line = one_line(
+        assignment_lines(
+            budget_issue,
+            "self._cleanup_budget_records_by_identity[id(epoch)]",
+            "record",
+        ),
+        "A2a identity-map store",
+    )
+    issue_serial_store_line = one_line(
+        assignment_lines(
+            budget_issue,
+            "self._cleanup_budget_records_by_serial[epoch.serial]",
+            "record",
+        ),
+        "A2a serial-map store",
+    )
+    issue_live_store_line = one_line(
+        assignment_lines(budget_issue, "self._live_cleanup_budget_record", "record"),
+        "A2a live-slot store",
+    )
+    _require(
+        issue_clock_line
+        < issue_epoch_line
+        < issue_record_line
+        < issue_receipt_line
+        < issue_receipt_bind_line
+        < issue_identity_store_line
+        < issue_serial_store_line
+        < issue_live_store_line
+        and isinstance(budget_issue_try.body[-1], ast.Assign)
+        and tuple(ast.unparse(target) for target in budget_issue_try.body[-1].targets)
+        == ("self._live_cleanup_budget_record",)
+        and ast.unparse(budget_issue_try.body[-1].value) == "record"
+        and len(budget_issue_try.handlers) == 1
+        and isinstance(budget_issue_try.handlers[0].type, ast.Name)
+        and budget_issue_try.handlers[0].type.id == "BaseException"
+        and ast.unparse(budget_issue_try.handlers[0].body[0])
+        == "self._cleanup_budget_faulted = True"
+        and ast.unparse(budget_issue_try.handlers[0].body[-1]) == "raise"
+        and tuple(
+            ast.unparse(node.value)
+            for node in budget_issue.body
+            if isinstance(node, ast.Return) and node.value is not None
+        )
+        == ("epoch",)
+        and "record.state = _Generation6RNamespaceCleanupBudgetState.UNCERTAIN"
+        in budget_issue_source
+        and ".pop(" not in budget_issue_source
+        and ".clear(" not in budget_issue_source
+        and "del " not in budget_issue_source,
+        "R namespace A2a fail-closed issue ordering differs",
+    )
+    caller_epoch_attribute_reads = tuple(
+        ast.unparse(node)
+        for node in ast.walk(budget_require_live)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "epoch"
+    )
+    require_live_writes = tuple(
+        ast.unparse(node)
+        for node in ast.walk(budget_require_live)
+        if isinstance(node, (ast.Attribute, ast.Subscript))
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+    )
+    trusted_identity_line = one_line(
+        a1b_selected_call_lines(
+            budget_require_live,
+            "self._cleanup_budget_records_by_identity.get",
+        ),
+        "A2a trusted identity lookup",
+    )
+    trusted_serial_line = one_line(
+        a1b_selected_call_lines(
+            budget_require_live,
+            "self._cleanup_budget_records_by_serial.get",
+        ),
+        "A2a trusted serial lookup",
+    )
+    caller_identity_lines = tuple(
+        node.lineno
+        for node in ast.walk(budget_require_live)
+        if isinstance(node, ast.Compare) and "epoch is trusted_epoch" in ast.unparse(node)
+    )
+    _require(
+        not caller_epoch_attribute_reads
+        and not require_live_writes
+        and len(caller_identity_lines) == 1
+        and trusted_identity_line < caller_identity_lines[0]
+        and trusted_serial_line < caller_identity_lines[0]
+        and "live_record = self._live_cleanup_budget_record" in budget_require_live_source
+        and "trusted_epoch = exact_record.epoch" in budget_require_live_source
+        and "self._cleanup_budget_records_by_identity.get(trusted_epoch_identity) is exact_record"
+        in budget_require_live_source
+        and "self._cleanup_budget_records_by_serial.get(trusted_epoch.serial) is exact_record"
+        in budget_require_live_source
+        and "exact_record.state is _Generation6RNamespaceCleanupBudgetState.ACTIVE"
+        in budget_require_live_source
+        and "epoch is trusted_epoch" in budget_require_live_source
+        and "issuance_receipt.event == _Generation6RNamespaceCleanupBudgetEvent.ISSUED.value"
+        in budget_require_live_source,
+        "R namespace A2a trusted-live authentication differs",
+    )
+    budget_terminal_try_nodes = tuple(
+        node for node in budget_terminalize.body if isinstance(node, ast.Try)
+    )
+    _require(len(budget_terminal_try_nodes) == 1, "R namespace A2a terminal try differs")
+    budget_terminal_try = budget_terminal_try_nodes[0]
+    terminal_fault_line = one_line(
+        assignment_lines(budget_terminalize, "self._cleanup_budget_faulted", "True")[:1],
+        "A2a terminal fault latch",
+    )
+    terminal_state_lines = assignment_lines(budget_terminalize, "record.state", "terminal_state")
+    terminal_receipt_line = one_line(
+        a1b_selected_call_lines(budget_terminalize, "self._append_receipt"),
+        "A2a terminal receipt",
+    )
+    terminal_receipt_bind_line = one_line(
+        assignment_lines(
+            budget_terminalize,
+            "exact_record.terminal_receipt",
+            "terminal_receipt",
+        ),
+        "A2a terminal receipt binding",
+    )
+    terminal_live_clear_line = one_line(
+        assignment_lines(
+            budget_terminalize,
+            "self._live_cleanup_budget_record",
+            "None",
+        ),
+        "A2a terminal live clear",
+    )
+    _require(
+        len(terminal_state_lines) == 1
+        and terminal_fault_line < terminal_state_lines[0] < terminal_receipt_line
+        and terminal_receipt_line < terminal_receipt_bind_line < terminal_live_clear_line
+        and isinstance(budget_terminal_try.body[-1], ast.Assign)
+        and tuple(ast.unparse(target) for target in budget_terminal_try.body[-1].targets)
+        == ("self._live_cleanup_budget_record",)
+        and ast.unparse(budget_terminal_try.body[-1].value) == "None"
+        and len(budget_terminal_try.handlers) == 1
+        and "self._live_cleanup_budget_record = None"
+        not in "\n".join(ast.unparse(node) for node in budget_terminal_try.handlers[0].body)
+        and "record.state = _Generation6RNamespaceCleanupBudgetState.UNCERTAIN"
+        in budget_terminalize_source
+        and "_Generation6RNamespaceCleanupBudgetState.ACTIVE" not in budget_terminalize_source
+        and "_Generation6RNamespaceCleanupBudgetEvent.ISSUED" not in budget_terminalize_source,
+        "R namespace A2a irreversible terminalization differs",
+    )
+    caller_charge_epoch_attributes = tuple(
+        ast.unparse(node)
+        for node in ast.walk(budget_charge)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "epoch"
+    )
+    charge_clock_line = one_line(
+        a1b_selected_call_lines(budget_charge, "self._read_cleanup_budget_clock"),
+        "A2a charge clock",
+    )
+    charge_projected_depth_line = one_line(
+        assignment_lines(
+            budget_charge,
+            "projected_depth",
+            "next_depth if next_depth > record.depth_high_water else record.depth_high_water",
+        ),
+        "A2a projected depth",
+    )
+    charge_depth_cap_lines = tuple(
+        node.lineno
+        for node in ast.walk(budget_charge)
+        if isinstance(node, ast.Compare)
+        and ast.unparse(node) == "projected_depth > record.epoch.max_depth"
+    )
+    charge_depth_cap_line = one_line(charge_depth_cap_lines, "A2a depth cap")
+    charge_exhausted_line = one_line(
+        assignment_lines(
+            budget_charge,
+            "terminal_state",
+            "_Generation6RNamespaceCleanupBudgetState.EXHAUSTED",
+        ),
+        "A2a exhaustion classification",
+    )
+    charge_counter_lines = (
+        one_line(
+            assignment_lines(budget_charge, "record.depth_high_water", "projected_depth"),
+            "A2a depth commit",
+        ),
+        one_line(
+            assignment_lines(budget_charge, "record.entry_count", "projected_entries"),
+            "A2a entry commit",
+        ),
+        one_line(
+            assignment_lines(
+                budget_charge,
+                "record.encoded_name_bytes",
+                "projected_encoded_name_bytes",
+            ),
+            "A2a encoded-byte commit",
+        ),
+        one_line(
+            assignment_lines(
+                budget_charge,
+                "record.operation_count",
+                "projected_operations",
+            ),
+            "A2a operation commit",
+        ),
+        one_line(
+            assignment_lines(budget_charge, "record.last_monotonic_ns", "now_ns"),
+            "A2a clock commit",
+        ),
+    )
+    _require(
+        not caller_charge_epoch_attributes
+        and call_targets(budget_charge).count("self._require_live_cleanup_budget") == 1
+        and call_targets(budget_charge).count("self._read_cleanup_budget_clock") == 1
+        and call_targets(budget_charge).count("self._terminalize_cleanup_budget") == 1
+        and "type(next_depth) is int" in budget_charge_source
+        and "next_depth >= 0" in budget_charge_source
+        and "next_depth <= record.epoch.max_depth" not in budget_charge_source
+        and "type(entry_increment) is int" in budget_charge_source
+        and "type(encoded_name_bytes_increment) is int" in budget_charge_source
+        and "entry_increment == 0 and encoded_name_bytes_increment == 0" in budget_charge_source
+        and "entry_increment == 1 and 1 <= encoded_name_bytes_increment <= 255"
+        in budget_charge_source
+        and "projected_operations = record.operation_count + 1" in budget_charge_source
+        and "now_ns >= record.last_monotonic_ns" in budget_charge_source
+        and "projected_depth > record.epoch.max_depth" in budget_charge_source
+        and "projected_entries > record.epoch.max_entries" in budget_charge_source
+        and "projected_encoded_name_bytes > record.epoch.max_encoded_name_bytes"
+        in budget_charge_source
+        and "projected_operations > record.epoch.max_operations" in budget_charge_source
+        and "now_ns >= record.epoch.deadline_ns" in budget_charge_source
+        and "terminal_state = _Generation6RNamespaceCleanupBudgetState.EXHAUSTED"
+        in budget_charge_source
+        and charge_projected_depth_line
+        < charge_clock_line
+        < charge_depth_cap_line
+        <= charge_exhausted_line
+        and all(charge_clock_line < line for line in charge_counter_lines)
+        and charge_counter_lines == tuple(sorted(charge_counter_lines))
+        and "os.fsencode" not in budget_charge_source
+        and "len(" not in budget_charge_source,
+        "R namespace A2a projected charge differs",
+    )
+    budget_method_sources = "\n".join(
+        ast.unparse(method)
+        for method in (
+            budget_clock,
+            budget_issue,
+            budget_require_live,
+            budget_terminalize,
+            budget_charge,
+        )
+    )
+    _require(
+        "os.fsencode" not in budget_method_sources
+        and "os.scandir" not in budget_method_sources
+        and "os.stat" not in budget_method_sources
+        and "os.open" not in budget_method_sources
+        and "os.fstat" not in budget_method_sources
+        and "os.unlink" not in budget_method_sources
+        and "os.rmdir" not in budget_method_sources
+        and "_Generation6RNamespaceInventoryCursor" not in budget_method_sources
+        and "_Generation6RNamespaceEmptyInventory" not in budget_method_sources,
+        "R namespace A2a inert no-filesystem boundary differs",
+    )
+
+    a2_budget_foundation_present = True
     a2_budget_readiness = False
     a2_budget_prerequisites = (
-        "strong-budget-record",
-        "strong-budget-epoch",
         "scan-attempt-metering",
         "yield-metering",
         "nofollow-stat-attempt-metering",
@@ -20917,12 +21895,12 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "current-inventory-cursor",
     )
     _require(
-        type(a2_budget_readiness) is bool
+        type(a2_budget_foundation_present) is bool
+        and a2_budget_foundation_present
+        and type(a2_budget_readiness) is bool
         and not a2_budget_readiness
         and a2_budget_prerequisites
         == (
-            "strong-budget-record",
-            "strong-budget-epoch",
             "scan-attempt-metering",
             "yield-metering",
             "nofollow-stat-attempt-metering",
@@ -20944,14 +21922,21 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         and all(
             fragment not in namespace_source
             for fragment in (
-                "_Generation6RNamespaceBudgetRecord",
-                "_Generation6RNamespaceBudgetEpoch",
                 "_Generation6RNamespaceInventoryCursor",
                 "_Generation6RNamespaceEmptyInventory",
                 "consume_rmdir",
             )
+        )
+        and all(
+            fragment in namespace_source
+            for fragment in (
+                "_Generation6RNamespaceCleanupBudgetEpoch",
+                "_Generation6RNamespaceCleanupBudgetRecord",
+                "_issue_cleanup_budget_epoch",
+                "_charge_cleanup_budget",
+            )
         ),
-        "R namespace A1b A2 budget/RMDIR readiness must remain statically false",
+        "R namespace A2a budget/RMDIR readiness must remain statically false",
     )
 
     permanent_collection_names = {
@@ -20967,6 +21952,8 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "self._mutation_permit_records_by_serial",
         "self._mutation_permit_records_by_identity",
         "self._archived_mutation_permit_records",
+        "self._cleanup_budget_records_by_serial",
+        "self._cleanup_budget_records_by_identity",
         "self._namespace_owner_tokens",
         "self._namespace_owner_contexts",
         "self._receipts",
@@ -21169,28 +22156,28 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     )
     _require(
         type(namespace_gate_function.end_lineno) is int,
-        "R namespace A1b gate end differs",
+        "R namespace A2a gate end differs",
     )
     gate_start = namespace_gate_function.lineno
     gate_end = cast(int, namespace_gate_function.end_lineno)
-    expected_gate_digest = "a8ae42c4ee87d3fc872468460e6ff975ef1aba4ede534f6c8046c03846c962e0"
+    expected_gate_digest = "9b4d94d877a2e3e9028f3408682a6fb17e31eb6d76a914ab441745dfaacede94"
     normalized_gate_source = "\n".join(source.splitlines()[gate_start - 1 : gate_end]) + "\n"
     _require(
         normalized_gate_source.count(expected_gate_digest) == 1,
-        "R namespace A1b gate digest token differs",
+        "R namespace A2a gate digest token differs",
     )
     normalized_gate_source = normalized_gate_source.replace(
         expected_gate_digest,
         "0" * 64,
     )
-    gate_domain = b"TASK-064\0GEN6\0R-A1b\0gate-v1\0"
+    gate_domain = b"TASK-064\0GEN6\0R-A2a\0gate-v1\0"
     gate_digest = hashlib.sha256(gate_domain + normalized_gate_source.encode("utf-8")).hexdigest()
     namespace_gate_index = syntax.body.index(namespace_gate_function)
     _require(
-        gate_start == 15889
+        gate_start == 16255
         and syntax.body[namespace_gate_index + 1] is top_function("_selftest_r_case")
         and gate_digest == expected_gate_digest,
-        "R namespace A1b reviewed gate digest differs",
+        "R namespace A2a reviewed gate digest differs",
     )
 
 
