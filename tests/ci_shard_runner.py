@@ -14384,7 +14384,7 @@ class _Generation6RNamespaceJournal:
                 )
                 or (
                     action is _Generation6RNamespaceAction.UNLINK
-                    and fact.kind is not _Generation6RNamespaceNodeKind.DIRECTORY
+                    and fact.kind is _Generation6RNamespaceNodeKind.REGULAR
                 )
             ),
             "R namespace present action differs",
@@ -15925,7 +15925,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "class:_Generation6RNamespaceJournal",
     )
     normalized_bundle_source = "\n".join(source.splitlines()[bundle_start - 1 : bundle_end]) + "\n"
-    bundle_domain = b"TASK-064\0GEN6\0R-A1a\0source-v1\0"
+    bundle_domain = b"TASK-064\0GEN6\0R-A1a.1\0source-v1\0"
     bundle_preimage = bundle_domain + normalized_bundle_source.encode("utf-8")
     bundle_digest = hashlib.sha256(bundle_preimage).hexdigest()
     _require(
@@ -15940,8 +15940,8 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             and node.end_lineno < namespace_bundle_nodes[index + 1].lineno
             for index, node in enumerate(namespace_bundle_nodes[:-1])
         )
-        and len(bundle_preimage) == 127985
-        and bundle_digest == "d17d88981e65319bad919061b77114a4c4624b980a1d68398296be5454c9d189",
+        and len(bundle_preimage) == 127981
+        and bundle_digest == "1af8e55ac6cc9d04d23ebb425556932d987fac10a306c5e0d9c0e15488a2e408",
         "R namespace static reviewed source-bundle digest differs",
     )
     self_aliases_by_method: dict[str, set[str]] = {}
@@ -17000,6 +17000,41 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             and all(annotation not in {"int", "Path"} for _, annotation in observed_parameters),
             f"R namespace static public parameter contract differs: {method_name}",
         )
+
+    authorize_present_method = namespace_methods["authorize_present"]
+    authorize_present_preamble = tuple(
+        statement.value
+        for statement in authorize_present_method.body[:3]
+        if isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call)
+    )
+    expected_present_action_predicate = ast.parse(
+        "type(action) is _Generation6RNamespaceAction and "
+        "((action is _Generation6RNamespaceAction.RMDIR and "
+        "fact.kind is _Generation6RNamespaceNodeKind.DIRECTORY) or "
+        "(action is _Generation6RNamespaceAction.UNLINK and "
+        "fact.kind is _Generation6RNamespaceNodeKind.REGULAR))",
+        filename="TASK-064-R-A1a.1-present-action",
+        mode="eval",
+    ).body
+    _require(
+        len(authorize_present_preamble) == 3
+        and tuple(ast.unparse(call.func) for call in authorize_present_preamble)
+        == (
+            "self._require_teardown_authorization",
+            "self._require_name_fact",
+            "_require",
+        )
+        and tuple(ast.unparse(argument) for argument in authorize_present_preamble[1].args)
+        == ("authority", "fact")
+        and not authorize_present_preamble[1].keywords
+        and len(authorize_present_preamble[2].args) == 2
+        and not authorize_present_preamble[2].keywords
+        and ast.dump(authorize_present_preamble[2].args[0], include_attributes=False)
+        == ast.dump(expected_present_action_predicate, include_attributes=False)
+        and isinstance(authorize_present_preamble[2].args[1], ast.Constant)
+        and authorize_present_preamble[2].args[1].value == "R namespace present action differs",
+        "R namespace static exact present-action minting differs",
+    )
 
     def local_name_assignments(method: ast.FunctionDef, name: str) -> tuple[ast.AST, ...]:
         return tuple(
