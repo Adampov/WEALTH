@@ -11743,6 +11743,7 @@ class _Generation6RAuthorityScope:
 # it makes no atomicity, hostile pathname-race, or nested-teardown usability claim.
 # R-AUTH-NAMESPACE A2a adds only an inert, strongly bound cleanup-budget foundation.
 # R-AUTH-NAMESPACE A2b adds only inert inventory-evidence identity vocabulary.
+# R-AUTH-NAMESPACE A2c adds only inert inventory-cursor provenance.
 _GENERATION6_R_NAMESPACE_REAL_OS_STAT: Final = os.stat
 _GENERATION6_R_NAMESPACE_REAL_OS_OPEN: Final = os.open
 _GENERATION6_R_NAMESPACE_REAL_OS_FSTAT: Final = os.fstat
@@ -12136,8 +12137,31 @@ class _Generation6RNamespaceCleanupBudgetRecord:
     terminal_receipt: _Generation6RNamespaceReceipt | None
 
 
+@dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceInventoryCursorBinding:
+    serial: int
+    issuer_identity: int
+    cursor: _Generation6RNamespaceInventoryCursor
+    cursor_identity: int
+    cursor_serial: int
+    cursor_issuer_identity: int
+    authority: _Generation6RNamespaceDirectoryAuthority
+    authority_identity: int
+    authority_serial: int
+    authority_record: _Generation6RNamespaceDirectoryRecord
+    authority_record_identity: int
+    authority_binding: _Generation6RNamespaceDirectoryBinding
+    authority_binding_identity: int
+    cleanup_epoch: _Generation6RNamespaceCleanupBudgetEpoch
+    cleanup_epoch_identity: int
+    cleanup_epoch_serial: int
+    cleanup_epoch_issuer_identity: int
+    cleanup_budget_record: _Generation6RNamespaceCleanupBudgetRecord
+    cleanup_budget_record_identity: int
+
+
 class _Generation6RNamespaceJournal:
-    """Strong, private A1/A2b journal with no activation or runtime call surface."""
+    """Strong, private A1/A2c journal with no activation or runtime call surface."""
 
     def __init__(
         self,
@@ -12192,6 +12216,13 @@ class _Generation6RNamespaceJournal:
         ] = {}
         self._live_cleanup_budget_record: _Generation6RNamespaceCleanupBudgetRecord | None = None
         self._cleanup_budget_faulted = False
+        self._inventory_cursor_bindings_by_identity: dict[
+            int, _Generation6RNamespaceInventoryCursorBinding
+        ] = {}
+        self._inventory_cursor_bindings_by_serial: dict[
+            int, _Generation6RNamespaceInventoryCursorBinding
+        ] = {}
+        self._inventory_cursor_issuance_faulted = False
         self._pending_publication: object | None = None
         self._poisoned_descriptors: set[int] = set()
         self._namespace_owner_tokens: dict[int, _Generation6ROwnerToken] = {}
@@ -13016,6 +13047,179 @@ class _Generation6RNamespaceJournal:
             "R namespace directory reauthentication differs",
         )
         return authority_record, descriptor_record, descriptor, current
+
+    def _issue_inventory_cursor_provenance(
+        self,
+        authority: _Generation6RNamespaceDirectoryAuthority,
+        cleanup_epoch: _Generation6RNamespaceCleanupBudgetEpoch,
+    ) -> _Generation6RNamespaceInventoryCursor:
+        try:
+            _require(
+                type(self._inventory_cursor_issuance_faulted) is bool
+                and not self._inventory_cursor_issuance_faulted
+                and type(self._inventory_cursor_bindings_by_identity) is dict
+                and not self._inventory_cursor_bindings_by_identity
+                and type(self._inventory_cursor_bindings_by_serial) is dict
+                and not self._inventory_cursor_bindings_by_serial,
+                "R namespace inventory cursor issue state differs",
+            )
+            authority_record, _, _ = self._require_authority(authority)
+            authority_binding = authority_record.binding
+            cleanup_budget_record = self._require_live_cleanup_budget(cleanup_epoch)
+            _require(
+                type(authority_binding) is _Generation6RNamespaceDirectoryBinding
+                and authority_binding.authority is authority
+                and cleanup_budget_record.epoch is cleanup_epoch,
+                "R namespace inventory cursor issue authority differs",
+            )
+            cursor = _Generation6RNamespaceInventoryCursor(
+                self._issue_serial(),
+                self._issuer_identity,
+            )
+            cursor_identity = id(cursor)
+            binding = _Generation6RNamespaceInventoryCursorBinding(
+                self._issue_serial(),
+                self._issuer_identity,
+                cursor,
+                cursor_identity,
+                cursor.serial,
+                cursor.issuer_identity,
+                authority,
+                id(authority),
+                authority.serial,
+                authority_record,
+                id(authority_record),
+                authority_binding,
+                id(authority_binding),
+                cleanup_epoch,
+                id(cleanup_epoch),
+                cleanup_epoch.serial,
+                cleanup_epoch.issuer_identity,
+                cleanup_budget_record,
+                id(cleanup_budget_record),
+            )
+            self._inventory_cursor_bindings_by_identity[cursor_identity] = binding
+            self._inventory_cursor_bindings_by_serial[cursor.serial] = binding
+        except BaseException:
+            self._inventory_cursor_issuance_faulted = True
+            raise
+        return cursor
+
+    def _require_inventory_cursor_provenance(
+        self,
+        cursor: _Generation6RNamespaceInventoryCursor,
+    ) -> _Generation6RNamespaceInventoryCursorBinding:
+        cursor_identity = id(cursor)
+        _require(
+            type(self._inventory_cursor_issuance_faulted) is bool
+            and not self._inventory_cursor_issuance_faulted
+            and type(self._inventory_cursor_bindings_by_identity) is dict
+            and type(self._inventory_cursor_bindings_by_serial) is dict
+            and type(cursor_identity) is int
+            and cursor_identity > 0,
+            "R namespace inventory cursor trusted indexes differ",
+        )
+        binding = self._inventory_cursor_bindings_by_identity.get(cursor_identity)
+        _require(
+            type(binding) is _Generation6RNamespaceInventoryCursorBinding,
+            "R namespace inventory cursor trusted binding type differs",
+        )
+        exact_binding = cast(_Generation6RNamespaceInventoryCursorBinding, binding)
+        _exact_keys(
+            vars(exact_binding),
+            (
+                "serial",
+                "issuer_identity",
+                "cursor",
+                "cursor_identity",
+                "cursor_serial",
+                "cursor_issuer_identity",
+                "authority",
+                "authority_identity",
+                "authority_serial",
+                "authority_record",
+                "authority_record_identity",
+                "authority_binding",
+                "authority_binding_identity",
+                "cleanup_epoch",
+                "cleanup_epoch_identity",
+                "cleanup_epoch_serial",
+                "cleanup_epoch_issuer_identity",
+                "cleanup_budget_record",
+                "cleanup_budget_record_identity",
+            ),
+            "R namespace inventory cursor binding",
+        )
+        trusted_cursor = exact_binding.cursor
+        trusted_authority = exact_binding.authority
+        trusted_authority_record = exact_binding.authority_record
+        trusted_authority_binding = exact_binding.authority_binding
+        trusted_cleanup_epoch = exact_binding.cleanup_epoch
+        trusted_cleanup_budget_record = exact_binding.cleanup_budget_record
+        _require(
+            type(exact_binding.serial) is int
+            and exact_binding.serial > 0
+            and exact_binding.issuer_identity == self._issuer_identity
+            and type(trusted_cursor) is _Generation6RNamespaceInventoryCursor
+            and exact_binding.cursor_identity == id(trusted_cursor)
+            and exact_binding.cursor_serial == trusted_cursor.serial
+            and exact_binding.cursor_issuer_identity == trusted_cursor.issuer_identity
+            and trusted_cursor.issuer_identity == self._issuer_identity
+            and type(trusted_cursor.serial) is int
+            and trusted_cursor.serial > 0
+            and self._inventory_cursor_bindings_by_identity.get(exact_binding.cursor_identity)
+            is exact_binding
+            and self._inventory_cursor_bindings_by_serial.get(exact_binding.cursor_serial)
+            is exact_binding
+            and type(trusted_authority) is _Generation6RNamespaceDirectoryAuthority
+            and exact_binding.authority_identity == id(trusted_authority)
+            and exact_binding.authority_serial == trusted_authority.serial
+            and trusted_authority.issuer_identity == self._issuer_identity
+            and type(trusted_authority_record) is _Generation6RNamespaceDirectoryRecord
+            and exact_binding.authority_record_identity == id(trusted_authority_record)
+            and type(trusted_authority_binding) is _Generation6RNamespaceDirectoryBinding
+            and exact_binding.authority_binding_identity == id(trusted_authority_binding)
+            and trusted_authority_record.binding is trusted_authority_binding
+            and trusted_authority_binding.authority is trusted_authority
+            and type(trusted_cleanup_epoch) is _Generation6RNamespaceCleanupBudgetEpoch
+            and exact_binding.cleanup_epoch_identity == id(trusted_cleanup_epoch)
+            and exact_binding.cleanup_epoch_serial == trusted_cleanup_epoch.serial
+            and exact_binding.cleanup_epoch_issuer_identity == trusted_cleanup_epoch.issuer_identity
+            and trusted_cleanup_epoch.issuer_identity == self._issuer_identity
+            and type(trusted_cleanup_budget_record) is _Generation6RNamespaceCleanupBudgetRecord
+            and exact_binding.cleanup_budget_record_identity == id(trusted_cleanup_budget_record)
+            and trusted_cleanup_budget_record.epoch is trusted_cleanup_epoch,
+            "R namespace inventory cursor trusted evidence differs",
+        )
+        authenticated_authority_record, _, _ = self._require_authority(trusted_authority)
+        authenticated_cleanup_budget_record = self._require_live_cleanup_budget(
+            trusted_cleanup_epoch
+        )
+        _require(
+            authenticated_authority_record is trusted_authority_record
+            and authenticated_authority_record.binding is trusted_authority_binding
+            and authenticated_cleanup_budget_record is trusted_cleanup_budget_record,
+            "R namespace inventory cursor trusted authority binding differs",
+        )
+        _require(
+            type(cursor) is _Generation6RNamespaceInventoryCursor,
+            "R namespace inventory cursor caller type differs",
+        )
+        _exact_keys(
+            vars(cursor),
+            ("serial", "issuer_identity"),
+            "R namespace inventory cursor caller",
+        )
+        _require(
+            cursor.serial == exact_binding.cursor_serial
+            and cursor.issuer_identity == exact_binding.cursor_issuer_identity,
+            "R namespace inventory cursor caller fields differ",
+        )
+        _require(
+            cursor is trusted_cursor,
+            "R namespace inventory cursor caller identity differs",
+        )
+        return exact_binding
 
     def register_borrowed_directory(
         self,
@@ -16976,6 +17180,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_Generation6RNamespaceEmptyInventory",
         "_Generation6RNamespaceReceipt",
         "_Generation6RNamespaceCleanupBudgetRecord",
+        "_Generation6RNamespaceInventoryCursorBinding",
         "_Generation6RNamespaceJournal",
     )
     observed_namespace_class_names = tuple(
@@ -17295,6 +17500,27 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "issuance_receipt",
             "terminal_receipt",
         ),
+        "_Generation6RNamespaceInventoryCursorBinding": (
+            "serial",
+            "issuer_identity",
+            "cursor",
+            "cursor_identity",
+            "cursor_serial",
+            "cursor_issuer_identity",
+            "authority",
+            "authority_identity",
+            "authority_serial",
+            "authority_record",
+            "authority_record_identity",
+            "authority_binding",
+            "authority_binding_identity",
+            "cleanup_epoch",
+            "cleanup_epoch_identity",
+            "cleanup_epoch_serial",
+            "cleanup_epoch_issuer_identity",
+            "cleanup_budget_record",
+            "cleanup_budget_record_identity",
+        ),
     }
     expected_namespace_annotations = {
         "_Generation6RNamespaceDirectoryFact": (
@@ -17487,6 +17713,27 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "_Generation6RNamespaceReceipt | None",
             "_Generation6RNamespaceReceipt | None",
         ),
+        "_Generation6RNamespaceInventoryCursorBinding": (
+            "int",
+            "int",
+            "_Generation6RNamespaceInventoryCursor",
+            "int",
+            "int",
+            "int",
+            "_Generation6RNamespaceDirectoryAuthority",
+            "int",
+            "int",
+            "_Generation6RNamespaceDirectoryRecord",
+            "int",
+            "_Generation6RNamespaceDirectoryBinding",
+            "int",
+            "_Generation6RNamespaceCleanupBudgetEpoch",
+            "int",
+            "int",
+            "int",
+            "_Generation6RNamespaceCleanupBudgetRecord",
+            "int",
+        ),
     }
     frozen_namespace_classes = {
         "_Generation6RNamespaceDirectoryFact",
@@ -17505,6 +17752,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_Generation6RNamespaceInventoryCursor",
         "_Generation6RNamespaceEmptyInventory",
         "_Generation6RNamespaceReceipt",
+        "_Generation6RNamespaceInventoryCursorBinding",
     }
     mutable_namespace_record_classes = {
         "_Generation6RNamespaceDirectoryRecord",
@@ -17588,6 +17836,8 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_register_authority",
         "_require_authority",
         "_reauthenticate_directory",
+        "_issue_inventory_cursor_provenance",
+        "_require_inventory_cursor_provenance",
         "register_borrowed_directory",
         "_retain_uncertain_owner",
         "_reconcile_mount_poison",
@@ -17734,15 +17984,16 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "class:_Generation6RNamespaceEmptyInventory",
         "class:_Generation6RNamespaceReceipt",
         "class:_Generation6RNamespaceCleanupBudgetRecord",
+        "class:_Generation6RNamespaceInventoryCursorBinding",
         "class:_Generation6RNamespaceJournal",
     )
     normalized_bundle_source = "\n".join(source.splitlines()[bundle_start - 1 : bundle_end]) + "\n"
-    bundle_domain = b"TASK-064\0GEN6\0R-A2b\0source-v1\0"
+    bundle_domain = b"TASK-064\0GEN6\0R-A2c\0source-v1\0"
     bundle_preimage = bundle_domain + normalized_bundle_source.encode("utf-8")
     bundle_digest = hashlib.sha256(bundle_preimage).hexdigest()
     _require(
-        bundle_start == 11746
-        and bundle_end == 16265
+        bundle_start == 11747
+        and bundle_end == 16469
         and observed_bundle_inventory == expected_bundle_inventory
         and namespace_bundle_nodes[0]
         is namespace_capture_nodes["_GENERATION6_R_NAMESPACE_REAL_OS_STAT"]
@@ -17752,9 +18003,9 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             and node.end_lineno < namespace_bundle_nodes[index + 1].lineno
             for index, node in enumerate(namespace_bundle_nodes[:-1])
         )
-        and len(bundle_preimage) == 201_752
-        and bundle_digest == "33c9ba84245f7114c384fba9620bb6c0a385c974d99cc7c0e6a03ad794e85a97",
-        "R namespace A2b reviewed source-bundle digest differs",
+        and len(bundle_preimage) == 211_439
+        and bundle_digest == "b3cc642eac72f18cdc35b3009ff88c73189176df2d33da97149a6115a946f0de",
+        "R namespace A2c reviewed source-bundle digest differs",
     )
     self_aliases_by_method: dict[str, set[str]] = {}
     self_alias_assignments: list[tuple[str, str, str]] = []
@@ -17892,10 +18143,16 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "_charge_cleanup_budget",
             "_issue_cleanup_budget_epoch",
         ),
-        "self._require_live_cleanup_budget": ("_charge_cleanup_budget",),
+        "self._require_live_cleanup_budget": (
+            "_charge_cleanup_budget",
+            "_issue_inventory_cursor_provenance",
+            "_require_inventory_cursor_provenance",
+        ),
         "self._terminalize_cleanup_budget": ("_charge_cleanup_budget",),
         "self._issue_cleanup_budget_epoch": (),
         "self._charge_cleanup_budget": (),
+        "self._issue_inventory_cursor_provenance": (),
+        "self._require_inventory_cursor_provenance": (),
         "self._issue_a2_mutation_permit": ("consume_present",),
         "self._preauthorize_present_unlink": ("consume_present",),
         "self._postauthorize_present_unlink": ("consume_present",),
@@ -17970,6 +18227,9 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "self._cleanup_budget_records_by_identity",
             "self._live_cleanup_budget_record",
             "self._cleanup_budget_faulted",
+            "self._inventory_cursor_bindings_by_identity",
+            "self._inventory_cursor_bindings_by_serial",
+            "self._inventory_cursor_issuance_faulted",
             "self._pending_publication",
             "self._poisoned_descriptors",
             "self._namespace_owner_tokens",
@@ -18963,6 +19223,14 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "_issue_cleanup_budget_epoch",
             "self._cleanup_budget_records_by_serial[epoch.serial]",
         ),
+        "_inventory_cursor_bindings_by_identity": (
+            "_issue_inventory_cursor_provenance",
+            "self._inventory_cursor_bindings_by_identity[cursor_identity]",
+        ),
+        "_inventory_cursor_bindings_by_serial": (
+            "_issue_inventory_cursor_provenance",
+            "self._inventory_cursor_bindings_by_serial[cursor.serial]",
+        ),
         "_namespace_owner_tokens": (
             "_open_namespace_owner",
             "self._namespace_owner_tokens[owner_identity]",
@@ -19026,6 +19294,14 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,))
         if ast.unparse(target) == "self._cleanup_budget_faulted"
     )
+    inventory_cursor_fault_assignments = tuple(
+        (method_name, ast.unparse(node.value))
+        for method_name, method in namespace_methods.items()
+        for node in ast.walk(method)
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None
+        for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,))
+        if ast.unparse(target) == "self._inventory_cursor_issuance_faulted"
+    )
     pending_store_methods = tuple(
         method_name
         for method_name, method in namespace_methods.items()
@@ -19047,6 +19323,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
                 "_live_capability_record",
                 "_live_cleanup_budget_record",
                 "_cleanup_budget_faulted",
+                "_inventory_cursor_issuance_faulted",
                 "_pending_publication",
             )
         )
@@ -19162,6 +19439,11 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             ("_issue_cleanup_budget_epoch", "True"),
             ("_terminalize_cleanup_budget", "True"),
             ("_terminalize_cleanup_budget", "True"),
+        )
+        and inventory_cursor_fault_assignments
+        == (
+            ("__init__", "False"),
+            ("_issue_inventory_cursor_provenance", "True"),
         )
         and pending_store_methods == ("_begin_publication", "_finish_publication")
         and call_targets(namespace_methods["_register_name_fact"]).count(
@@ -20700,6 +20982,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
                 "_directory_facts_by_serial",
                 "_name_facts_by_key",
                 "_hardlink_groups",
+                "_inventory_cursor_bindings_",
                 "_namespace_owner_tokens",
                 "_namespace_owner_contexts",
                 "_archived_capability_records",
@@ -20895,9 +21178,9 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     )
 
     namespace_constructor_names = set(namespace_class_names)
-    inventory_vocabulary_constructor_names = {
+    inventory_provenance_constructor_names = {
         "_Generation6RNamespaceInventoryCursor",
-        "_Generation6RNamespaceEmptyInventory",
+        "_Generation6RNamespaceInventoryCursorBinding",
     }
 
     def assignment_values(
@@ -20936,14 +21219,270 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         )
 
     namespace_calls = tuple(call for method in namespace_methods.values() for call in calls(method))
-    inventory_vocabulary_constructor_calls = tuple(
+    inventory_provenance_constructor_calls = tuple(
+        call
+        for call in full_calls
+        if ast.unparse(call.func) in inventory_provenance_constructor_names
+    )
+    empty_inventory_constructor_calls = tuple(
+        call
+        for call in full_calls
+        if ast.unparse(call.func) == "_Generation6RNamespaceEmptyInventory"
+    )
+    inventory_cursor_issuer = namespace_methods["_issue_inventory_cursor_provenance"]
+    _require(
+        tuple(ast.unparse(call.func) for call in inventory_provenance_constructor_calls)
+        == (
+            "_Generation6RNamespaceInventoryCursor",
+            "_Generation6RNamespaceInventoryCursorBinding",
+        )
+        and all(
+            call in tuple(ast.walk(inventory_cursor_issuer))
+            for call in inventory_provenance_constructor_calls
+        )
+        and not empty_inventory_constructor_calls,
+        "R namespace A2c inventory provenance constructor inventory differs",
+    )
+    inventory_cursor_authenticator = namespace_methods["_require_inventory_cursor_provenance"]
+    inventory_cursor_issuer_targets = call_targets(inventory_cursor_issuer)
+    inventory_cursor_authenticator_targets = call_targets(inventory_cursor_authenticator)
+    inventory_helper_names = {
+        "_issue_inventory_cursor_provenance",
+        "_require_inventory_cursor_provenance",
+    }
+    full_inventory_helper_calls = tuple(
         ast.unparse(call.func)
         for call in full_calls
-        if ast.unparse(call.func) in inventory_vocabulary_constructor_names
+        if isinstance(call.func, ast.Attribute) and call.func.attr in inventory_helper_names
     )
     _require(
-        not inventory_vocabulary_constructor_calls,
-        "R namespace A2b inventory vocabulary must remain inert",
+        tuple(argument.arg for argument in inventory_cursor_issuer.args.args)
+        == ("self", "authority", "cleanup_epoch")
+        and tuple(
+            ast.unparse(argument.annotation)
+            for argument in inventory_cursor_issuer.args.args
+            if argument.annotation is not None
+        )
+        == (
+            "_Generation6RNamespaceDirectoryAuthority",
+            "_Generation6RNamespaceCleanupBudgetEpoch",
+        )
+        and inventory_cursor_issuer.returns is not None
+        and ast.unparse(inventory_cursor_issuer.returns) == "_Generation6RNamespaceInventoryCursor"
+        and not inventory_cursor_issuer.args.posonlyargs
+        and not inventory_cursor_issuer.args.kwonlyargs
+        and inventory_cursor_issuer.args.vararg is None
+        and inventory_cursor_issuer.args.kwarg is None
+        and tuple(argument.arg for argument in inventory_cursor_authenticator.args.args)
+        == ("self", "cursor")
+        and tuple(
+            ast.unparse(argument.annotation)
+            for argument in inventory_cursor_authenticator.args.args
+            if argument.annotation is not None
+        )
+        == ("_Generation6RNamespaceInventoryCursor",)
+        and inventory_cursor_authenticator.returns is not None
+        and ast.unparse(inventory_cursor_authenticator.returns)
+        == "_Generation6RNamespaceInventoryCursorBinding"
+        and not inventory_cursor_authenticator.args.posonlyargs
+        and not inventory_cursor_authenticator.args.kwonlyargs
+        and inventory_cursor_authenticator.args.vararg is None
+        and inventory_cursor_authenticator.args.kwarg is None
+        and exact_callers("_issue_inventory_cursor_provenance") == ()
+        and exact_callers("_require_inventory_cursor_provenance") == ()
+        and not full_inventory_helper_calls,
+        "R namespace A2c inventory provenance helper surface differs",
+    )
+    inventory_cursor_issue_transactions = tuple(
+        node for node in inventory_cursor_issuer.body if isinstance(node, ast.Try)
+    )
+    inventory_cursor_issue_return = (
+        inventory_cursor_issuer.body[1] if len(inventory_cursor_issuer.body) == 2 else None
+    )
+    _require(
+        len(inventory_cursor_issuer.body) == 2
+        and len(inventory_cursor_issue_transactions) == 1
+        and inventory_cursor_issuer.body[0] is inventory_cursor_issue_transactions[0]
+        and isinstance(inventory_cursor_issue_return, ast.Return)
+        and inventory_cursor_issue_return.value is not None
+        and ast.unparse(inventory_cursor_issue_return.value) == "cursor",
+        "R namespace A2c inventory cursor issue transaction differs",
+    )
+    inventory_cursor_issue_transaction = inventory_cursor_issue_transactions[0]
+    inventory_cursor_issue_handlers = tuple(
+        handler
+        for handler in inventory_cursor_issue_transaction.handlers
+        if handler.type is not None and ast.unparse(handler.type) == "BaseException"
+    )
+    _require(
+        len(inventory_cursor_issue_transaction.handlers)
+        == len(inventory_cursor_issue_handlers)
+        == 1
+        and not inventory_cursor_issue_transaction.orelse
+        and not inventory_cursor_issue_transaction.finalbody
+        and len(inventory_cursor_issue_handlers[0].body) == 2
+        and assignment_values(
+            inventory_cursor_issue_handlers[0],
+            "self._inventory_cursor_issuance_faulted",
+        )
+        == ((inventory_cursor_issue_handlers[0].body[0].lineno, "True"),)
+        and isinstance(inventory_cursor_issue_handlers[0].body[1], ast.Raise)
+        and inventory_cursor_issue_handlers[0].body[1].exc is None,
+        "R namespace A2c inventory cursor fail-closed latch differs",
+    )
+    inventory_cursor_authority_line = one_line(
+        selected_call_lines(inventory_cursor_issuer, "self._require_authority"),
+        "A2c inventory cursor non-observational authority authentication",
+    )
+    inventory_cursor_budget_line = one_line(
+        selected_call_lines(inventory_cursor_issuer, "self._require_live_cleanup_budget"),
+        "A2c inventory cursor cleanup epoch authentication",
+    )
+    inventory_cursor_constructor_line = one_line(
+        selected_call_lines(
+            inventory_cursor_issuer,
+            "_Generation6RNamespaceInventoryCursor",
+        ),
+        "A2c inventory cursor construction",
+    )
+    inventory_cursor_binding_line = one_line(
+        selected_call_lines(
+            inventory_cursor_issuer,
+            "_Generation6RNamespaceInventoryCursorBinding",
+        ),
+        "A2c inventory cursor binding construction",
+    )
+    inventory_cursor_identity_store_line = one_line(
+        assignment_lines(
+            inventory_cursor_issuer,
+            "self._inventory_cursor_bindings_by_identity[cursor_identity]",
+            "binding",
+        ),
+        "A2c inventory cursor identity publication",
+    )
+    inventory_cursor_serial_store_line = one_line(
+        assignment_lines(
+            inventory_cursor_issuer,
+            "self._inventory_cursor_bindings_by_serial[cursor.serial]",
+            "binding",
+        ),
+        "A2c inventory cursor serial publication",
+    )
+    _require(
+        inventory_cursor_issuer_targets.count("self._require_authority") == 1
+        and inventory_cursor_issuer_targets.count("self._reauthenticate_directory") == 0
+        and inventory_cursor_issuer_targets.count("self._require_live_cleanup_budget") == 1
+        and inventory_cursor_issuer_targets.count("_Generation6RNamespaceInventoryCursor") == 1
+        and inventory_cursor_issuer_targets.count("_Generation6RNamespaceInventoryCursorBinding")
+        == 1
+        and inventory_cursor_issuer_targets.count("self._issue_serial") == 2
+        and inventory_cursor_issuer_targets.count("id") == 6
+        and inventory_cursor_authority_line
+        < inventory_cursor_budget_line
+        < inventory_cursor_constructor_line
+        < inventory_cursor_binding_line
+        < inventory_cursor_identity_store_line
+        < inventory_cursor_serial_store_line,
+        "R namespace A2c inventory cursor fixed publication ordering differs",
+    )
+    inventory_cursor_authenticator_writes = tuple(
+        ast.unparse(node)
+        for node in ast.walk(inventory_cursor_authenticator)
+        if (
+            isinstance(node, (ast.Attribute, ast.Subscript))
+            and isinstance(node.ctx, (ast.Store, ast.Del))
+        )
+        or isinstance(node, (ast.AugAssign, ast.NamedExpr))
+    )
+    caller_cursor_attribute_lines = tuple(
+        sorted(
+            node.lineno
+            for node in ast.walk(inventory_cursor_authenticator)
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "cursor"
+        )
+    )
+    authenticator_authority_line = one_line(
+        selected_call_lines(
+            inventory_cursor_authenticator,
+            "self._require_authority",
+        ),
+        "A2c inventory cursor trusted non-observational authority authentication",
+    )
+    authenticator_budget_line = one_line(
+        selected_call_lines(
+            inventory_cursor_authenticator,
+            "self._require_live_cleanup_budget",
+        ),
+        "A2c inventory cursor trusted epoch reauthentication",
+    )
+    caller_identity_guard_lines = tuple(
+        call.lineno
+        for call in calls(inventory_cursor_authenticator)
+        if ast.unparse(call.func) == "_require" and "cursor is trusted_cursor" in ast.unparse(call)
+    )
+    inventory_cursor_authenticator_return = (
+        inventory_cursor_authenticator.body[-1] if inventory_cursor_authenticator.body else None
+    )
+    _require(
+        not inventory_cursor_authenticator_writes
+        and inventory_cursor_authenticator_targets.count("self._require_authority") == 1
+        and inventory_cursor_authenticator_targets.count("self._reauthenticate_directory") == 0
+        and inventory_cursor_authenticator_targets.count("self._require_live_cleanup_budget") == 1
+        and inventory_cursor_authenticator_targets.count(
+            "self._inventory_cursor_bindings_by_identity.get"
+        )
+        == 2
+        and inventory_cursor_authenticator_targets.count(
+            "self._inventory_cursor_bindings_by_serial.get"
+        )
+        == 1
+        and inventory_cursor_authenticator_targets.count("_exact_keys") == 2
+        and len(caller_cursor_attribute_lines) == 2
+        and len(caller_identity_guard_lines) == 1
+        and authenticator_authority_line < min(caller_cursor_attribute_lines)
+        and authenticator_budget_line < min(caller_cursor_attribute_lines)
+        and max(caller_cursor_attribute_lines) < caller_identity_guard_lines[0]
+        and isinstance(inventory_cursor_authenticator_return, ast.Return)
+        and inventory_cursor_authenticator_return.value is not None
+        and ast.unparse(inventory_cursor_authenticator_return.value) == "exact_binding"
+        and caller_identity_guard_lines[0] == inventory_cursor_authenticator.body[-2].lineno,
+        "R namespace A2c trusted-first cursor authentication differs",
+    )
+    inventory_provenance_sources = "\n".join(
+        ast.unparse(method) for method in (inventory_cursor_issuer, inventory_cursor_authenticator)
+    )
+    inventory_provenance_forbidden_targets = {
+        "self._append_receipt",
+        "self._begin_publication",
+        "self._charge_cleanup_budget",
+        "self._finish_publication",
+        "self._reauthenticate_directory",
+        "self._terminalize_cleanup_budget",
+        "self._namespace_mount_id",
+        "_GENERATION6_R_NAMESPACE_CAPTURED_MOUNT_ID",
+        "_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD",
+        "_GENERATION6_R_NAMESPACE_REAL_FCNTL",
+        "_GENERATION6_R_NAMESPACE_REAL_MONOTONIC_NS",
+        "_GENERATION6_R_NAMESPACE_REAL_OS_FSTAT",
+        "_GENERATION6_R_NAMESPACE_REAL_OS_OPEN",
+        "_GENERATION6_R_NAMESPACE_REAL_OS_STAT",
+        "_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK",
+        "os.rmdir",
+        "os.scandir",
+    }
+    _require(
+        not inventory_provenance_forbidden_targets.intersection(
+            set(inventory_cursor_issuer_targets) | set(inventory_cursor_authenticator_targets)
+        )
+        and "_Generation6RNamespaceEmptyInventory" not in inventory_provenance_sources
+        and "consume_rmdir" not in inventory_provenance_sources
+        and "current-inventory-cursor" not in inventory_provenance_sources
+        and "self._phase" not in inventory_provenance_sources
+        and "self._live_capability_record" not in inventory_provenance_sources
+        and "self._live_mutation_permit_record" not in inventory_provenance_sources,
+        "R namespace A2c provenance-only no-consumer boundary differs",
     )
     permit_constructor_names = {
         "_Generation6RNamespaceMutationPermit",
@@ -21607,7 +22146,12 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         and exact_callers("_charge_cleanup_budget") == ()
         and exact_callers("_read_cleanup_budget_clock")
         == ("_issue_cleanup_budget_epoch", "_charge_cleanup_budget")
-        and exact_callers("_require_live_cleanup_budget") == ("_charge_cleanup_budget",)
+        and exact_callers("_require_live_cleanup_budget")
+        == (
+            "_charge_cleanup_budget",
+            "_issue_inventory_cursor_provenance",
+            "_require_inventory_cursor_provenance",
+        )
         and exact_callers("_terminalize_cleanup_budget") == ("_charge_cleanup_budget",)
         and call_targets(budget_clock).count("_GENERATION6_R_NAMESPACE_REAL_MONOTONIC_NS") == 1
         and call_targets(namespace_journal).count("_GENERATION6_R_NAMESPACE_REAL_MONOTONIC_NS") == 1
@@ -21925,6 +22469,8 @@ def _generation6_r_authority_source_gates(source: str) -> None:
 
     a2_budget_foundation_present = True
     a2_inventory_vocabulary_present = True
+    a2_inventory_cursor_provenance_present = True
+    a2_current_inventory_cursor = False
     a2_budget_readiness = False
     a2_budget_prerequisites = (
         "scan-attempt-metering",
@@ -21948,6 +22494,10 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         and a2_budget_foundation_present
         and type(a2_inventory_vocabulary_present) is bool
         and a2_inventory_vocabulary_present
+        and type(a2_inventory_cursor_provenance_present) is bool
+        and a2_inventory_cursor_provenance_present
+        and type(a2_current_inventory_cursor) is bool
+        and not a2_current_inventory_cursor
         and type(a2_budget_readiness) is bool
         and not a2_budget_readiness
         and a2_budget_prerequisites
@@ -21980,7 +22530,6 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         and all(
             fragment not in namespace_source
             for fragment in (
-                "_Generation6RNamespaceInventoryCursor",
                 "_Generation6RNamespaceEmptyInventory",
                 "consume_rmdir",
             )
@@ -21992,9 +22541,12 @@ def _generation6_r_authority_source_gates(source: str) -> None:
                 "_Generation6RNamespaceCleanupBudgetRecord",
                 "_issue_cleanup_budget_epoch",
                 "_charge_cleanup_budget",
+                "_Generation6RNamespaceInventoryCursorBinding",
+                "_issue_inventory_cursor_provenance",
+                "_require_inventory_cursor_provenance",
             )
         ),
-        "R namespace A2b budget/RMDIR readiness must remain statically false",
+        "R namespace A2c budget/RMDIR readiness must remain statically false",
     )
 
     permanent_collection_names = {
@@ -22012,6 +22564,8 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "self._archived_mutation_permit_records",
         "self._cleanup_budget_records_by_serial",
         "self._cleanup_budget_records_by_identity",
+        "self._inventory_cursor_bindings_by_identity",
+        "self._inventory_cursor_bindings_by_serial",
         "self._namespace_owner_tokens",
         "self._namespace_owner_contexts",
         "self._receipts",
@@ -22214,28 +22768,30 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     )
     _require(
         type(namespace_gate_function.end_lineno) is int,
-        "R namespace A2b gate end differs",
+        "R namespace A2c gate end differs",
     )
     gate_start = namespace_gate_function.lineno
     gate_end = cast(int, namespace_gate_function.end_lineno)
-    expected_gate_digest = "809f211ce7f787cf63bbecd7db67e656e2bdc2a503ccdd9f6fe82ef5f3743687"
+    expected_gate_digest = "f1f5f42a25724eca1353b0246f2b16b76a7b6f4635c575f440393dc1c5c6b7d5"
     normalized_gate_source = "\n".join(source.splitlines()[gate_start - 1 : gate_end]) + "\n"
     _require(
         normalized_gate_source.count(expected_gate_digest) == 1,
-        "R namespace A2b gate digest token differs",
+        "R namespace A2c gate digest token differs",
     )
     normalized_gate_source = normalized_gate_source.replace(
         expected_gate_digest,
         "0" * 64,
     )
-    gate_domain = b"TASK-064\0GEN6\0R-A2b\0gate-v1\0"
-    gate_digest = hashlib.sha256(gate_domain + normalized_gate_source.encode("utf-8")).hexdigest()
+    gate_domain = b"TASK-064\0GEN6\0R-A2c\0gate-v1\0"
+    gate_preimage = gate_domain + normalized_gate_source.encode("utf-8")
+    gate_digest = hashlib.sha256(gate_preimage).hexdigest()
     namespace_gate_index = syntax.body.index(namespace_gate_function)
     _require(
-        gate_start == 16268
+        gate_start == 16472
         and syntax.body[namespace_gate_index + 1] is top_function("_selftest_r_case")
+        and len(gate_preimage) == 269_655
         and gate_digest == expected_gate_digest,
-        "R namespace A2b reviewed gate digest differs",
+        "R namespace A2c reviewed gate digest differs",
     )
 
 
