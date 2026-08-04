@@ -11745,6 +11745,7 @@ class _Generation6RAuthorityScope:
 # R-AUTH-NAMESPACE A2b adds only inert inventory-evidence identity vocabulary.
 # R-AUTH-NAMESPACE A2c adds only inert inventory-cursor provenance.
 # R-AUTH-NAMESPACE A2d adds only an inert single-current inventory-cursor lifecycle.
+# R-AUTH-NAMESPACE A2e adds only inert precharged scan acquisition and ownership.
 _GENERATION6_R_NAMESPACE_REAL_OS_STAT: Final = os.stat
 _GENERATION6_R_NAMESPACE_REAL_OS_OPEN: Final = os.open
 _GENERATION6_R_NAMESPACE_REAL_OS_FSTAT: Final = os.fstat
@@ -11895,6 +11896,14 @@ class _Generation6RNamespaceInventoryCursorState(  # noqa: UP042 - exact contrac
 ):
     CURRENT = "CURRENT"
     RETIRED = "RETIRED"
+    UNCERTAIN = "UNCERTAIN"
+
+
+class _Generation6RNamespaceInventoryScanState(  # noqa: UP042 - exact contract
+    str, Enum
+):
+    LIVE = "LIVE"
+    CLOSED_UNEXHAUSTED = "CLOSED_UNEXHAUSTED"
     UNCERTAIN = "UNCERTAIN"
 
 
@@ -12119,6 +12128,12 @@ class _Generation6RNamespaceInventoryCursor:
 
 
 @dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceInventoryScan:
+    serial: int
+    issuer_identity: int
+
+
+@dataclass(frozen=True, eq=False)
 class _Generation6RNamespaceEmptyInventory:
     serial: int
     issuer_identity: int
@@ -12178,8 +12193,42 @@ class _Generation6RNamespaceInventoryCursorRecord:
     terminal_receipt: _Generation6RNamespaceReceipt | None
 
 
+@dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceInventoryScanBinding:
+    serial: int
+    issuer_identity: int
+    scan: _Generation6RNamespaceInventoryScan
+    scan_identity: int
+    scan_serial: int
+    scan_issuer_identity: int
+    cursor_record: _Generation6RNamespaceInventoryCursorRecord
+    cursor_record_identity: int
+    cursor_binding: _Generation6RNamespaceInventoryCursorBinding
+    cursor_binding_identity: int
+    proxy: _Generation6RScandirProxy
+    proxy_identity: int
+    iterator_token: _Generation6RIteratorToken
+    iterator_token_identity: int
+    descriptor: int
+    depth: int
+    cleanup_epoch: _Generation6RNamespaceCleanupBudgetEpoch
+    cleanup_epoch_identity: int
+    cleanup_epoch_serial: int
+    cleanup_epoch_issuer_identity: int
+
+
+@dataclass(eq=False)
+class _Generation6RNamespaceInventoryScanRecord:
+    binding: _Generation6RNamespaceInventoryScanBinding
+    binding_identity: int
+    state: _Generation6RNamespaceInventoryScanState
+    close_attempts: int
+    acquisition_receipt: _Generation6RNamespaceReceipt | None
+    terminal_receipt: _Generation6RNamespaceReceipt | None
+
+
 class _Generation6RNamespaceJournal:
-    """Strong, private A1/A2d journal with no activation or runtime call surface."""
+    """Strong, private A1/A2e journal with no activation or runtime call surface."""
 
     def __init__(
         self,
@@ -12254,6 +12303,16 @@ class _Generation6RNamespaceJournal:
             _Generation6RNamespaceInventoryCursorRecord
         ] = []
         self._inventory_cursor_lifecycle_faulted = False
+        self._inventory_scan_records_by_identity: dict[
+            int, _Generation6RNamespaceInventoryScanRecord
+        ] = {}
+        self._inventory_scan_records_by_serial: dict[
+            int, _Generation6RNamespaceInventoryScanRecord
+        ] = {}
+        self._live_inventory_scan_record: _Generation6RNamespaceInventoryScanRecord | None = None
+        self._archived_inventory_scan_records: list[_Generation6RNamespaceInventoryScanRecord] = []
+        self._inventory_scan_proxy_quarantine: list[_Generation6RScandirProxy] = []
+        self._inventory_scan_lifecycle_faulted = False
         self._pending_publication: object | None = None
         self._poisoned_descriptors: set[int] = set()
         self._namespace_owner_tokens: dict[int, _Generation6ROwnerToken] = {}
@@ -13415,6 +13474,452 @@ class _Generation6RNamespaceJournal:
             self._inventory_cursor_lifecycle_faulted = True
             if type(record) is _Generation6RNamespaceInventoryCursorRecord:
                 record.state = _Generation6RNamespaceInventoryCursorState.UNCERTAIN
+            raise
+
+    def _acquire_metered_inventory_scan(
+        self,
+        cursor: _Generation6RNamespaceInventoryCursor,
+    ) -> _Generation6RNamespaceInventoryScan:
+        _require(
+            type(self._inventory_scan_lifecycle_faulted) is bool
+            and not self._inventory_scan_lifecycle_faulted
+            and type(self._inventory_scan_records_by_identity) is dict
+            and not self._inventory_scan_records_by_identity
+            and type(self._inventory_scan_records_by_serial) is dict
+            and not self._inventory_scan_records_by_serial
+            and self._live_inventory_scan_record is None
+            and type(self._archived_inventory_scan_records) is list
+            and not self._archived_inventory_scan_records
+            and type(self._inventory_scan_proxy_quarantine) is list
+            and not self._inventory_scan_proxy_quarantine,
+            "R namespace inventory scan pristine issue state differs",
+        )
+        record: _Generation6RNamespaceInventoryScanRecord | None = None
+        proxy: _Generation6RScandirProxy | None = None
+        try:
+            cursor_record = self._require_current_inventory_cursor(cursor)
+            cursor_binding = cursor_record.binding
+            authority_binding = cursor_binding.authority_binding
+            cleanup_epoch = cursor_binding.cleanup_epoch
+            _require(
+                type(cursor_binding) is _Generation6RNamespaceInventoryCursorBinding
+                and cursor_record.binding_identity == id(cursor_binding)
+                and type(authority_binding) is _Generation6RNamespaceDirectoryBinding
+                and cursor_binding.authority_binding_identity == id(authority_binding)
+                and type(cleanup_epoch) is _Generation6RNamespaceCleanupBudgetEpoch
+                and cursor_binding.cleanup_epoch_identity == id(cleanup_epoch),
+                "R namespace inventory scan trusted cursor binding differs",
+            )
+            trusted_descriptor = _GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE(
+                authority_binding.owner.fd
+            )
+            trusted_relative = authority_binding.fact.relative
+            trusted_depth = len(trusted_relative)
+            _require(
+                type(trusted_descriptor) is int
+                and trusted_descriptor > 2
+                and trusted_descriptor == authority_binding.descriptor_token.descriptor
+                and type(trusted_relative) is tuple
+                and type(trusted_depth) is int
+                and 0 <= trusted_depth <= cleanup_epoch.max_depth,
+                "R namespace inventory scan trusted descriptor or depth differs",
+            )
+            self._charge_cleanup_budget(
+                cleanup_epoch,
+                next_depth=trusted_depth,
+                entry_increment=0,
+                encoded_name_bytes_increment=0,
+            )
+            proxy = self._descriptor_ledger.scandir(trusted_descriptor)
+            _require(
+                type(proxy) is _Generation6RScandirProxy,
+                "R namespace inventory scan proxy type differs",
+            )
+            _exact_keys(
+                vars(proxy),
+                (
+                    "_ledger",
+                    "_token",
+                    "_iterator",
+                    "_close_operation",
+                    "_terminal",
+                    "_close_attempts",
+                ),
+                "R namespace inventory scan proxy",
+            )
+            proxy_identity = id(proxy)
+            iterator_token = proxy._token
+            _require(
+                type(proxy_identity) is int
+                and proxy_identity > 0
+                and proxy._ledger is self._descriptor_ledger
+                and type(iterator_token) is _Generation6RIteratorToken
+                and iterator_token.parent is authority_binding.descriptor_token
+                and iterator_token.iterator_identity == id(proxy._iterator)
+                and iterator_token.acquired_phase is _Generation6RPhase.PRODUCTION
+                and not proxy._terminal
+                and proxy._close_attempts == 0
+                and self._descriptor_ledger._live_scandir_proxies.get(proxy_identity) is proxy,
+                "R namespace inventory scan adopted proxy differs",
+            )
+            scan = _Generation6RNamespaceInventoryScan(
+                self._issue_serial(),
+                self._issuer_identity,
+            )
+            scan_identity = id(scan)
+            binding = _Generation6RNamespaceInventoryScanBinding(
+                self._issue_serial(),
+                self._issuer_identity,
+                scan,
+                scan_identity,
+                scan.serial,
+                scan.issuer_identity,
+                cursor_record,
+                id(cursor_record),
+                cursor_binding,
+                id(cursor_binding),
+                proxy,
+                proxy_identity,
+                iterator_token,
+                id(iterator_token),
+                trusted_descriptor,
+                trusted_depth,
+                cleanup_epoch,
+                id(cleanup_epoch),
+                cleanup_epoch.serial,
+                cleanup_epoch.issuer_identity,
+            )
+            record = _Generation6RNamespaceInventoryScanRecord(
+                binding,
+                id(binding),
+                _Generation6RNamespaceInventoryScanState.LIVE,
+                0,
+                None,
+                None,
+            )
+            self._inventory_scan_records_by_identity[scan_identity] = record
+            self._inventory_scan_records_by_serial[scan.serial] = record
+            acquisition_receipt = self._append_receipt(
+                token_serial=scan.serial,
+                authority_serial=cursor_binding.authority_serial,
+                event="INVENTORY_SCAN_ACQUIRED",
+            )
+            record.acquisition_receipt = acquisition_receipt
+            self._live_inventory_scan_record = record
+            return scan
+        except BaseException as primary:
+            self._inventory_scan_lifecycle_faulted = True
+            if type(record) is _Generation6RNamespaceInventoryScanRecord:
+                record.state = _Generation6RNamespaceInventoryScanState.UNCERTAIN
+                try:
+                    self._archived_inventory_scan_records.append(record)
+                except BaseException as archive_error:
+                    primary.add_note(
+                        f"R namespace inventory scan failure archive failed: {archive_error!r}"
+                    )
+            if type(proxy) is _Generation6RScandirProxy:
+                try:
+                    self._inventory_scan_proxy_quarantine.append(proxy)
+                except BaseException as quarantine_error:
+                    primary.add_note(
+                        "R namespace inventory scan failure quarantine failed: "
+                        f"{quarantine_error!r}"
+                    )
+                if (
+                    not proxy._terminal
+                    and proxy._close_attempts == 0
+                    and self._descriptor_ledger._live_scandir_proxies.get(id(proxy)) is proxy
+                ):
+                    if type(record) is _Generation6RNamespaceInventoryScanRecord:
+                        record.close_attempts = 1
+                    try:
+                        proxy.close()
+                    except BaseException as close_error:
+                        primary.add_note(
+                            f"R namespace inventory scan failure close failed: {close_error!r}"
+                        )
+            raise
+
+    def _require_current_inventory_scan(
+        self,
+        scan: _Generation6RNamespaceInventoryScan,
+    ) -> _Generation6RNamespaceInventoryScanRecord:
+        live_record = self._live_inventory_scan_record
+        _require(
+            type(self._inventory_scan_lifecycle_faulted) is bool
+            and not self._inventory_scan_lifecycle_faulted
+            and type(self._inventory_scan_records_by_identity) is dict
+            and type(self._inventory_scan_records_by_serial) is dict
+            and type(self._archived_inventory_scan_records) is list
+            and not self._archived_inventory_scan_records
+            and type(self._inventory_scan_proxy_quarantine) is list
+            and not self._inventory_scan_proxy_quarantine
+            and type(live_record) is _Generation6RNamespaceInventoryScanRecord,
+            "R namespace current inventory scan trusted live slot differs",
+        )
+        exact_record = cast(_Generation6RNamespaceInventoryScanRecord, live_record)
+        trusted_binding = exact_record.binding
+        _require(
+            type(trusted_binding) is _Generation6RNamespaceInventoryScanBinding,
+            "R namespace current inventory scan trusted binding type differs",
+        )
+        trusted_scan = trusted_binding.scan
+        trusted_cursor_record = trusted_binding.cursor_record
+        trusted_cursor_binding = trusted_binding.cursor_binding
+        trusted_proxy = trusted_binding.proxy
+        trusted_iterator_token = trusted_binding.iterator_token
+        trusted_epoch = trusted_binding.cleanup_epoch
+        acquisition_receipt = exact_record.acquisition_receipt
+        _exact_keys(
+            vars(exact_record),
+            (
+                "binding",
+                "binding_identity",
+                "state",
+                "close_attempts",
+                "acquisition_receipt",
+                "terminal_receipt",
+            ),
+            "R namespace current inventory scan record",
+        )
+        _exact_keys(
+            vars(trusted_binding),
+            (
+                "serial",
+                "issuer_identity",
+                "scan",
+                "scan_identity",
+                "scan_serial",
+                "scan_issuer_identity",
+                "cursor_record",
+                "cursor_record_identity",
+                "cursor_binding",
+                "cursor_binding_identity",
+                "proxy",
+                "proxy_identity",
+                "iterator_token",
+                "iterator_token_identity",
+                "descriptor",
+                "depth",
+                "cleanup_epoch",
+                "cleanup_epoch_identity",
+                "cleanup_epoch_serial",
+                "cleanup_epoch_issuer_identity",
+            ),
+            "R namespace current inventory scan binding",
+        )
+        _require(
+            exact_record.binding_identity == id(trusted_binding)
+            and type(trusted_scan) is _Generation6RNamespaceInventoryScan
+            and trusted_binding.scan_identity == id(trusted_scan)
+            and trusted_binding.scan_serial == trusted_scan.serial
+            and trusted_binding.scan_issuer_identity == trusted_scan.issuer_identity
+            and trusted_scan.issuer_identity == self._issuer_identity
+            and self._inventory_scan_records_by_identity.get(trusted_binding.scan_identity)
+            is exact_record
+            and self._inventory_scan_records_by_serial.get(trusted_binding.scan_serial)
+            is exact_record
+            and exact_record.state is _Generation6RNamespaceInventoryScanState.LIVE
+            and exact_record.close_attempts == 0
+            and type(acquisition_receipt) is _Generation6RNamespaceReceipt
+            and acquisition_receipt.issuer_identity == self._issuer_identity
+            and acquisition_receipt.token_serial == trusted_binding.scan_serial
+            and acquisition_receipt.authority_serial == trusted_cursor_binding.authority_serial
+            and acquisition_receipt.event == "INVENTORY_SCAN_ACQUIRED"
+            and exact_record.terminal_receipt is None
+            and type(trusted_cursor_record) is _Generation6RNamespaceInventoryCursorRecord
+            and trusted_binding.cursor_record_identity == id(trusted_cursor_record)
+            and type(trusted_cursor_binding) is _Generation6RNamespaceInventoryCursorBinding
+            and trusted_binding.cursor_binding_identity == id(trusted_cursor_binding)
+            and trusted_cursor_record.binding is trusted_cursor_binding
+            and self._live_inventory_cursor_record is trusted_cursor_record
+            and self._inventory_cursor_records_by_identity.get(
+                trusted_cursor_binding.cursor_identity
+            )
+            is trusted_cursor_record
+            and self._inventory_cursor_records_by_serial.get(trusted_cursor_binding.cursor_serial)
+            is trusted_cursor_record
+            and trusted_cursor_record.state is _Generation6RNamespaceInventoryCursorState.CURRENT
+            and trusted_cursor_record.terminal_receipt is None
+            and type(trusted_proxy) is _Generation6RScandirProxy
+            and trusted_binding.proxy_identity == id(trusted_proxy)
+            and trusted_proxy._ledger is self._descriptor_ledger
+            and type(trusted_iterator_token) is _Generation6RIteratorToken
+            and trusted_binding.iterator_token_identity == id(trusted_iterator_token)
+            and trusted_proxy._token is trusted_iterator_token
+            and trusted_iterator_token.parent
+            is trusted_cursor_binding.authority_binding.descriptor_token
+            and trusted_iterator_token.iterator_identity == id(trusted_proxy._iterator)
+            and trusted_iterator_token.acquired_phase is _Generation6RPhase.PRODUCTION
+            and not trusted_proxy._terminal
+            and trusted_proxy._close_attempts == 0
+            and self._descriptor_ledger._live_scandir_proxies.get(trusted_binding.proxy_identity)
+            is trusted_proxy
+            and trusted_binding.descriptor == trusted_iterator_token.parent.descriptor
+            and trusted_binding.descriptor
+            == _GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE(
+                trusted_cursor_binding.authority_binding.owner.fd
+            )
+            and trusted_binding.depth == len(trusted_cursor_binding.authority_binding.fact.relative)
+            and type(trusted_epoch) is _Generation6RNamespaceCleanupBudgetEpoch
+            and trusted_binding.cleanup_epoch_identity == id(trusted_epoch)
+            and trusted_binding.cleanup_epoch_serial == trusted_epoch.serial
+            and trusted_binding.cleanup_epoch_issuer_identity == trusted_epoch.issuer_identity
+            and trusted_epoch is trusted_cursor_binding.cleanup_epoch
+            and self._live_cleanup_budget_record is trusted_cursor_binding.cleanup_budget_record
+            and trusted_cursor_binding.cleanup_budget_record.state
+            is _Generation6RNamespaceCleanupBudgetState.ACTIVE,
+            "R namespace current inventory scan trusted evidence differs",
+        )
+        _require(
+            type(scan) is _Generation6RNamespaceInventoryScan,
+            "R namespace current inventory scan caller type differs",
+        )
+        _exact_keys(
+            vars(scan),
+            ("serial", "issuer_identity"),
+            "R namespace current inventory scan caller",
+        )
+        _require(
+            scan.serial == trusted_binding.scan_serial
+            and scan.issuer_identity == trusted_binding.scan_issuer_identity,
+            "R namespace current inventory scan caller fields differ",
+        )
+        _require(
+            scan is trusted_scan,
+            "R namespace current inventory scan caller identity differs",
+        )
+        return exact_record
+
+    def _terminalize_inventory_scan(
+        self,
+        scan: _Generation6RNamespaceInventoryScan,
+    ) -> None:
+        record: _Generation6RNamespaceInventoryScanRecord | None = None
+        proxy: _Generation6RScandirProxy | None = None
+        archive_on_failure = False
+        archive_attempted = False
+        quarantine_on_failure = False
+        try:
+            scan_identity = id(scan)
+            candidate = self._inventory_scan_records_by_identity.get(scan_identity)
+            _require(
+                type(candidate) is _Generation6RNamespaceInventoryScanRecord,
+                "R namespace inventory scan close trusted record differs",
+            )
+            record = cast(_Generation6RNamespaceInventoryScanRecord, candidate)
+            binding = record.binding
+            _require(
+                type(binding) is _Generation6RNamespaceInventoryScanBinding,
+                "R namespace inventory scan close trusted binding differs",
+            )
+            trusted_scan = binding.scan
+            proxy = binding.proxy
+            iterator_token = binding.iterator_token
+            _exact_keys(
+                vars(record),
+                (
+                    "binding",
+                    "binding_identity",
+                    "state",
+                    "close_attempts",
+                    "acquisition_receipt",
+                    "terminal_receipt",
+                ),
+                "R namespace inventory scan close record",
+            )
+            _require(
+                record.binding_identity == id(binding)
+                and type(trusted_scan) is _Generation6RNamespaceInventoryScan
+                and binding.scan_identity == id(trusted_scan)
+                and binding.scan_serial == trusted_scan.serial
+                and binding.scan_issuer_identity == trusted_scan.issuer_identity
+                and self._inventory_scan_records_by_identity.get(binding.scan_identity) is record
+                and self._inventory_scan_records_by_serial.get(binding.scan_serial) is record
+                and type(proxy) is _Generation6RScandirProxy
+                and binding.proxy_identity == id(proxy)
+                and proxy._ledger is self._descriptor_ledger
+                and type(iterator_token) is _Generation6RIteratorToken
+                and binding.iterator_token_identity == id(iterator_token)
+                and proxy._token is iterator_token
+                and iterator_token.parent
+                is binding.cursor_binding.authority_binding.descriptor_token
+                and binding.descriptor == iterator_token.parent.descriptor,
+                "R namespace inventory scan close permanent evidence differs",
+            )
+            _require(
+                type(scan) is _Generation6RNamespaceInventoryScan,
+                "R namespace inventory scan close caller type differs",
+            )
+            _exact_keys(
+                vars(scan),
+                ("serial", "issuer_identity"),
+                "R namespace inventory scan close caller",
+            )
+            _require(
+                scan.serial == binding.scan_serial
+                and scan.issuer_identity == binding.scan_issuer_identity,
+                "R namespace inventory scan close caller fields differ",
+            )
+            _require(
+                scan is trusted_scan,
+                "R namespace inventory scan close caller identity differs",
+            )
+            faulted_before = self._inventory_scan_lifecycle_faulted
+            archive_on_failure = record.state is _Generation6RNamespaceInventoryScanState.LIVE
+            quarantine_on_failure = (
+                record.state is not _Generation6RNamespaceInventoryScanState.UNCERTAIN
+            )
+            _require(
+                record.state is _Generation6RNamespaceInventoryScanState.LIVE
+                and record.close_attempts == 0
+                and record.terminal_receipt is None
+                and self._live_inventory_scan_record is record,
+                "R namespace inventory scan close live evidence differs",
+            )
+            record.close_attempts = 1
+            _require(
+                not proxy._terminal
+                and proxy._close_attempts == 0
+                and self._descriptor_ledger._live_scandir_proxies.get(id(proxy)) is proxy,
+                "R namespace inventory scan close proxy topology differs",
+            )
+            proxy.close()
+            _require(
+                proxy._terminal
+                and proxy._close_attempts == 1
+                and self._descriptor_ledger._live_scandir_proxies.get(id(proxy)) is None
+                and not faulted_before,
+                "R namespace inventory scan close result differs",
+            )
+            record.state = _Generation6RNamespaceInventoryScanState.CLOSED_UNEXHAUSTED
+            terminal_receipt = self._append_receipt(
+                token_serial=binding.scan_serial,
+                authority_serial=binding.cursor_binding.authority_serial,
+                event="INVENTORY_SCAN_CLOSED_UNEXHAUSTED",
+            )
+            record.terminal_receipt = terminal_receipt
+            archive_attempted = True
+            self._archived_inventory_scan_records.append(record)
+            self._live_inventory_scan_record = None
+        except BaseException as primary:
+            self._inventory_scan_lifecycle_faulted = True
+            if type(record) is _Generation6RNamespaceInventoryScanRecord:
+                record.state = _Generation6RNamespaceInventoryScanState.UNCERTAIN
+                if archive_on_failure and not archive_attempted:
+                    try:
+                        self._archived_inventory_scan_records.append(record)
+                    except BaseException as archive_error:
+                        primary.add_note(
+                            f"R namespace inventory scan close archive failed: {archive_error!r}"
+                        )
+            if type(proxy) is _Generation6RScandirProxy and quarantine_on_failure:
+                try:
+                    self._inventory_scan_proxy_quarantine.append(proxy)
+                except BaseException as quarantine_error:
+                    primary.add_note(
+                        f"R namespace inventory scan close quarantine failed: {quarantine_error!r}"
+                    )
             raise
 
     def register_borrowed_directory(
@@ -16703,6 +17208,10 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     def call_targets(node: ast.AST) -> tuple[str, ...]:
         return tuple(ast.unparse(candidate.func) for candidate in calls(node))
 
+    def normalized_node_source(node: ast.FunctionDef) -> str:
+        _require(type(node.end_lineno) is int, "R static node source end differs")
+        return "\n".join(source.splitlines()[node.lineno - 1 : cast(int, node.end_lineno)]) + "\n"
+
     capture_values = {
         "_GENERATION6_R_CAPTURED_FD_INIT": "FdOwner.__init__",
         "_GENERATION6_R_CAPTURED_FD_REQUIRE": "FdOwner.require",
@@ -17036,6 +17545,27 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     scandir = class_method(ledger_class, "scandir")
     scandir_source = ast.unparse(scandir)
     scandir_targets = call_targets(scandir)
+    raw_scandir_statements = tuple(
+        statement
+        for statement in scandir.body
+        if isinstance(statement, ast.Assign)
+        and ast.unparse(statement.value) == "_GENERATION6_R_REAL_OS_SCANDIR(authorized_descriptor)"
+    )
+    _require(
+        len(raw_scandir_statements) == 1,
+        "R static scandir raw acquisition statement differs",
+    )
+    raw_scandir_statement = raw_scandir_statements[0]
+    raw_scandir_index = scandir.body.index(raw_scandir_statement)
+    _require(
+        raw_scandir_index + 2 < len(scandir.body)
+        and isinstance(scandir.body[raw_scandir_index + 1], ast.AnnAssign)
+        and ast.unparse(scandir.body[raw_scandir_index + 1])
+        == "proxy: _Generation6RScandirProxy | None = None"
+        and not calls(scandir.body[raw_scandir_index + 1])
+        and isinstance(scandir.body[raw_scandir_index + 2], ast.Try),
+        "R static scandir immediate adoption boundary differs",
+    )
     _require(
         "self._scan_capabilities_by_descriptor.get(descriptor)" in scandir_source
         and "self._current_by_descriptor.get(descriptor) is capability.parent" in scandir_source
@@ -17053,13 +17583,34 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     )
     release_proxy = class_method(ledger_class, "_release_scandir_proxy")
     proxy_class = classes["_Generation6RScandirProxy"]
+    proxy_init = class_method(proxy_class, "__init__")
+    proxy_iter = class_method(proxy_class, "__iter__")
+    proxy_next = class_method(proxy_class, "__next__")
     proxy_close = class_method(proxy_class, "close")
+    proxy_enter = class_method(proxy_class, "__enter__")
+    proxy_exit = class_method(proxy_class, "__exit__")
+    proxy_close_terminal_lines = tuple(
+        node.lineno
+        for node in ast.walk(proxy_close)
+        if isinstance(node, ast.Assign)
+        and any(ast.unparse(target) == "self._terminal" for target in node.targets)
+        and ast.unparse(node.value) == "True"
+    )
+    proxy_raw_close_lines = tuple(
+        call.lineno
+        for call in calls(proxy_close)
+        if ast.unparse(call.func) == "self._close_operation"
+    )
     _require(
         "self._live_scandir_proxies.pop(proxy_identity, None)" in ast.unparse(release_proxy)
         and call_targets(proxy_close).count("self._close_operation") == 1
         and call_targets(proxy_close).count("self._ledger._release_scandir_proxy") == 1
         and "self._terminal = True" in ast.unparse(proxy_close)
-        and "self._close_attempts == 1" in ast.unparse(proxy_close),
+        and "_require(not self._terminal, 'R scandir proxy close repeated')"
+        in ast.unparse(proxy_close)
+        and "self._close_attempts == 1" in ast.unparse(proxy_close)
+        and len(proxy_close_terminal_lines) == len(proxy_raw_close_lines) == 1
+        and proxy_close_terminal_lines[0] < proxy_raw_close_lines[0],
         "R static opaque iterator one-close authority differs",
     )
 
@@ -17123,6 +17674,52 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         and all(value in original_identity_source for value in capture_values)
         and "FdOwner.require is _GENERATION6_R_CAPTURED_FD_REQUIRE" in original_identity_source,
         "R static composite restoration differs",
+    )
+    inherited_scan_source_digests = {
+        "ledger_release": (
+            release_proxy,
+            "761d737f43e588f5f2359d4515eec29db109a73d93e760baf2229b1bc0ca38f9",
+        ),
+        "ledger_scandir": (
+            scandir,
+            "fc92399eba4b8efd597ab0f56ced011d5c024c4133807f11fa0bcb3c7f7f283a",
+        ),
+        "proxy_init": (
+            proxy_init,
+            "b7a91d32af42ff06ed1daacb82ef545024d3cd8176447b033dbfec36955d5758",
+        ),
+        "proxy_iter": (
+            proxy_iter,
+            "a38cbeec6321c63f6b99511ff83a6f2a94fcbb50810dee6572eaa73f21445e1d",
+        ),
+        "proxy_next": (
+            proxy_next,
+            "b22702039c709c5ef429f51c0d908cf80d6c925355406d1953b993c6f8c41b9b",
+        ),
+        "proxy_close": (
+            proxy_close,
+            "178673fda75e17bcee1cb1353f817416160eba2dd8d908562d05a1070dda7214",
+        ),
+        "proxy_enter": (
+            proxy_enter,
+            "e089e2efd7c5f5cdb7ad4c780cafcd814c34483055165b6147468c2050b233ad",
+        ),
+        "proxy_exit": (
+            proxy_exit,
+            "9eb49de03029b8639465268a5ecd592361fedaf3b2d59ba499500ecba8e6f499",
+        ),
+        "scope_restore_all": (
+            restore_all,
+            "4c63e52b114bae74b061bd921a8df898e3e91c2a630ea60172cb0742f3488271",
+        ),
+    }
+    _require(
+        all(
+            hashlib.sha256(normalized_node_source(node).encode("utf-8")).hexdigest()
+            == expected_digest
+            for node, expected_digest in inherited_scan_source_digests.values()
+        ),
+        "R static inherited scan source binding differs",
     )
 
     socket_handoff = top_function("_generation6_r_socket_detach_handoff")
@@ -17355,6 +17952,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_Generation6RNamespaceCleanupBudgetState",
         "_Generation6RNamespaceCleanupBudgetEvent",
         "_Generation6RNamespaceInventoryCursorState",
+        "_Generation6RNamespaceInventoryScanState",
         "_Generation6RNamespaceTerminalEvent",
         "_Generation6RNamespaceDirectoryFact",
         "_Generation6RNamespaceNameFact",
@@ -17374,11 +17972,14 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_Generation6RNamespaceMutationPermitRecord",
         "_Generation6RNamespaceCleanupBudgetEpoch",
         "_Generation6RNamespaceInventoryCursor",
+        "_Generation6RNamespaceInventoryScan",
         "_Generation6RNamespaceEmptyInventory",
         "_Generation6RNamespaceReceipt",
         "_Generation6RNamespaceCleanupBudgetRecord",
         "_Generation6RNamespaceInventoryCursorBinding",
         "_Generation6RNamespaceInventoryCursorRecord",
+        "_Generation6RNamespaceInventoryScanBinding",
+        "_Generation6RNamespaceInventoryScanRecord",
         "_Generation6RNamespaceJournal",
     )
     observed_namespace_class_names = tuple(
@@ -17402,6 +18003,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         > namespace_classes["_Generation6RNamespaceCleanupBudgetEvent"].lineno
         and namespace_capture_nodes["_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE"].lineno
         < namespace_classes["_Generation6RNamespaceInventoryCursorState"].lineno
+        < namespace_classes["_Generation6RNamespaceInventoryScanState"].lineno
         < namespace_classes["_Generation6RNamespaceTerminalEvent"].lineno,
         "R namespace static capture/class ordering differs",
     )
@@ -17481,6 +18083,11 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_Generation6RNamespaceInventoryCursorState": (
             "CURRENT",
             "RETIRED",
+            "UNCERTAIN",
+        ),
+        "_Generation6RNamespaceInventoryScanState": (
+            "LIVE",
+            "CLOSED_UNEXHAUSTED",
             "UNCERTAIN",
         ),
         "_Generation6RNamespaceTerminalEvent": (
@@ -17682,6 +18289,10 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "serial",
             "issuer_identity",
         ),
+        "_Generation6RNamespaceInventoryScan": (
+            "serial",
+            "issuer_identity",
+        ),
         "_Generation6RNamespaceEmptyInventory": (
             "serial",
             "issuer_identity",
@@ -17730,6 +18341,36 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "binding_identity",
             "state",
             "current_receipt",
+            "terminal_receipt",
+        ),
+        "_Generation6RNamespaceInventoryScanBinding": (
+            "serial",
+            "issuer_identity",
+            "scan",
+            "scan_identity",
+            "scan_serial",
+            "scan_issuer_identity",
+            "cursor_record",
+            "cursor_record_identity",
+            "cursor_binding",
+            "cursor_binding_identity",
+            "proxy",
+            "proxy_identity",
+            "iterator_token",
+            "iterator_token_identity",
+            "descriptor",
+            "depth",
+            "cleanup_epoch",
+            "cleanup_epoch_identity",
+            "cleanup_epoch_serial",
+            "cleanup_epoch_issuer_identity",
+        ),
+        "_Generation6RNamespaceInventoryScanRecord": (
+            "binding",
+            "binding_identity",
+            "state",
+            "close_attempts",
+            "acquisition_receipt",
             "terminal_receipt",
         ),
     }
@@ -17902,6 +18543,10 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "int",
             "int",
         ),
+        "_Generation6RNamespaceInventoryScan": (
+            "int",
+            "int",
+        ),
         "_Generation6RNamespaceEmptyInventory": (
             "int",
             "int",
@@ -17952,6 +18597,36 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "_Generation6RNamespaceReceipt | None",
             "_Generation6RNamespaceReceipt | None",
         ),
+        "_Generation6RNamespaceInventoryScanBinding": (
+            "int",
+            "int",
+            "_Generation6RNamespaceInventoryScan",
+            "int",
+            "int",
+            "int",
+            "_Generation6RNamespaceInventoryCursorRecord",
+            "int",
+            "_Generation6RNamespaceInventoryCursorBinding",
+            "int",
+            "_Generation6RScandirProxy",
+            "int",
+            "_Generation6RIteratorToken",
+            "int",
+            "int",
+            "int",
+            "_Generation6RNamespaceCleanupBudgetEpoch",
+            "int",
+            "int",
+            "int",
+        ),
+        "_Generation6RNamespaceInventoryScanRecord": (
+            "_Generation6RNamespaceInventoryScanBinding",
+            "int",
+            "_Generation6RNamespaceInventoryScanState",
+            "int",
+            "_Generation6RNamespaceReceipt | None",
+            "_Generation6RNamespaceReceipt | None",
+        ),
     }
     frozen_namespace_classes = {
         "_Generation6RNamespaceDirectoryFact",
@@ -17968,9 +18643,11 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_Generation6RNamespaceMutationPermitBinding",
         "_Generation6RNamespaceCleanupBudgetEpoch",
         "_Generation6RNamespaceInventoryCursor",
+        "_Generation6RNamespaceInventoryScan",
         "_Generation6RNamespaceEmptyInventory",
         "_Generation6RNamespaceReceipt",
         "_Generation6RNamespaceInventoryCursorBinding",
+        "_Generation6RNamespaceInventoryScanBinding",
     }
     mutable_namespace_record_classes = {
         "_Generation6RNamespaceDirectoryRecord",
@@ -17979,6 +18656,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_Generation6RNamespaceMutationPermitRecord",
         "_Generation6RNamespaceCleanupBudgetRecord",
         "_Generation6RNamespaceInventoryCursorRecord",
+        "_Generation6RNamespaceInventoryScanRecord",
     }
     for name, expected_fields in expected_namespace_fields.items():
         class_node = namespace_classes[name]
@@ -18060,6 +18738,9 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_issue_current_inventory_cursor",
         "_require_current_inventory_cursor",
         "_terminalize_inventory_cursor",
+        "_acquire_metered_inventory_scan",
+        "_require_current_inventory_scan",
+        "_terminalize_inventory_scan",
         "register_borrowed_directory",
         "_retain_uncertain_owner",
         "_reconcile_mount_poison",
@@ -18184,6 +18865,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "class:_Generation6RNamespaceCleanupBudgetEvent",
         "capture:_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE",
         "class:_Generation6RNamespaceInventoryCursorState",
+        "class:_Generation6RNamespaceInventoryScanState",
         "class:_Generation6RNamespaceTerminalEvent",
         "class:_Generation6RNamespaceDirectoryFact",
         "class:_Generation6RNamespaceNameFact",
@@ -18204,20 +18886,23 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "class:_Generation6RNamespaceMutationPermitRecord",
         "class:_Generation6RNamespaceCleanupBudgetEpoch",
         "class:_Generation6RNamespaceInventoryCursor",
+        "class:_Generation6RNamespaceInventoryScan",
         "class:_Generation6RNamespaceEmptyInventory",
         "class:_Generation6RNamespaceReceipt",
         "class:_Generation6RNamespaceCleanupBudgetRecord",
         "class:_Generation6RNamespaceInventoryCursorBinding",
         "class:_Generation6RNamespaceInventoryCursorRecord",
+        "class:_Generation6RNamespaceInventoryScanBinding",
+        "class:_Generation6RNamespaceInventoryScanRecord",
         "class:_Generation6RNamespaceJournal",
     )
     normalized_bundle_source = "\n".join(source.splitlines()[bundle_start - 1 : bundle_end]) + "\n"
-    bundle_domain = b"TASK-064\0GEN6\0R-A2d\0source-v1\0"
+    bundle_domain = b"TASK-064\0GEN6\0R-A2e\0source-v1\0"
     bundle_preimage = bundle_domain + normalized_bundle_source.encode("utf-8")
     bundle_digest = hashlib.sha256(bundle_preimage).hexdigest()
     _require(
-        bundle_start == 11748
-        and bundle_end == 16665
+        bundle_start == 11749
+        and bundle_end == 17170
         and observed_bundle_inventory == expected_bundle_inventory
         and namespace_bundle_nodes[0]
         is namespace_capture_nodes["_GENERATION6_R_NAMESPACE_REAL_OS_STAT"]
@@ -18227,9 +18912,9 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             and node.end_lineno < namespace_bundle_nodes[index + 1].lineno
             for index, node in enumerate(namespace_bundle_nodes[:-1])
         )
-        and len(bundle_preimage) == 220_485
-        and bundle_digest == "6b384ef67293de49f0e8d75a12e61c3d6a9fc464356e60f05cd64566dacfff53",
-        "R namespace A2d reviewed source-bundle digest differs",
+        and len(bundle_preimage) == 244_282
+        and bundle_digest == "beb6642828197c03840c19c5dc4edbafa9ef4c55a67499bd03551a87ae0038cf",
+        "R namespace A2e reviewed source-bundle digest differs",
     )
     self_aliases_by_method: dict[str, set[str]] = {}
     self_alias_assignments: list[tuple[str, str, str]] = []
@@ -18332,6 +19017,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "consume_present",
         ),
         "self._append_receipt": (
+            "_acquire_metered_inventory_scan",
             "_close_namespace_owner",
             "_issue_cleanup_budget_epoch",
             "_issue_current_inventory_cursor",
@@ -18340,6 +19026,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "_register_name_fact",
             "_terminalize_cleanup_budget",
             "_terminalize_inventory_cursor",
+            "_terminalize_inventory_scan",
             "abandon_token",
             "abandon_token",
             "consume_present",
@@ -18376,15 +19063,22 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         ),
         "self._terminalize_cleanup_budget": ("_charge_cleanup_budget",),
         "self._issue_cleanup_budget_epoch": (),
-        "self._charge_cleanup_budget": (),
+        "self._charge_cleanup_budget": ("_acquire_metered_inventory_scan",),
         "self._issue_inventory_cursor_provenance": ("_issue_current_inventory_cursor",),
         "self._require_inventory_cursor_provenance": (
             "_issue_current_inventory_cursor",
             "_require_current_inventory_cursor",
         ),
         "self._issue_current_inventory_cursor": (),
-        "self._require_current_inventory_cursor": ("_terminalize_inventory_cursor",),
+        "self._require_current_inventory_cursor": (
+            "_acquire_metered_inventory_scan",
+            "_terminalize_inventory_cursor",
+        ),
         "self._terminalize_inventory_cursor": (),
+        "self._acquire_metered_inventory_scan": (),
+        "self._require_current_inventory_scan": (),
+        "self._terminalize_inventory_scan": (),
+        "self._descriptor_ledger.scandir": ("_acquire_metered_inventory_scan",),
         "self._issue_a2_mutation_permit": ("consume_present",),
         "self._preauthorize_present_unlink": ("consume_present",),
         "self._postauthorize_present_unlink": ("consume_present",),
@@ -18467,6 +19161,12 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "self._live_inventory_cursor_record",
             "self._archived_inventory_cursor_records",
             "self._inventory_cursor_lifecycle_faulted",
+            "self._inventory_scan_records_by_identity",
+            "self._inventory_scan_records_by_serial",
+            "self._live_inventory_scan_record",
+            "self._archived_inventory_scan_records",
+            "self._inventory_scan_proxy_quarantine",
+            "self._inventory_scan_lifecycle_faulted",
             "self._pending_publication",
             "self._poisoned_descriptors",
             "self._namespace_owner_tokens",
@@ -18709,7 +19409,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         for node in ast.walk(namespace_journal)
         if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr))
         for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,))
-        if ast.unparse(target).startswith(("token.", "authority.", "fact.", "epoch."))
+        if ast.unparse(target).startswith(("token.", "authority.", "fact.", "epoch.", "scan."))
     )
     _require(
         not public_attribute_writes,
@@ -18841,12 +19541,14 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "R namespace static immutable authority surface differs",
     )
     mutable_record_fields = {
+        "acquisition_receipt",
         "armed_receipt",
         "authority_record",
         "authorization_receipt",
         "capability_record",
         "close_receipt",
         "current_receipt",
+        "close_attempts",
         "depth_high_water",
         "encoded_name_bytes",
         "entry_count",
@@ -19431,23 +20133,72 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             )
         )
     )
+    a2e_writer_methods = {
+        "_acquire_metered_inventory_scan",
+        "_terminalize_inventory_scan",
+    }
+    expected_a2e_mutable_record_writes = tuple(
+        sorted(
+            (
+                (
+                    "_acquire_metered_inventory_scan",
+                    "record.acquisition_receipt",
+                    "acquisition_receipt",
+                ),
+                (
+                    "_acquire_metered_inventory_scan",
+                    "record.close_attempts",
+                    "1",
+                ),
+                (
+                    "_acquire_metered_inventory_scan",
+                    "record.state",
+                    "_Generation6RNamespaceInventoryScanState.UNCERTAIN",
+                ),
+                (
+                    "_terminalize_inventory_scan",
+                    "record.close_attempts",
+                    "1",
+                ),
+                (
+                    "_terminalize_inventory_scan",
+                    "record.state",
+                    "_Generation6RNamespaceInventoryScanState.CLOSED_UNEXHAUSTED",
+                ),
+                (
+                    "_terminalize_inventory_scan",
+                    "record.state",
+                    "_Generation6RNamespaceInventoryScanState.UNCERTAIN",
+                ),
+                (
+                    "_terminalize_inventory_scan",
+                    "record.terminal_receipt",
+                    "terminal_receipt",
+                ),
+            )
+        )
+    )
     _require(
         tuple(
             write
             for write in mutable_record_writes
-            if write[0] not in a1b_writer_methods | a2a_writer_methods | a2d_writer_methods
+            if write[0]
+            not in a1b_writer_methods | a2a_writer_methods | a2d_writer_methods | a2e_writer_methods
         )
         == tuple(
             write
             for write in expected_mutable_record_writes
-            if write[0] not in a1b_writer_methods | a2a_writer_methods | a2d_writer_methods
+            if write[0]
+            not in a1b_writer_methods | a2a_writer_methods | a2d_writer_methods | a2e_writer_methods
         )
         and tuple(write for write in mutable_record_writes if write[0] in a1b_writer_methods)
         == expected_a1b_mutable_record_writes
         and tuple(write for write in mutable_record_writes if write[0] in a2a_writer_methods)
         == expected_a2a_mutable_record_writes
         and tuple(write for write in mutable_record_writes if write[0] in a2d_writer_methods)
-        == expected_a2d_mutable_record_writes,
+        == expected_a2d_mutable_record_writes
+        and tuple(write for write in mutable_record_writes if write[0] in a2e_writer_methods)
+        == expected_a2e_mutable_record_writes,
         "R namespace static mutable-record writer matrix differs",
     )
 
@@ -19514,6 +20265,14 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "_issue_current_inventory_cursor",
             "self._inventory_cursor_records_by_serial[binding.cursor_serial]",
         ),
+        "_inventory_scan_records_by_identity": (
+            "_acquire_metered_inventory_scan",
+            "self._inventory_scan_records_by_identity[scan_identity]",
+        ),
+        "_inventory_scan_records_by_serial": (
+            "_acquire_metered_inventory_scan",
+            "self._inventory_scan_records_by_serial[scan.serial]",
+        ),
         "_namespace_owner_tokens": (
             "_open_namespace_owner",
             "self._namespace_owner_tokens[owner_identity]",
@@ -19536,6 +20295,8 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_mutation_permit_records_by_identity",
         "_archived_mutation_permit_records",
         "_archived_inventory_cursor_records",
+        "_archived_inventory_scan_records",
+        "_inventory_scan_proxy_quarantine",
         *expected_registry_subscript_stores,
         "_hardlink_groups",
         "_archived_capability_records",
@@ -19602,6 +20363,22 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,))
         if ast.unparse(target) == "self._inventory_cursor_lifecycle_faulted"
     )
+    inventory_scan_live_slot_assignments = tuple(
+        (method_name, ast.unparse(node.value))
+        for method_name, method in namespace_methods.items()
+        for node in ast.walk(method)
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None
+        for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,))
+        if ast.unparse(target) == "self._live_inventory_scan_record"
+    )
+    inventory_scan_lifecycle_fault_assignments = tuple(
+        (method_name, ast.unparse(node.value))
+        for method_name, method in namespace_methods.items()
+        for node in ast.walk(method)
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None
+        for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,))
+        if ast.unparse(target) == "self._inventory_scan_lifecycle_faulted"
+    )
     pending_store_methods = tuple(
         method_name
         for method_name, method in namespace_methods.items()
@@ -19626,6 +20403,8 @@ def _generation6_r_authority_source_gates(source: str) -> None:
                 "_inventory_cursor_issuance_faulted",
                 "_live_inventory_cursor_record",
                 "_inventory_cursor_lifecycle_faulted",
+                "_live_inventory_scan_record",
+                "_inventory_scan_lifecycle_faulted",
                 "_pending_publication",
             )
         )
@@ -19695,6 +20474,26 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         (
             "_terminalize_inventory_cursor",
             "self._archived_inventory_cursor_records.append",
+        ),
+        (
+            "_acquire_metered_inventory_scan",
+            "self._archived_inventory_scan_records.append",
+        ),
+        (
+            "_acquire_metered_inventory_scan",
+            "self._inventory_scan_proxy_quarantine.append",
+        ),
+        (
+            "_terminalize_inventory_scan",
+            "self._archived_inventory_scan_records.append",
+        ),
+        (
+            "_terminalize_inventory_scan",
+            "self._archived_inventory_scan_records.append",
+        ),
+        (
+            "_terminalize_inventory_scan",
+            "self._inventory_scan_proxy_quarantine.append",
         ),
         ("_close_namespace_owner", "self._owner_quarantine.append"),
         ("_close_namespace_owner", "self._poisoned_descriptors.add"),
@@ -19767,6 +20566,18 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             ("_issue_current_inventory_cursor", "True"),
             ("_terminalize_inventory_cursor", "True"),
             ("_terminalize_inventory_cursor", "True"),
+        )
+        and inventory_scan_live_slot_assignments
+        == (
+            ("__init__", "None"),
+            ("_acquire_metered_inventory_scan", "record"),
+            ("_terminalize_inventory_scan", "None"),
+        )
+        and inventory_scan_lifecycle_fault_assignments
+        == (
+            ("__init__", "False"),
+            ("_acquire_metered_inventory_scan", "True"),
+            ("_terminalize_inventory_scan", "True"),
         )
         and pending_store_methods == ("_begin_publication", "_finish_publication")
         and call_targets(namespace_methods["_register_name_fact"]).count(
@@ -21894,9 +22705,17 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             )
         )
         and exact_callers("_issue_current_inventory_cursor") == ()
-        and exact_callers("_require_current_inventory_cursor") == ("_terminalize_inventory_cursor",)
+        and exact_callers("_require_current_inventory_cursor")
+        == (
+            "_terminalize_inventory_cursor",
+            "_acquire_metered_inventory_scan",
+        )
         and exact_callers("_terminalize_inventory_cursor") == ()
-        and full_lifecycle_helper_calls == ("self._require_current_inventory_cursor",),
+        and full_lifecycle_helper_calls
+        == (
+            "self._require_current_inventory_cursor",
+            "self._require_current_inventory_cursor",
+        ),
         "R namespace A2d lifecycle private API and caller surface differs",
     )
 
@@ -23780,14 +24599,602 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "R namespace A2a inert no-filesystem boundary differs",
     )
 
+    inventory_scan_constructor_names = {
+        "_Generation6RNamespaceInventoryScan",
+        "_Generation6RNamespaceInventoryScanBinding",
+        "_Generation6RNamespaceInventoryScanRecord",
+    }
+    inventory_scan_constructor_calls = tuple(
+        call for call in full_calls if ast.unparse(call.func) in inventory_scan_constructor_names
+    )
+    inventory_scan_acquirer = namespace_methods["_acquire_metered_inventory_scan"]
+    current_inventory_scan_authenticator = namespace_methods["_require_current_inventory_scan"]
+    inventory_scan_terminalizer = namespace_methods["_terminalize_inventory_scan"]
+    inventory_scan_acquirer_targets = call_targets(inventory_scan_acquirer)
+    current_inventory_scan_authenticator_targets = call_targets(
+        current_inventory_scan_authenticator
+    )
+    inventory_scan_terminalizer_targets = call_targets(inventory_scan_terminalizer)
+    inventory_scan_helper_names = {
+        "_acquire_metered_inventory_scan",
+        "_require_current_inventory_scan",
+        "_terminalize_inventory_scan",
+    }
+    full_inventory_scan_helper_calls = tuple(
+        ast.unparse(call.func)
+        for call in full_calls
+        if isinstance(call.func, ast.Attribute) and call.func.attr in inventory_scan_helper_names
+    )
+    _require(
+        tuple(ast.unparse(call.func) for call in inventory_scan_constructor_calls)
+        == (
+            "_Generation6RNamespaceInventoryScan",
+            "_Generation6RNamespaceInventoryScanBinding",
+            "_Generation6RNamespaceInventoryScanRecord",
+        )
+        and all(
+            call in tuple(ast.walk(inventory_scan_acquirer))
+            for call in inventory_scan_constructor_calls
+        )
+        and tuple(argument.arg for argument in inventory_scan_acquirer.args.args)
+        == ("self", "cursor")
+        and tuple(
+            ast.unparse(argument.annotation)
+            for argument in inventory_scan_acquirer.args.args
+            if argument.annotation is not None
+        )
+        == ("_Generation6RNamespaceInventoryCursor",)
+        and inventory_scan_acquirer.returns is not None
+        and ast.unparse(inventory_scan_acquirer.returns) == "_Generation6RNamespaceInventoryScan"
+        and tuple(argument.arg for argument in current_inventory_scan_authenticator.args.args)
+        == ("self", "scan")
+        and tuple(
+            ast.unparse(argument.annotation)
+            for argument in current_inventory_scan_authenticator.args.args
+            if argument.annotation is not None
+        )
+        == ("_Generation6RNamespaceInventoryScan",)
+        and current_inventory_scan_authenticator.returns is not None
+        and ast.unparse(current_inventory_scan_authenticator.returns)
+        == "_Generation6RNamespaceInventoryScanRecord"
+        and tuple(argument.arg for argument in inventory_scan_terminalizer.args.args)
+        == ("self", "scan")
+        and tuple(
+            ast.unparse(argument.annotation)
+            for argument in inventory_scan_terminalizer.args.args
+            if argument.annotation is not None
+        )
+        == ("_Generation6RNamespaceInventoryScan",)
+        and inventory_scan_terminalizer.returns is not None
+        and ast.unparse(inventory_scan_terminalizer.returns) == "None"
+        and all(
+            not method.args.posonlyargs
+            and not method.args.kwonlyargs
+            and method.args.vararg is None
+            and method.args.kwarg is None
+            for method in (
+                inventory_scan_acquirer,
+                current_inventory_scan_authenticator,
+                inventory_scan_terminalizer,
+            )
+        )
+        and exact_callers("_acquire_metered_inventory_scan") == ()
+        and exact_callers("_require_current_inventory_scan") == ()
+        and exact_callers("_terminalize_inventory_scan") == ()
+        and not full_inventory_scan_helper_calls,
+        "R namespace A2e private scan API and constructor surface differs",
+    )
+
+    pristine_scan_statement = inventory_scan_acquirer.body[0]
+    _require(
+        isinstance(pristine_scan_statement, ast.Expr)
+        and isinstance(pristine_scan_statement.value, ast.Call)
+        and ast.unparse(pristine_scan_statement.value.func) == "_require"
+        and len(pristine_scan_statement.value.args) == 2
+        and not pristine_scan_statement.value.keywords
+        and isinstance(pristine_scan_statement.value.args[0], ast.BoolOp)
+        and isinstance(pristine_scan_statement.value.args[0].op, ast.And)
+        and tuple(
+            ast.unparse(predicate) for predicate in pristine_scan_statement.value.args[0].values
+        )
+        == (
+            "type(self._inventory_scan_lifecycle_faulted) is bool",
+            "not self._inventory_scan_lifecycle_faulted",
+            "type(self._inventory_scan_records_by_identity) is dict",
+            "not self._inventory_scan_records_by_identity",
+            "type(self._inventory_scan_records_by_serial) is dict",
+            "not self._inventory_scan_records_by_serial",
+            "self._live_inventory_scan_record is None",
+            "type(self._archived_inventory_scan_records) is list",
+            "not self._archived_inventory_scan_records",
+            "type(self._inventory_scan_proxy_quarantine) is list",
+            "not self._inventory_scan_proxy_quarantine",
+        )
+        and isinstance(pristine_scan_statement.value.args[1], ast.Constant)
+        and pristine_scan_statement.value.args[1].value
+        == "R namespace inventory scan pristine issue state differs"
+        and call_targets(pristine_scan_statement)
+        == (
+            "_require",
+            "type",
+            "type",
+            "type",
+            "type",
+            "type",
+        )
+        and not any(
+            isinstance(candidate, (ast.NamedExpr, ast.Store))
+            for candidate in ast.walk(pristine_scan_statement.value.args[0])
+        ),
+        "R namespace A2e pristine one-shot pre-charge gate differs",
+    )
+    inventory_scan_acquire_transactions = tuple(
+        node for node in inventory_scan_acquirer.body if isinstance(node, ast.Try)
+    )
+    _require(
+        len(inventory_scan_acquirer.body) == 4
+        and isinstance(inventory_scan_acquirer.body[1], ast.AnnAssign)
+        and ast.unparse(inventory_scan_acquirer.body[1])
+        == "record: _Generation6RNamespaceInventoryScanRecord | None = None"
+        and isinstance(inventory_scan_acquirer.body[2], ast.AnnAssign)
+        and ast.unparse(inventory_scan_acquirer.body[2])
+        == "proxy: _Generation6RScandirProxy | None = None"
+        and len(inventory_scan_acquire_transactions) == 1
+        and inventory_scan_acquirer.body[-1] is inventory_scan_acquire_transactions[0],
+        "R namespace A2e acquisition transaction shell differs",
+    )
+    inventory_scan_acquire_transaction = inventory_scan_acquire_transactions[0]
+    acquire_cursor_auth_line = one_line(
+        selected_call_lines(
+            inventory_scan_acquirer,
+            "self._require_current_inventory_cursor",
+        ),
+        "A2e current cursor authentication",
+    )
+    acquire_descriptor_line = one_line(
+        selected_call_lines(
+            inventory_scan_acquirer,
+            "_GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE",
+        ),
+        "A2e trusted descriptor derivation",
+    )
+    acquire_depth_line = one_line(
+        selected_call_lines(inventory_scan_acquirer, "len"),
+        "A2e trusted depth derivation",
+    )
+    acquire_charge_line = one_line(
+        selected_call_lines(inventory_scan_acquirer, "self._charge_cleanup_budget"),
+        "A2e scan-attempt charge",
+    )
+    acquire_scan_line = one_line(
+        selected_call_lines(inventory_scan_acquirer, "self._descriptor_ledger.scandir"),
+        "A2e descriptor-ledger scan",
+    )
+    acquire_token_line = one_line(
+        selected_call_lines(
+            inventory_scan_acquirer,
+            "_Generation6RNamespaceInventoryScan",
+        ),
+        "A2e scan token construction",
+    )
+    acquire_binding_line = one_line(
+        selected_call_lines(
+            inventory_scan_acquirer,
+            "_Generation6RNamespaceInventoryScanBinding",
+        ),
+        "A2e scan binding construction",
+    )
+    acquire_record_line = one_line(
+        selected_call_lines(
+            inventory_scan_acquirer,
+            "_Generation6RNamespaceInventoryScanRecord",
+        ),
+        "A2e scan record construction",
+    )
+    acquire_identity_store_line = one_line(
+        assignment_lines(
+            inventory_scan_acquirer,
+            "self._inventory_scan_records_by_identity[scan_identity]",
+            "record",
+        ),
+        "A2e scan identity store",
+    )
+    acquire_serial_store_line = one_line(
+        assignment_lines(
+            inventory_scan_acquirer,
+            "self._inventory_scan_records_by_serial[scan.serial]",
+            "record",
+        ),
+        "A2e scan serial store",
+    )
+    acquire_receipt_line = one_line(
+        selected_call_lines(inventory_scan_acquirer, "self._append_receipt"),
+        "A2e acquisition receipt",
+    )
+    acquire_receipt_store_line = one_line(
+        assignment_lines(
+            inventory_scan_acquirer,
+            "record.acquisition_receipt",
+            "acquisition_receipt",
+        ),
+        "A2e acquisition receipt binding",
+    )
+    acquire_live_line = one_line(
+        assignment_lines(
+            inventory_scan_acquirer,
+            "self._live_inventory_scan_record",
+            "record",
+        ),
+        "A2e live scan publication",
+    )
+    cursor_argument_attribute_lines = tuple(
+        node.lineno
+        for node in ast.walk(inventory_scan_acquirer)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "cursor"
+    )
+    acquire_charge_calls = tuple(
+        call
+        for call in calls(inventory_scan_acquirer)
+        if ast.unparse(call.func) == "self._charge_cleanup_budget"
+    )
+    acquire_scan_calls = tuple(
+        call
+        for call in calls(inventory_scan_acquirer)
+        if ast.unparse(call.func) == "self._descriptor_ledger.scandir"
+    )
+    acquire_return = inventory_scan_acquire_transaction.body[-1]
+    _require(
+        not cursor_argument_attribute_lines
+        and len(acquire_charge_calls) == len(acquire_scan_calls) == 1
+        and tuple(ast.unparse(argument) for argument in acquire_charge_calls[0].args)
+        == ("cleanup_epoch",)
+        and tuple(
+            (keyword.arg, ast.unparse(keyword.value))
+            for keyword in acquire_charge_calls[0].keywords
+        )
+        == (
+            ("next_depth", "trusted_depth"),
+            ("entry_increment", "0"),
+            ("encoded_name_bytes_increment", "0"),
+        )
+        and tuple(ast.unparse(argument) for argument in acquire_scan_calls[0].args)
+        == ("trusted_descriptor",)
+        and not acquire_scan_calls[0].keywords
+        and acquire_cursor_auth_line
+        < acquire_descriptor_line
+        <= acquire_depth_line
+        < acquire_charge_line
+        < acquire_scan_line
+        < acquire_token_line
+        < acquire_binding_line
+        < acquire_record_line
+        < acquire_identity_store_line
+        < acquire_serial_store_line
+        < acquire_receipt_line
+        < acquire_receipt_store_line
+        < acquire_live_line
+        and isinstance(acquire_return, ast.Return)
+        and acquire_return.value is not None
+        and ast.unparse(acquire_return.value) == "scan"
+        and acquire_live_line == inventory_scan_acquire_transaction.body[-2].lineno
+        and acquire_return is inventory_scan_acquire_transaction.body[-1]
+        and max(
+            call.lineno
+            for statement in inventory_scan_acquire_transaction.body
+            for call in calls(statement)
+        )
+        < acquire_live_line,
+        "R namespace A2e fixed precharge acquisition ordering differs",
+    )
+    inventory_scan_acquire_handlers = tuple(
+        handler
+        for handler in inventory_scan_acquire_transaction.handlers
+        if handler.type is not None and ast.unparse(handler.type) == "BaseException"
+    )
+    _require(
+        len(inventory_scan_acquire_transaction.handlers)
+        == len(inventory_scan_acquire_handlers)
+        == 1
+        and inventory_scan_acquire_handlers[0].name == "primary"
+        and not inventory_scan_acquire_transaction.orelse
+        and not inventory_scan_acquire_transaction.finalbody
+        and assignment_values(
+            inventory_scan_acquire_handlers[0],
+            "self._inventory_scan_lifecycle_faulted",
+        )
+        == ((inventory_scan_acquire_handlers[0].body[0].lineno, "True"),)
+        and call_targets(inventory_scan_acquire_handlers[0]).count(
+            "self._archived_inventory_scan_records.append"
+        )
+        == 1
+        and call_targets(inventory_scan_acquire_handlers[0]).count(
+            "self._inventory_scan_proxy_quarantine.append"
+        )
+        == 1
+        and call_targets(inventory_scan_acquire_handlers[0]).count("proxy.close") == 1
+        and assignment_values(
+            inventory_scan_acquire_handlers[0],
+            "record.close_attempts",
+        )
+        == (
+            (
+                one_line(
+                    assignment_lines(
+                        inventory_scan_acquire_handlers[0],
+                        "record.close_attempts",
+                        "1",
+                    ),
+                    "A2e failed acquisition close attempt",
+                ),
+                "1",
+            ),
+        )
+        and isinstance(inventory_scan_acquire_handlers[0].body[-1], ast.Raise)
+        and inventory_scan_acquire_handlers[0].body[-1].exc is None,
+        "R namespace A2e acquisition failure retention differs",
+    )
+
+    current_inventory_scan_authenticator_writes = tuple(
+        ast.unparse(node)
+        for node in ast.walk(current_inventory_scan_authenticator)
+        if (
+            isinstance(node, (ast.Attribute, ast.Subscript))
+            and isinstance(node.ctx, (ast.Store, ast.Del))
+        )
+        or isinstance(node, (ast.AugAssign, ast.NamedExpr))
+    )
+    caller_scan_attribute_lines = tuple(
+        sorted(
+            node.lineno
+            for node in ast.walk(current_inventory_scan_authenticator)
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "scan"
+        )
+    )
+    current_scan_identity_guard_lines = tuple(
+        call.lineno
+        for call in calls(current_inventory_scan_authenticator)
+        if ast.unparse(call.func) == "_require" and "scan is trusted_scan" in ast.unparse(call)
+    )
+    current_scan_return = current_inventory_scan_authenticator.body[-1]
+    _require(
+        not current_inventory_scan_authenticator_writes
+        and current_inventory_scan_authenticator_targets.count(
+            "self._inventory_scan_records_by_identity.get"
+        )
+        == 1
+        and current_inventory_scan_authenticator_targets.count(
+            "self._inventory_scan_records_by_serial.get"
+        )
+        == 1
+        and current_inventory_scan_authenticator_targets.count(
+            "self._require_current_inventory_cursor"
+        )
+        == 0
+        and current_inventory_scan_authenticator_targets.count("self._require_live_cleanup_budget")
+        == 0
+        and current_inventory_scan_authenticator_targets.count("_exact_keys") == 3
+        and len(caller_scan_attribute_lines) == 2
+        and len(current_scan_identity_guard_lines) == 1
+        and max(caller_scan_attribute_lines) < current_scan_identity_guard_lines[0]
+        and isinstance(current_scan_return, ast.Return)
+        and current_scan_return.value is not None
+        and ast.unparse(current_scan_return.value) == "exact_record"
+        and current_scan_identity_guard_lines[0]
+        == current_inventory_scan_authenticator.body[-2].lineno,
+        "R namespace A2e trusted-first current scan authentication differs",
+    )
+
+    inventory_scan_terminal_transactions = tuple(
+        node for node in inventory_scan_terminalizer.body if isinstance(node, ast.Try)
+    )
+    _require(
+        len(inventory_scan_terminal_transactions) == 1,
+        "R namespace A2e scan terminal transaction differs",
+    )
+    inventory_scan_terminal_transaction = inventory_scan_terminal_transactions[0]
+    terminal_close_attempt_line = one_line(
+        assignment_lines(inventory_scan_terminalizer, "record.close_attempts", "1"),
+        "A2e terminal close attempt",
+    )
+    terminal_proxy_close_line = one_line(
+        selected_call_lines(inventory_scan_terminalizer, "proxy.close"),
+        "A2e terminal proxy close",
+    )
+    terminal_closed_state_line = one_line(
+        assignment_lines(
+            inventory_scan_terminalizer,
+            "record.state",
+            "_Generation6RNamespaceInventoryScanState.CLOSED_UNEXHAUSTED",
+        ),
+        "A2e terminal closed-unexhausted state",
+    )
+    terminal_receipt_line = one_line(
+        selected_call_lines(inventory_scan_terminalizer, "self._append_receipt"),
+        "A2e terminal resource receipt",
+    )
+    terminal_receipt_store_line = one_line(
+        assignment_lines(
+            inventory_scan_terminalizer,
+            "record.terminal_receipt",
+            "terminal_receipt",
+        ),
+        "A2e terminal receipt binding",
+    )
+    terminal_archive_lines = selected_call_lines(
+        inventory_scan_terminalizer,
+        "self._archived_inventory_scan_records.append",
+    )
+    terminal_live_clear_line = one_line(
+        assignment_lines(
+            inventory_scan_terminalizer,
+            "self._live_inventory_scan_record",
+            "None",
+        ),
+        "A2e terminal live clear",
+    )
+    terminal_scan_attribute_lines = tuple(
+        sorted(
+            node.lineno
+            for node in ast.walk(inventory_scan_terminalizer)
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "scan"
+        )
+    )
+    terminal_identity_guard_lines = tuple(
+        call.lineno
+        for call in calls(inventory_scan_terminalizer)
+        if ast.unparse(call.func) == "_require" and "scan is trusted_scan" in ast.unparse(call)
+    )
+    _require(
+        inventory_scan_terminalizer_targets.count("self._inventory_scan_records_by_identity.get")
+        == 1
+        and inventory_scan_terminalizer_targets.count("self._inventory_scan_records_by_serial.get")
+        == 1
+        and inventory_scan_terminalizer_targets.count("proxy.close") == 1
+        and inventory_scan_terminalizer_targets.count("self._append_receipt") == 1
+        and inventory_scan_terminalizer_targets.count(
+            "self._archived_inventory_scan_records.append"
+        )
+        == 2
+        and inventory_scan_terminalizer_targets.count(
+            "self._inventory_scan_proxy_quarantine.append"
+        )
+        == 1
+        and inventory_scan_terminalizer_targets.count("self._require_current_inventory_scan") == 0
+        and inventory_scan_terminalizer_targets.count("self._require_current_inventory_cursor") == 0
+        and inventory_scan_terminalizer_targets.count("self._require_live_cleanup_budget") == 0
+        and len(terminal_scan_attribute_lines) == 2
+        and len(terminal_identity_guard_lines) == 1
+        and max(terminal_scan_attribute_lines) < terminal_identity_guard_lines[0]
+        and terminal_close_attempt_line
+        < terminal_proxy_close_line
+        < terminal_closed_state_line
+        < terminal_receipt_line
+        < terminal_receipt_store_line
+        < terminal_archive_lines[0]
+        < terminal_live_clear_line
+        and terminal_live_clear_line == inventory_scan_terminal_transaction.body[-1].lineno
+        and assignment_values(
+            inventory_scan_terminal_transaction.handlers[0],
+            "self._live_inventory_scan_record",
+        )
+        == ()
+        and "faulted_before = self._inventory_scan_lifecycle_faulted"
+        in ast.unparse(inventory_scan_terminalizer)
+        and "not faulted_before" in ast.unparse(inventory_scan_terminalizer)
+        and "proxy._terminal and proxy._close_attempts == 1"
+        in ast.unparse(inventory_scan_terminalizer),
+        "R namespace A2e one-close terminal topology differs",
+    )
+
+    inventory_scan_sources = "\n".join(
+        ast.unparse(method)
+        for method in (
+            inventory_scan_acquirer,
+            current_inventory_scan_authenticator,
+            inventory_scan_terminalizer,
+        )
+    )
+    inventory_scan_targets = (
+        set(inventory_scan_acquirer_targets)
+        | set(current_inventory_scan_authenticator_targets)
+        | set(inventory_scan_terminalizer_targets)
+    )
+    inventory_scan_forbidden_targets = {
+        "self._reauthenticate_directory",
+        "self._read_cleanup_budget_clock",
+        "self._terminalize_cleanup_budget",
+        "self._terminalize_inventory_cursor",
+        "_GENERATION6_R_NAMESPACE_CAPTURED_COMPONENT",
+        "_GENERATION6_R_NAMESPACE_CAPTURED_MOUNT_ID",
+        "_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD",
+        "_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT",
+        "_GENERATION6_R_NAMESPACE_REAL_FCNTL",
+        "_GENERATION6_R_NAMESPACE_REAL_MONOTONIC_NS",
+        "_GENERATION6_R_NAMESPACE_REAL_OS_FSTAT",
+        "_GENERATION6_R_NAMESPACE_REAL_OS_OPEN",
+        "_GENERATION6_R_NAMESPACE_REAL_OS_STAT",
+        "_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK",
+        "iter",
+        "list",
+        "next",
+        "os.fsencode",
+        "os.listdir",
+        "os.rmdir",
+        "os.scandir",
+        "sorted",
+        "tuple",
+    }
+    inventory_scan_loops = tuple(
+        node
+        for method in (
+            inventory_scan_acquirer,
+            current_inventory_scan_authenticator,
+            inventory_scan_terminalizer,
+        )
+        for node in ast.walk(method)
+        if isinstance(
+            node,
+            (
+                ast.AsyncFor,
+                ast.AsyncWith,
+                ast.DictComp,
+                ast.For,
+                ast.GeneratorExp,
+                ast.ListComp,
+                ast.SetComp,
+                ast.While,
+                ast.With,
+            ),
+        )
+    )
+    _require(
+        not inventory_scan_forbidden_targets.intersection(inventory_scan_targets)
+        and not inventory_scan_loops
+        and inventory_scan_acquirer_targets.count("self._require_current_inventory_cursor") == 1
+        and inventory_scan_acquirer_targets.count("self._charge_cleanup_budget") == 1
+        and inventory_scan_acquirer_targets.count("self._descriptor_ledger.scandir") == 1
+        and inventory_scan_targets.intersection(
+            {
+                "_Generation6RNamespaceEmptyInventory",
+                "_Generation6RNamespaceNameFact",
+                "consume_rmdir",
+            }
+        )
+        == set()
+        and "StopIteration" not in inventory_scan_sources
+        and "DirEntry" not in inventory_scan_sources
+        and ".name" not in inventory_scan_sources
+        and ".path" not in inventory_scan_sources
+        and ".inode" not in inventory_scan_sources
+        and ".is_dir" not in inventory_scan_sources
+        and ".is_file" not in inventory_scan_sources
+        and ".is_symlink" not in inventory_scan_sources
+        and "entry_increment=1" not in inventory_scan_sources
+        and "encoded_name_bytes_increment=1" not in inventory_scan_sources
+        and "INVENTORY_SCAN_ACQUIRED" in inventory_scan_sources
+        and "INVENTORY_SCAN_CLOSED_UNEXHAUSTED" in inventory_scan_sources
+        and "INVENTORY_SCAN_EXHAUSTED" not in inventory_scan_sources
+        and "authenticated-empty-inventory" not in inventory_scan_sources
+        and "self._phase" not in inventory_scan_sources
+        and "self._pending_publication" not in inventory_scan_sources,
+        "R namespace A2e inert acquisition-only boundary differs",
+    )
+
     a2_budget_foundation_present = True
     a2_inventory_vocabulary_present = True
     a2_inventory_cursor_provenance_present = True
     a2_inventory_cursor_lifecycle_present = True
     a2_current_inventory_cursor = True
+    a2_metered_scan_acquisition_present = True
+    a2_owned_inventory_scan_present = True
     a2_budget_readiness = False
     a2_budget_prerequisites = (
-        "scan-attempt-metering",
         "yield-metering",
         "nofollow-stat-attempt-metering",
         "open-attempt-metering",
@@ -23811,11 +25218,14 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         and a2_inventory_cursor_lifecycle_present
         and type(a2_current_inventory_cursor) is bool
         and a2_current_inventory_cursor
+        and type(a2_metered_scan_acquisition_present) is bool
+        and a2_metered_scan_acquisition_present
+        and type(a2_owned_inventory_scan_present) is bool
+        and a2_owned_inventory_scan_present
         and type(a2_budget_readiness) is bool
         and not a2_budget_readiness
         and a2_budget_prerequisites
         == (
-            "scan-attempt-metering",
             "yield-metering",
             "nofollow-stat-attempt-metering",
             "open-attempt-metering",
@@ -23833,6 +25243,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             name in namespace_classes
             for name in (
                 "_Generation6RNamespaceInventoryCursor",
+                "_Generation6RNamespaceInventoryScan",
                 "_Generation6RNamespaceEmptyInventory",
             )
         )
@@ -23857,9 +25268,16 @@ def _generation6_r_authority_source_gates(source: str) -> None:
                 "_issue_current_inventory_cursor",
                 "_require_current_inventory_cursor",
                 "_terminalize_inventory_cursor",
+                "_Generation6RNamespaceInventoryScanState",
+                "_Generation6RNamespaceInventoryScan",
+                "_Generation6RNamespaceInventoryScanBinding",
+                "_Generation6RNamespaceInventoryScanRecord",
+                "_acquire_metered_inventory_scan",
+                "_require_current_inventory_scan",
+                "_terminalize_inventory_scan",
             )
         ),
-        "R namespace A2d budget/RMDIR readiness and current capability differ",
+        "R namespace A2e budget/RMDIR readiness and current capability differ",
     )
 
     permanent_collection_names = {
@@ -23882,6 +25300,10 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "self._inventory_cursor_records_by_identity",
         "self._inventory_cursor_records_by_serial",
         "self._archived_inventory_cursor_records",
+        "self._inventory_scan_records_by_identity",
+        "self._inventory_scan_records_by_serial",
+        "self._archived_inventory_scan_records",
+        "self._inventory_scan_proxy_quarantine",
         "self._namespace_owner_tokens",
         "self._namespace_owner_contexts",
         "self._receipts",
@@ -23980,7 +25402,9 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         *namespace_class_names,
         "_Generation6RNamespaceLiveToken",
     }
-    sensitive_dynamic_names = protected_global_names | namespace_public_calls
+    sensitive_dynamic_names = (
+        protected_global_names | namespace_public_calls | inventory_scan_helper_names
+    )
     sensitive_string_aliases = {
         target.id
         for node in ast.walk(syntax)
@@ -24084,30 +25508,30 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     )
     _require(
         type(namespace_gate_function.end_lineno) is int,
-        "R namespace A2d gate end differs",
+        "R namespace A2e gate end differs",
     )
     gate_start = namespace_gate_function.lineno
     gate_end = cast(int, namespace_gate_function.end_lineno)
-    expected_gate_digest = "5b7bb88a39a9b47234cefbefae1d25a4e77ead96aaba6e19ea65e5a5f16a213a"
+    expected_gate_digest = "ef5d8bc148d55436ea8e02f7136f74b82976eba7d7847bcaff2e5821fdf3e39a"
     normalized_gate_source = "\n".join(source.splitlines()[gate_start - 1 : gate_end]) + "\n"
     _require(
         normalized_gate_source.count(expected_gate_digest) == 1,
-        "R namespace A2d gate digest token differs",
+        "R namespace A2e gate digest token differs",
     )
     normalized_gate_source = normalized_gate_source.replace(
         expected_gate_digest,
         "0" * 64,
     )
-    gate_domain = b"TASK-064\0GEN6\0R-A2d\0gate-v1\0"
+    gate_domain = b"TASK-064\0GEN6\0R-A2e\0gate-v1\0"
     gate_preimage = gate_domain + normalized_gate_source.encode("utf-8")
     gate_digest = hashlib.sha256(gate_preimage).hexdigest()
     namespace_gate_index = syntax.body.index(namespace_gate_function)
     _require(
-        gate_start == 16668
+        gate_start == 17173
         and syntax.body[namespace_gate_index + 1] is top_function("_selftest_r_case")
-        and len(gate_preimage) == 321_233
+        and len(gate_preimage) == 358_112
         and gate_digest == expected_gate_digest,
-        "R namespace A2d reviewed gate digest differs",
+        "R namespace A2e reviewed gate digest differs",
     )
 
 
