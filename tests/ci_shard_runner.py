@@ -11744,6 +11744,7 @@ class _Generation6RAuthorityScope:
 # R-AUTH-NAMESPACE A2a adds only an inert, strongly bound cleanup-budget foundation.
 # R-AUTH-NAMESPACE A2b adds only inert inventory-evidence identity vocabulary.
 # R-AUTH-NAMESPACE A2c adds only inert inventory-cursor provenance.
+# R-AUTH-NAMESPACE A2d adds only an inert single-current inventory-cursor lifecycle.
 _GENERATION6_R_NAMESPACE_REAL_OS_STAT: Final = os.stat
 _GENERATION6_R_NAMESPACE_REAL_OS_OPEN: Final = os.open
 _GENERATION6_R_NAMESPACE_REAL_OS_FSTAT: Final = os.fstat
@@ -11887,6 +11888,14 @@ _GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE: Final = {
         _Generation6RNamespaceCleanupBudgetEvent.UNCERTAIN
     ),
 }
+
+
+class _Generation6RNamespaceInventoryCursorState(  # noqa: UP042 - exact contract
+    str, Enum
+):
+    CURRENT = "CURRENT"
+    RETIRED = "RETIRED"
+    UNCERTAIN = "UNCERTAIN"
 
 
 class _Generation6RNamespaceTerminalEvent(str, Enum):  # noqa: UP042 - exact contract
@@ -12160,8 +12169,17 @@ class _Generation6RNamespaceInventoryCursorBinding:
     cleanup_budget_record_identity: int
 
 
+@dataclass(eq=False)
+class _Generation6RNamespaceInventoryCursorRecord:
+    binding: _Generation6RNamespaceInventoryCursorBinding
+    binding_identity: int
+    state: _Generation6RNamespaceInventoryCursorState
+    current_receipt: _Generation6RNamespaceReceipt | None
+    terminal_receipt: _Generation6RNamespaceReceipt | None
+
+
 class _Generation6RNamespaceJournal:
-    """Strong, private A1/A2c journal with no activation or runtime call surface."""
+    """Strong, private A1/A2d journal with no activation or runtime call surface."""
 
     def __init__(
         self,
@@ -12223,6 +12241,19 @@ class _Generation6RNamespaceJournal:
             int, _Generation6RNamespaceInventoryCursorBinding
         ] = {}
         self._inventory_cursor_issuance_faulted = False
+        self._inventory_cursor_records_by_identity: dict[
+            int, _Generation6RNamespaceInventoryCursorRecord
+        ] = {}
+        self._inventory_cursor_records_by_serial: dict[
+            int, _Generation6RNamespaceInventoryCursorRecord
+        ] = {}
+        self._live_inventory_cursor_record: _Generation6RNamespaceInventoryCursorRecord | None = (
+            None
+        )
+        self._archived_inventory_cursor_records: list[
+            _Generation6RNamespaceInventoryCursorRecord
+        ] = []
+        self._inventory_cursor_lifecycle_faulted = False
         self._pending_publication: object | None = None
         self._poisoned_descriptors: set[int] = set()
         self._namespace_owner_tokens: dict[int, _Generation6ROwnerToken] = {}
@@ -13220,6 +13251,171 @@ class _Generation6RNamespaceJournal:
             "R namespace inventory cursor caller identity differs",
         )
         return exact_binding
+
+    def _issue_current_inventory_cursor(
+        self,
+        authority: _Generation6RNamespaceDirectoryAuthority,
+        cleanup_epoch: _Generation6RNamespaceCleanupBudgetEpoch,
+    ) -> _Generation6RNamespaceInventoryCursor:
+        record: _Generation6RNamespaceInventoryCursorRecord | None = None
+        try:
+            _require(
+                type(self._inventory_cursor_lifecycle_faulted) is bool
+                and not self._inventory_cursor_lifecycle_faulted
+                and type(self._inventory_cursor_records_by_identity) is dict
+                and not self._inventory_cursor_records_by_identity
+                and type(self._inventory_cursor_records_by_serial) is dict
+                and not self._inventory_cursor_records_by_serial
+                and self._live_inventory_cursor_record is None
+                and type(self._archived_inventory_cursor_records) is list
+                and not self._archived_inventory_cursor_records,
+                "R namespace current inventory cursor issue state differs",
+            )
+            cursor = self._issue_inventory_cursor_provenance(authority, cleanup_epoch)
+            binding = self._require_inventory_cursor_provenance(cursor)
+            _require(
+                binding.cursor is cursor
+                and binding.authority is authority
+                and binding.cleanup_epoch is cleanup_epoch,
+                "R namespace current inventory cursor provenance differs",
+            )
+            record = _Generation6RNamespaceInventoryCursorRecord(
+                binding,
+                id(binding),
+                _Generation6RNamespaceInventoryCursorState.CURRENT,
+                None,
+                None,
+            )
+            self._inventory_cursor_records_by_identity[binding.cursor_identity] = record
+            self._inventory_cursor_records_by_serial[binding.cursor_serial] = record
+            current_receipt = self._append_receipt(
+                token_serial=binding.cursor_serial,
+                authority_serial=binding.authority_serial,
+                event="INVENTORY_CURSOR_CURRENT",
+            )
+            record.current_receipt = current_receipt
+            self._live_inventory_cursor_record = record
+            return cursor
+        except BaseException:
+            self._inventory_cursor_lifecycle_faulted = True
+            if type(record) is _Generation6RNamespaceInventoryCursorRecord:
+                record.state = _Generation6RNamespaceInventoryCursorState.UNCERTAIN
+                self._archived_inventory_cursor_records.append(record)
+            raise
+
+    def _require_current_inventory_cursor(
+        self,
+        cursor: _Generation6RNamespaceInventoryCursor,
+    ) -> _Generation6RNamespaceInventoryCursorRecord:
+        live_record = self._live_inventory_cursor_record
+        _require(
+            type(self._inventory_cursor_lifecycle_faulted) is bool
+            and not self._inventory_cursor_lifecycle_faulted
+            and type(self._inventory_cursor_records_by_identity) is dict
+            and type(self._inventory_cursor_records_by_serial) is dict
+            and type(self._archived_inventory_cursor_records) is list
+            and not self._archived_inventory_cursor_records
+            and type(live_record) is _Generation6RNamespaceInventoryCursorRecord,
+            "R namespace current inventory cursor trusted live slot differs",
+        )
+        exact_record = cast(_Generation6RNamespaceInventoryCursorRecord, live_record)
+        trusted_binding = exact_record.binding
+        _require(
+            type(trusted_binding) is _Generation6RNamespaceInventoryCursorBinding,
+            "R namespace current inventory cursor trusted binding type differs",
+        )
+        trusted_cursor = trusted_binding.cursor
+        current_receipt = exact_record.current_receipt
+        _exact_keys(
+            vars(exact_record),
+            (
+                "binding",
+                "binding_identity",
+                "state",
+                "current_receipt",
+                "terminal_receipt",
+            ),
+            "R namespace current inventory cursor record",
+        )
+        _require(
+            exact_record.binding_identity == id(trusted_binding)
+            and type(trusted_cursor) is _Generation6RNamespaceInventoryCursor
+            and self._inventory_cursor_records_by_identity.get(trusted_binding.cursor_identity)
+            is exact_record
+            and self._inventory_cursor_records_by_serial.get(trusted_binding.cursor_serial)
+            is exact_record
+            and exact_record.state is _Generation6RNamespaceInventoryCursorState.CURRENT
+            and type(current_receipt) is _Generation6RNamespaceReceipt
+            and current_receipt.issuer_identity == self._issuer_identity
+            and current_receipt.token_serial == trusted_binding.cursor_serial
+            and current_receipt.authority_serial == trusted_binding.authority_serial
+            and current_receipt.event == "INVENTORY_CURSOR_CURRENT"
+            and exact_record.terminal_receipt is None,
+            "R namespace current inventory cursor trusted evidence differs",
+        )
+        authenticated_binding = self._require_inventory_cursor_provenance(trusted_cursor)
+        _require(
+            authenticated_binding is trusted_binding,
+            "R namespace current inventory cursor authenticated binding differs",
+        )
+        _require(
+            type(cursor) is _Generation6RNamespaceInventoryCursor,
+            "R namespace current inventory cursor caller type differs",
+        )
+        _exact_keys(
+            vars(cursor),
+            ("serial", "issuer_identity"),
+            "R namespace current inventory cursor caller",
+        )
+        _require(
+            cursor.serial == trusted_binding.cursor_serial
+            and cursor.issuer_identity == trusted_binding.cursor_issuer_identity,
+            "R namespace current inventory cursor caller fields differ",
+        )
+        _require(
+            cursor is trusted_cursor,
+            "R namespace current inventory cursor caller identity differs",
+        )
+        return exact_record
+
+    def _terminalize_inventory_cursor(
+        self,
+        cursor: _Generation6RNamespaceInventoryCursor,
+        state: _Generation6RNamespaceInventoryCursorState,
+    ) -> None:
+        record: _Generation6RNamespaceInventoryCursorRecord | None = None
+        try:
+            _require(
+                type(state) is _Generation6RNamespaceInventoryCursorState
+                and state
+                in {
+                    _Generation6RNamespaceInventoryCursorState.RETIRED,
+                    _Generation6RNamespaceInventoryCursorState.UNCERTAIN,
+                },
+                "R namespace inventory cursor terminal state differs",
+            )
+            record = self._require_current_inventory_cursor(cursor)
+            trusted_binding = record.binding
+            if state is _Generation6RNamespaceInventoryCursorState.UNCERTAIN:
+                self._inventory_cursor_lifecycle_faulted = True
+            record.state = state
+            terminal_receipt = self._append_receipt(
+                token_serial=trusted_binding.cursor_serial,
+                authority_serial=trusted_binding.authority_serial,
+                event=(
+                    "INVENTORY_CURSOR_RETIRED"
+                    if state is _Generation6RNamespaceInventoryCursorState.RETIRED
+                    else "INVENTORY_CURSOR_UNCERTAIN"
+                ),
+            )
+            record.terminal_receipt = terminal_receipt
+            self._archived_inventory_cursor_records.append(record)
+            self._live_inventory_cursor_record = None
+        except BaseException:
+            self._inventory_cursor_lifecycle_faulted = True
+            if type(record) is _Generation6RNamespaceInventoryCursorRecord:
+                record.state = _Generation6RNamespaceInventoryCursorState.UNCERTAIN
+            raise
 
     def register_borrowed_directory(
         self,
@@ -17158,6 +17354,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_Generation6RNamespaceMutationPermitState",
         "_Generation6RNamespaceCleanupBudgetState",
         "_Generation6RNamespaceCleanupBudgetEvent",
+        "_Generation6RNamespaceInventoryCursorState",
         "_Generation6RNamespaceTerminalEvent",
         "_Generation6RNamespaceDirectoryFact",
         "_Generation6RNamespaceNameFact",
@@ -17181,6 +17378,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_Generation6RNamespaceReceipt",
         "_Generation6RNamespaceCleanupBudgetRecord",
         "_Generation6RNamespaceInventoryCursorBinding",
+        "_Generation6RNamespaceInventoryCursorRecord",
         "_Generation6RNamespaceJournal",
     )
     observed_namespace_class_names = tuple(
@@ -17203,6 +17401,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         and namespace_capture_nodes["_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE"].lineno
         > namespace_classes["_Generation6RNamespaceCleanupBudgetEvent"].lineno
         and namespace_capture_nodes["_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE"].lineno
+        < namespace_classes["_Generation6RNamespaceInventoryCursorState"].lineno
         < namespace_classes["_Generation6RNamespaceTerminalEvent"].lineno,
         "R namespace static capture/class ordering differs",
     )
@@ -17277,6 +17476,11 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_Generation6RNamespaceCleanupBudgetEvent": (
             "ISSUED",
             "EXHAUSTED",
+            "UNCERTAIN",
+        ),
+        "_Generation6RNamespaceInventoryCursorState": (
+            "CURRENT",
+            "RETIRED",
             "UNCERTAIN",
         ),
         "_Generation6RNamespaceTerminalEvent": (
@@ -17521,6 +17725,13 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "cleanup_budget_record",
             "cleanup_budget_record_identity",
         ),
+        "_Generation6RNamespaceInventoryCursorRecord": (
+            "binding",
+            "binding_identity",
+            "state",
+            "current_receipt",
+            "terminal_receipt",
+        ),
     }
     expected_namespace_annotations = {
         "_Generation6RNamespaceDirectoryFact": (
@@ -17734,6 +17945,13 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "_Generation6RNamespaceCleanupBudgetRecord",
             "int",
         ),
+        "_Generation6RNamespaceInventoryCursorRecord": (
+            "_Generation6RNamespaceInventoryCursorBinding",
+            "int",
+            "_Generation6RNamespaceInventoryCursorState",
+            "_Generation6RNamespaceReceipt | None",
+            "_Generation6RNamespaceReceipt | None",
+        ),
     }
     frozen_namespace_classes = {
         "_Generation6RNamespaceDirectoryFact",
@@ -17760,6 +17978,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_Generation6RNamespaceCapabilityRecord",
         "_Generation6RNamespaceMutationPermitRecord",
         "_Generation6RNamespaceCleanupBudgetRecord",
+        "_Generation6RNamespaceInventoryCursorRecord",
     }
     for name, expected_fields in expected_namespace_fields.items():
         class_node = namespace_classes[name]
@@ -17838,6 +18057,9 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_reauthenticate_directory",
         "_issue_inventory_cursor_provenance",
         "_require_inventory_cursor_provenance",
+        "_issue_current_inventory_cursor",
+        "_require_current_inventory_cursor",
+        "_terminalize_inventory_cursor",
         "register_borrowed_directory",
         "_retain_uncertain_owner",
         "_reconcile_mount_poison",
@@ -17961,6 +18183,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "class:_Generation6RNamespaceCleanupBudgetState",
         "class:_Generation6RNamespaceCleanupBudgetEvent",
         "capture:_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE",
+        "class:_Generation6RNamespaceInventoryCursorState",
         "class:_Generation6RNamespaceTerminalEvent",
         "class:_Generation6RNamespaceDirectoryFact",
         "class:_Generation6RNamespaceNameFact",
@@ -17985,15 +18208,16 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "class:_Generation6RNamespaceReceipt",
         "class:_Generation6RNamespaceCleanupBudgetRecord",
         "class:_Generation6RNamespaceInventoryCursorBinding",
+        "class:_Generation6RNamespaceInventoryCursorRecord",
         "class:_Generation6RNamespaceJournal",
     )
     normalized_bundle_source = "\n".join(source.splitlines()[bundle_start - 1 : bundle_end]) + "\n"
-    bundle_domain = b"TASK-064\0GEN6\0R-A2c\0source-v1\0"
+    bundle_domain = b"TASK-064\0GEN6\0R-A2d\0source-v1\0"
     bundle_preimage = bundle_domain + normalized_bundle_source.encode("utf-8")
     bundle_digest = hashlib.sha256(bundle_preimage).hexdigest()
     _require(
-        bundle_start == 11747
-        and bundle_end == 16469
+        bundle_start == 11748
+        and bundle_end == 16665
         and observed_bundle_inventory == expected_bundle_inventory
         and namespace_bundle_nodes[0]
         is namespace_capture_nodes["_GENERATION6_R_NAMESPACE_REAL_OS_STAT"]
@@ -18003,9 +18227,9 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             and node.end_lineno < namespace_bundle_nodes[index + 1].lineno
             for index, node in enumerate(namespace_bundle_nodes[:-1])
         )
-        and len(bundle_preimage) == 211_439
-        and bundle_digest == "b3cc642eac72f18cdc35b3009ff88c73189176df2d33da97149a6115a946f0de",
-        "R namespace A2c reviewed source-bundle digest differs",
+        and len(bundle_preimage) == 220_485
+        and bundle_digest == "6b384ef67293de49f0e8d75a12e61c3d6a9fc464356e60f05cd64566dacfff53",
+        "R namespace A2d reviewed source-bundle digest differs",
     )
     self_aliases_by_method: dict[str, set[str]] = {}
     self_alias_assignments: list[tuple[str, str, str]] = []
@@ -18110,10 +18334,12 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "self._append_receipt": (
             "_close_namespace_owner",
             "_issue_cleanup_budget_epoch",
+            "_issue_current_inventory_cursor",
             "_publish_capability",
             "_register_authority",
             "_register_name_fact",
             "_terminalize_cleanup_budget",
+            "_terminalize_inventory_cursor",
             "abandon_token",
             "abandon_token",
             "consume_present",
@@ -18151,8 +18377,14 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "self._terminalize_cleanup_budget": ("_charge_cleanup_budget",),
         "self._issue_cleanup_budget_epoch": (),
         "self._charge_cleanup_budget": (),
-        "self._issue_inventory_cursor_provenance": (),
-        "self._require_inventory_cursor_provenance": (),
+        "self._issue_inventory_cursor_provenance": ("_issue_current_inventory_cursor",),
+        "self._require_inventory_cursor_provenance": (
+            "_issue_current_inventory_cursor",
+            "_require_current_inventory_cursor",
+        ),
+        "self._issue_current_inventory_cursor": (),
+        "self._require_current_inventory_cursor": ("_terminalize_inventory_cursor",),
+        "self._terminalize_inventory_cursor": (),
         "self._issue_a2_mutation_permit": ("consume_present",),
         "self._preauthorize_present_unlink": ("consume_present",),
         "self._postauthorize_present_unlink": ("consume_present",),
@@ -18230,6 +18462,11 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "self._inventory_cursor_bindings_by_identity",
             "self._inventory_cursor_bindings_by_serial",
             "self._inventory_cursor_issuance_faulted",
+            "self._inventory_cursor_records_by_identity",
+            "self._inventory_cursor_records_by_serial",
+            "self._live_inventory_cursor_record",
+            "self._archived_inventory_cursor_records",
+            "self._inventory_cursor_lifecycle_faulted",
             "self._pending_publication",
             "self._poisoned_descriptors",
             "self._namespace_owner_tokens",
@@ -18609,6 +18846,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "authorization_receipt",
         "capability_record",
         "close_receipt",
+        "current_receipt",
         "depth_high_water",
         "encoded_name_bytes",
         "entry_count",
@@ -19158,21 +19396,58 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             )
         )
     )
+    a2d_writer_methods = {
+        "_issue_current_inventory_cursor",
+        "_terminalize_inventory_cursor",
+    }
+    expected_a2d_mutable_record_writes = tuple(
+        sorted(
+            (
+                (
+                    "_issue_current_inventory_cursor",
+                    "record.current_receipt",
+                    "current_receipt",
+                ),
+                (
+                    "_issue_current_inventory_cursor",
+                    "record.state",
+                    "_Generation6RNamespaceInventoryCursorState.UNCERTAIN",
+                ),
+                (
+                    "_terminalize_inventory_cursor",
+                    "record.state",
+                    "state",
+                ),
+                (
+                    "_terminalize_inventory_cursor",
+                    "record.state",
+                    "_Generation6RNamespaceInventoryCursorState.UNCERTAIN",
+                ),
+                (
+                    "_terminalize_inventory_cursor",
+                    "record.terminal_receipt",
+                    "terminal_receipt",
+                ),
+            )
+        )
+    )
     _require(
         tuple(
             write
             for write in mutable_record_writes
-            if write[0] not in a1b_writer_methods | a2a_writer_methods
+            if write[0] not in a1b_writer_methods | a2a_writer_methods | a2d_writer_methods
         )
         == tuple(
             write
             for write in expected_mutable_record_writes
-            if write[0] not in a1b_writer_methods | a2a_writer_methods
+            if write[0] not in a1b_writer_methods | a2a_writer_methods | a2d_writer_methods
         )
         and tuple(write for write in mutable_record_writes if write[0] in a1b_writer_methods)
         == expected_a1b_mutable_record_writes
         and tuple(write for write in mutable_record_writes if write[0] in a2a_writer_methods)
-        == expected_a2a_mutable_record_writes,
+        == expected_a2a_mutable_record_writes
+        and tuple(write for write in mutable_record_writes if write[0] in a2d_writer_methods)
+        == expected_a2d_mutable_record_writes,
         "R namespace static mutable-record writer matrix differs",
     )
 
@@ -19231,6 +19506,14 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "_issue_inventory_cursor_provenance",
             "self._inventory_cursor_bindings_by_serial[cursor.serial]",
         ),
+        "_inventory_cursor_records_by_identity": (
+            "_issue_current_inventory_cursor",
+            "self._inventory_cursor_records_by_identity[binding.cursor_identity]",
+        ),
+        "_inventory_cursor_records_by_serial": (
+            "_issue_current_inventory_cursor",
+            "self._inventory_cursor_records_by_serial[binding.cursor_serial]",
+        ),
         "_namespace_owner_tokens": (
             "_open_namespace_owner",
             "self._namespace_owner_tokens[owner_identity]",
@@ -19252,6 +19535,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "_mutation_permit_records_by_serial",
         "_mutation_permit_records_by_identity",
         "_archived_mutation_permit_records",
+        "_archived_inventory_cursor_records",
         *expected_registry_subscript_stores,
         "_hardlink_groups",
         "_archived_capability_records",
@@ -19302,6 +19586,22 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,))
         if ast.unparse(target) == "self._inventory_cursor_issuance_faulted"
     )
+    inventory_cursor_live_slot_assignments = tuple(
+        (method_name, ast.unparse(node.value))
+        for method_name, method in namespace_methods.items()
+        for node in ast.walk(method)
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None
+        for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,))
+        if ast.unparse(target) == "self._live_inventory_cursor_record"
+    )
+    inventory_cursor_lifecycle_fault_assignments = tuple(
+        (method_name, ast.unparse(node.value))
+        for method_name, method in namespace_methods.items()
+        for node in ast.walk(method)
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None
+        for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,))
+        if ast.unparse(target) == "self._inventory_cursor_lifecycle_faulted"
+    )
     pending_store_methods = tuple(
         method_name
         for method_name, method in namespace_methods.items()
@@ -19324,6 +19624,8 @@ def _generation6_r_authority_source_gates(source: str) -> None:
                 "_live_cleanup_budget_record",
                 "_cleanup_budget_faulted",
                 "_inventory_cursor_issuance_faulted",
+                "_live_inventory_cursor_record",
+                "_inventory_cursor_lifecycle_faulted",
                 "_pending_publication",
             )
         )
@@ -19386,6 +19688,14 @@ def _generation6_r_authority_source_gates(source: str) -> None:
             "_archive_mutation_permit",
             "self._archived_mutation_permit_records.append",
         ),
+        (
+            "_issue_current_inventory_cursor",
+            "self._archived_inventory_cursor_records.append",
+        ),
+        (
+            "_terminalize_inventory_cursor",
+            "self._archived_inventory_cursor_records.append",
+        ),
         ("_close_namespace_owner", "self._owner_quarantine.append"),
         ("_close_namespace_owner", "self._poisoned_descriptors.add"),
         ("_reconcile_mount_poison", "self._owner_quarantine.append"),
@@ -19444,6 +19754,19 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         == (
             ("__init__", "False"),
             ("_issue_inventory_cursor_provenance", "True"),
+        )
+        and inventory_cursor_live_slot_assignments
+        == (
+            ("__init__", "None"),
+            ("_issue_current_inventory_cursor", "record"),
+            ("_terminalize_inventory_cursor", "None"),
+        )
+        and inventory_cursor_lifecycle_fault_assignments
+        == (
+            ("__init__", "False"),
+            ("_issue_current_inventory_cursor", "True"),
+            ("_terminalize_inventory_cursor", "True"),
+            ("_terminalize_inventory_cursor", "True"),
         )
         and pending_store_methods == ("_begin_publication", "_finish_publication")
         and call_targets(namespace_methods["_register_name_fact"]).count(
@@ -20983,9 +21306,11 @@ def _generation6_r_authority_source_gates(source: str) -> None:
                 "_name_facts_by_key",
                 "_hardlink_groups",
                 "_inventory_cursor_bindings_",
+                "_inventory_cursor_records_",
                 "_namespace_owner_tokens",
                 "_namespace_owner_contexts",
                 "_archived_capability_records",
+                "_archived_inventory_cursor_records",
                 "_poisoned_descriptors",
                 "_owner_quarantine",
                 "_untransferred_raw_quarantine",
@@ -21288,10 +21613,20 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         and not inventory_cursor_authenticator.args.kwonlyargs
         and inventory_cursor_authenticator.args.vararg is None
         and inventory_cursor_authenticator.args.kwarg is None
-        and exact_callers("_issue_inventory_cursor_provenance") == ()
-        and exact_callers("_require_inventory_cursor_provenance") == ()
-        and not full_inventory_helper_calls,
-        "R namespace A2c inventory provenance helper surface differs",
+        and exact_callers("_issue_inventory_cursor_provenance")
+        == ("_issue_current_inventory_cursor",)
+        and exact_callers("_require_inventory_cursor_provenance")
+        == (
+            "_issue_current_inventory_cursor",
+            "_require_current_inventory_cursor",
+        )
+        and tuple(sorted(full_inventory_helper_calls))
+        == (
+            "self._issue_inventory_cursor_provenance",
+            "self._require_inventory_cursor_provenance",
+            "self._require_inventory_cursor_provenance",
+        ),
+        "R namespace A2d-preserved inventory provenance helper surface differs",
     )
     inventory_cursor_issue_transactions = tuple(
         node for node in inventory_cursor_issuer.body if isinstance(node, ast.Try)
@@ -21483,6 +21818,984 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         and "self._live_capability_record" not in inventory_provenance_sources
         and "self._live_mutation_permit_record" not in inventory_provenance_sources,
         "R namespace A2c provenance-only no-consumer boundary differs",
+    )
+
+    inventory_cursor_lifecycle_constructor_calls = tuple(
+        call
+        for call in full_calls
+        if ast.unparse(call.func) == "_Generation6RNamespaceInventoryCursorRecord"
+    )
+    current_cursor_issuer = namespace_methods["_issue_current_inventory_cursor"]
+    current_cursor_authenticator = namespace_methods["_require_current_inventory_cursor"]
+    current_cursor_terminalizer = namespace_methods["_terminalize_inventory_cursor"]
+    current_cursor_issuer_targets = call_targets(current_cursor_issuer)
+    current_cursor_authenticator_targets = call_targets(current_cursor_authenticator)
+    current_cursor_terminalizer_targets = call_targets(current_cursor_terminalizer)
+    lifecycle_helper_names = {
+        "_issue_current_inventory_cursor",
+        "_require_current_inventory_cursor",
+        "_terminalize_inventory_cursor",
+    }
+    full_lifecycle_helper_calls = tuple(
+        ast.unparse(call.func)
+        for call in full_calls
+        if isinstance(call.func, ast.Attribute) and call.func.attr in lifecycle_helper_names
+    )
+    _require(
+        len(inventory_cursor_lifecycle_constructor_calls) == 1
+        and inventory_cursor_lifecycle_constructor_calls[0]
+        in tuple(ast.walk(current_cursor_issuer))
+        and tuple(argument.arg for argument in current_cursor_issuer.args.args)
+        == ("self", "authority", "cleanup_epoch")
+        and tuple(
+            ast.unparse(argument.annotation)
+            for argument in current_cursor_issuer.args.args
+            if argument.annotation is not None
+        )
+        == (
+            "_Generation6RNamespaceDirectoryAuthority",
+            "_Generation6RNamespaceCleanupBudgetEpoch",
+        )
+        and current_cursor_issuer.returns is not None
+        and ast.unparse(current_cursor_issuer.returns) == "_Generation6RNamespaceInventoryCursor"
+        and tuple(argument.arg for argument in current_cursor_authenticator.args.args)
+        == ("self", "cursor")
+        and tuple(
+            ast.unparse(argument.annotation)
+            for argument in current_cursor_authenticator.args.args
+            if argument.annotation is not None
+        )
+        == ("_Generation6RNamespaceInventoryCursor",)
+        and current_cursor_authenticator.returns is not None
+        and ast.unparse(current_cursor_authenticator.returns)
+        == "_Generation6RNamespaceInventoryCursorRecord"
+        and tuple(argument.arg for argument in current_cursor_terminalizer.args.args)
+        == ("self", "cursor", "state")
+        and tuple(
+            ast.unparse(argument.annotation)
+            for argument in current_cursor_terminalizer.args.args
+            if argument.annotation is not None
+        )
+        == (
+            "_Generation6RNamespaceInventoryCursor",
+            "_Generation6RNamespaceInventoryCursorState",
+        )
+        and current_cursor_terminalizer.returns is not None
+        and ast.unparse(current_cursor_terminalizer.returns) == "None"
+        and all(
+            not method.args.posonlyargs
+            and not method.args.kwonlyargs
+            and method.args.vararg is None
+            and method.args.kwarg is None
+            for method in (
+                current_cursor_issuer,
+                current_cursor_authenticator,
+                current_cursor_terminalizer,
+            )
+        )
+        and exact_callers("_issue_current_inventory_cursor") == ()
+        and exact_callers("_require_current_inventory_cursor") == ("_terminalize_inventory_cursor",)
+        and exact_callers("_terminalize_inventory_cursor") == ()
+        and full_lifecycle_helper_calls == ("self._require_current_inventory_cursor",),
+        "R namespace A2d lifecycle private API and caller surface differs",
+    )
+
+    current_cursor_issue_transactions = tuple(
+        node for node in current_cursor_issuer.body if isinstance(node, ast.Try)
+    )
+    current_cursor_issue_record_declarations = tuple(
+        node
+        for node in current_cursor_issuer.body
+        if isinstance(node, ast.AnnAssign)
+        and isinstance(node.target, ast.Name)
+        and node.target.id == "record"
+    )
+    _require(
+        len(current_cursor_issuer.body) == 2
+        and len(current_cursor_issue_record_declarations) == 1
+        and current_cursor_issuer.body[0] is current_cursor_issue_record_declarations[0]
+        and ast.unparse(current_cursor_issue_record_declarations[0].annotation)
+        == "_Generation6RNamespaceInventoryCursorRecord | None"
+        and current_cursor_issue_record_declarations[0].value is not None
+        and ast.unparse(current_cursor_issue_record_declarations[0].value) == "None"
+        and len(current_cursor_issue_transactions) == 1
+        and current_cursor_issuer.body[-1] is current_cursor_issue_transactions[0],
+        "R namespace A2d current cursor issue transaction differs",
+    )
+    current_cursor_issue_transaction = current_cursor_issue_transactions[0]
+    current_cursor_issue_return = current_cursor_issue_transaction.body[-1]
+    current_cursor_issue_require_calls = tuple(
+        call
+        for statement in current_cursor_issue_transaction.body
+        for call in calls(statement)
+        if ast.unparse(call.func) == "_require"
+    )
+    current_cursor_issue_precondition_calls = tuple(
+        call
+        for call in current_cursor_issue_require_calls
+        if len(call.args) == 2
+        and isinstance(call.args[1], ast.Constant)
+        and call.args[1].value == "R namespace current inventory cursor issue state differs"
+    )
+    current_cursor_issue_provenance_predicate_calls = tuple(
+        call
+        for call in current_cursor_issue_require_calls
+        if len(call.args) == 2
+        and isinstance(call.args[1], ast.Constant)
+        and call.args[1].value == "R namespace current inventory cursor provenance differs"
+    )
+    current_cursor_record_assignments = tuple(
+        node
+        for node in current_cursor_issue_transaction.body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "record"
+        and isinstance(node.value, ast.Call)
+        and ast.unparse(node.value.func) == "_Generation6RNamespaceInventoryCursorRecord"
+    )
+    current_cursor_receipt_assignments = tuple(
+        node
+        for node in current_cursor_issue_transaction.body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "current_receipt"
+        and isinstance(node.value, ast.Call)
+        and ast.unparse(node.value.func) == "self._append_receipt"
+    )
+    _require(
+        len(current_cursor_issue_transaction.body) == 11
+        and isinstance(current_cursor_issue_return, ast.Return)
+        and current_cursor_issue_return.value is not None
+        and ast.unparse(current_cursor_issue_return.value) == "cursor"
+        and current_cursor_issue_return is current_cursor_issue_transaction.body[-1]
+        and len(current_cursor_issue_require_calls) == 2
+        and len(current_cursor_issue_precondition_calls) == 1
+        and isinstance(current_cursor_issue_transaction.body[0], ast.Expr)
+        and current_cursor_issue_precondition_calls[0]
+        is current_cursor_issue_transaction.body[0].value
+        and not current_cursor_issue_precondition_calls[0].keywords
+        and ast.unparse(current_cursor_issue_precondition_calls[0].args[0])
+        == (
+            "type(self._inventory_cursor_lifecycle_faulted) is bool and (not "
+            "self._inventory_cursor_lifecycle_faulted) and "
+            "(type(self._inventory_cursor_records_by_identity) is dict) and (not "
+            "self._inventory_cursor_records_by_identity) and "
+            "(type(self._inventory_cursor_records_by_serial) is dict) and (not "
+            "self._inventory_cursor_records_by_serial) and "
+            "(self._live_inventory_cursor_record is None) and "
+            "(type(self._archived_inventory_cursor_records) is list) and (not "
+            "self._archived_inventory_cursor_records)"
+        )
+        and len(current_cursor_issue_provenance_predicate_calls) == 1
+        and isinstance(current_cursor_issue_transaction.body[3], ast.Expr)
+        and current_cursor_issue_provenance_predicate_calls[0]
+        is current_cursor_issue_transaction.body[3].value
+        and not current_cursor_issue_provenance_predicate_calls[0].keywords
+        and ast.unparse(current_cursor_issue_provenance_predicate_calls[0].args[0])
+        == (
+            "binding.cursor is cursor and binding.authority is authority and "
+            "(binding.cleanup_epoch is cleanup_epoch)"
+        )
+        and len(current_cursor_record_assignments) == 1
+        and current_cursor_record_assignments[0] is current_cursor_issue_transaction.body[4]
+        and len(current_cursor_receipt_assignments) == 1
+        and current_cursor_receipt_assignments[0] is current_cursor_issue_transaction.body[7],
+        "R namespace A2d exact issuer predicates and direct assignments differ",
+    )
+    current_cursor_record_call = cast(ast.Call, current_cursor_record_assignments[0].value)
+    current_cursor_receipt_call = cast(ast.Call, current_cursor_receipt_assignments[0].value)
+    _require(
+        inventory_cursor_lifecycle_constructor_calls == (current_cursor_record_call,)
+        and tuple(ast.unparse(argument) for argument in current_cursor_record_call.args)
+        == (
+            "binding",
+            "id(binding)",
+            "_Generation6RNamespaceInventoryCursorState.CURRENT",
+            "None",
+            "None",
+        )
+        and not current_cursor_record_call.keywords
+        and not current_cursor_receipt_call.args
+        and tuple(
+            (keyword.arg, ast.unparse(keyword.value))
+            for keyword in current_cursor_receipt_call.keywords
+        )
+        == (
+            ("token_serial", "binding.cursor_serial"),
+            ("authority_serial", "binding.authority_serial"),
+            ("event", "'INVENTORY_CURSOR_CURRENT'"),
+        )
+        and ast.unparse(current_cursor_issue_transaction.body[1])
+        == "cursor = self._issue_inventory_cursor_provenance(authority, cleanup_epoch)"
+        and ast.unparse(current_cursor_issue_transaction.body[2])
+        == "binding = self._require_inventory_cursor_provenance(cursor)"
+        and ast.unparse(current_cursor_issue_transaction.body[5])
+        == "self._inventory_cursor_records_by_identity[binding.cursor_identity] = record"
+        and ast.unparse(current_cursor_issue_transaction.body[6])
+        == "self._inventory_cursor_records_by_serial[binding.cursor_serial] = record"
+        and ast.unparse(current_cursor_issue_transaction.body[8])
+        == "record.current_receipt = current_receipt"
+        and ast.unparse(current_cursor_issue_transaction.body[9])
+        == "self._live_inventory_cursor_record = record",
+        "R namespace A2d exact current record and receipt binding differs",
+    )
+    current_cursor_issue_handlers = tuple(
+        handler
+        for handler in current_cursor_issue_transaction.handlers
+        if handler.type is not None and ast.unparse(handler.type) == "BaseException"
+    )
+    current_cursor_issue_failure_ifs = tuple(
+        node
+        for handler in current_cursor_issue_handlers
+        for node in handler.body
+        if isinstance(node, ast.If)
+    )
+    current_cursor_issue_archive_calls = tuple(
+        call
+        for node in current_cursor_issue_failure_ifs
+        for call in calls(node)
+        if ast.unparse(call.func) == "self._archived_inventory_cursor_records.append"
+    )
+    _require(
+        len(current_cursor_issue_transaction.handlers) == len(current_cursor_issue_handlers) == 1
+        and not current_cursor_issue_transaction.orelse
+        and not current_cursor_issue_transaction.finalbody
+        and len(current_cursor_issue_handlers[0].body) == 3
+        and current_cursor_issue_handlers[0].name is None
+        and isinstance(current_cursor_issue_handlers[0].body[0], ast.Assign)
+        and assignment_values(
+            current_cursor_issue_handlers[0],
+            "self._inventory_cursor_lifecycle_faulted",
+        )
+        == ((current_cursor_issue_handlers[0].body[0].lineno, "True"),)
+        and len(current_cursor_issue_failure_ifs) == 1
+        and current_cursor_issue_handlers[0].body[1] is current_cursor_issue_failure_ifs[0]
+        and ast.unparse(current_cursor_issue_failure_ifs[0].test)
+        == "type(record) is _Generation6RNamespaceInventoryCursorRecord"
+        and len(current_cursor_issue_failure_ifs[0].body) == 2
+        and not current_cursor_issue_failure_ifs[0].orelse
+        and isinstance(current_cursor_issue_failure_ifs[0].body[0], ast.Assign)
+        and isinstance(current_cursor_issue_failure_ifs[0].body[1], ast.Expr)
+        and assignment_values(current_cursor_issue_handlers[0], "record.state")
+        == (
+            (
+                current_cursor_issue_failure_ifs[0].body[0].lineno,
+                "_Generation6RNamespaceInventoryCursorState.UNCERTAIN",
+            ),
+        )
+        and len(current_cursor_issue_archive_calls) == 1
+        and current_cursor_issue_failure_ifs[0].body[1].value
+        is current_cursor_issue_archive_calls[0]
+        and tuple(ast.unparse(argument) for argument in current_cursor_issue_archive_calls[0].args)
+        == ("record",)
+        and not current_cursor_issue_archive_calls[0].keywords
+        and current_cursor_issue_failure_ifs[0].body[0].lineno
+        < current_cursor_issue_archive_calls[0].lineno
+        and assignment_values(
+            current_cursor_issue_handlers[0],
+            "self._live_inventory_cursor_record",
+        )
+        == ()
+        and isinstance(current_cursor_issue_handlers[0].body[-1], ast.Raise)
+        and current_cursor_issue_handlers[0].body[-1].exc is None,
+        "R namespace A2d current cursor issue fail-closed path differs",
+    )
+    current_cursor_provenance_issue_line = one_line(
+        selected_call_lines(
+            current_cursor_issuer,
+            "self._issue_inventory_cursor_provenance",
+        ),
+        "A2d current cursor provenance issuance",
+    )
+    current_cursor_provenance_auth_line = one_line(
+        selected_call_lines(
+            current_cursor_issuer,
+            "self._require_inventory_cursor_provenance",
+        ),
+        "A2d current cursor provenance authentication",
+    )
+    current_cursor_record_line = one_line(
+        selected_call_lines(
+            current_cursor_issuer,
+            "_Generation6RNamespaceInventoryCursorRecord",
+        ),
+        "A2d current cursor record construction",
+    )
+    current_cursor_identity_store_line = one_line(
+        assignment_lines(
+            current_cursor_issuer,
+            "self._inventory_cursor_records_by_identity[binding.cursor_identity]",
+            "record",
+        ),
+        "A2d current cursor identity record store",
+    )
+    current_cursor_serial_store_line = one_line(
+        assignment_lines(
+            current_cursor_issuer,
+            "self._inventory_cursor_records_by_serial[binding.cursor_serial]",
+            "record",
+        ),
+        "A2d current cursor serial record store",
+    )
+    current_cursor_receipt_line = one_line(
+        selected_call_lines(current_cursor_issuer, "self._append_receipt"),
+        "A2d current cursor receipt",
+    )
+    current_cursor_receipt_store_line = one_line(
+        assignment_lines(
+            current_cursor_issuer,
+            "record.current_receipt",
+            "current_receipt",
+        ),
+        "A2d current cursor receipt binding",
+    )
+    current_cursor_live_line = one_line(
+        assignment_lines(
+            current_cursor_issuer,
+            "self._live_inventory_cursor_record",
+            "record",
+        ),
+        "A2d current cursor live publication",
+    )
+    current_cursor_normal_call_lines = tuple(
+        call.lineno
+        for statement in current_cursor_issue_transaction.body
+        for call in calls(statement)
+    )
+    _require(
+        current_cursor_issuer_targets.count("self._issue_inventory_cursor_provenance") == 1
+        and current_cursor_issuer_targets.count("self._require_inventory_cursor_provenance") == 1
+        and current_cursor_issuer_targets.count("_Generation6RNamespaceInventoryCursorRecord") == 1
+        and current_cursor_issuer_targets.count("self._append_receipt") == 1
+        and current_cursor_issuer_targets.count("self._issue_serial") == 0
+        and current_cursor_provenance_issue_line
+        < current_cursor_provenance_auth_line
+        < current_cursor_record_line
+        < current_cursor_identity_store_line
+        < current_cursor_serial_store_line
+        < current_cursor_receipt_line
+        < current_cursor_receipt_store_line
+        < current_cursor_live_line
+        < current_cursor_issue_return.lineno
+        and current_cursor_provenance_issue_line == current_cursor_issue_transaction.body[1].lineno
+        and current_cursor_provenance_auth_line == current_cursor_issue_transaction.body[2].lineno
+        and current_cursor_record_line == current_cursor_issue_transaction.body[4].lineno
+        and current_cursor_identity_store_line == current_cursor_issue_transaction.body[5].lineno
+        and current_cursor_serial_store_line == current_cursor_issue_transaction.body[6].lineno
+        and current_cursor_receipt_line == current_cursor_issue_transaction.body[7].lineno
+        and current_cursor_receipt_store_line == current_cursor_issue_transaction.body[8].lineno
+        and current_cursor_live_line == current_cursor_issue_transaction.body[-2].lineno
+        and current_cursor_issue_return is current_cursor_issue_transaction.body[-1]
+        and max(current_cursor_normal_call_lines) < current_cursor_live_line,
+        "R namespace A2d current cursor fixed publication order differs",
+    )
+
+    current_cursor_live_predicate_calls = tuple(
+        call
+        for call in calls(current_cursor_authenticator)
+        if ast.unparse(call.func) == "_require"
+        and len(call.args) == 2
+        and isinstance(call.args[1], ast.Constant)
+        and call.args[1].value == "R namespace current inventory cursor trusted live slot differs"
+    )
+    current_cursor_evidence_predicate_calls = tuple(
+        call
+        for call in calls(current_cursor_authenticator)
+        if ast.unparse(call.func) == "_require"
+        and len(call.args) == 2
+        and isinstance(call.args[1], ast.Constant)
+        and call.args[1].value == "R namespace current inventory cursor trusted evidence differs"
+    )
+    _require(
+        len(current_cursor_live_predicate_calls) == 1
+        and isinstance(current_cursor_authenticator.body[1], ast.Expr)
+        and current_cursor_authenticator.body[1].value is current_cursor_live_predicate_calls[0]
+        and not current_cursor_live_predicate_calls[0].keywords
+        and ast.unparse(current_cursor_live_predicate_calls[0].args[0])
+        == (
+            "type(self._inventory_cursor_lifecycle_faulted) is bool and (not "
+            "self._inventory_cursor_lifecycle_faulted) and "
+            "(type(self._inventory_cursor_records_by_identity) is dict) and "
+            "(type(self._inventory_cursor_records_by_serial) is dict) and "
+            "(type(self._archived_inventory_cursor_records) is list) and (not "
+            "self._archived_inventory_cursor_records) and "
+            "(type(live_record) is _Generation6RNamespaceInventoryCursorRecord)"
+        )
+        and len(current_cursor_evidence_predicate_calls) == 1
+        and isinstance(current_cursor_authenticator.body[8], ast.Expr)
+        and current_cursor_authenticator.body[8].value is current_cursor_evidence_predicate_calls[0]
+        and not current_cursor_evidence_predicate_calls[0].keywords
+        and ast.unparse(current_cursor_evidence_predicate_calls[0].args[0])
+        == (
+            "exact_record.binding_identity == id(trusted_binding) and "
+            "type(trusted_cursor) is _Generation6RNamespaceInventoryCursor and "
+            "(self._inventory_cursor_records_by_identity.get("
+            "trusted_binding.cursor_identity) is exact_record) and "
+            "(self._inventory_cursor_records_by_serial.get("
+            "trusted_binding.cursor_serial) is exact_record) and "
+            "(exact_record.state is _Generation6RNamespaceInventoryCursorState.CURRENT) "
+            "and (type(current_receipt) is _Generation6RNamespaceReceipt) and "
+            "(current_receipt.issuer_identity == self._issuer_identity) and "
+            "(current_receipt.token_serial == trusted_binding.cursor_serial) and "
+            "(current_receipt.authority_serial == trusted_binding.authority_serial) and "
+            "(current_receipt.event == 'INVENTORY_CURSOR_CURRENT') and "
+            "(exact_record.terminal_receipt is None)"
+        ),
+        "R namespace A2d exact trusted current-record predicates differ",
+    )
+    current_cursor_authenticator_statement_kinds = tuple(
+        type(statement).__name__ for statement in current_cursor_authenticator.body
+    )
+    current_cursor_authenticator_statement_sources = tuple(
+        ast.unparse(statement) for statement in current_cursor_authenticator.body
+    )
+    current_cursor_authenticator_call_target_multiset = tuple(
+        sorted(current_cursor_authenticator_targets)
+    )
+    _require(
+        current_cursor_authenticator_statement_kinds
+        == (
+            "Assign",
+            "Expr",
+            "Assign",
+            "Assign",
+            "Expr",
+            "Assign",
+            "Assign",
+            "Expr",
+            "Expr",
+            "Assign",
+            "Expr",
+            "Expr",
+            "Expr",
+            "Expr",
+            "Expr",
+            "Return",
+        )
+        and current_cursor_authenticator_statement_sources
+        == (
+            "live_record = self._live_inventory_cursor_record",
+            ast.unparse(current_cursor_live_predicate_calls[0]),
+            "exact_record = cast(_Generation6RNamespaceInventoryCursorRecord, live_record)",
+            "trusted_binding = exact_record.binding",
+            (
+                "_require(type(trusted_binding) is "
+                "_Generation6RNamespaceInventoryCursorBinding, 'R namespace current "
+                "inventory cursor trusted binding type differs')"
+            ),
+            "trusted_cursor = trusted_binding.cursor",
+            "current_receipt = exact_record.current_receipt",
+            (
+                "_exact_keys(vars(exact_record), ('binding', 'binding_identity', "
+                "'state', 'current_receipt', 'terminal_receipt'), 'R namespace current "
+                "inventory cursor record')"
+            ),
+            ast.unparse(current_cursor_evidence_predicate_calls[0]),
+            ("authenticated_binding = self._require_inventory_cursor_provenance(trusted_cursor)"),
+            (
+                "_require(authenticated_binding is trusted_binding, 'R namespace "
+                "current inventory cursor authenticated binding differs')"
+            ),
+            (
+                "_require(type(cursor) is _Generation6RNamespaceInventoryCursor, 'R "
+                "namespace current inventory cursor caller type differs')"
+            ),
+            (
+                "_exact_keys(vars(cursor), ('serial', 'issuer_identity'), 'R namespace "
+                "current inventory cursor caller')"
+            ),
+            (
+                "_require(cursor.serial == trusted_binding.cursor_serial and "
+                "cursor.issuer_identity == trusted_binding.cursor_issuer_identity, 'R "
+                "namespace current inventory cursor caller fields differ')"
+            ),
+            (
+                "_require(cursor is trusted_cursor, 'R namespace current inventory "
+                "cursor caller identity differs')"
+            ),
+            "return exact_record",
+        )
+        and current_cursor_authenticator_call_target_multiset
+        == (
+            "_exact_keys",
+            "_exact_keys",
+            "_require",
+            "_require",
+            "_require",
+            "_require",
+            "_require",
+            "_require",
+            "_require",
+            "cast",
+            "id",
+            "self._inventory_cursor_records_by_identity.get",
+            "self._inventory_cursor_records_by_serial.get",
+            "self._require_inventory_cursor_provenance",
+            "type",
+            "type",
+            "type",
+            "type",
+            "type",
+            "type",
+            "type",
+            "type",
+            "type",
+            "vars",
+            "vars",
+        ),
+        "R namespace A2d authenticator closed body and call surface differs",
+    )
+    current_cursor_authenticator_writes = tuple(
+        ast.unparse(node)
+        for node in ast.walk(current_cursor_authenticator)
+        if (
+            isinstance(node, (ast.Attribute, ast.Subscript))
+            and isinstance(node.ctx, (ast.Store, ast.Del))
+        )
+        or isinstance(node, (ast.AugAssign, ast.NamedExpr))
+    )
+    current_cursor_live_read_line = one_line(
+        assignment_lines(
+            current_cursor_authenticator,
+            "live_record",
+            "self._live_inventory_cursor_record",
+        ),
+        "A2d trusted live cursor record",
+    )
+    current_cursor_binding_read_line = one_line(
+        assignment_lines(
+            current_cursor_authenticator,
+            "trusted_binding",
+            "exact_record.binding",
+        ),
+        "A2d trusted cursor binding",
+    )
+    current_cursor_trusted_cursor_line = one_line(
+        assignment_lines(
+            current_cursor_authenticator,
+            "trusted_cursor",
+            "trusted_binding.cursor",
+        ),
+        "A2d trusted cursor identity",
+    )
+    current_cursor_reauthentication_line = one_line(
+        selected_call_lines(
+            current_cursor_authenticator,
+            "self._require_inventory_cursor_provenance",
+        ),
+        "A2d trusted cursor provenance reauthentication",
+    )
+    current_cursor_caller_attribute_lines = tuple(
+        sorted(
+            node.lineno
+            for node in ast.walk(current_cursor_authenticator)
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "cursor"
+        )
+    )
+    current_cursor_identity_guard_lines = tuple(
+        call.lineno
+        for call in calls(current_cursor_authenticator)
+        if ast.unparse(call.func) == "_require" and "cursor is trusted_cursor" in ast.unparse(call)
+    )
+    current_cursor_authenticator_return = current_cursor_authenticator.body[-1]
+    _require(
+        not current_cursor_authenticator_writes
+        and current_cursor_authenticator_targets.count(
+            "self._inventory_cursor_records_by_identity.get"
+        )
+        == 1
+        and current_cursor_authenticator_targets.count(
+            "self._inventory_cursor_records_by_serial.get"
+        )
+        == 1
+        and current_cursor_authenticator_targets.count("self._require_inventory_cursor_provenance")
+        == 1
+        and current_cursor_authenticator_targets.count("_exact_keys") == 2
+        and len(current_cursor_caller_attribute_lines) == 2
+        and len(current_cursor_identity_guard_lines) == 1
+        and current_cursor_live_read_line
+        < current_cursor_live_predicate_calls[0].lineno
+        < current_cursor_binding_read_line
+        < current_cursor_trusted_cursor_line
+        < current_cursor_evidence_predicate_calls[0].lineno
+        < current_cursor_reauthentication_line
+        < min(current_cursor_caller_attribute_lines)
+        < current_cursor_identity_guard_lines[0]
+        and isinstance(current_cursor_authenticator_return, ast.Return)
+        and current_cursor_authenticator_return.value is not None
+        and ast.unparse(current_cursor_authenticator_return.value) == "exact_record"
+        and current_cursor_identity_guard_lines[0] == current_cursor_authenticator.body[-2].lineno,
+        "R namespace A2d trusted-first current cursor authentication differs",
+    )
+
+    current_cursor_terminal_transactions = tuple(
+        node for node in current_cursor_terminalizer.body if isinstance(node, ast.Try)
+    )
+    current_cursor_terminal_record_declarations = tuple(
+        node
+        for node in current_cursor_terminalizer.body
+        if isinstance(node, ast.AnnAssign)
+        and isinstance(node.target, ast.Name)
+        and node.target.id == "record"
+    )
+    _require(
+        len(current_cursor_terminalizer.body) == 2
+        and len(current_cursor_terminal_record_declarations) == 1
+        and current_cursor_terminalizer.body[0] is current_cursor_terminal_record_declarations[0]
+        and ast.unparse(current_cursor_terminal_record_declarations[0].annotation)
+        == "_Generation6RNamespaceInventoryCursorRecord | None"
+        and current_cursor_terminal_record_declarations[0].value is not None
+        and ast.unparse(current_cursor_terminal_record_declarations[0].value) == "None"
+        and len(current_cursor_terminal_transactions) == 1
+        and current_cursor_terminalizer.body[1] is current_cursor_terminal_transactions[0],
+        "R namespace A2d cursor terminal transaction differs",
+    )
+    current_cursor_terminal_transaction = current_cursor_terminal_transactions[0]
+    current_cursor_terminal_state_predicate_calls = tuple(
+        call
+        for call in calls(current_cursor_terminalizer)
+        if ast.unparse(call.func) == "_require"
+        and len(call.args) == 2
+        and isinstance(call.args[1], ast.Constant)
+        and call.args[1].value == "R namespace inventory cursor terminal state differs"
+    )
+    current_cursor_terminal_uncertain_ifs = tuple(
+        node
+        for node in current_cursor_terminal_transaction.body
+        if isinstance(node, ast.If)
+        and ast.unparse(node.test)
+        == "state is _Generation6RNamespaceInventoryCursorState.UNCERTAIN"
+    )
+    current_cursor_terminal_receipt_assignments = tuple(
+        node
+        for node in current_cursor_terminal_transaction.body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "terminal_receipt"
+        and isinstance(node.value, ast.Call)
+        and ast.unparse(node.value.func) == "self._append_receipt"
+    )
+    _require(
+        len(current_cursor_terminal_transaction.body) == 9
+        and len(current_cursor_terminal_state_predicate_calls) == 1
+        and isinstance(current_cursor_terminal_transaction.body[0], ast.Expr)
+        and current_cursor_terminal_transaction.body[0].value
+        is current_cursor_terminal_state_predicate_calls[0]
+        and not current_cursor_terminal_state_predicate_calls[0].keywords
+        and isinstance(current_cursor_terminal_state_predicate_calls[0].args[0], ast.BoolOp)
+        and isinstance(current_cursor_terminal_state_predicate_calls[0].args[0].op, ast.And)
+        and len(current_cursor_terminal_state_predicate_calls[0].args[0].values) == 2,
+        "R namespace A2d terminal state predicate shape differs",
+    )
+    current_cursor_terminal_state_predicate = cast(
+        ast.BoolOp,
+        current_cursor_terminal_state_predicate_calls[0].args[0],
+    )
+    current_cursor_terminal_state_membership = current_cursor_terminal_state_predicate.values[1]
+    _require(
+        ast.unparse(current_cursor_terminal_state_predicate.values[0])
+        == "type(state) is _Generation6RNamespaceInventoryCursorState"
+        and isinstance(current_cursor_terminal_state_membership, ast.Compare)
+        and ast.unparse(current_cursor_terminal_state_membership.left) == "state"
+        and len(current_cursor_terminal_state_membership.ops) == 1
+        and isinstance(current_cursor_terminal_state_membership.ops[0], ast.In)
+        and len(current_cursor_terminal_state_membership.comparators) == 1
+        and isinstance(current_cursor_terminal_state_membership.comparators[0], ast.Set)
+        and tuple(
+            ast.unparse(element)
+            for element in current_cursor_terminal_state_membership.comparators[0].elts
+        )
+        == (
+            "_Generation6RNamespaceInventoryCursorState.RETIRED",
+            "_Generation6RNamespaceInventoryCursorState.UNCERTAIN",
+        )
+        and len(current_cursor_terminal_uncertain_ifs) == 1
+        and current_cursor_terminal_transaction.body[3] is current_cursor_terminal_uncertain_ifs[0]
+        and len(current_cursor_terminal_uncertain_ifs[0].body) == 1
+        and not current_cursor_terminal_uncertain_ifs[0].orelse
+        and assignment_values(
+            current_cursor_terminal_uncertain_ifs[0],
+            "self._inventory_cursor_lifecycle_faulted",
+        )
+        == ((current_cursor_terminal_uncertain_ifs[0].body[0].lineno, "True"),)
+        and len(current_cursor_terminal_receipt_assignments) == 1
+        and current_cursor_terminal_receipt_assignments[0]
+        is current_cursor_terminal_transaction.body[5],
+        "R namespace A2d exact terminal states and UNCERTAIN transition differ",
+    )
+    current_cursor_terminal_receipt_call = cast(
+        ast.Call,
+        current_cursor_terminal_receipt_assignments[0].value,
+    )
+    current_cursor_terminal_event_keywords = tuple(
+        keyword
+        for keyword in current_cursor_terminal_receipt_call.keywords
+        if keyword.arg == "event"
+    )
+    current_cursor_terminal_archive_calls = tuple(
+        call
+        for call in calls(current_cursor_terminal_transaction.body[7])
+        if ast.unparse(call.func) == "self._archived_inventory_cursor_records.append"
+    )
+    _require(
+        not current_cursor_terminal_receipt_call.args
+        and tuple(
+            (keyword.arg, ast.unparse(keyword.value))
+            for keyword in current_cursor_terminal_receipt_call.keywords
+        )
+        == (
+            ("token_serial", "trusted_binding.cursor_serial"),
+            ("authority_serial", "trusted_binding.authority_serial"),
+            (
+                "event",
+                "'INVENTORY_CURSOR_RETIRED' if state is "
+                "_Generation6RNamespaceInventoryCursorState.RETIRED else "
+                "'INVENTORY_CURSOR_UNCERTAIN'",
+            ),
+        )
+        and len(current_cursor_terminal_event_keywords) == 1
+        and isinstance(current_cursor_terminal_event_keywords[0].value, ast.IfExp)
+        and ast.unparse(current_cursor_terminal_event_keywords[0].value.test)
+        == "state is _Generation6RNamespaceInventoryCursorState.RETIRED"
+        and isinstance(current_cursor_terminal_event_keywords[0].value.body, ast.Constant)
+        and current_cursor_terminal_event_keywords[0].value.body.value == "INVENTORY_CURSOR_RETIRED"
+        and isinstance(current_cursor_terminal_event_keywords[0].value.orelse, ast.Constant)
+        and current_cursor_terminal_event_keywords[0].value.orelse.value
+        == "INVENTORY_CURSOR_UNCERTAIN"
+        and len(current_cursor_terminal_archive_calls) == 1
+        and tuple(
+            ast.unparse(argument) for argument in current_cursor_terminal_archive_calls[0].args
+        )
+        == ("record",)
+        and not current_cursor_terminal_archive_calls[0].keywords
+        and ast.unparse(current_cursor_terminal_transaction.body[1])
+        == "record = self._require_current_inventory_cursor(cursor)"
+        and ast.unparse(current_cursor_terminal_transaction.body[2])
+        == "trusted_binding = record.binding"
+        and ast.unparse(current_cursor_terminal_transaction.body[4]) == "record.state = state"
+        and ast.unparse(current_cursor_terminal_transaction.body[6])
+        == "record.terminal_receipt = terminal_receipt"
+        and ast.unparse(current_cursor_terminal_transaction.body[8])
+        == "self._live_inventory_cursor_record = None",
+        "R namespace A2d exact terminal receipt and event mapping differs",
+    )
+    current_cursor_terminal_handlers = tuple(
+        handler
+        for handler in current_cursor_terminal_transaction.handlers
+        if handler.type is not None and ast.unparse(handler.type) == "BaseException"
+    )
+    current_cursor_terminal_failure_ifs = tuple(
+        node
+        for handler in current_cursor_terminal_handlers
+        for node in handler.body
+        if isinstance(node, ast.If)
+    )
+    _require(
+        len(current_cursor_terminal_transaction.handlers)
+        == len(current_cursor_terminal_handlers)
+        == 1
+        and not current_cursor_terminal_transaction.orelse
+        and not current_cursor_terminal_transaction.finalbody
+        and len(current_cursor_terminal_handlers[0].body) == 3
+        and current_cursor_terminal_handlers[0].name is None
+        and isinstance(current_cursor_terminal_handlers[0].body[0], ast.Assign)
+        and assignment_values(
+            current_cursor_terminal_handlers[0],
+            "self._inventory_cursor_lifecycle_faulted",
+        )
+        == ((current_cursor_terminal_handlers[0].body[0].lineno, "True"),)
+        and len(current_cursor_terminal_failure_ifs) == 1
+        and current_cursor_terminal_handlers[0].body[1] is current_cursor_terminal_failure_ifs[0]
+        and ast.unparse(current_cursor_terminal_failure_ifs[0].test)
+        == "type(record) is _Generation6RNamespaceInventoryCursorRecord"
+        and len(current_cursor_terminal_failure_ifs[0].body) == 1
+        and not current_cursor_terminal_failure_ifs[0].orelse
+        and isinstance(current_cursor_terminal_failure_ifs[0].body[0], ast.Assign)
+        and assignment_values(current_cursor_terminal_handlers[0], "record.state")
+        == (
+            (
+                current_cursor_terminal_failure_ifs[0].body[0].lineno,
+                "_Generation6RNamespaceInventoryCursorState.UNCERTAIN",
+            ),
+        )
+        and assignment_values(
+            current_cursor_terminal_handlers[0],
+            "self._live_inventory_cursor_record",
+        )
+        == ()
+        and call_targets(current_cursor_terminal_handlers[0]).count(
+            "self._archived_inventory_cursor_records.append"
+        )
+        == 0
+        and isinstance(current_cursor_terminal_handlers[0].body[-1], ast.Raise)
+        and current_cursor_terminal_handlers[0].body[-1].exc is None,
+        "R namespace A2d cursor terminal ambiguity path differs",
+    )
+    current_cursor_terminal_state_guard_lines = tuple(
+        call.lineno
+        for call in calls(current_cursor_terminalizer)
+        if ast.unparse(call.func) == "_require"
+        and "type(state) is _Generation6RNamespaceInventoryCursorState" in ast.unparse(call)
+    )
+    current_cursor_terminal_auth_line = one_line(
+        selected_call_lines(
+            current_cursor_terminalizer,
+            "self._require_current_inventory_cursor",
+        ),
+        "A2d terminal current cursor authentication",
+    )
+    current_cursor_terminal_fault_lines = assignment_lines(
+        current_cursor_terminalizer,
+        "self._inventory_cursor_lifecycle_faulted",
+        "True",
+    )
+    current_cursor_terminal_state_line = one_line(
+        assignment_lines(current_cursor_terminalizer, "record.state", "state"),
+        "A2d cursor terminal state",
+    )
+    current_cursor_terminal_receipt_line = one_line(
+        selected_call_lines(current_cursor_terminalizer, "self._append_receipt"),
+        "A2d cursor terminal receipt",
+    )
+    current_cursor_terminal_receipt_store_line = one_line(
+        assignment_lines(
+            current_cursor_terminalizer,
+            "record.terminal_receipt",
+            "terminal_receipt",
+        ),
+        "A2d cursor terminal receipt binding",
+    )
+    current_cursor_terminal_archive_line = one_line(
+        selected_call_lines(
+            current_cursor_terminalizer,
+            "self._archived_inventory_cursor_records.append",
+        ),
+        "A2d cursor terminal archive",
+    )
+    current_cursor_terminal_clear_line = one_line(
+        assignment_lines(
+            current_cursor_terminalizer,
+            "self._live_inventory_cursor_record",
+            "None",
+        ),
+        "A2d cursor terminal live clear",
+    )
+    _require(
+        len(current_cursor_terminal_state_guard_lines) == 1
+        and len(current_cursor_terminal_fault_lines) == 2
+        and current_cursor_terminalizer_targets.count("self._require_current_inventory_cursor") == 1
+        and current_cursor_terminalizer_targets.count("self._append_receipt") == 1
+        and current_cursor_terminalizer_targets.count(
+            "self._archived_inventory_cursor_records.append"
+        )
+        == 1
+        and current_cursor_terminal_state_guard_lines[0]
+        == current_cursor_terminal_state_predicate_calls[0].lineno
+        < current_cursor_terminal_auth_line
+        < current_cursor_terminal_fault_lines[0]
+        < current_cursor_terminal_state_line
+        < current_cursor_terminal_receipt_line
+        < current_cursor_terminal_receipt_store_line
+        < current_cursor_terminal_archive_line
+        < current_cursor_terminal_clear_line
+        < current_cursor_terminal_fault_lines[1]
+        and current_cursor_terminal_state_guard_lines[0]
+        == current_cursor_terminal_transaction.body[0].lineno
+        and current_cursor_terminal_auth_line == current_cursor_terminal_transaction.body[1].lineno
+        and current_cursor_terminal_uncertain_ifs[0] is current_cursor_terminal_transaction.body[3]
+        and current_cursor_terminal_state_line == current_cursor_terminal_transaction.body[4].lineno
+        and current_cursor_terminal_receipt_line
+        == current_cursor_terminal_transaction.body[5].lineno
+        and current_cursor_terminal_receipt_store_line
+        == current_cursor_terminal_transaction.body[6].lineno
+        and current_cursor_terminal_archive_line
+        == current_cursor_terminal_transaction.body[7].lineno
+        and current_cursor_terminal_clear_line
+        == current_cursor_terminal_transaction.body[-1].lineno,
+        "R namespace A2d irreversible cursor terminal ordering differs",
+    )
+
+    inventory_cursor_lifecycle_sources = "\n".join(
+        ast.unparse(method)
+        for method in (
+            current_cursor_issuer,
+            current_cursor_authenticator,
+            current_cursor_terminalizer,
+        )
+    )
+    inventory_cursor_lifecycle_targets = (
+        set(current_cursor_issuer_targets)
+        | set(current_cursor_authenticator_targets)
+        | set(current_cursor_terminalizer_targets)
+    )
+    inventory_cursor_lifecycle_forbidden_targets = {
+        "self._begin_publication",
+        "self._charge_cleanup_budget",
+        "self._finish_publication",
+        "self._read_cleanup_budget_clock",
+        "self._reauthenticate_directory",
+        "self._terminalize_cleanup_budget",
+        "self._namespace_mount_id",
+        "_GENERATION6_R_NAMESPACE_CAPTURED_COMPONENT",
+        "_GENERATION6_R_NAMESPACE_CAPTURED_MOUNT_ID",
+        "_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD",
+        "_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT",
+        "_GENERATION6_R_NAMESPACE_REAL_FCNTL",
+        "_GENERATION6_R_NAMESPACE_REAL_MONOTONIC_NS",
+        "_GENERATION6_R_NAMESPACE_REAL_OS_FSTAT",
+        "_GENERATION6_R_NAMESPACE_REAL_OS_OPEN",
+        "_GENERATION6_R_NAMESPACE_REAL_OS_STAT",
+        "_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK",
+        "os.fsencode",
+        "os.rmdir",
+        "os.scandir",
+    }
+    inventory_cursor_lifecycle_loops = tuple(
+        node
+        for method in (
+            current_cursor_issuer,
+            current_cursor_authenticator,
+            current_cursor_terminalizer,
+        )
+        for node in ast.walk(method)
+        if isinstance(
+            node,
+            (
+                ast.AsyncFor,
+                ast.AsyncWith,
+                ast.DictComp,
+                ast.For,
+                ast.GeneratorExp,
+                ast.ListComp,
+                ast.SetComp,
+                ast.While,
+                ast.With,
+            ),
+        )
+    )
+    _require(
+        not inventory_cursor_lifecycle_forbidden_targets.intersection(
+            inventory_cursor_lifecycle_targets
+        )
+        and not inventory_cursor_lifecycle_loops
+        and "_Generation6RNamespaceEmptyInventory" not in inventory_cursor_lifecycle_sources
+        and "consume_rmdir" not in inventory_cursor_lifecycle_sources
+        and "scandir" not in inventory_cursor_lifecycle_sources.lower()
+        and "iterator" not in inventory_cursor_lifecycle_sources.lower()
+        and "weakref" not in inventory_cursor_lifecycle_sources.lower()
+        and "self._phase" not in inventory_cursor_lifecycle_sources
+        and "self._pending_publication" not in inventory_cursor_lifecycle_sources
+        and "self._live_capability_record" not in inventory_cursor_lifecycle_sources
+        and "self._live_mutation_permit_record" not in inventory_cursor_lifecycle_sources
+        and inventory_cursor_lifecycle_sources.count("INVENTORY_CURSOR_CURRENT") == 2
+        and inventory_cursor_lifecycle_sources.count("INVENTORY_CURSOR_RETIRED") == 1
+        and inventory_cursor_lifecycle_sources.count("INVENTORY_CURSOR_UNCERTAIN") == 1,
+        "R namespace A2d inert lifecycle boundary differs",
     )
     permit_constructor_names = {
         "_Generation6RNamespaceMutationPermit",
@@ -22470,7 +23783,8 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     a2_budget_foundation_present = True
     a2_inventory_vocabulary_present = True
     a2_inventory_cursor_provenance_present = True
-    a2_current_inventory_cursor = False
+    a2_inventory_cursor_lifecycle_present = True
+    a2_current_inventory_cursor = True
     a2_budget_readiness = False
     a2_budget_prerequisites = (
         "scan-attempt-metering",
@@ -22485,10 +23799,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "unlink-attempt-metering",
     )
     a2_rmdir_readiness = False
-    a2_rmdir_prerequisites = (
-        "authenticated-empty-inventory",
-        "current-inventory-cursor",
-    )
+    a2_rmdir_prerequisites = ("authenticated-empty-inventory",)
     _require(
         type(a2_budget_foundation_present) is bool
         and a2_budget_foundation_present
@@ -22496,8 +23807,10 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         and a2_inventory_vocabulary_present
         and type(a2_inventory_cursor_provenance_present) is bool
         and a2_inventory_cursor_provenance_present
+        and type(a2_inventory_cursor_lifecycle_present) is bool
+        and a2_inventory_cursor_lifecycle_present
         and type(a2_current_inventory_cursor) is bool
-        and not a2_current_inventory_cursor
+        and a2_current_inventory_cursor
         and type(a2_budget_readiness) is bool
         and not a2_budget_readiness
         and a2_budget_prerequisites
@@ -22515,11 +23828,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         )
         and type(a2_rmdir_readiness) is bool
         and not a2_rmdir_readiness
-        and a2_rmdir_prerequisites
-        == (
-            "authenticated-empty-inventory",
-            "current-inventory-cursor",
-        )
+        and a2_rmdir_prerequisites == ("authenticated-empty-inventory",)
         and all(
             name in namespace_classes
             for name in (
@@ -22542,11 +23851,15 @@ def _generation6_r_authority_source_gates(source: str) -> None:
                 "_issue_cleanup_budget_epoch",
                 "_charge_cleanup_budget",
                 "_Generation6RNamespaceInventoryCursorBinding",
+                "_Generation6RNamespaceInventoryCursorRecord",
                 "_issue_inventory_cursor_provenance",
                 "_require_inventory_cursor_provenance",
+                "_issue_current_inventory_cursor",
+                "_require_current_inventory_cursor",
+                "_terminalize_inventory_cursor",
             )
         ),
-        "R namespace A2c budget/RMDIR readiness must remain statically false",
+        "R namespace A2d budget/RMDIR readiness and current capability differ",
     )
 
     permanent_collection_names = {
@@ -22566,6 +23879,9 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         "self._cleanup_budget_records_by_identity",
         "self._inventory_cursor_bindings_by_identity",
         "self._inventory_cursor_bindings_by_serial",
+        "self._inventory_cursor_records_by_identity",
+        "self._inventory_cursor_records_by_serial",
+        "self._archived_inventory_cursor_records",
         "self._namespace_owner_tokens",
         "self._namespace_owner_contexts",
         "self._receipts",
@@ -22768,30 +24084,30 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     )
     _require(
         type(namespace_gate_function.end_lineno) is int,
-        "R namespace A2c gate end differs",
+        "R namespace A2d gate end differs",
     )
     gate_start = namespace_gate_function.lineno
     gate_end = cast(int, namespace_gate_function.end_lineno)
-    expected_gate_digest = "f1f5f42a25724eca1353b0246f2b16b76a7b6f4635c575f440393dc1c5c6b7d5"
+    expected_gate_digest = "5b7bb88a39a9b47234cefbefae1d25a4e77ead96aaba6e19ea65e5a5f16a213a"
     normalized_gate_source = "\n".join(source.splitlines()[gate_start - 1 : gate_end]) + "\n"
     _require(
         normalized_gate_source.count(expected_gate_digest) == 1,
-        "R namespace A2c gate digest token differs",
+        "R namespace A2d gate digest token differs",
     )
     normalized_gate_source = normalized_gate_source.replace(
         expected_gate_digest,
         "0" * 64,
     )
-    gate_domain = b"TASK-064\0GEN6\0R-A2c\0gate-v1\0"
+    gate_domain = b"TASK-064\0GEN6\0R-A2d\0gate-v1\0"
     gate_preimage = gate_domain + normalized_gate_source.encode("utf-8")
     gate_digest = hashlib.sha256(gate_preimage).hexdigest()
     namespace_gate_index = syntax.body.index(namespace_gate_function)
     _require(
-        gate_start == 16472
+        gate_start == 16668
         and syntax.body[namespace_gate_index + 1] is top_function("_selftest_r_case")
-        and len(gate_preimage) == 269_655
+        and len(gate_preimage) == 321_233
         and gate_digest == expected_gate_digest,
-        "R namespace A2c reviewed gate digest differs",
+        "R namespace A2d reviewed gate digest differs",
     )
 
 
