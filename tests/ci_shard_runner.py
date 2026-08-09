@@ -12515,6 +12515,7 @@ class _Generation6RAuthorityScope:
 # R-AUTH-NAMESPACE A2d adds only an inert single-current inventory-cursor lifecycle.
 # R-AUTH-NAMESPACE A2e adds only inert precharged scan acquisition and ownership.
 # R-AUTH-NAMESPACE A2f adds only one sealed, metered inventory advance and opaque item.
+# R-AUTH-NAMESPACE A2g adds only one inert, metered inventory-item classification.
 _GENERATION6_R_NAMESPACE_REAL_OS_STAT: Final = os.stat
 _GENERATION6_R_NAMESPACE_REAL_OS_OPEN: Final = os.open
 _GENERATION6_R_NAMESPACE_REAL_OS_FSTAT: Final = os.fstat
@@ -12620,6 +12621,7 @@ class _Generation6RNamespaceOwnerPurpose(str, Enum):  # noqa: UP042 - exact cont
     SEALED_ENTRY = "SEALED_ENTRY"
     PRESENT_TOKEN = "PRESENT_TOKEN"
     RENAME_TOKEN = "RENAME_TOKEN"
+    INVENTORY_CLASSIFICATION_ENTRY = "INVENTORY_CLASSIFICATION_ENTRY"
 
 
 class _Generation6RNamespaceContextState(str, Enum):  # noqa: UP042 - exact contract
@@ -12640,6 +12642,8 @@ class _Generation6RNamespaceCloseEvent(str, Enum):  # noqa: UP042 - exact contra
     PRESENT_TOKEN_ABORT_CLOSED = "PRESENT_TOKEN_ABORT_CLOSED"
     RENAME_TOKEN_ABORT_CLOSED = "RENAME_TOKEN_ABORT_CLOSED"
     MUTATION_TOKEN_HANDLE_CLOSED = "MUTATION_TOKEN_HANDLE_CLOSED"
+    INVENTORY_CLASSIFICATION_HANDLE_CLOSED = "INVENTORY_CLASSIFICATION_HANDLE_CLOSED"
+    INVENTORY_CLASSIFICATION_ABORT_CLOSED = "INVENTORY_CLASSIFICATION_ABORT_CLOSED"
 
 
 class _Generation6RNamespaceMutationPermitState(  # noqa: UP042 - exact contract
@@ -12711,6 +12715,17 @@ class _Generation6RNamespaceInventoryItemState(  # noqa: UP042 - exact contract
 ):
     LIVE_UNCLASSIFIED = "LIVE_UNCLASSIFIED"
     ABANDONED_UNCLASSIFIED = "ABANDONED_UNCLASSIFIED"
+    UNCERTAIN = "UNCERTAIN"
+    CLASSIFIED_REMOVABLE_CANDIDATE = "CLASSIFIED_REMOVABLE_CANDIDATE"
+    CLASSIFIED_KNOWN_RESIDUE = "CLASSIFIED_KNOWN_RESIDUE"
+
+
+class _Generation6RNamespaceInventoryClassificationState(  # noqa: UP042 - exact contract
+    str, Enum
+):
+    ATTEMPTING = "ATTEMPTING"
+    CLASSIFIED_REMOVABLE_CANDIDATE = "CLASSIFIED_REMOVABLE_CANDIDATE"
+    CLASSIFIED_KNOWN_RESIDUE = "CLASSIFIED_KNOWN_RESIDUE"
     UNCERTAIN = "UNCERTAIN"
 
 
@@ -12953,6 +12968,12 @@ class _Generation6RNamespaceInventoryItem:
 
 
 @dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceInventoryClassification:
+    serial: int
+    issuer_identity: int
+
+
+@dataclass(frozen=True, eq=False)
 class _Generation6RNamespaceEmptyInventory:
     serial: int
     issuer_identity: int
@@ -13126,8 +13147,91 @@ class _Generation6RNamespaceInventoryItemRecord:
     terminal_receipt: _Generation6RNamespaceReceipt | None
 
 
+@dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceInventoryClassificationBinding:
+    serial: int
+    issuer_identity: int
+    classification: _Generation6RNamespaceInventoryClassification
+    classification_identity: int
+    classification_serial: int
+    classification_issuer_identity: int
+    item_record: _Generation6RNamespaceInventoryItemRecord
+    item_record_identity: int
+    item_binding: _Generation6RNamespaceInventoryItemBinding
+    item_binding_identity: int
+    item: _Generation6RNamespaceInventoryItem
+    item_identity: int
+    advance_record: _Generation6RNamespaceInventoryAdvanceRecord
+    advance_record_identity: int
+    advance_binding: _Generation6RNamespaceInventoryAdvanceBinding
+    advance_binding_identity: int
+    scan_record: _Generation6RNamespaceInventoryScanRecord
+    scan_record_identity: int
+    scan_binding: _Generation6RNamespaceInventoryScanBinding
+    scan_binding_identity: int
+    cursor_record: _Generation6RNamespaceInventoryCursorRecord
+    cursor_record_identity: int
+    cursor_binding: _Generation6RNamespaceInventoryCursorBinding
+    cursor_binding_identity: int
+    authority: _Generation6RNamespaceDirectoryAuthority
+    authority_identity: int
+    authority_record: _Generation6RNamespaceDirectoryRecord
+    authority_record_identity: int
+    authority_binding: _Generation6RNamespaceDirectoryBinding
+    authority_binding_identity: int
+    raw_entry: os.DirEntry[str]
+    raw_entry_identity: int
+    component: str
+    encoded_name_bytes: int
+    parent_descriptor: int
+    item_depth: int
+    cleanup_epoch: _Generation6RNamespaceCleanupBudgetEpoch
+    cleanup_epoch_identity: int
+    cleanup_budget_record: _Generation6RNamespaceCleanupBudgetRecord
+    cleanup_budget_record_identity: int
+    operation_count_before: int
+    entry_count_before: int
+    encoded_name_bytes_before: int
+    depth_high_water_before: int
+
+
+@dataclass(eq=False)
+class _Generation6RNamespaceInventoryClassificationRecord:
+    binding: _Generation6RNamespaceInventoryClassificationBinding
+    binding_identity: int
+    state: _Generation6RNamespaceInventoryClassificationState
+    stat_attempts: int
+    open_attempts: int
+    named_snapshot: DescriptorSnapshot | None
+    entry_owner: FdOwner | None
+    descriptor_token: _Generation6ROwnerToken | None
+    owner_context: _Generation6RNamespaceOwnerContext | None
+    owner_state: _Generation6RNamespaceOwnerState | None
+    opened_snapshot: DescriptorSnapshot | None
+    entry_mount_id: int | None
+    parent_snapshot: DescriptorSnapshot | None
+    parent_mount_id: int | None
+    current_uid: int | None
+    descriptor_flags: int | None
+    status_flags: int | None
+    operation_count_after_stat: int | None
+    operation_count_after_open: int | None
+    entry_count_after: int | None
+    encoded_name_bytes_after: int | None
+    depth_high_water_after: int | None
+    node_kind: _Generation6RNamespaceNodeKind | None
+    hardlink_group: str | None
+    fact: _Generation6RNamespaceNameFact | None
+    attempt_receipt: _Generation6RNamespaceReceipt | None
+    stat_receipt: _Generation6RNamespaceReceipt | None
+    open_receipt: _Generation6RNamespaceReceipt | None
+    close_receipt: _Generation6RNamespaceReceipt | None
+    outcome_receipt: _Generation6RNamespaceReceipt | None
+    terminal_receipt: _Generation6RNamespaceReceipt | None
+
+
 class _Generation6RNamespaceJournal:
-    """Strong, private A1/A2e journal with no activation or runtime call surface."""
+    """Strong, private A1/A2g journal with no activation or runtime call surface."""
 
     def __init__(
         self,
@@ -13234,6 +13338,23 @@ class _Generation6RNamespaceJournal:
         self._archived_inventory_item_records: list[_Generation6RNamespaceInventoryItemRecord] = []
         self._inventory_raw_entry_quarantine: list[object] = []
         self._inventory_advance_item_lifecycle_faulted = False
+        self._inventory_classification_records_by_identity: dict[
+            int, _Generation6RNamespaceInventoryClassificationRecord
+        ] = {}
+        self._inventory_classification_records_by_serial: dict[
+            int, _Generation6RNamespaceInventoryClassificationRecord
+        ] = {}
+        self._live_inventory_classification_record: (
+            _Generation6RNamespaceInventoryClassificationRecord | None
+        ) = None
+        self._archived_inventory_classification_records: list[
+            _Generation6RNamespaceInventoryClassificationRecord
+        ] = []
+        self._inventory_classification_residue_evidence: list[
+            _Generation6RNamespaceInventoryClassificationRecord
+        ] = []
+        self._inventory_classification_descriptor_quarantine: list[FdOwner] = []
+        self._inventory_classification_faulted = False
         self._pending_publication: object | None = None
         self._poisoned_descriptors: set[int] = set()
         self._namespace_owner_tokens: dict[int, _Generation6ROwnerToken] = {}
@@ -15577,6 +15698,922 @@ class _Generation6RNamespaceJournal:
             raise ContractError("R namespace inventory end observed")
         raise ContractError("R namespace inventory advance result differs")
 
+    def _require_pristine_inventory_classification(
+        self,
+        item: _Generation6RNamespaceInventoryItem,
+    ) -> _Generation6RNamespaceInventoryItemRecord:
+        self._require_building()
+        item_record = self._require_current_inventory_item(item)
+        item_binding = item_record.binding
+        advance_record = item_binding.advance_record
+        advance_binding = item_binding.advance_binding
+        scan_record = item_binding.scan_record
+        scan_binding = item_binding.scan_binding
+        cursor_record = scan_binding.cursor_record
+        cursor_binding = scan_binding.cursor_binding
+        authority_record = cursor_binding.authority_record
+        cleanup_budget_record = item_binding.cleanup_budget_record
+        _require(
+            type(self._inventory_classification_records_by_identity) is dict
+            and not self._inventory_classification_records_by_identity
+            and type(self._inventory_classification_records_by_serial) is dict
+            and not self._inventory_classification_records_by_serial
+            and self._live_inventory_classification_record is None
+            and type(self._archived_inventory_classification_records) is list
+            and not self._archived_inventory_classification_records
+            and type(self._inventory_classification_residue_evidence) is list
+            and not self._inventory_classification_residue_evidence
+            and type(self._inventory_classification_descriptor_quarantine) is list
+            and not self._inventory_classification_descriptor_quarantine
+            and type(self._inventory_classification_faulted) is bool
+            and not self._inventory_classification_faulted
+            and item_record.state is _Generation6RNamespaceInventoryItemState.LIVE_UNCLASSIFIED
+            and item_record.terminal_receipt is None
+            and type(advance_record) is _Generation6RNamespaceInventoryAdvanceRecord
+            and advance_record.binding is advance_binding
+            and advance_record.item_record is item_record
+            and advance_record.state is _Generation6RNamespaceInventoryAdvanceState.ENTRY_RETURNED
+            and type(scan_record) is _Generation6RNamespaceInventoryScanRecord
+            and scan_record.binding is scan_binding
+            and scan_record.state is _Generation6RNamespaceInventoryScanState.LIVE
+            and self._live_inventory_scan_record is scan_record
+            and type(cursor_record) is _Generation6RNamespaceInventoryCursorRecord
+            and cursor_record.binding is cursor_binding
+            and cursor_record.state is _Generation6RNamespaceInventoryCursorState.CURRENT
+            and self._live_inventory_cursor_record is cursor_record
+            and type(authority_record) is _Generation6RNamespaceDirectoryRecord
+            and authority_record.binding is cursor_binding.authority_binding
+            and authority_record.state is _Generation6RNamespaceOwnerState.LIVE
+            and cursor_binding.authority is authority_record.binding.authority
+            and type(cleanup_budget_record) is _Generation6RNamespaceCleanupBudgetRecord
+            and cleanup_budget_record is self._live_cleanup_budget_record
+            and cleanup_budget_record.epoch is item_binding.cleanup_epoch
+            and cleanup_budget_record.state is _Generation6RNamespaceCleanupBudgetState.ACTIVE,
+            "R namespace pristine inventory classification differs",
+        )
+        return item_record
+
+    def _require_current_inventory_classification(
+        self,
+        classification: _Generation6RNamespaceInventoryClassification,
+    ) -> _Generation6RNamespaceInventoryClassificationRecord:
+        live_record = self._live_inventory_classification_record
+        _require(
+            type(self._inventory_classification_faulted) is bool
+            and not self._inventory_classification_faulted
+            and type(live_record) is _Generation6RNamespaceInventoryClassificationRecord,
+            "R namespace current inventory classification live slot differs",
+        )
+        if type(live_record) is not _Generation6RNamespaceInventoryClassificationRecord:
+            raise ContractError("R namespace current inventory classification live slot differs")
+        record = live_record
+        binding = record.binding
+        _require(
+            type(binding) is _Generation6RNamespaceInventoryClassificationBinding,
+            "R namespace current inventory classification binding type differs",
+        )
+        _exact_keys(
+            vars(record),
+            (
+                "binding",
+                "binding_identity",
+                "state",
+                "stat_attempts",
+                "open_attempts",
+                "named_snapshot",
+                "entry_owner",
+                "descriptor_token",
+                "owner_context",
+                "owner_state",
+                "opened_snapshot",
+                "entry_mount_id",
+                "parent_snapshot",
+                "parent_mount_id",
+                "current_uid",
+                "descriptor_flags",
+                "status_flags",
+                "operation_count_after_stat",
+                "operation_count_after_open",
+                "entry_count_after",
+                "encoded_name_bytes_after",
+                "depth_high_water_after",
+                "node_kind",
+                "hardlink_group",
+                "fact",
+                "attempt_receipt",
+                "stat_receipt",
+                "open_receipt",
+                "close_receipt",
+                "outcome_receipt",
+                "terminal_receipt",
+            ),
+            "R namespace current inventory classification record",
+        )
+        _exact_keys(
+            vars(binding),
+            (
+                "serial",
+                "issuer_identity",
+                "classification",
+                "classification_identity",
+                "classification_serial",
+                "classification_issuer_identity",
+                "item_record",
+                "item_record_identity",
+                "item_binding",
+                "item_binding_identity",
+                "item",
+                "item_identity",
+                "advance_record",
+                "advance_record_identity",
+                "advance_binding",
+                "advance_binding_identity",
+                "scan_record",
+                "scan_record_identity",
+                "scan_binding",
+                "scan_binding_identity",
+                "cursor_record",
+                "cursor_record_identity",
+                "cursor_binding",
+                "cursor_binding_identity",
+                "authority",
+                "authority_identity",
+                "authority_record",
+                "authority_record_identity",
+                "authority_binding",
+                "authority_binding_identity",
+                "raw_entry",
+                "raw_entry_identity",
+                "component",
+                "encoded_name_bytes",
+                "parent_descriptor",
+                "item_depth",
+                "cleanup_epoch",
+                "cleanup_epoch_identity",
+                "cleanup_budget_record",
+                "cleanup_budget_record_identity",
+                "operation_count_before",
+                "entry_count_before",
+                "encoded_name_bytes_before",
+                "depth_high_water_before",
+            ),
+            "R namespace current inventory classification binding",
+        )
+        item_record = binding.item_record
+        item_binding = binding.item_binding
+        advance_record = binding.advance_record
+        advance_binding = binding.advance_binding
+        scan_record = binding.scan_record
+        scan_binding = binding.scan_binding
+        cursor_record = binding.cursor_record
+        cursor_binding = binding.cursor_binding
+        authority_record = binding.authority_record
+        authority_binding = binding.authority_binding
+        budget_record = binding.cleanup_budget_record
+        attempt_receipt = record.attempt_receipt
+        _require(
+            record.binding_identity == id(binding)
+            and record.state is _Generation6RNamespaceInventoryClassificationState.ATTEMPTING
+            and record.stat_attempts == 0
+            and record.open_attempts == 0
+            and record.named_snapshot is None
+            and record.entry_owner is None
+            and record.descriptor_token is None
+            and record.owner_context is None
+            and record.owner_state is None
+            and record.opened_snapshot is None
+            and record.entry_mount_id is None
+            and record.parent_snapshot is None
+            and record.parent_mount_id is None
+            and record.current_uid is None
+            and record.descriptor_flags is None
+            and record.status_flags is None
+            and record.operation_count_after_stat is None
+            and record.operation_count_after_open is None
+            and record.entry_count_after is None
+            and record.encoded_name_bytes_after is None
+            and record.depth_high_water_after is None
+            and record.node_kind is None
+            and record.hardlink_group is None
+            and record.fact is None
+            and record.stat_receipt is None
+            and record.open_receipt is None
+            and record.close_receipt is None
+            and record.outcome_receipt is None
+            and record.terminal_receipt is None
+            and type(classification) is _Generation6RNamespaceInventoryClassification
+            and binding.classification is classification
+            and binding.classification_identity == id(classification)
+            and binding.classification_serial == classification.serial
+            and binding.classification_issuer_identity == classification.issuer_identity
+            and classification.issuer_identity == self._issuer_identity
+            and binding.issuer_identity == self._issuer_identity
+            and type(binding.serial) is int
+            and binding.serial > 0
+            and self._inventory_classification_records_by_identity.get(
+                binding.classification_identity
+            )
+            is record
+            and self._inventory_classification_records_by_serial.get(binding.classification_serial)
+            is record
+            and type(item_record) is _Generation6RNamespaceInventoryItemRecord
+            and binding.item_record_identity == id(item_record)
+            and item_record is self._live_inventory_item_record
+            and item_record.binding is item_binding
+            and item_record.state is _Generation6RNamespaceInventoryItemState.LIVE_UNCLASSIFIED
+            and item_record.terminal_receipt is None
+            and type(item_binding) is _Generation6RNamespaceInventoryItemBinding
+            and binding.item_binding_identity == id(item_binding)
+            and binding.item is item_binding.item
+            and binding.item_identity == id(binding.item)
+            and type(advance_record) is _Generation6RNamespaceInventoryAdvanceRecord
+            and binding.advance_record_identity == id(advance_record)
+            and advance_record.binding is advance_binding
+            and advance_record.item_record is item_record
+            and advance_record.state is _Generation6RNamespaceInventoryAdvanceState.ENTRY_RETURNED
+            and type(advance_binding) is _Generation6RNamespaceInventoryAdvanceBinding
+            and binding.advance_binding_identity == id(advance_binding)
+            and type(scan_record) is _Generation6RNamespaceInventoryScanRecord
+            and binding.scan_record_identity == id(scan_record)
+            and scan_record.binding is scan_binding
+            and scan_record.state is _Generation6RNamespaceInventoryScanState.LIVE
+            and self._live_inventory_scan_record is scan_record
+            and type(scan_binding) is _Generation6RNamespaceInventoryScanBinding
+            and binding.scan_binding_identity == id(scan_binding)
+            and type(cursor_record) is _Generation6RNamespaceInventoryCursorRecord
+            and binding.cursor_record_identity == id(cursor_record)
+            and cursor_record.binding is cursor_binding
+            and cursor_record.state is _Generation6RNamespaceInventoryCursorState.CURRENT
+            and self._live_inventory_cursor_record is cursor_record
+            and type(cursor_binding) is _Generation6RNamespaceInventoryCursorBinding
+            and binding.cursor_binding_identity == id(cursor_binding)
+            and binding.authority is cursor_binding.authority
+            and binding.authority_identity == id(binding.authority)
+            and type(authority_record) is _Generation6RNamespaceDirectoryRecord
+            and binding.authority_record_identity == id(authority_record)
+            and authority_record.binding is authority_binding
+            and authority_record.state is _Generation6RNamespaceOwnerState.LIVE
+            and type(authority_binding) is _Generation6RNamespaceDirectoryBinding
+            and binding.authority_binding_identity == id(authority_binding)
+            and authority_binding.authority is binding.authority
+            and binding.raw_entry is item_binding.raw_entry
+            and binding.raw_entry_identity == item_binding.raw_entry_identity
+            and binding.component == item_binding.component
+            and binding.encoded_name_bytes == item_binding.encoded_name_bytes
+            and binding.parent_descriptor == scan_binding.descriptor
+            and binding.item_depth == advance_binding.next_depth
+            and binding.cleanup_epoch is item_binding.cleanup_epoch
+            and binding.cleanup_epoch_identity == id(binding.cleanup_epoch)
+            and type(budget_record) is _Generation6RNamespaceCleanupBudgetRecord
+            and binding.cleanup_budget_record_identity == id(budget_record)
+            and budget_record is item_binding.cleanup_budget_record
+            and budget_record is self._live_cleanup_budget_record
+            and budget_record.state is _Generation6RNamespaceCleanupBudgetState.ACTIVE
+            and binding.operation_count_before == item_binding.operation_count_after
+            and binding.entry_count_before == item_binding.entry_count_after
+            and binding.encoded_name_bytes_before == item_binding.encoded_name_bytes_after
+            and binding.depth_high_water_before == budget_record.depth_high_water
+            and budget_record.operation_count == binding.operation_count_before
+            and budget_record.entry_count == binding.entry_count_before
+            and budget_record.encoded_name_bytes == binding.encoded_name_bytes_before
+            and type(attempt_receipt) is _Generation6RNamespaceReceipt
+            and attempt_receipt.issuer_identity == self._issuer_identity
+            and attempt_receipt.token_serial == binding.classification_serial
+            and attempt_receipt.authority_serial == binding.authority.serial
+            and attempt_receipt.event == "INVENTORY_CLASSIFICATION_ATTEMPTING"
+            and any(candidate is attempt_receipt for candidate in self._receipts),
+            "R namespace current inventory classification evidence differs",
+        )
+        return record
+
+    def _reauthenticate_inventory_classification_parent(
+        self,
+        record: _Generation6RNamespaceInventoryClassificationRecord,
+    ) -> tuple[
+        _Generation6RNamespaceDirectoryRecord,
+        _Generation6ROwnerRecord,
+        int,
+        DescriptorSnapshot,
+        int,
+        int,
+        int,
+    ]:
+        _require(
+            type(record) is _Generation6RNamespaceInventoryClassificationRecord
+            and record is self._live_inventory_classification_record,
+            "R namespace inventory classification parent record differs",
+        )
+        binding = record.binding
+        authority_record, descriptor_record, descriptor = self._require_authority(binding.authority)
+        authority_binding = authority_record.binding
+        parent_snapshot = _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT(
+            _GENERATION6_R_NAMESPACE_REAL_OS_FSTAT(descriptor)
+        )
+        parent_mount_id = self._namespace_mount_id(
+            descriptor,
+            excluded_descriptors=(record.descriptor_token.descriptor,)
+            if record.descriptor_token is not None
+            else (),
+        )
+        descriptor_flags = _GENERATION6_R_NAMESPACE_REAL_FCNTL(
+            descriptor,
+            fcntl.F_GETFD,
+        )
+        status_flags = _GENERATION6_R_NAMESPACE_REAL_FCNTL(
+            descriptor,
+            fcntl.F_GETFL,
+        )
+        _require(
+            authority_record is binding.authority_record
+            and authority_binding is binding.authority_binding
+            and descriptor == binding.parent_descriptor
+            and descriptor_record.token is authority_binding.descriptor_token
+            and parent_snapshot == descriptor_record.token.snapshot
+            and parent_snapshot.device == authority_binding.fact.device
+            and parent_snapshot.inode == authority_binding.fact.inode
+            and parent_snapshot.uid == authority_binding.fact.uid
+            and parent_snapshot.mode == authority_binding.fact.mode
+            and parent_mount_id == authority_binding.fact.mount_id
+            and type(descriptor_flags) is int
+            and descriptor_flags == fcntl.FD_CLOEXEC
+            and descriptor_flags == descriptor_record.token.fd_flags
+            and type(status_flags) is int
+            and status_flags == descriptor_record.token.status_flags
+            and status_flags & os.O_ACCMODE == os.O_RDONLY
+            and status_flags & os.O_DIRECTORY == os.O_DIRECTORY
+            and status_flags & os.O_PATH == 0,
+            "R namespace inventory classification parent reauthentication differs",
+        )
+        return (
+            authority_record,
+            descriptor_record,
+            descriptor,
+            parent_snapshot,
+            parent_mount_id,
+            descriptor_flags,
+            status_flags,
+        )
+
+    def _derive_inventory_classification(
+        self,
+        snapshot: DescriptorSnapshot,
+        mount_id: int,
+        expected_uid: int,
+        expected_mount_id: int,
+    ) -> tuple[
+        _Generation6RNamespaceNodeKind,
+        _Generation6RNamespaceInventoryClassificationState,
+        str | None,
+    ]:
+        _require(
+            type(snapshot) is DescriptorSnapshot
+            and type(snapshot.device) is int
+            and snapshot.device >= 0
+            and type(snapshot.inode) is int
+            and snapshot.inode > 0
+            and type(snapshot.uid) is int
+            and snapshot.uid >= 0
+            and type(snapshot.mode) is int
+            and snapshot.mode >= 0
+            and type(snapshot.link_count) is int
+            and snapshot.link_count > 0
+            and type(mount_id) is int
+            and mount_id > 0
+            and type(expected_uid) is int
+            and expected_uid >= 0
+            and type(expected_mount_id) is int
+            and expected_mount_id > 0
+            and snapshot.uid == expected_uid
+            and mount_id == expected_mount_id,
+            "R namespace inventory classification inputs differ",
+        )
+        file_type = _GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT(snapshot.mode)
+        special_permissions = snapshot.mode & SPECIAL_PERMISSION_BITS
+        hardlink_group: str | None = None
+        state = _Generation6RNamespaceInventoryClassificationState.CLASSIFIED_KNOWN_RESIDUE
+        if file_type == stat.S_IFREG and snapshot.link_count > 1:
+            kind = _Generation6RNamespaceNodeKind.HARDLINK
+            hardlink_group = f"r6-hardlink:{mount_id}:{snapshot.device}:{snapshot.inode}"
+        elif (file_type == stat.S_IFREG or file_type == stat.S_IFDIR) and special_permissions != 0:
+            kind = _Generation6RNamespaceNodeKind.SPECIAL
+        elif file_type == stat.S_IFREG:
+            _require(
+                snapshot.link_count == 1,
+                "R namespace inventory regular link count differs",
+            )
+            kind = _Generation6RNamespaceNodeKind.REGULAR
+            state = (
+                _Generation6RNamespaceInventoryClassificationState.CLASSIFIED_REMOVABLE_CANDIDATE
+            )
+        elif file_type == stat.S_IFDIR:
+            kind = _Generation6RNamespaceNodeKind.DIRECTORY
+            state = (
+                _Generation6RNamespaceInventoryClassificationState.CLASSIFIED_REMOVABLE_CANDIDATE
+            )
+        elif file_type == stat.S_IFLNK:
+            kind = _Generation6RNamespaceNodeKind.SYMLINK
+        elif file_type == stat.S_IFSOCK:
+            kind = _Generation6RNamespaceNodeKind.SOCKET
+        elif file_type == stat.S_IFIFO:
+            kind = _Generation6RNamespaceNodeKind.FIFO
+        elif file_type == stat.S_IFCHR or file_type == stat.S_IFBLK:
+            kind = _Generation6RNamespaceNodeKind.SPECIAL
+        else:
+            raise ContractError("R namespace inventory classification file type differs")
+        return kind, state, hardlink_group
+
+    def _close_inventory_classification_owner(
+        self,
+        record: _Generation6RNamespaceInventoryClassificationRecord,
+        *,
+        event: _Generation6RNamespaceCloseEvent,
+    ) -> None:
+        _require(
+            type(record) is _Generation6RNamespaceInventoryClassificationRecord
+            and type(event) is _Generation6RNamespaceCloseEvent
+            and (
+                event is _Generation6RNamespaceCloseEvent.INVENTORY_CLASSIFICATION_HANDLE_CLOSED
+                or event is _Generation6RNamespaceCloseEvent.INVENTORY_CLASSIFICATION_ABORT_CLOSED
+            )
+            and type(record.entry_owner) is FdOwner
+            and type(record.descriptor_token) is _Generation6ROwnerToken
+            and type(record.owner_context) is _Generation6RNamespaceOwnerContext
+            and record.owner_state is _Generation6RNamespaceOwnerState.LIVE
+            and not record.entry_owner.terminal,
+            "R namespace inventory classification close inputs differ",
+        )
+        owner = cast(FdOwner, record.entry_owner)
+        descriptor_token = cast(_Generation6ROwnerToken, record.descriptor_token)
+        owner_context = cast(_Generation6RNamespaceOwnerContext, record.owner_context)
+        try:
+            close_receipt = self._close_namespace_owner(
+                owner,
+                descriptor_token,
+                owner_context,
+                capability_record=None,
+                event=event,
+            )
+        except BaseException as primary:
+            if self._namespace_owner_close_verified(owner, descriptor_token, owner_context):
+                record.owner_state = _Generation6RNamespaceOwnerState.CLOSED
+                record.close_receipt = owner_context.close_receipt
+            else:
+                record.owner_state = _Generation6RNamespaceOwnerState.UNCERTAIN
+                try:
+                    if not any(
+                        candidate is owner
+                        for candidate in self._inventory_classification_descriptor_quarantine
+                    ):
+                        self._inventory_classification_descriptor_quarantine.append(owner)
+                except BaseException as quarantine_error:
+                    primary.add_note(
+                        "R namespace inventory classification quarantine failed: "
+                        f"{quarantine_error!r}"
+                    )
+            raise
+        record.close_receipt = close_receipt
+        record.owner_state = _Generation6RNamespaceOwnerState.CLOSED
+
+    def _terminalize_inventory_classification(
+        self,
+        record: _Generation6RNamespaceInventoryClassificationRecord,
+        state: _Generation6RNamespaceInventoryClassificationState,
+    ) -> None:
+        binding = record.binding
+        item_record = binding.item_record
+        fact = record.fact
+        _require(
+            type(record) is _Generation6RNamespaceInventoryClassificationRecord
+            and record is self._live_inventory_classification_record
+            and record.state is _Generation6RNamespaceInventoryClassificationState.ATTEMPTING
+            and (
+                state
+                is _Generation6RNamespaceInventoryClassificationState.CLASSIFIED_REMOVABLE_CANDIDATE
+                or state
+                is _Generation6RNamespaceInventoryClassificationState.CLASSIFIED_KNOWN_RESIDUE
+            )
+            and record.node_kind is not None
+            and type(fact) is _Generation6RNamespaceNameFact
+            and record.owner_state is _Generation6RNamespaceOwnerState.CLOSED
+            and type(record.close_receipt) is _Generation6RNamespaceReceipt
+            and item_record is self._live_inventory_item_record
+            and item_record.state is _Generation6RNamespaceInventoryItemState.LIVE_UNCLASSIFIED
+            and item_record.terminal_receipt is None
+            and not any(
+                candidate is item_record for candidate in self._archived_inventory_item_records
+            )
+            and not any(
+                candidate is record for candidate in self._archived_inventory_classification_records
+            ),
+            "R namespace inventory classification terminal inputs differ",
+        )
+        item_state = (
+            _Generation6RNamespaceInventoryItemState.CLASSIFIED_REMOVABLE_CANDIDATE
+            if state
+            is _Generation6RNamespaceInventoryClassificationState.CLASSIFIED_REMOVABLE_CANDIDATE
+            else _Generation6RNamespaceInventoryItemState.CLASSIFIED_KNOWN_RESIDUE
+        )
+        classification_event = (
+            "INVENTORY_CLASSIFICATION_REMOVABLE_CANDIDATE"
+            if state
+            is _Generation6RNamespaceInventoryClassificationState.CLASSIFIED_REMOVABLE_CANDIDATE
+            else "INVENTORY_CLASSIFICATION_KNOWN_RESIDUE"
+        )
+        item_event = (
+            "INVENTORY_ITEM_CLASSIFIED_REMOVABLE_CANDIDATE"
+            if item_state is _Generation6RNamespaceInventoryItemState.CLASSIFIED_REMOVABLE_CANDIDATE
+            else "INVENTORY_ITEM_CLASSIFIED_KNOWN_RESIDUE"
+        )
+        record.state = state
+        item_record.state = item_state
+        outcome_receipt = self._append_receipt(
+            token_serial=binding.classification_serial,
+            authority_serial=binding.authority.serial,
+            event=classification_event,
+        )
+        record.outcome_receipt = outcome_receipt
+        terminal_receipt = self._append_receipt(
+            token_serial=binding.item.serial,
+            authority_serial=binding.authority.serial,
+            event=item_event,
+        )
+        item_record.terminal_receipt = terminal_receipt
+        record.terminal_receipt = terminal_receipt
+        self._archived_inventory_item_records.append(item_record)
+        self._archived_inventory_classification_records.append(record)
+        if state is _Generation6RNamespaceInventoryClassificationState.CLASSIFIED_KNOWN_RESIDUE:
+            self._inventory_classification_residue_evidence.append(record)
+        self._live_inventory_item_record = None
+        self._live_inventory_classification_record = None
+
+    def _fail_inventory_classification_uncertain(
+        self,
+        record: _Generation6RNamespaceInventoryClassificationRecord | None,
+        item_record: _Generation6RNamespaceInventoryItemRecord | None,
+        owner: FdOwner | None,
+        primary: BaseException,
+    ) -> None:
+        if self._inventory_classification_faulted is False:
+            self._inventory_classification_faulted = True
+        self._phase = _Generation6RNamespacePhase.UNCERTAIN
+        exact_record = (
+            record if type(record) is _Generation6RNamespaceInventoryClassificationRecord else None
+        )
+        exact_item_record = (
+            item_record if type(item_record) is _Generation6RNamespaceInventoryItemRecord else None
+        )
+        if exact_record is not None:
+            exact_record.state = _Generation6RNamespaceInventoryClassificationState.UNCERTAIN
+        if exact_item_record is not None:
+            exact_item_record.state = _Generation6RNamespaceInventoryItemState.UNCERTAIN
+        if (
+            exact_record is not None
+            and type(owner) is FdOwner
+            and exact_record.entry_owner is owner
+            and exact_record.owner_state is _Generation6RNamespaceOwnerState.LIVE
+            and not owner.terminal
+        ):
+            try:
+                self._close_inventory_classification_owner(
+                    exact_record,
+                    event=_Generation6RNamespaceCloseEvent.INVENTORY_CLASSIFICATION_ABORT_CLOSED,
+                )
+            except BaseException as close_error:
+                primary.add_note(
+                    f"R namespace inventory classification abort close failed: {close_error!r}"
+                )
+        if exact_record is not None:
+            binding = exact_record.binding
+            try:
+                classification_receipt = self._append_receipt(
+                    token_serial=binding.classification_serial,
+                    authority_serial=binding.authority.serial,
+                    event="INVENTORY_CLASSIFICATION_UNCERTAIN",
+                )
+                exact_record.outcome_receipt = classification_receipt
+            except BaseException as receipt_error:
+                primary.add_note(
+                    "R namespace inventory classification uncertainty receipt failed: "
+                    f"{receipt_error!r}"
+                )
+        if exact_item_record is not None:
+            try:
+                item_binding = exact_item_record.binding
+                item_receipt = self._append_receipt(
+                    token_serial=item_binding.item_serial,
+                    authority_serial=item_binding.scan_binding.cursor_binding.authority_serial,
+                    event="INVENTORY_ITEM_CLASSIFICATION_UNCERTAIN",
+                )
+                exact_item_record.terminal_receipt = item_receipt
+                if exact_record is not None:
+                    exact_record.terminal_receipt = item_receipt
+            except BaseException as receipt_error:
+                primary.add_note(
+                    f"R namespace inventory item uncertainty receipt failed: {receipt_error!r}"
+                )
+            try:
+                if not any(
+                    candidate is exact_item_record
+                    for candidate in self._archived_inventory_item_records
+                ):
+                    self._archived_inventory_item_records.append(exact_item_record)
+            except BaseException as archive_error:
+                primary.add_note(
+                    f"R namespace inventory item uncertainty archive failed: {archive_error!r}"
+                )
+        if exact_record is not None:
+            try:
+                if not any(
+                    candidate is exact_record
+                    for candidate in self._archived_inventory_classification_records
+                ):
+                    self._archived_inventory_classification_records.append(exact_record)
+            except BaseException as archive_error:
+                primary.add_note(
+                    "R namespace inventory classification uncertainty archive failed: "
+                    f"{archive_error!r}"
+                )
+            try:
+                if not any(
+                    candidate is exact_record
+                    for candidate in self._inventory_classification_residue_evidence
+                ):
+                    self._inventory_classification_residue_evidence.append(exact_record)
+            except BaseException as evidence_error:
+                primary.add_note(
+                    "R namespace inventory classification residue evidence failed: "
+                    f"{evidence_error!r}"
+                )
+        if self._live_inventory_item_record is exact_item_record:
+            self._live_inventory_item_record = None
+        self._live_inventory_classification_record = None
+        raise primary
+
+    def _classify_metered_inventory_item(
+        self,
+        item: _Generation6RNamespaceInventoryItem,
+    ) -> _Generation6RNamespaceInventoryClassification:
+        item_record = self._require_pristine_inventory_classification(item)
+        classification_record: _Generation6RNamespaceInventoryClassificationRecord | None = None
+        owner: FdOwner | None = None
+        try:
+            item_binding = item_record.binding
+            advance_record = item_binding.advance_record
+            advance_binding = item_binding.advance_binding
+            scan_record = item_binding.scan_record
+            scan_binding = item_binding.scan_binding
+            cursor_record = scan_binding.cursor_record
+            cursor_binding = scan_binding.cursor_binding
+            authority = cursor_binding.authority
+            authority_record = cursor_binding.authority_record
+            authority_binding = cursor_binding.authority_binding
+            budget_record = item_binding.cleanup_budget_record
+            classification = _Generation6RNamespaceInventoryClassification(
+                self._issue_serial(),
+                self._issuer_identity,
+            )
+            classification_binding = _Generation6RNamespaceInventoryClassificationBinding(
+                self._issue_serial(),
+                self._issuer_identity,
+                classification,
+                id(classification),
+                classification.serial,
+                classification.issuer_identity,
+                item_record,
+                id(item_record),
+                item_binding,
+                id(item_binding),
+                item,
+                id(item),
+                advance_record,
+                id(advance_record),
+                advance_binding,
+                id(advance_binding),
+                scan_record,
+                id(scan_record),
+                scan_binding,
+                id(scan_binding),
+                cursor_record,
+                id(cursor_record),
+                cursor_binding,
+                id(cursor_binding),
+                authority,
+                id(authority),
+                authority_record,
+                id(authority_record),
+                authority_binding,
+                id(authority_binding),
+                item_binding.raw_entry,
+                item_binding.raw_entry_identity,
+                item_binding.component,
+                item_binding.encoded_name_bytes,
+                scan_binding.descriptor,
+                advance_binding.next_depth,
+                item_binding.cleanup_epoch,
+                item_binding.cleanup_epoch_identity,
+                budget_record,
+                id(budget_record),
+                budget_record.operation_count,
+                budget_record.entry_count,
+                budget_record.encoded_name_bytes,
+                budget_record.depth_high_water,
+            )
+            classification_record = _Generation6RNamespaceInventoryClassificationRecord(
+                classification_binding,
+                id(classification_binding),
+                _Generation6RNamespaceInventoryClassificationState.ATTEMPTING,
+                0,
+                0,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            classification_identity = id(classification)
+            self._inventory_classification_records_by_identity[classification_identity] = (
+                classification_record
+            )
+            self._inventory_classification_records_by_serial[classification.serial] = (
+                classification_record
+            )
+            self._live_inventory_classification_record = classification_record
+            attempt_receipt = self._append_receipt(
+                token_serial=classification.serial,
+                authority_serial=authority.serial,
+                event="INVENTORY_CLASSIFICATION_ATTEMPTING",
+            )
+            classification_record.attempt_receipt = attempt_receipt
+            classification_record = self._require_current_inventory_classification(classification)
+            binding = classification_record.binding
+            self._charge_cleanup_budget(
+                binding.cleanup_epoch,
+                next_depth=binding.item_depth,
+                entry_increment=0,
+                encoded_name_bytes_increment=0,
+            )
+            classification_record.stat_attempts = 1
+            named_snapshot = _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT(
+                _GENERATION6_R_NAMESPACE_REAL_OS_STAT(
+                    binding.component,
+                    dir_fd=binding.parent_descriptor,
+                    follow_symlinks=False,
+                )
+            )
+            classification_record.named_snapshot = named_snapshot
+            classification_record.operation_count_after_stat = budget_record.operation_count
+            classification_record.entry_count_after = budget_record.entry_count
+            classification_record.encoded_name_bytes_after = budget_record.encoded_name_bytes
+            classification_record.depth_high_water_after = budget_record.depth_high_water
+            classification_record.stat_receipt = self._append_receipt(
+                token_serial=binding.classification_serial,
+                authority_serial=authority.serial,
+                event="INVENTORY_CLASSIFICATION_NOFOLLOW_STAT_OBSERVED",
+            )
+            self._charge_cleanup_budget(
+                binding.cleanup_epoch,
+                next_depth=binding.item_depth,
+                entry_increment=0,
+                encoded_name_bytes_increment=0,
+            )
+            classification_record.open_attempts = 1
+            owner, descriptor_token, owner_context = self._open_namespace_owner(
+                authority,
+                authority_record,
+                binding.parent_descriptor,
+                binding.component,
+                os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC,
+                purpose=_Generation6RNamespaceOwnerPurpose.INVENTORY_CLASSIFICATION_ENTRY,
+                label=f"R namespace inventory classification {binding.component}",
+            )
+            classification_record.entry_owner = owner
+            classification_record.descriptor_token = descriptor_token
+            classification_record.owner_context = owner_context
+            classification_record.owner_state = _Generation6RNamespaceOwnerState.LIVE
+            owner_context.state = _Generation6RNamespaceContextState.LIVE
+            opened_snapshot = descriptor_token.snapshot
+            descriptor_flags = descriptor_token.fd_flags
+            status_flags = descriptor_token.status_flags
+            classification_record.opened_snapshot = opened_snapshot
+            classification_record.descriptor_flags = descriptor_flags
+            classification_record.status_flags = status_flags
+            entry_mount_id = self._namespace_mount_id(
+                descriptor_token.descriptor,
+                excluded_descriptors=(binding.parent_descriptor,),
+            )
+            classification_record.entry_mount_id = entry_mount_id
+            (
+                parent_record,
+                parent_descriptor_record,
+                parent_descriptor,
+                parent_snapshot,
+                parent_mount_id,
+                _,
+                _,
+            ) = self._reauthenticate_inventory_classification_parent(classification_record)
+            classification_record.parent_snapshot = parent_snapshot
+            classification_record.parent_mount_id = parent_mount_id
+            current_uid = _GENERATION6_R_NAMESPACE_REAL_OS_GETUID()
+            classification_record.current_uid = current_uid
+            classification_record.operation_count_after_open = budget_record.operation_count
+            expected_depth_high_water = (
+                binding.item_depth
+                if binding.item_depth > binding.depth_high_water_before
+                else binding.depth_high_water_before
+            )
+            _require(
+                parent_record is authority_record
+                and parent_descriptor_record.token is authority_binding.descriptor_token
+                and parent_descriptor == binding.parent_descriptor
+                and binding.raw_entry is item_binding.raw_entry
+                and binding.raw_entry_identity == id(binding.raw_entry)
+                and binding.raw_entry.name == binding.component
+                and type(binding.component) is str
+                and binding.component != ""
+                and opened_snapshot == named_snapshot
+                and descriptor_token.snapshot == opened_snapshot
+                and descriptor_token.descriptor != binding.parent_descriptor
+                and type(current_uid) is int
+                and current_uid >= 0
+                and named_snapshot.uid == current_uid
+                and named_snapshot.uid == authority_binding.fact.uid
+                and entry_mount_id == parent_mount_id
+                and entry_mount_id == authority_binding.fact.mount_id
+                and parent_snapshot == parent_descriptor_record.token.snapshot
+                and type(descriptor_flags) is int
+                and descriptor_flags == fcntl.FD_CLOEXEC
+                and descriptor_flags == descriptor_token.fd_flags
+                and type(status_flags) is int
+                and status_flags == descriptor_token.status_flags
+                and status_flags & os.O_ACCMODE == os.O_RDONLY
+                and status_flags & os.O_PATH == os.O_PATH
+                and budget_record.operation_count == binding.operation_count_before + 2
+                and classification_record.operation_count_after_stat
+                == binding.operation_count_before + 1
+                and classification_record.operation_count_after_open
+                == binding.operation_count_before + 2
+                and budget_record.entry_count == binding.entry_count_before
+                and budget_record.encoded_name_bytes == binding.encoded_name_bytes_before
+                and budget_record.depth_high_water == expected_depth_high_water,
+                "R namespace inventory classification authentication differs",
+            )
+            classification_record.open_receipt = self._append_receipt(
+                token_serial=binding.classification_serial,
+                authority_serial=authority.serial,
+                event="INVENTORY_CLASSIFICATION_HANDLE_AUTHENTICATED",
+            )
+            node_kind, state, hardlink_group = self._derive_inventory_classification(
+                opened_snapshot,
+                entry_mount_id,
+                current_uid,
+                parent_mount_id,
+            )
+            classification_record.node_kind = node_kind
+            classification_record.hardlink_group = hardlink_group
+            self._close_inventory_classification_owner(
+                classification_record,
+                event=_Generation6RNamespaceCloseEvent.INVENTORY_CLASSIFICATION_HANDLE_CLOSED,
+            )
+            _require(
+                classification_record.owner_state is _Generation6RNamespaceOwnerState.CLOSED
+                and type(classification_record.close_receipt) is _Generation6RNamespaceReceipt
+                and owner.terminal
+                and owner.descriptor == -1,
+                "R namespace inventory classification close result differs",
+            )
+            self._register_inventory_classification_name_fact(classification_record)
+            self._terminalize_inventory_classification(classification_record, state)
+            return classification
+        except BaseException as primary:
+            self._fail_inventory_classification_uncertain(
+                classification_record,
+                item_record,
+                owner,
+                primary,
+            )
+            raise
+
     def register_borrowed_directory(
         self,
         directory: DirectoryOwner,
@@ -15877,6 +16914,16 @@ class _Generation6RNamespaceJournal:
                                         and event
                                         is _Generation6RNamespaceCloseEvent.RENAME_TOKEN_ABORT_CLOSED
                                     )
+                                    or (
+                                        context_binding.purpose
+                                        is _Generation6RNamespaceOwnerPurpose.INVENTORY_CLASSIFICATION_ENTRY
+                                        and (
+                                            event
+                                            is _Generation6RNamespaceCloseEvent.INVENTORY_CLASSIFICATION_HANDLE_CLOSED
+                                            or event
+                                            is _Generation6RNamespaceCloseEvent.INVENTORY_CLASSIFICATION_ABORT_CLOSED
+                                        )
+                                    )
                                 )
                             )
                         ),
@@ -16056,6 +17103,46 @@ class _Generation6RNamespaceJournal:
         if not any(candidate is owner for candidate in self._owner_quarantine):
             self._owner_quarantine.append(owner)
 
+    def _close_rejected_namespace_raw_once(self, raw_descriptor: int) -> None:
+        if type(raw_descriptor) is not int or not 0 <= raw_descriptor <= 2:
+            raise ContractError("R namespace rejected descriptor domain differs")
+        evidence_error: BaseException | None = None
+        close_error: BaseException | None = None
+        poison_error: BaseException | None = None
+        try:
+            _GENERATION6_R_REAL_LIST_APPEND(
+                self._untransferred_raw_quarantine,
+                raw_descriptor,
+            )
+        except BaseException as error:
+            evidence_error = error
+        try:
+            _GENERATION6_R_REAL_OS_CLOSE(raw_descriptor)
+        except BaseException as error:
+            close_error = error
+        if close_error is not None:
+            try:
+                self._poisoned_descriptors.add(raw_descriptor)
+            except BaseException as error:
+                poison_error = error
+        self._phase = _Generation6RNamespacePhase.UNCERTAIN
+        if evidence_error is not None:
+            if close_error is not None:
+                evidence_error.add_note(
+                    f"R namespace rejected descriptor close failed: {close_error!r}"
+                )
+            if poison_error is not None:
+                evidence_error.add_note(
+                    f"R namespace rejected descriptor poison failed: {poison_error!r}"
+                )
+            raise evidence_error
+        if close_error is not None:
+            if poison_error is not None:
+                close_error.add_note(
+                    f"R namespace rejected descriptor poison failed: {poison_error!r}"
+                )
+            raise close_error
+
     def _open_namespace_owner(
         self,
         authority: _Generation6RNamespaceDirectoryAuthority,
@@ -16088,69 +17175,54 @@ class _Generation6RNamespaceJournal:
         )
         owner = object.__new__(FdOwner)
         _require(
-            type(owner) is FdOwner and not vars(owner),
+            type(owner) is FdOwner and vars(owner) == {},
             "R namespace owner shell differs",
         )
-        raw_descriptor: object = _PID_SENTINEL
+        raw_result: object = _PID_SENTINEL
         accepted_descriptor: object = _PID_SENTINEL
+        initialization_started = False
         owner_context: _Generation6RNamespaceOwnerContext | None = None
-        try:
-            raw_descriptor = _GENERATION6_R_NAMESPACE_REAL_OS_OPEN(
-                name,
-                flags,
-                dir_fd=directory_descriptor,
-            )
-            _require(
-                type(raw_descriptor) is int and raw_descriptor > 2,
-                "R namespace opened descriptor differs",
-            )
-            accepted_descriptor = raw_descriptor
-            raw_descriptor = _PID_SENTINEL
+        raw_result = _GENERATION6_R_NAMESPACE_REAL_OS_OPEN(
+            name,
+            flags,
+            dir_fd=directory_descriptor,
+        )
+        if type(raw_result) is not int or raw_result < 0:
+            invalid_evidence = raw_result
+            raw_result = _PID_SENTINEL
             try:
-                FdOwner.__init__(
-                    owner,
-                    accepted_descriptor,
-                    exact_label,
+                _GENERATION6_R_REAL_LIST_APPEND(
+                    self._untransferred_raw_quarantine,
+                    invalid_evidence,
                 )
             except BaseException:
-                owner_identity = id(owner)
-                accepted_record = self._descriptor_ledger._records_by_owner_identity.get(
-                    owner_identity
-                )
-                accepted_current = self._descriptor_ledger._current_by_descriptor.get(
-                    accepted_descriptor
-                )
-                retained_by_ledger = any(
-                    candidate is owner
-                    for candidate in self._descriptor_ledger._registration_quarantine
-                )
-                partial_is_current = (
-                    accepted_current is not None
-                    and accepted_current.owner_identity == owner_identity
-                )
-                if (
-                    accepted_descriptor in self._descriptor_ledger._uncertain_descriptors
-                    or retained_by_ledger
-                    or accepted_record is not None
-                    or partial_is_current
-                ):
-                    self._retain_uncertain_owner(
-                        owner,
-                        accepted_descriptor,
-                    )
-                accepted_descriptor = _PID_SENTINEL
+                self._phase = _Generation6RNamespacePhase.UNCERTAIN
                 raise
-            accepted_number = accepted_descriptor
-            accepted_descriptor = _PID_SENTINEL
+            self._phase = _Generation6RNamespacePhase.UNCERTAIN
+            raise ContractError("R namespace opened descriptor type differs")
+        if raw_result <= 2:
+            low_descriptor = raw_result
+            raw_result = _PID_SENTINEL
+            self._close_rejected_namespace_raw_once(low_descriptor)
+            raise ContractError("R namespace opened descriptor range differs")
+        accepted_descriptor = raw_result
+        raw_result = _PID_SENTINEL
+        initialization_descriptor = accepted_descriptor
+        initialization_started = True
+        accepted_descriptor = _PID_SENTINEL
+        try:
+            FdOwner.__init__(owner, initialization_descriptor, exact_label)
             descriptor_token = self._descriptor_ledger.token_for_owner(owner)
             record = self._descriptor_ledger._authorize_live(owner, descriptor_token)
             _require(
-                owner.label == exact_label
+                initialization_started
+                and owner.label == exact_label
                 and record.owner is owner
                 and record.token is descriptor_token
-                and descriptor_token.descriptor == accepted_number
+                and descriptor_token.descriptor == initialization_descriptor
                 and descriptor_token.owner_identity == id(owner)
-                and accepted_number == _GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE(owner),
+                and initialization_descriptor
+                == _GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE(owner),
                 "R namespace adopted descriptor authority differs",
             )
             owner_identity = id(owner)
@@ -16186,6 +17258,7 @@ class _Generation6RNamespaceJournal:
             self._namespace_owner_contexts[owner_identity] = owner_context
             self._namespace_owner_tokens[owner_identity] = descriptor_token
         except BaseException as primary:
+            self._phase = _Generation6RNamespacePhase.UNCERTAIN
             if owner_context is not None:
                 owner_context.state = _Generation6RNamespaceContextState.UNCERTAIN
             owner_fields = vars(owner)
@@ -16200,11 +17273,6 @@ class _Generation6RNamespaceJournal:
                     "R namespace retained an owner whose accepted token was unavailable"
                 )
             raise
-        finally:
-            if raw_descriptor is not _PID_SENTINEL:
-                self._retain_untransferred_raw(owner, raw_descriptor)
-            if accepted_descriptor is not _PID_SENTINEL:
-                self._retain_untransferred_raw(owner, accepted_descriptor)
         return owner, descriptor_token, owner_context
 
     def _require_same_parent_proof(
@@ -16541,12 +17609,23 @@ class _Generation6RNamespaceJournal:
     def _validate_node_kind(
         self,
         snapshot: DescriptorSnapshot,
+        mount_id: int,
         kind: _Generation6RNamespaceNodeKind,
         hardlink_group: str | None,
     ) -> str | None:
         _require(
             type(snapshot) is DescriptorSnapshot
+            and type(mount_id) is int
+            and mount_id > 0
             and type(kind) is _Generation6RNamespaceNodeKind
+            and type(snapshot.device) is int
+            and snapshot.device >= 0
+            and type(snapshot.inode) is int
+            and snapshot.inode > 0
+            and type(snapshot.uid) is int
+            and snapshot.uid >= 0
+            and type(snapshot.mode) is int
+            and snapshot.mode >= 0
             and type(snapshot.link_count) is int
             and snapshot.link_count > 0,
             "R namespace node-kind inputs differ",
@@ -16566,19 +17645,34 @@ class _Generation6RNamespaceJournal:
         elif kind is _Generation6RNamespaceNodeKind.FIFO:
             matches = file_type == stat.S_IFIFO
         elif kind is _Generation6RNamespaceNodeKind.HARDLINK:
-            matches = file_type == stat.S_IFREG and snapshot.link_count == 2
+            matches = file_type == stat.S_IFREG and snapshot.link_count > 1
+            canonical_group = f"r6-hardlink:{mount_id}:{snapshot.device}:{snapshot.inode}"
             exact_group = _ascii(hardlink_group, "R namespace hardlink group")
-            _require(exact_group != "", "R namespace hardlink group is empty")
+            _require(
+                exact_group == canonical_group,
+                "R namespace hardlink group differs",
+            )
         else:
             _require(
                 kind is _Generation6RNamespaceNodeKind.SPECIAL,
                 "R namespace node kind differs",
             )
             matches = (
-                file_type == stat.S_IFCHR or file_type == stat.S_IFBLK or special_permissions != 0
+                file_type == stat.S_IFCHR
+                or file_type == stat.S_IFBLK
+                or (
+                    special_permissions != 0
+                    and (
+                        (file_type == stat.S_IFREG and snapshot.link_count == 1)
+                        or file_type == stat.S_IFDIR
+                    )
+                )
             )
         _require(matches, "R namespace node kind does not match its snapshot")
-        if kind is not _Generation6RNamespaceNodeKind.SPECIAL:
+        if (
+            kind is not _Generation6RNamespaceNodeKind.SPECIAL
+            and kind is not _Generation6RNamespaceNodeKind.HARDLINK
+        ):
             _require(
                 special_permissions == 0,
                 "R namespace ordinary node has special permissions",
@@ -16603,7 +17697,7 @@ class _Generation6RNamespaceJournal:
             name,
             label="R namespace copied entry name",
         )
-        exact_group = self._validate_node_kind(snapshot, kind, hardlink_group)
+        exact_group = self._validate_node_kind(snapshot, mount_id, kind, hardlink_group)
         return _Generation6RNamespaceNameFact(
             self._issue_serial(),
             self._issuer_identity,
@@ -16638,19 +17732,22 @@ class _Generation6RNamespaceJournal:
         self._begin_publication(fact)
         try:
             if fact.kind is _Generation6RNamespaceNodeKind.HARDLINK:
+                canonical_group = f"r6-hardlink:{fact.mount_id}:{fact.device}:{fact.inode}"
                 _require(
                     type(fact.hardlink_group) is str
-                    and fact.hardlink_group != ""
-                    and fact.link_count == 2,
+                    and fact.hardlink_group == canonical_group
+                    and type(fact.link_count) is int
+                    and fact.link_count > 1,
                     "R namespace hardlink fact differs",
                 )
                 exact_group = cast(str, fact.hardlink_group)
                 group = self._hardlink_groups.setdefault(exact_group, [])
                 _require(
-                    len(group) < 2
+                    len(group) < fact.link_count
                     and all(
                         candidate.kind is _Generation6RNamespaceNodeKind.HARDLINK
                         and candidate.hardlink_group == exact_group
+                        and candidate.link_count == fact.link_count
                         and candidate.device == fact.device
                         and candidate.inode == fact.inode
                         and candidate.uid == fact.uid
@@ -16772,6 +17869,51 @@ class _Generation6RNamespaceJournal:
             "R namespace sealed entry completion differs",
         )
         self._register_name_fact(fact)
+        return fact
+
+    def _register_inventory_classification_name_fact(
+        self,
+        record: _Generation6RNamespaceInventoryClassificationRecord,
+    ) -> _Generation6RNamespaceNameFact:
+        _require(
+            type(record) is _Generation6RNamespaceInventoryClassificationRecord
+            and record is self._live_inventory_classification_record
+            and record.state is _Generation6RNamespaceInventoryClassificationState.ATTEMPTING
+            and type(record.named_snapshot) is DescriptorSnapshot
+            and type(record.opened_snapshot) is DescriptorSnapshot
+            and record.named_snapshot == record.opened_snapshot
+            and type(record.entry_mount_id) is int
+            and type(record.node_kind) is _Generation6RNamespaceNodeKind
+            and record.owner_state is _Generation6RNamespaceOwnerState.CLOSED
+            and type(record.close_receipt) is _Generation6RNamespaceReceipt
+            and record.fact is None
+            and record.outcome_receipt is None
+            and record.terminal_receipt is None,
+            "R namespace inventory classification fact inputs differ",
+        )
+        binding = record.binding
+        snapshot = cast(DescriptorSnapshot, record.opened_snapshot)
+        mount_id = cast(int, record.entry_mount_id)
+        kind = cast(_Generation6RNamespaceNodeKind, record.node_kind)
+        fact = self._copy_name_fact(
+            binding.authority,
+            binding.component,
+            snapshot,
+            mount_id,
+            kind,
+            record.hardlink_group,
+        )
+        registration_receipt = self._register_name_fact(fact)
+        _require(
+            registration_receipt.issuer_identity == self._issuer_identity
+            and registration_receipt.token_serial is None
+            and registration_receipt.authority_serial == binding.authority.serial
+            and registration_receipt.event == "NAME_FACT_SEALED"
+            and any(candidate is registration_receipt for candidate in self._receipts)
+            and self._name_facts_by_key.get((binding.authority.serial, binding.component)) is fact,
+            "R namespace inventory classification fact registration differs",
+        )
+        record.fact = fact
         return fact
 
     def _require_name_fact(
@@ -16909,22 +18051,24 @@ class _Generation6RNamespaceJournal:
                 type(group_name) is str
                 and group_name != ""
                 and type(members) is list
-                and len(members) == 2
-                and members[0] is not members[1]
-                and members[0].kind is _Generation6RNamespaceNodeKind.HARDLINK
-                and members[1].kind is _Generation6RNamespaceNodeKind.HARDLINK
-                and members[0].hardlink_group == group_name
-                and members[1].hardlink_group == group_name
-                and members[0].link_count == members[1].link_count == 2
-                and members[0].device == members[1].device
-                and members[0].inode == members[1].inode
-                and members[0].uid == members[1].uid
-                and members[0].mode == members[1].mode
-                and members[0].mount_id == members[1].mount_id
-                and (
-                    members[0].parent_authority is not members[1].parent_authority
-                    or members[0].name != members[1].name
+                and 1 <= len(members) <= members[0].link_count
+                and type(members[0].link_count) is int
+                and members[0].link_count > 1
+                and group_name
+                == f"r6-hardlink:{members[0].mount_id}:{members[0].device}:{members[0].inode}"
+                and all(
+                    member.kind is _Generation6RNamespaceNodeKind.HARDLINK
+                    and member.hardlink_group == group_name
+                    and member.link_count == members[0].link_count
+                    and member.device == members[0].device
+                    and member.inode == members[0].inode
+                    and member.uid == members[0].uid
+                    and member.mode == members[0].mode
+                    and member.mount_id == members[0].mount_id
+                    for member in members
                 )
+                and len({(member.parent_authority.serial, member.name) for member in members})
+                == len(members)
                 and all(
                     self._name_facts_by_key.get((member.parent_authority.serial, member.name))
                     is member
@@ -18828,7 +19972,7 @@ class _Generation6RNamespaceJournal:
 def _generation6_r_authority_source_gates(source: str) -> None:
     # fmt: off
     'Uncalled static proof for the deliberately integration-blocked R authority core.'
-    _require(type(source) is str and '\x00' not in source and 0 < len(source.encode('utf-8')) < 2_000_000, 'R authority source input differs')
+    _require(type(source) is str and '\x00' not in source and 0 < len(source.encode('utf-8')) <= 1_868_927 and 2_000_000 - len(source.encode('utf-8')) >= 131_072, 'R authority source input differs')
     syntax = ast.parse(source, filename='tests/ci_shard_runner.py', mode='exec')
     def top_function(name: str) -> ast.FunctionDef:
         matches = tuple((node for node in syntax.body if isinstance(node, ast.FunctionDef) and node.name == name))
@@ -18998,13 +20142,30 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         namespace_capture_nodes[name] = capture
     namespace_capture_rebindings = tuple(((type(node).__name__, ast.unparse(target)) for node in ast.walk(syntax) if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr)) for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,)) if isinstance(target, ast.Name) and target.id in namespace_capture_values and (node is not namespace_capture_nodes[target.id])))
     _require(not namespace_capture_rebindings, 'R namespace static capture rebinding surface differs')
-    namespace_class_names = ('_Generation6RNamespacePhase', '_Generation6RNamespaceTokenState', '_Generation6RNamespaceAction', '_Generation6RNamespaceNodeKind', '_Generation6RNamespaceAuthorityKind', '_Generation6RNamespaceOwnerState', '_Generation6RNamespaceOwnerKind', '_Generation6RNamespaceOwnerPurpose', '_Generation6RNamespaceContextState', '_Generation6RNamespaceCloseEvent', '_Generation6RNamespaceMutationPermitState', '_Generation6RNamespaceCleanupBudgetState', '_Generation6RNamespaceCleanupBudgetEvent', '_Generation6RNamespaceInventoryCursorState', '_Generation6RNamespaceInventoryScanState', '_Generation6RNamespaceInventoryAdvanceState', '_Generation6RNamespaceInventoryItemState', '_Generation6RNamespaceTerminalEvent', '_Generation6RNamespaceDirectoryFact', '_Generation6RNamespaceNameFact', '_Generation6RNamespaceDirectoryAuthority', '_Generation6RNamespaceDirectoryBinding', '_Generation6RNamespaceDirectoryRecord', '_Generation6RNamespaceOwnerContextBinding', '_Generation6RNamespaceOwnerContext', '_Generation6RNamespacePresentToken', '_Generation6RNamespaceAbsenceToken', '_Generation6RNamespaceRenameToken', '_Generation6RNamespaceMutationPermit', '_Generation6RNamespaceCapabilityBinding', '_Generation6RNamespaceCapabilityRecord', '_Generation6RNamespaceUnlinkPreproof', '_Generation6RNamespaceMutationPermitBinding', '_Generation6RNamespaceMutationPermitRecord', '_Generation6RNamespaceCleanupBudgetEpoch', '_Generation6RNamespaceInventoryCursor', '_Generation6RNamespaceInventoryScan', '_Generation6RNamespaceInventoryAdvance', '_Generation6RNamespaceInventoryItem', '_Generation6RNamespaceEmptyInventory', '_Generation6RNamespaceReceipt', '_Generation6RNamespaceCleanupBudgetRecord', '_Generation6RNamespaceInventoryCursorBinding', '_Generation6RNamespaceInventoryCursorRecord', '_Generation6RNamespaceInventoryScanBinding', '_Generation6RNamespaceInventoryScanRecord', '_Generation6RNamespaceInventoryAdvanceBinding', '_Generation6RNamespaceInventoryAdvanceRecord', '_Generation6RNamespaceInventoryItemBinding', '_Generation6RNamespaceInventoryItemRecord', '_Generation6RNamespaceJournal')
+    namespace_class_names: tuple[str, ...] = ('_Generation6RNamespacePhase', '_Generation6RNamespaceTokenState', '_Generation6RNamespaceAction', '_Generation6RNamespaceNodeKind', '_Generation6RNamespaceAuthorityKind', '_Generation6RNamespaceOwnerState', '_Generation6RNamespaceOwnerKind', '_Generation6RNamespaceOwnerPurpose', '_Generation6RNamespaceContextState', '_Generation6RNamespaceCloseEvent', '_Generation6RNamespaceMutationPermitState', '_Generation6RNamespaceCleanupBudgetState', '_Generation6RNamespaceCleanupBudgetEvent', '_Generation6RNamespaceInventoryCursorState', '_Generation6RNamespaceInventoryScanState', '_Generation6RNamespaceInventoryAdvanceState', '_Generation6RNamespaceInventoryItemState', '_Generation6RNamespaceTerminalEvent', '_Generation6RNamespaceDirectoryFact', '_Generation6RNamespaceNameFact', '_Generation6RNamespaceDirectoryAuthority', '_Generation6RNamespaceDirectoryBinding', '_Generation6RNamespaceDirectoryRecord', '_Generation6RNamespaceOwnerContextBinding', '_Generation6RNamespaceOwnerContext', '_Generation6RNamespacePresentToken', '_Generation6RNamespaceAbsenceToken', '_Generation6RNamespaceRenameToken', '_Generation6RNamespaceMutationPermit', '_Generation6RNamespaceCapabilityBinding', '_Generation6RNamespaceCapabilityRecord', '_Generation6RNamespaceUnlinkPreproof', '_Generation6RNamespaceMutationPermitBinding', '_Generation6RNamespaceMutationPermitRecord', '_Generation6RNamespaceCleanupBudgetEpoch', '_Generation6RNamespaceInventoryCursor', '_Generation6RNamespaceInventoryScan', '_Generation6RNamespaceInventoryAdvance', '_Generation6RNamespaceInventoryItem', '_Generation6RNamespaceEmptyInventory', '_Generation6RNamespaceReceipt', '_Generation6RNamespaceCleanupBudgetRecord', '_Generation6RNamespaceInventoryCursorBinding', '_Generation6RNamespaceInventoryCursorRecord', '_Generation6RNamespaceInventoryScanBinding', '_Generation6RNamespaceInventoryScanRecord', '_Generation6RNamespaceInventoryAdvanceBinding', '_Generation6RNamespaceInventoryAdvanceRecord', '_Generation6RNamespaceInventoryItemBinding', '_Generation6RNamespaceInventoryItemRecord', '_Generation6RNamespaceJournal')
+    namespace_class_names = (
+        *namespace_class_names[:17],
+        '_Generation6RNamespaceInventoryClassificationState',
+        *namespace_class_names[17:39],
+        '_Generation6RNamespaceInventoryClassification',
+        *namespace_class_names[39:50],
+        '_Generation6RNamespaceInventoryClassificationBinding',
+        '_Generation6RNamespaceInventoryClassificationRecord',
+        *namespace_class_names[50:],
+    )
     observed_namespace_class_names = tuple((node.name for node in syntax.body if isinstance(node, ast.ClassDef) and node.name.startswith('_Generation6RNamespace')))
     _require(observed_namespace_class_names == namespace_class_names, 'R namespace static class inventory differs')
     namespace_classes = {name: top_class(name) for name in namespace_class_names}
     namespace_phase_class = namespace_classes['_Generation6RNamespacePhase']
     _require(all((capture.lineno < namespace_phase_class.lineno for name, capture in namespace_capture_nodes.items() if name != '_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE')) and namespace_capture_nodes['_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE'].lineno > namespace_classes['_Generation6RNamespaceCleanupBudgetEvent'].lineno and (namespace_capture_nodes['_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE'].lineno < namespace_classes['_Generation6RNamespaceInventoryCursorState'].lineno < namespace_classes['_Generation6RNamespaceInventoryScanState'].lineno < namespace_classes['_Generation6RNamespaceInventoryAdvanceState'].lineno < namespace_classes['_Generation6RNamespaceInventoryItemState'].lineno < namespace_classes['_Generation6RNamespaceTerminalEvent'].lineno), 'R namespace static capture/class ordering differs')
     namespace_enum_members = {'_Generation6RNamespacePhase': ('BUILDING', 'SEALED', 'PATCH_ACTIVE', 'PATCH_RESTORED', 'TEARDOWN_ACTIVE', 'COMPLETE', 'UNCERTAIN'), '_Generation6RNamespaceTokenState': ('AUTHORIZED', 'ATTEMPTED', 'CONSUMED', 'UNCERTAIN'), '_Generation6RNamespaceAction': ('UNLINK', 'RMDIR', 'RENAME'), '_Generation6RNamespaceNodeKind': ('DIRECTORY', 'REGULAR', 'SYMLINK', 'SOCKET', 'FIFO', 'HARDLINK', 'SPECIAL'), '_Generation6RNamespaceAuthorityKind': ('BORROWED_GUARD', 'OWNED_CURSOR'), '_Generation6RNamespaceOwnerState': ('LIVE', 'CLOSED', 'UNCERTAIN'), '_Generation6RNamespaceOwnerKind': ('OWNED_CURSOR', 'ENTRY_HANDLE'), '_Generation6RNamespaceOwnerPurpose': ('OWNED_CURSOR', 'SEALED_ENTRY', 'PRESENT_TOKEN', 'RENAME_TOKEN'), '_Generation6RNamespaceContextState': ('OPENING', 'LIVE', 'TRANSFERRED', 'ATTEMPTED', 'CLOSED', 'UNCERTAIN'), '_Generation6RNamespaceCloseEvent': ('OWNED_CURSOR_ABORT_CLOSED', 'OWNED_CURSOR_CLOSED', 'ENTRY_HANDLE_ABORT_CLOSED', 'SEALED_ENTRY_HANDLE_CLOSED', 'SEALED_ENTRY_ABORT_CLOSED', 'PRESENT_TOKEN_ABORT_CLOSED', 'RENAME_TOKEN_ABORT_CLOSED', 'MUTATION_TOKEN_HANDLE_CLOSED'), '_Generation6RNamespaceMutationPermitState': ('AUTHORIZED', 'ATTEMPTED', 'CONSUMED', 'UNCERTAIN'), '_Generation6RNamespaceCleanupBudgetState': ('ACTIVE', 'EXHAUSTED', 'UNCERTAIN'), '_Generation6RNamespaceCleanupBudgetEvent': ('ISSUED', 'EXHAUSTED', 'UNCERTAIN'), '_Generation6RNamespaceInventoryCursorState': ('CURRENT', 'RETIRED', 'UNCERTAIN'), '_Generation6RNamespaceInventoryScanState': ('LIVE', 'CLOSED_UNEXHAUSTED', 'END_OBSERVED', 'UNCERTAIN'), '_Generation6RNamespaceInventoryAdvanceState': ('ATTEMPTING', 'ENTRY_RETURNED', 'END_OBSERVED', 'UNCERTAIN'), '_Generation6RNamespaceInventoryItemState': ('LIVE_UNCLASSIFIED', 'ABANDONED_UNCLASSIFIED', 'UNCERTAIN'), '_Generation6RNamespaceTerminalEvent': ('ABSENCE_TOKEN_ABANDONED', 'MUTATION_TOKEN_ABANDONED', 'PRESENT_UNLINK_CONSUMED')}
+    namespace_enum_members = {
+        **namespace_enum_members,
+        '_Generation6RNamespaceOwnerPurpose': (*namespace_enum_members['_Generation6RNamespaceOwnerPurpose'], 'INVENTORY_CLASSIFICATION_ENTRY'),
+        '_Generation6RNamespaceCloseEvent': (*namespace_enum_members['_Generation6RNamespaceCloseEvent'], 'INVENTORY_CLASSIFICATION_HANDLE_CLOSED', 'INVENTORY_CLASSIFICATION_ABORT_CLOSED'),
+        '_Generation6RNamespaceInventoryItemState': (*namespace_enum_members['_Generation6RNamespaceInventoryItemState'], 'CLASSIFIED_REMOVABLE_CANDIDATE', 'CLASSIFIED_KNOWN_RESIDUE'),
+        '_Generation6RNamespaceInventoryClassificationState': ('ATTEMPTING', 'CLASSIFIED_REMOVABLE_CANDIDATE', 'CLASSIFIED_KNOWN_RESIDUE', 'UNCERTAIN'),
+    }
     for name, expected_members in namespace_enum_members.items():
         class_node = namespace_classes[name]
         expected_values = tuple(((member, f'CLEANUP_BUDGET_{member}' if name == '_Generation6RNamespaceCleanupBudgetEvent' else member) for member in expected_members))
@@ -19015,6 +20176,20 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     expected_namespace_annotations = {'_Generation6RNamespaceDirectoryFact': ('int', 'int', 'str', 'tuple[str, ...]', 'int', 'int', 'int', 'int', 'int'), '_Generation6RNamespaceNameFact': ('int', 'int', '_Generation6RNamespaceDirectoryAuthority', 'str', '_Generation6RNamespaceNodeKind', 'int', 'int', 'int', 'int', 'int', 'int', 'str | None'), '_Generation6RNamespaceDirectoryAuthority': ('int', 'int'), '_Generation6RNamespaceDirectoryBinding': ('int', 'int', '_Generation6RNamespaceDirectoryAuthority', '_Generation6RNamespaceAuthorityKind', 'DirectoryOwner', 'int', 'int', 'int', '_Generation6ROwnerToken', '_Generation6RNamespaceDirectoryFact'), '_Generation6RNamespaceDirectoryRecord': ('_Generation6RNamespaceDirectoryBinding', '_Generation6RNamespaceOwnerState', '_Generation6RNamespaceReceipt | None'), '_Generation6RNamespaceOwnerContextBinding': ('int', 'int', 'FdOwner', 'int', '_Generation6ROwnerToken', 'int', '_Generation6RNamespaceOwnerKind', '_Generation6RNamespaceOwnerPurpose', '_Generation6RNamespaceDirectoryRecord'), '_Generation6RNamespaceOwnerContext': ('_Generation6RNamespaceOwnerContextBinding', '_Generation6RNamespaceDirectoryRecord', '_Generation6RNamespaceContextState', '_Generation6RNamespaceCapabilityRecord | None', '_Generation6RNamespaceReceipt | None'), '_Generation6RNamespacePresentToken': ('int', 'int', '_Generation6RNamespaceAction'), '_Generation6RNamespaceAbsenceToken': ('int', 'int', '_Generation6RNamespaceAction'), '_Generation6RNamespaceRenameToken': ('int', 'int', '_Generation6RNamespaceAction'), '_Generation6RNamespaceMutationPermit': ('int', 'int'), '_Generation6RNamespaceCapabilityBinding': ('int', 'int', '_Generation6RNamespaceLiveToken', 'int', 'int', '_Generation6RNamespaceAction', '_Generation6RNamespaceDirectoryAuthority', '_Generation6RNamespaceDirectoryRecord', '_Generation6RNamespaceNameFact | None', 'str', 'FdOwner | None', '_Generation6ROwnerToken | None', '_Generation6RNamespaceOwnerContext | None', '_Generation6RNamespaceOwnerState | None', '_Generation6RNamespaceDirectoryAuthority | None', '_Generation6RNamespaceDirectoryRecord | None', 'str | None'), '_Generation6RNamespaceCapabilityRecord': ('_Generation6RNamespaceCapabilityBinding', '_Generation6RNamespaceTokenState', '_Generation6RNamespaceOwnerState | None', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None'), '_Generation6RNamespaceUnlinkPreproof': ('_Generation6RNamespaceCapabilityRecord', '_Generation6RNamespaceCapabilityBinding', '_Generation6RNamespacePresentToken', 'int', '_Generation6RNamespaceAction', '_Generation6RNamespaceDirectoryAuthority', '_Generation6RNamespaceDirectoryRecord', '_Generation6RNamespaceDirectoryBinding', 'str', 'int', 'DescriptorSnapshot', 'FdOwner', '_Generation6RNamespaceOwnerContext', '_Generation6RNamespaceOwnerContextBinding', '_Generation6ROwnerToken', 'int', 'DescriptorSnapshot', 'int', 'int'), '_Generation6RNamespaceMutationPermitBinding': ('int', 'int', '_Generation6RNamespaceMutationPermit', 'int', 'int', '_Generation6RNamespaceCapabilityRecord', '_Generation6RNamespaceCapabilityBinding', '_Generation6RNamespacePresentToken', 'int', 'int', '_Generation6RNamespaceAction', 'str', '_Generation6RNamespaceDirectoryAuthority', 'int', '_Generation6RNamespaceDirectoryRecord', '_Generation6RNamespaceUnlinkPreproof', 'int'), '_Generation6RNamespaceMutationPermitRecord': ('_Generation6RNamespaceMutationPermitBinding', '_Generation6RNamespaceMutationPermitState', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None'), '_Generation6RNamespaceCleanupBudgetEpoch': ('int', 'int', 'int', 'int', 'int', 'int', 'int', 'int'), '_Generation6RNamespaceInventoryCursor': ('int', 'int'), '_Generation6RNamespaceInventoryScan': ('int', 'int'), '_Generation6RNamespaceInventoryAdvance': ('int', 'int'), '_Generation6RNamespaceInventoryItem': ('int', 'int'), '_Generation6RNamespaceEmptyInventory': ('int', 'int'), '_Generation6RNamespaceReceipt': ('int', 'int', 'int | None', 'int | None', 'str'), '_Generation6RNamespaceCleanupBudgetRecord': ('_Generation6RNamespaceCleanupBudgetEpoch', '_Generation6RNamespaceCleanupBudgetState', 'int', 'int', 'int', 'int', 'int', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None'), '_Generation6RNamespaceInventoryCursorBinding': ('int', 'int', '_Generation6RNamespaceInventoryCursor', 'int', 'int', 'int', '_Generation6RNamespaceDirectoryAuthority', 'int', 'int', '_Generation6RNamespaceDirectoryRecord', 'int', '_Generation6RNamespaceDirectoryBinding', 'int', '_Generation6RNamespaceCleanupBudgetEpoch', 'int', 'int', 'int', '_Generation6RNamespaceCleanupBudgetRecord', 'int'), '_Generation6RNamespaceInventoryCursorRecord': ('_Generation6RNamespaceInventoryCursorBinding', 'int', '_Generation6RNamespaceInventoryCursorState', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None'), '_Generation6RNamespaceInventoryScanBinding': ('int', 'int', '_Generation6RNamespaceInventoryScan', 'int', 'int', 'int', '_Generation6RNamespaceInventoryCursorRecord', 'int', '_Generation6RNamespaceInventoryCursorBinding', 'int', '_Generation6RScandirProxy', 'int', '_Generation6RIteratorToken', 'int', 'int', 'int', '_Generation6RNamespaceCleanupBudgetEpoch', 'int', 'int', 'int'), '_Generation6RNamespaceInventoryScanRecord': ('_Generation6RNamespaceInventoryScanBinding', 'int', '_Generation6RNamespaceInventoryScanState', 'int', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None'), '_Generation6RNamespaceInventoryAdvanceBinding': ('int', 'int', '_Generation6RNamespaceInventoryAdvance', 'int', 'int', 'int', '_Generation6RNamespaceInventoryScanRecord', 'int', '_Generation6RNamespaceInventoryScanBinding', 'int', '_Generation6RScandirProxy', 'int', '_Generation6RIteratorToken', 'int', 'int', 'int', 'int', '_Generation6RNamespaceCleanupBudgetEpoch', 'int', '_Generation6RNamespaceCleanupBudgetRecord', 'int', 'int', 'int', 'int'), '_Generation6RNamespaceInventoryAdvanceRecord': ('_Generation6RNamespaceInventoryAdvanceBinding', 'int', '_Generation6RNamespaceInventoryAdvanceState', 'int', 'os.DirEntry[str] | None', 'int | None', '_Generation6RNamespaceInventoryItemRecord | None', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None'), '_Generation6RNamespaceInventoryItemBinding': ('int', 'int', '_Generation6RNamespaceInventoryItem', 'int', 'int', 'int', '_Generation6RNamespaceInventoryAdvanceRecord', 'int', '_Generation6RNamespaceInventoryAdvanceBinding', 'int', '_Generation6RNamespaceInventoryScanRecord', 'int', '_Generation6RNamespaceInventoryScanBinding', 'int', 'os.DirEntry[str]', 'int', 'str', 'int', '_Generation6RNamespaceCleanupBudgetEpoch', 'int', '_Generation6RNamespaceCleanupBudgetRecord', 'int', 'int', 'int', 'int'), '_Generation6RNamespaceInventoryItemRecord': ('_Generation6RNamespaceInventoryItemBinding', 'int', '_Generation6RNamespaceInventoryItemState', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None')}
     frozen_namespace_classes = {'_Generation6RNamespaceDirectoryFact', '_Generation6RNamespaceNameFact', '_Generation6RNamespaceDirectoryAuthority', '_Generation6RNamespaceDirectoryBinding', '_Generation6RNamespaceOwnerContextBinding', '_Generation6RNamespacePresentToken', '_Generation6RNamespaceAbsenceToken', '_Generation6RNamespaceRenameToken', '_Generation6RNamespaceMutationPermit', '_Generation6RNamespaceCapabilityBinding', '_Generation6RNamespaceUnlinkPreproof', '_Generation6RNamespaceMutationPermitBinding', '_Generation6RNamespaceCleanupBudgetEpoch', '_Generation6RNamespaceInventoryCursor', '_Generation6RNamespaceInventoryScan', '_Generation6RNamespaceInventoryAdvance', '_Generation6RNamespaceInventoryItem', '_Generation6RNamespaceEmptyInventory', '_Generation6RNamespaceReceipt', '_Generation6RNamespaceInventoryCursorBinding', '_Generation6RNamespaceInventoryScanBinding', '_Generation6RNamespaceInventoryAdvanceBinding', '_Generation6RNamespaceInventoryItemBinding'}
     mutable_namespace_record_classes = {'_Generation6RNamespaceDirectoryRecord', '_Generation6RNamespaceOwnerContext', '_Generation6RNamespaceCapabilityRecord', '_Generation6RNamespaceMutationPermitRecord', '_Generation6RNamespaceCleanupBudgetRecord', '_Generation6RNamespaceInventoryCursorRecord', '_Generation6RNamespaceInventoryScanRecord', '_Generation6RNamespaceInventoryAdvanceRecord', '_Generation6RNamespaceInventoryItemRecord'}
+    expected_namespace_fields = {
+        **expected_namespace_fields,
+        '_Generation6RNamespaceInventoryClassification': ('serial', 'issuer_identity'),
+        '_Generation6RNamespaceInventoryClassificationBinding': ('serial', 'issuer_identity', 'classification', 'classification_identity', 'classification_serial', 'classification_issuer_identity', 'item_record', 'item_record_identity', 'item_binding', 'item_binding_identity', 'item', 'item_identity', 'advance_record', 'advance_record_identity', 'advance_binding', 'advance_binding_identity', 'scan_record', 'scan_record_identity', 'scan_binding', 'scan_binding_identity', 'cursor_record', 'cursor_record_identity', 'cursor_binding', 'cursor_binding_identity', 'authority', 'authority_identity', 'authority_record', 'authority_record_identity', 'authority_binding', 'authority_binding_identity', 'raw_entry', 'raw_entry_identity', 'component', 'encoded_name_bytes', 'parent_descriptor', 'item_depth', 'cleanup_epoch', 'cleanup_epoch_identity', 'cleanup_budget_record', 'cleanup_budget_record_identity', 'operation_count_before', 'entry_count_before', 'encoded_name_bytes_before', 'depth_high_water_before'),
+        '_Generation6RNamespaceInventoryClassificationRecord': ('binding', 'binding_identity', 'state', 'stat_attempts', 'open_attempts', 'named_snapshot', 'entry_owner', 'descriptor_token', 'owner_context', 'owner_state', 'opened_snapshot', 'entry_mount_id', 'parent_snapshot', 'parent_mount_id', 'current_uid', 'descriptor_flags', 'status_flags', 'operation_count_after_stat', 'operation_count_after_open', 'entry_count_after', 'encoded_name_bytes_after', 'depth_high_water_after', 'node_kind', 'hardlink_group', 'fact', 'attempt_receipt', 'stat_receipt', 'open_receipt', 'close_receipt', 'outcome_receipt', 'terminal_receipt'),
+    }
+    expected_namespace_annotations = {
+        **expected_namespace_annotations,
+        '_Generation6RNamespaceInventoryClassification': ('int', 'int'),
+        '_Generation6RNamespaceInventoryClassificationBinding': ('int', 'int', '_Generation6RNamespaceInventoryClassification', 'int', 'int', 'int', '_Generation6RNamespaceInventoryItemRecord', 'int', '_Generation6RNamespaceInventoryItemBinding', 'int', '_Generation6RNamespaceInventoryItem', 'int', '_Generation6RNamespaceInventoryAdvanceRecord', 'int', '_Generation6RNamespaceInventoryAdvanceBinding', 'int', '_Generation6RNamespaceInventoryScanRecord', 'int', '_Generation6RNamespaceInventoryScanBinding', 'int', '_Generation6RNamespaceInventoryCursorRecord', 'int', '_Generation6RNamespaceInventoryCursorBinding', 'int', '_Generation6RNamespaceDirectoryAuthority', 'int', '_Generation6RNamespaceDirectoryRecord', 'int', '_Generation6RNamespaceDirectoryBinding', 'int', 'os.DirEntry[str]', 'int', 'str', 'int', 'int', 'int', '_Generation6RNamespaceCleanupBudgetEpoch', 'int', '_Generation6RNamespaceCleanupBudgetRecord', 'int', 'int', 'int', 'int', 'int'),
+        '_Generation6RNamespaceInventoryClassificationRecord': ('_Generation6RNamespaceInventoryClassificationBinding', 'int', '_Generation6RNamespaceInventoryClassificationState', 'int', 'int', 'DescriptorSnapshot | None', 'FdOwner | None', '_Generation6ROwnerToken | None', '_Generation6RNamespaceOwnerContext | None', '_Generation6RNamespaceOwnerState | None', 'DescriptorSnapshot | None', 'int | None', 'DescriptorSnapshot | None', 'int | None', 'int | None', 'int | None', 'int | None', 'int | None', 'int | None', 'int | None', 'int | None', 'int | None', '_Generation6RNamespaceNodeKind | None', 'str | None', '_Generation6RNamespaceNameFact | None', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None'),
+    }
+    frozen_namespace_classes = frozen_namespace_classes | {'_Generation6RNamespaceInventoryClassification', '_Generation6RNamespaceInventoryClassificationBinding'}
+    mutable_namespace_record_classes = mutable_namespace_record_classes | {'_Generation6RNamespaceInventoryClassificationRecord'}
     for name, expected_fields in expected_namespace_fields.items():
         class_node = namespace_classes[name]
         decorators = tuple((ast.unparse(value) for value in class_node.decorator_list))
@@ -19024,32 +20199,125 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     namespace_aliases = tuple((node for node in syntax.body if isinstance(node, ast.Assign) and any((isinstance(target, ast.Name) and target.id == '_Generation6RNamespaceLiveToken' for target in node.targets))))
     _require(len(namespace_aliases) == 1 and ast.unparse(namespace_aliases[0].value) == '_Generation6RNamespacePresentToken | _Generation6RNamespaceAbsenceToken | _Generation6RNamespaceRenameToken', 'R namespace static live-token union differs')
     namespace_journal = namespace_classes['_Generation6RNamespaceJournal']
-    namespace_method_inventory = ('__init__', '_require_dependencies', '_issue_serial', '_append_receipt', '_read_cleanup_budget_clock', '_issue_cleanup_budget_epoch', '_require_live_cleanup_budget', '_terminalize_cleanup_budget', '_charge_cleanup_budget', '_begin_publication', '_finish_publication', '_fail_publication', '_require_clean_guard', '_require_building', '_copy_directory_fact', '_register_authority', '_require_authority', '_reauthenticate_directory', '_issue_inventory_cursor_provenance', '_require_inventory_cursor_provenance', '_issue_current_inventory_cursor', '_require_current_inventory_cursor', '_terminalize_inventory_cursor', '_acquire_metered_inventory_scan', '_require_current_inventory_scan', '_terminalize_inventory_scan', '_fail_inventory_advance_uncertain', '_terminalize_inventory_scan_end_observed', '_require_current_inventory_item', '_terminalize_inventory_item', '_yield_metered_inventory_item', 'register_borrowed_directory', '_retain_uncertain_owner', '_reconcile_mount_poison', '_namespace_mount_id', '_close_namespace_owner', '_namespace_owner_close_verified', '_retain_untransferred_raw', '_open_namespace_owner', '_require_same_parent_proof', 'open_owned_cursor', 'close_owned_cursor', '_acquire_name_owner', '_validate_node_kind', '_copy_name_fact', '_register_name_fact', 'seal_name', '_require_name_fact', '_name_fact_matches', 'seal', '_require_teardown_authorization', '_require_name_absent', '_require_live_capability_slot', '_receipt_binding_matches', '_require_receipt_binding', '_publish_capability', '_require_live_capability', '_preauthorize_present_unlink', '_postauthorize_present_unlink', '_issue_a2_mutation_permit', '_preproof_parent_authority_matches', '_postissuer_capability_matches', '_terminal_unlink_capability_matches', '_trusted_live_mutation_permit', '_require_returned_mutation_permit', '_fail_present_unlink_preproof', '_fail_invalid_mutation_permit', '_fail_present_unlink_attempt', '_fail_present_unlink_terminal', '_archive_mutation_permit', 'consume_present', '_archive_capability', 'authorize_present', 'authorize_absence', 'authorize_rename', 'abandon_token')
+    namespace_method_inventory: tuple[str, ...] = ('__init__', '_require_dependencies', '_issue_serial', '_append_receipt', '_read_cleanup_budget_clock', '_issue_cleanup_budget_epoch', '_require_live_cleanup_budget', '_terminalize_cleanup_budget', '_charge_cleanup_budget', '_begin_publication', '_finish_publication', '_fail_publication', '_require_clean_guard', '_require_building', '_copy_directory_fact', '_register_authority', '_require_authority', '_reauthenticate_directory', '_issue_inventory_cursor_provenance', '_require_inventory_cursor_provenance', '_issue_current_inventory_cursor', '_require_current_inventory_cursor', '_terminalize_inventory_cursor', '_acquire_metered_inventory_scan', '_require_current_inventory_scan', '_terminalize_inventory_scan', '_fail_inventory_advance_uncertain', '_terminalize_inventory_scan_end_observed', '_require_current_inventory_item', '_terminalize_inventory_item', '_yield_metered_inventory_item', 'register_borrowed_directory', '_retain_uncertain_owner', '_reconcile_mount_poison', '_namespace_mount_id', '_close_namespace_owner', '_namespace_owner_close_verified', '_retain_untransferred_raw', '_open_namespace_owner', '_require_same_parent_proof', 'open_owned_cursor', 'close_owned_cursor', '_acquire_name_owner', '_validate_node_kind', '_copy_name_fact', '_register_name_fact', 'seal_name', '_require_name_fact', '_name_fact_matches', 'seal', '_require_teardown_authorization', '_require_name_absent', '_require_live_capability_slot', '_receipt_binding_matches', '_require_receipt_binding', '_publish_capability', '_require_live_capability', '_preauthorize_present_unlink', '_postauthorize_present_unlink', '_issue_a2_mutation_permit', '_preproof_parent_authority_matches', '_postissuer_capability_matches', '_terminal_unlink_capability_matches', '_trusted_live_mutation_permit', '_require_returned_mutation_permit', '_fail_present_unlink_preproof', '_fail_invalid_mutation_permit', '_fail_present_unlink_attempt', '_fail_present_unlink_terminal', '_archive_mutation_permit', 'consume_present', '_archive_capability', 'authorize_present', 'authorize_absence', 'authorize_rename', 'abandon_token')
+    namespace_method_inventory = (
+        *namespace_method_inventory[:31],
+        '_require_pristine_inventory_classification',
+        '_require_current_inventory_classification',
+        '_reauthenticate_inventory_classification_parent',
+        '_derive_inventory_classification',
+        '_close_inventory_classification_owner',
+        '_terminalize_inventory_classification',
+        '_fail_inventory_classification_uncertain',
+        '_classify_metered_inventory_item',
+        *namespace_method_inventory[31:38],
+        '_close_rejected_namespace_raw_once',
+        *namespace_method_inventory[38:47],
+        '_register_inventory_classification_name_fact',
+        *namespace_method_inventory[47:],
+    )
     observed_namespace_methods = tuple((node.name for node in namespace_journal.body if isinstance(node, ast.FunctionDef)))
     _require(observed_namespace_methods == namespace_method_inventory, 'R namespace static journal method inventory differs')
     namespace_methods = {name: class_method(namespace_journal, name) for name in namespace_method_inventory}
+    a2g_helper_names = ('_require_pristine_inventory_classification', '_require_current_inventory_classification', '_reauthenticate_inventory_classification_parent', '_derive_inventory_classification', '_close_rejected_namespace_raw_once', '_close_inventory_classification_owner', '_register_inventory_classification_name_fact', '_terminalize_inventory_classification', '_fail_inventory_classification_uncertain', '_classify_metered_inventory_item')
+    _require(len(a2g_helper_names) == 10 and all(name in namespace_methods for name in a2g_helper_names), 'R namespace A2g helper-role inventory differs')
+    expected_a2g_signatures = {
+        '_require_pristine_inventory_classification': ('self, item: _Generation6RNamespaceInventoryItem', '_Generation6RNamespaceInventoryItemRecord'),
+        '_require_current_inventory_classification': ('self, classification: _Generation6RNamespaceInventoryClassification', '_Generation6RNamespaceInventoryClassificationRecord'),
+        '_reauthenticate_inventory_classification_parent': ('self, record: _Generation6RNamespaceInventoryClassificationRecord', 'tuple[_Generation6RNamespaceDirectoryRecord, _Generation6ROwnerRecord, int, DescriptorSnapshot, int, int, int]'),
+        '_derive_inventory_classification': ('self, snapshot: DescriptorSnapshot, mount_id: int, expected_uid: int, expected_mount_id: int', 'tuple[_Generation6RNamespaceNodeKind, _Generation6RNamespaceInventoryClassificationState, str | None]'),
+        '_close_rejected_namespace_raw_once': ('self, raw_descriptor: int', 'None'),
+        '_close_inventory_classification_owner': ('self, record: _Generation6RNamespaceInventoryClassificationRecord, *, event: _Generation6RNamespaceCloseEvent', 'None'),
+        '_register_inventory_classification_name_fact': ('self, record: _Generation6RNamespaceInventoryClassificationRecord', '_Generation6RNamespaceNameFact'),
+        '_terminalize_inventory_classification': ('self, record: _Generation6RNamespaceInventoryClassificationRecord, state: _Generation6RNamespaceInventoryClassificationState', 'None'),
+        '_fail_inventory_classification_uncertain': ('self, record: _Generation6RNamespaceInventoryClassificationRecord | None, item_record: _Generation6RNamespaceInventoryItemRecord | None, owner: FdOwner | None, primary: BaseException', 'None'),
+        '_classify_metered_inventory_item': ('self, item: _Generation6RNamespaceInventoryItem', '_Generation6RNamespaceInventoryClassification'),
+    }
+    _require(all(ast.unparse(namespace_methods[name].args) == signature and namespace_methods[name].returns is not None and ast.unparse(cast(ast.AST, namespace_methods[name].returns)) == returns for name, (signature, returns) in expected_a2g_signatures.items()), 'R namespace A2g helper signatures differ')
+    def namespace_callers(target: str) -> tuple[tuple[str, int], ...]:
+        return tuple((name, count) for name in namespace_method_inventory if (count := call_targets(namespace_methods[name]).count(f'self.{target}')))
+    _require(namespace_callers('_validate_node_kind') == (('_copy_name_fact', 1),) and namespace_callers('_copy_name_fact') == (('seal_name', 1), ('_register_inventory_classification_name_fact', 1)) and namespace_callers('_register_name_fact') == (('seal_name', 1), ('_register_inventory_classification_name_fact', 1)) and namespace_callers('_close_inventory_classification_owner') == (('_fail_inventory_classification_uncertain', 1), ('_classify_metered_inventory_item', 1)) and namespace_callers('_close_namespace_owner') == (('_close_inventory_classification_owner', 1), ('open_owned_cursor', 1), ('close_owned_cursor', 1), ('_acquire_name_owner', 1), ('seal_name', 2), ('_fail_present_unlink_preproof', 1), ('_fail_invalid_mutation_permit', 1), ('_fail_present_unlink_attempt', 1), ('consume_present', 1), ('authorize_present', 1), ('authorize_rename', 1), ('abandon_token', 1)) and namespace_callers('_charge_cleanup_budget') == (('_acquire_metered_inventory_scan', 1), ('_yield_metered_inventory_item', 1), ('_classify_metered_inventory_item', 2)) and namespace_callers('_open_namespace_owner') == (('_classify_metered_inventory_item', 1), ('open_owned_cursor', 1), ('_acquire_name_owner', 1)) and namespace_callers('_close_rejected_namespace_raw_once') == (('_open_namespace_owner', 1),) and namespace_callers('_require_current_inventory_item') == (('_require_pristine_inventory_classification', 1),), 'R namespace A2g exact caller/count inventory differs')
+    validate_kind = namespace_methods['_validate_node_kind']
+    copy_name_fact = namespace_methods['_copy_name_fact']
+    _require(ast.unparse(validate_kind.args) == 'self, snapshot: DescriptorSnapshot, mount_id: int, kind: _Generation6RNamespaceNodeKind, hardlink_group: str | None' and call_targets(copy_name_fact).count('self._validate_node_kind') == 1 and 'self._validate_node_kind(snapshot, mount_id, kind, hardlink_group)' in ast.unparse(copy_name_fact), 'R namespace A2g validate/copy signature propagation differs')
+    classifier = namespace_methods['_classify_metered_inventory_item']
+    parent_reauthentication = namespace_methods['_reauthenticate_inventory_classification_parent']
+    rejected_close = namespace_methods['_close_rejected_namespace_raw_once']
+    open_namespace_owner = namespace_methods['_open_namespace_owner']
+    classifier_targets = call_targets(classifier)
+    parent_targets = call_targets(parent_reauthentication)
+    rejected_targets = call_targets(rejected_close)
+    open_targets = call_targets(open_namespace_owner)
+    _require(classifier_targets.count('self._charge_cleanup_budget') == 2 and classifier_targets.count('_GENERATION6_R_NAMESPACE_REAL_OS_STAT') == 1 and classifier_targets.count('self._open_namespace_owner') == 1 and classifier_targets.count('self._namespace_mount_id') == 1 and classifier_targets.count('self._reauthenticate_inventory_classification_parent') == 1 and classifier_targets.count('_GENERATION6_R_NAMESPACE_REAL_OS_GETUID') == 1 and classifier_targets.count('_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD') == 0 and classifier_targets.count('_GENERATION6_R_NAMESPACE_REAL_OS_FSTAT') == 0 and classifier_targets.count('_GENERATION6_R_NAMESPACE_REAL_FCNTL') == 0 and parent_targets.count('_GENERATION6_R_NAMESPACE_REAL_OS_FSTAT') == 1 and parent_targets.count('self._namespace_mount_id') == 1 and parent_targets.count('_GENERATION6_R_NAMESPACE_REAL_FCNTL') == 2 and parent_targets.count('_GENERATION6_R_NAMESPACE_REAL_OS_STAT') == 0 and parent_targets.count('self._charge_cleanup_budget') == 0, 'R namespace A2g exact observation inventory differs')
+    classifier_source = ast.unparse(classifier)
+    classifier_calls = calls(classifier)
+    classifier_charge_calls = tuple(call for call in classifier_calls if ast.unparse(call.func) == 'self._charge_cleanup_budget')
+    classifier_stat_calls = tuple(call for call in classifier_calls if ast.unparse(call.func) == '_GENERATION6_R_NAMESPACE_REAL_OS_STAT')
+    classifier_open_calls = tuple(call for call in classifier_calls if ast.unparse(call.func) == 'self._open_namespace_owner')
+    classifier_authentication_fragments = ('binding.raw_entry.name == binding.component', 'opened_snapshot == named_snapshot', 'descriptor_token.snapshot == opened_snapshot', 'named_snapshot.uid == current_uid', 'named_snapshot.uid == authority_binding.fact.uid', 'entry_mount_id == parent_mount_id', 'entry_mount_id == authority_binding.fact.mount_id', 'parent_snapshot == parent_descriptor_record.token.snapshot', 'descriptor_flags == fcntl.FD_CLOEXEC', 'status_flags & os.O_ACCMODE == os.O_RDONLY', 'status_flags & os.O_PATH == os.O_PATH')
+    _require(len(classifier_charge_calls) == 2 and len(classifier_stat_calls) == 1 and len(classifier_open_calls) == 1 and classifier_charge_calls[0].lineno < classifier_stat_calls[0].lineno < classifier_charge_calls[1].lineno < classifier_open_calls[0].lineno and classifier_source.find('classification_record.stat_attempts = 1') < classifier_source.find('_GENERATION6_R_NAMESPACE_REAL_OS_STAT') and classifier_source.find('classification_record.open_attempts = 1') < classifier_source.find('self._open_namespace_owner') and classifier_source.count('entry_increment=0') == 2 and classifier_source.count('encoded_name_bytes_increment=0') == 2 and 'os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC' in classifier_source and 'descriptor_token.snapshot' in classifier_source and 'descriptor_token.fd_flags' in classifier_source and 'descriptor_token.status_flags' in classifier_source and all(fragment in classifier_source for fragment in classifier_authentication_fragments) and not any(target.startswith('binding.raw_entry.') for target in classifier_targets) and 'budget_record.operation_count == binding.operation_count_before + 2' in classifier_source and 'budget_record.entry_count == binding.entry_count_before' in classifier_source and 'budget_record.encoded_name_bytes == binding.encoded_name_bytes_before' in classifier_source, 'R namespace A2g metering/authentication source differs')
+    open_source = ast.unparse(open_namespace_owner)
+    open_order = tuple(open_source.find(fragment) for fragment in ('owner = object.__new__(FdOwner)', 'vars(owner) == {}', 'raw_result = _GENERATION6_R_NAMESPACE_REAL_OS_OPEN', 'invalid_evidence = raw_result', 'raw_result = _PID_SENTINEL', '_GENERATION6_R_REAL_LIST_APPEND', 'low_descriptor = raw_result', 'self._close_rejected_namespace_raw_once(low_descriptor)', 'accepted_descriptor = raw_result', 'initialization_descriptor = accepted_descriptor', 'initialization_started = True', 'accepted_descriptor = _PID_SENTINEL', 'FdOwner.__init__(owner, initialization_descriptor, exact_label)'))
+    _require(all(index >= 0 for index in open_order) and all(open_order[index] < open_order[index + 1] for index in range(len(open_order) - 1)) and open_targets.count('object.__new__') == 1 and open_targets.count('_GENERATION6_R_NAMESPACE_REAL_OS_OPEN') == 1 and open_targets.count('_GENERATION6_R_REAL_LIST_APPEND') == 1 and open_targets.count('self._close_rejected_namespace_raw_once') == 1 and open_targets.count('FdOwner.__init__') == 1 and open_targets.count('_GENERATION6_R_REAL_OS_CLOSE') == 0 and open_targets.count('self._retain_untransferred_raw') == 0 and not any(node.finalbody for node in ast.walk(open_namespace_owner) if isinstance(node, ast.Try)), 'R namespace A2g post-open responsibility partition differs')
+    rejected_source = ast.unparse(rejected_close)
+    rejected_order = tuple(rejected_source.find(fragment) for fragment in ('_GENERATION6_R_REAL_LIST_APPEND', '_GENERATION6_R_REAL_OS_CLOSE', 'self._poisoned_descriptors.add', 'self._phase = _Generation6RNamespacePhase.UNCERTAIN'))
+    rejected_top_level_tries = tuple(node for node in rejected_close.body if isinstance(node, ast.Try))
+    _require(rejected_targets.count('_GENERATION6_R_REAL_LIST_APPEND') == 1 and rejected_targets.count('_GENERATION6_R_REAL_OS_CLOSE') == 1 and all(index >= 0 for index in rejected_order) and all(rejected_order[index] < rejected_order[index + 1] for index in range(len(rejected_order) - 1)) and len(rejected_top_level_tries) == 2 and call_targets(rejected_top_level_tries[0]).count('_GENERATION6_R_REAL_LIST_APPEND') == 1 and call_targets(rejected_top_level_tries[1]).count('_GENERATION6_R_REAL_OS_CLOSE') == 1 and rejected_targets.count('self._descriptor_ledger.initialize_owner') == 0 and rejected_targets.count('self._namespace_mount_id') == 0 and rejected_targets.count('_GENERATION6_R_NAMESPACE_REAL_OS_FSTAT') == 0 and rejected_targets.count('_GENERATION6_R_NAMESPACE_REAL_FCNTL') == 0 and rejected_targets.count('self._register_name_fact') == 0, 'R namespace A2g rejected-descriptor close differs')
+    a2g_graph_nodes = (*tuple(namespace_methods[name] for name in a2g_helper_names), open_namespace_owner)
+    a2g_graph_targets = tuple(target for node in a2g_graph_nodes for target in call_targets(node))
+    a2g_graph_names = tuple(candidate.id for node in a2g_graph_nodes for candidate in ast.walk(node) if isinstance(candidate, ast.Name))
+    _require(all(a2g_graph_targets.count(f'self.{name}') == 0 for name in ('_acquire_name_owner', '_reauthenticate_directory', '_terminalize_inventory_item', 'seal_name', '_publish_capability')) and '_Generation6RNamespaceEmptyInventory' not in a2g_graph_names and a2g_graph_targets.count('_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK') == 0 and a2g_graph_targets.count('os.rmdir') == 0 and a2g_graph_targets.count('os.unlink') == 0 and namespace_callers('_classify_metered_inventory_item') == (), 'R namespace A2g integration/exclusion graph differs')
+    namespace_call_targets = call_targets(namespace_journal)
+    empty_inventory_roots = tuple(node for node in syntax.body if isinstance(node, ast.ClassDef) and node.name == '_Generation6RNamespaceEmptyInventory')
+    empty_inventory_constructors = tuple(call for call in calls(syntax) if ast.unparse(call.func) == '_Generation6RNamespaceEmptyInventory')
+    unlink_capture_roots = tuple(node for node in syntax.body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == '_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK')
+    unlink_callers = tuple(name for name in namespace_method_inventory if call_targets(namespace_methods[name]).count('_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK'))
+    publish_definitions = tuple(node for node in namespace_journal.body if isinstance(node, ast.FunctionDef) and node.name == '_publish_capability')
+    forbidden_a2g_surface_fragments = ('dispatch', 'runtime', 'remote', 'production', 'trading', 'broker', 'exchange', 'order', 'publish')
+    _require(len(empty_inventory_roots) == 1 and len(empty_inventory_constructors) == 0 and a2g_graph_names.count('_Generation6RNamespaceEmptyInventory') == 0 and len(unlink_capture_roots) == 1 and namespace_call_targets.count('_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK') == 1 and unlink_callers == ('consume_present',) and a2g_graph_targets.count('_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK') == 0 and len(publish_definitions) == 1 and namespace_callers('_publish_capability') == (('authorize_present', 1), ('authorize_absence', 1), ('authorize_rename', 1)) and namespace_call_targets.count('self._publish_capability') == 3 and a2g_graph_targets.count('self._publish_capability') == 0 and namespace_call_targets.count('os.rmdir') == 0 and call_targets(syntax).count('os.rmdir') == 2 and not any(fragment in target.lower() for fragment in forbidden_a2g_surface_fragments for target in a2g_graph_targets), 'R namespace A2g scoped inherited surface differs')
+    derive_source = ast.unparse(namespace_methods['_derive_inventory_classification'])
+    register_source = ast.unparse(namespace_methods['_register_name_fact'])
+    seal_source = ast.unparse(namespace_methods['seal'])
+    hardlink_static_cases = ((1, 'REGULAR'), (2, 'HARDLINK'), (3, 'HARDLINK'), (17, 'HARDLINK'))
+    _require(hardlink_static_cases == tuple((count, 'HARDLINK' if count > 1 else 'REGULAR') for count in (1, 2, 3, 17)) and 'snapshot.link_count > 1' in derive_source and 'snapshot.link_count == 1' in derive_source and 'r6-hardlink:{mount_id}:{snapshot.device}:{snapshot.inode}' in derive_source and 'len(group) < fact.link_count' in register_source and 'candidate.link_count == fact.link_count' in register_source and '1 <= len(members) <= members[0].link_count' in seal_source and 'members[0].link_count > 1' in seal_source and 'len(members) == 2' not in seal_source, 'R namespace A2g hardlink generalization differs')
+    a2g_event_vocabulary = ('INVENTORY_CLASSIFICATION_ATTEMPTING', 'INVENTORY_CLASSIFICATION_NOFOLLOW_STAT_OBSERVED', 'INVENTORY_CLASSIFICATION_HANDLE_AUTHENTICATED', 'INVENTORY_CLASSIFICATION_HANDLE_CLOSED', 'INVENTORY_CLASSIFICATION_ABORT_CLOSED', 'INVENTORY_CLASSIFICATION_REMOVABLE_CANDIDATE', 'INVENTORY_CLASSIFICATION_KNOWN_RESIDUE', 'INVENTORY_ITEM_CLASSIFIED_REMOVABLE_CANDIDATE', 'INVENTORY_ITEM_CLASSIFIED_KNOWN_RESIDUE', 'INVENTORY_CLASSIFICATION_UNCERTAIN', 'INVENTORY_ITEM_CLASSIFICATION_UNCERTAIN', 'NAME_FACT_SEALED')
+    a2g_string_values = tuple(candidate.value for node in a2g_graph_nodes for candidate in ast.walk(node) if isinstance(candidate, ast.Constant) and type(candidate.value) is str)
+    _require(all(value in a2g_string_values or value in tuple(member for members in namespace_enum_members.values() for member in members) for value in a2g_event_vocabulary), 'R namespace A2g receipt vocabulary differs')
+    terminalize_classification = namespace_methods['_terminalize_inventory_classification']
+    fail_classification = namespace_methods['_fail_inventory_classification_uncertain']
+    classifier_try = tuple(node for node in classifier.body if isinstance(node, ast.Try))
+    _require(len(classifier_try) == 1 and isinstance(classifier_try[0].body[-1], ast.Return) and isinstance(classifier_try[0].body[-2], ast.Expr) and isinstance(classifier_try[0].body[-2].value, ast.Call) and ast.unparse(classifier_try[0].body[-2].value.func) == 'self._terminalize_inventory_classification' and isinstance(terminalize_classification.body[-1], ast.Assign) and ast.unparse(terminalize_classification.body[-1].targets[0]) == 'self._live_inventory_classification_record' and isinstance(terminalize_classification.body[-1].value, ast.Constant) and terminalize_classification.body[-1].value.value is None and isinstance(fail_classification.body[-2], ast.Assign) and ast.unparse(fail_classification.body[-2].targets[0]) == 'self._live_inventory_classification_record' and isinstance(fail_classification.body[-2].value, ast.Constant) and fail_classification.body[-2].value.value is None and isinstance(fail_classification.body[-1], ast.Raise), 'R namespace A2g final publication/failure ordering differs')
+    classifier_success_order = tuple(classifier_source.find(fragment) for fragment in ('self._derive_inventory_classification', 'self._close_inventory_classification_owner', 'self._register_inventory_classification_name_fact', 'self._terminalize_inventory_classification', 'return classification'))
+    terminalize_source = ast.unparse(terminalize_classification)
+    terminalize_success_order = tuple(terminalize_source.find(fragment) for fragment in ('record.state = state', 'item_record.state = item_state', 'outcome_receipt = self._append_receipt', 'record.outcome_receipt = outcome_receipt', 'terminal_receipt = self._append_receipt', '\n    item_record.terminal_receipt = terminal_receipt', '\n    record.terminal_receipt = terminal_receipt', 'self._archived_inventory_item_records.append(item_record)', 'self._archived_inventory_classification_records.append(record)', 'self._inventory_classification_residue_evidence.append(record)', 'self._live_inventory_item_record = None', 'self._live_inventory_classification_record = None'))
+    fail_source = ast.unparse(fail_classification)
+    failure_order = tuple(fail_source.find(fragment) for fragment in ('exact_record.state = _Generation6RNamespaceInventoryClassificationState.UNCERTAIN', 'exact_item_record.state = _Generation6RNamespaceInventoryItemState.UNCERTAIN', 'self._close_inventory_classification_owner', 'classification_receipt = self._append_receipt', 'item_receipt = self._append_receipt', 'self._archived_inventory_item_records.append(exact_item_record)', 'self._archived_inventory_classification_records.append(exact_record)', 'self._inventory_classification_residue_evidence.append(exact_record)', 'self._live_inventory_item_record = None', 'self._live_inventory_classification_record = None', 'raise primary'))
+    _require(all(index >= 0 for index in classifier_success_order) and all(classifier_success_order[index] < classifier_success_order[index + 1] for index in range(len(classifier_success_order) - 1)) and all(index >= 0 for index in terminalize_success_order) and all(terminalize_success_order[index] < terminalize_success_order[index + 1] for index in range(len(terminalize_success_order) - 1)) and all(index >= 0 for index in failure_order) and all(failure_order[index] < failure_order[index + 1] for index in range(len(failure_order) - 1)) and terminalize_source.count('self._live_inventory_classification_record = None') == 1 and fail_source.count('self._live_inventory_classification_record = None') == 1, 'R namespace A2g exact success/failure publication sequence differs')
+    namespace_init_source = ast.unparse(namespace_methods['__init__'])
+    a2g_store_fragments = ('self._inventory_classification_records_by_identity', 'self._inventory_classification_records_by_serial', 'self._live_inventory_classification_record', 'self._archived_inventory_classification_records', 'self._inventory_classification_residue_evidence', 'self._inventory_classification_descriptor_quarantine', 'self._inventory_classification_faulted')
+    _require(all(namespace_init_source.count(fragment) == 1 for fragment in a2g_store_fragments), 'R namespace A2g exact store inventory differs')
     namespace_source = ast.unparse(namespace_journal)
     bundle_start_nodes = tuple((node for node in syntax.body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and (node.target.id == '_GENERATION6_R_REAL_NEXT')))
-    _require(len(bundle_start_nodes) == 1, 'R namespace static A2f bundle start differs')
+    _require(len(bundle_start_nodes) == 1, 'R namespace static A2g bundle start differs')
     bundle_start = bundle_start_nodes[0].lineno
     _require(type(namespace_journal.end_lineno) is int, 'R namespace static bundle end differs')
     bundle_end = cast(int, namespace_journal.end_lineno)
     namespace_bundle_nodes = tuple((node for node in syntax.body if bundle_start <= node.lineno <= bundle_end))
     observed_bundle_inventory = tuple((f'capture:{node.target.id}' if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) else f'class:{node.name}' if isinstance(node, ast.ClassDef) else f'function:{node.name}' if isinstance(node, ast.FunctionDef) else 'alias:_Generation6RNamespaceLiveToken' if isinstance(node, ast.Assign) and any((isinstance(target, ast.Name) and target.id == '_Generation6RNamespaceLiveToken' for target in node.targets)) else f'unexpected:{type(node).__name__}' for node in namespace_bundle_nodes))
     canonical_capture_names = ('_G6R_PN', '_G6R_PK', '_G6R_PE', '_G6R_IK', '_G6R_IE', '_G6R_BK', '_G6R_BE', '_G6R_OK', '_G6R_OE', '_G6R_LK', '_G6R_LE', '_G6R_TK', '_G6R_TE', '_G6R_WK', '_G6R_WE', '_G6R_VK', '_G6R_VE', '_GENERATION6_R_AUTHORITY_EVENT_CLASS_SEAL', '_G6R_SS', '_G6R_SK', '_G6R_SE', '_G6R_AF', '_G6R_AI', '_G6R_NF', '_G6R_NI', '_G6R_VC', '_G6R_VF', '_G6R_VI', '_G6R_VB', '_G6R_G', '_G6R_D')
-    _require(len(namespace_bundle_nodes) == 155 and all(f'capture:{name}' in observed_bundle_inventory for name in canonical_capture_names) and not any(label.startswith('unexpected:') for label in observed_bundle_inventory), 'R namespace canonical capture inventory differs')
+    _require(len(namespace_bundle_nodes) == 159 and all(f'capture:{name}' in observed_bundle_inventory for name in canonical_capture_names) and not any(label.startswith('unexpected:') for label in observed_bundle_inventory), 'R namespace canonical capture inventory differs')
     normalized_bundle_source = '\n'.join(source.splitlines()[bundle_start - 1:bundle_end]) + '\n'
-    bundle_domain = b'TASK-064\x00GEN6\x00R-A2f\x00source-v1\x00'
+    bundle_domain = b'TASK-064\x00GEN6\x00R-A2g\x00source-v1\x00'
     bundle_preimage = bundle_domain + normalized_bundle_source.encode('utf-8')
     bundle_digest = hashlib.sha256(bundle_preimage).hexdigest()
-    _require(bundle_start == 10578 and bundle_end == 18825 and (namespace_bundle_nodes[0] is bundle_start_nodes[0]) and (namespace_bundle_nodes[-1] is namespace_journal) and all((type(node.end_lineno) is int and node.end_lineno < namespace_bundle_nodes[index + 1].lineno for index, node in enumerate(namespace_bundle_nodes[:-1]))) and (len(bundle_preimage) == 736905) and (bundle_digest == '9e27cffee2a7d32f4e838cbec6687bef765762a1f2b4a55bee7ff08002000d6e'), 'R namespace A2f reviewed source-bundle digest differs')
+    _require(bundle_start == 10578 and bundle_end == 19969 and (namespace_bundle_nodes[0] is bundle_start_nodes[0]) and (namespace_bundle_nodes[-1] is namespace_journal) and all((type(node.end_lineno) is int and node.end_lineno < namespace_bundle_nodes[index + 1].lineno for index, node in enumerate(namespace_bundle_nodes[:-1]))) and (len(bundle_preimage) == 791648) and (bundle_digest == '2682341b75ab6bcef8ca26a846f7ea6ccd43c59be49ea0a08508a3feeb3e0694'), 'R namespace A2g reviewed source-bundle digest differs')
     cap1_schema_domain = b'TASK-064\x00GEN6\x00R-CAP1\x00ast-schema-v1\x00'
     cap1_projection_domain = b'TASK-064\x00GEN6\x00R-CAP1\x00semantic-projection-v1\x00'
     _require(sys.version_info[:3] == (3, 13, 14), 'R CAP1 Python AST runtime differs')
     cap1_bundle_walk = tuple(candidate for node in namespace_bundle_nodes for candidate in ast.walk(node))
     cap1_schema_rows = tuple(sorted({(type(node).__name__, tuple(node._fields)) for node in cap1_bundle_walk}))
     cap1_schema_index = {row: index for index, row in enumerate(cap1_schema_rows)}
-    _require(len(cap1_bundle_walk) == 175849 and len(cap1_schema_rows) == 63 and len(cap1_schema_index) == 63, 'R CAP1 AST inventory differs')
+    _require(len(cap1_bundle_walk) == 181988 and len(cap1_schema_rows) == 63 and len(cap1_schema_index) == 63, 'R CAP1 AST inventory differs')
     def cap1_canonical_json(value: object) -> bytes:
         return json.dumps(value, ensure_ascii=True, allow_nan=False, separators=(',', ':'), sort_keys=False).encode('ascii')
     def cap1_scalar(value: object) -> list[object]:
@@ -19105,178 +20373,182 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         if type(node.end_lineno) is not int:
             raise ContractError('R CAP1 bundle root end line differs')
         return node.end_lineno
-    expected_bundle_root_projection_inventory: tuple[tuple[str, int, int, str], ...] = (
-        ('capture:_GENERATION6_R_REAL_NEXT', 10578, 10578, '4523be89a794e536cd2782d52d04479c3fda6839519e40ebadc3aa66b477c9a0'),
-        ('capture:_GENERATION6_R_REAL_STOP_ITERATION', 10579, 10579, 'b3304f6ad1881a808b91ffef6d322df48b175df9baedeaabc6d4c5862e8a7057'),
-        ('capture:_GENERATION6_R_REAL_DIRENTRY_TYPE', 10580, 10580, 'bffce5fe2eb9d26556233cab2d95f2a9bc8fe9205b036d43debb0eb355bed380'),
-        ('capture:_GENERATION6_R_REAL_LIST_APPEND', 10581, 10581, '3f1a825607661cc1cd338b1866037abe4cbea4c4d75d011b39b9451b47985307'),
-        ('capture:_GENERATION6_R_REAL_LIST_GETITEM', 10582, 10582, 'ef4f0db9d801560179d43eedb46025ea2cb9a34d96c76de051be9a1960be2d7d'),
-        ('capture:_GENERATION6_R_REAL_TYPE', 10583, 10583, '7a28612077526fad17a0e48f0fe2ed31cf98dcc90478804fb1f0616041ca8533'),
-        ('capture:_GENERATION6_R_REAL_ID', 10584, 10584, 'd8093d0865f2d3c08f78da09b5824bce5f5b2d5df104e95436bf0041f854d36b'),
-        ('capture:_GENERATION6_R_REAL_INT', 10585, 10585, '3e8dace45fc9d8b59d69f970b7f89f0ce7d16e0f2970a58c23808806816e1d60'),
-        ('capture:_GENERATION6_R_REAL_BOOL', 10586, 10586, '24a58e2265cc514dbede67d288a35e5485be9e498bf6aca6987f3dcd1a0a7249'),
-        ('capture:_GENERATION6_R_REAL_TUPLE', 10587, 10587, 'eb3f6d15782886fea6ab194c930386a3d72a5751888450e7189d89db7cdcd45b'),
-        ('capture:_GENERATION6_R_REAL_DICT', 10588, 10588, '972b3052bbcb4e4080380f0b0fd3b9632876afe8e317bdf62464d443c94e97e5'),
-        ('capture:_GENERATION6_R_REAL_LEN', 10589, 10589, 'd72cfeb414f189b01a9f0e7997ff1093b7d6b56571ea563d2cb02cb15a359d8c'),
-        ('capture:_GENERATION6_R_REAL_GETATTR', 10590, 10590, 'b91a19f4d8e4c9480515e07f17e6fa41c52f1acf3a4663aef4baa660d25c33a7'),
-        ('capture:_GENERATION6_R_REAL_DICT_ITEMS', 10591, 10591, 'c1db68590cb848ed54a4659e58d842af0827ffd9ab1aa26d602ae0215164d4b7'),
-        ('capture:_GENERATION6_R_REAL_TYPE_GETATTRIBUTE', 10592, 10592, '1d2aa49e145bf0a3c327030bea259a27315215af439377b6f8e2ed52cf1c743a'),
-        ('capture:_GENERATION6_R_REAL_OBJECT_GETATTRIBUTE', 10593, 10593, '8be879e00782aefe3456bf80423f5bc7c19f0468514e78a8401e06691a4fd4f0'),
-        ('capture:_GENERATION6_R_REAL_OBJECT_SETATTR', 10594, 10594, 'd4ad75cdebe258de12240823e33deb2b982bfb478e2d38688df6b0a9a524ee9c'),
-        ('capture:_GENERATION6_R_REAL_TUPLE_GETITEM', 10595, 10595, '0c1bacd5f83335849e9766423421de9491a09f8e766e320748a832aeba8ebe12'),
-        ('capture:_GENERATION6_R_PY_TPFLAGS_IMMUTABLETYPE', 10596, 10596, 'f231d5b595e2739db5de2ba3509c7636f1592bd87db6b94285ac98908319230a'),
-        ('capture:_GENERATION6_R_TPFLAGS_IMMUTABLETYPE', 10597, 10597, 'c070a2cd8b00685f683c0e34b0f85a93fd0e68cf275bf7bea4e5e265ee2aaad5'),
-        ('capture:_GENERATION6_R_TPFLAGS_HEAPTYPE', 10598, 10598, 'b603115bdadbb7cdc4778c08b8546c953750ea9b063f528b152765928eb69872'),
-        ('capture:_GENERATION6_R_TYPE_SECURITY_FLAGS_MASK', 10599, 10601, '13e9e3a08383565cc85d747e35cc3af5dc1aacdfc1e3217bb79e2585cee77f4b'),
-        ('class:_Generation6RPhase', 10604, 10610, '691be0936a9750ee16b859f7c9b4f8a0c9d0bd8e2e6f3adf46699515944a60d7'),
-        ('class:_Generation6RDescriptorState', 10613, 10617, '77157c60a3de68e4d146fe33f8ffd3c0a7ff7ceda1bfc1e0ddf768d9aff23522'),
-        ('class:_Generation6ROwnerToken', 10621, 10630, '960301fbb1ae406f6cdf880daec0739a9b94af18fa2b995850c405a7e06644ac'),
-        ('class:_Generation6ROwnerRecord', 10634, 10639, 'af61bbdc8b06bd74ab18eeea604e7fcb7d68a3e208890369c0f44925ff7541ae'),
-        ('class:_Generation6RAuthorityEvent', 10643, 10648, '61084f31353997e93651c00af6cd1d71cedd3c96cae72dd743d497ef87b2c8f5'),
-        ('class:_Generation6RIteratorToken', 10652, 10660, 'a01c4dd454ab917ee5ef70cd7c5284698d46fcb008a83d2e9c7220a5f8d640b4'),
-        ('class:_Generation6RScandirCapability', 10664, 10668, 'ec7cc0acd7d1f5fd94f25b7e3380461ad592aad173ff3c9dba77ba20e61873c6'),
-        ('class:_Generation6RAuthorityLedger', 10671, 11556, '68cb739f1a63b66a33a77242e44ad96934dd14b1a09afe95c5ebbb84e99a6d44'),
-        ('capture:_GENERATION6_R_CAPTURED_APPEND_EVENT', 11559, 11559, 'a03cba48bb5cd0b0bf090d40385e7638968a9aa945debeb802c9f6f1d662bdf5'),
-        ('class:_Generation6RScandirProxy', 11562, 11860, '4a8e6ca7575089d0348242963c9b017b87e5d5f8eafd3837767a9aec1dc8cab6'),
-        ('capture:_GENERATION6_R_CAPTURED_SCANDIR_PROXY_NEXT', 11863, 11863, '3a78fa0873709692b25da843d54995c46ec60279bd41367b4aa5f352e9960f4f'),
-        ('capture:_G6R_PN', 11864, 11887, '872bb209694715e8069673888c57f779e243b87e6e3afba22b0bd5c5b03ad731'),
-        ('capture:_G6R_PK', 11889, 11897, 'db46a5df7630c4508fe0244d8a352c65ce03bd21af9709943a02f5c6953bf91c'),
-        ('capture:_G6R_PE', 11898, 11908, '954a8c4d7b63d023b7a45e029af7b5d500ec5c5e05e99e7731872bccee564ccf'),
-        ('capture:_G6R_IK', 11910, 11916, 'e750f9701c102c9efede819966920f2d322678da8fa49575c6c73017a881b8df'),
-        ('capture:_G6R_IE', 11917, 11925, 'df23cfd509ffa1720c7dc67571107b313d8e9a6081c274118fbc9dbd2dfdf0d1'),
-        ('capture:_G6R_BK', 11927, 11933, '4e7004234edbc53d3ec968da2454f53a6b9ddf4509befdbb14ee33aa8a753c65'),
-        ('capture:_G6R_BE', 11934, 11942, 'ca38832fbf0b8bc4225f8e55930feb052f1523d17a668be13296fc5e15460ceb'),
-        ('capture:_G6R_OK', 11944, 11950, '5fe8d693115386d4cc27730799381f83675c8a1181d482da2ad0203c65577a50'),
-        ('capture:_G6R_OE', 11951, 11959, '4a8d29ebd583532054036dd5ca90a60111ddf6c35651770a02d207c6bd0e80ae'),
-        ('capture:_G6R_LK', 11961, 11969, '753c914fb12925cf314431d67b75487a6276fdfed2551ba487e600bab074a78e'),
-        ('capture:_G6R_LE', 11970, 11980, '48390a13498aaf7934a45f077938182ad4d4f5589f91e93db2b2fa2db90a7245'),
-        ('capture:_G6R_TK', 11982, 11990, '2a852da0570fb52a2dc190b4e580e2b8a915a26f49b4ca6ff9ef5ead025498e4'),
-        ('capture:_G6R_TE', 11991, 12001, 'ed0885d23974dbdf0ff50af0556453d4afd53f1d192d13dbc95bf92d660ba7bb'),
-        ('capture:_G6R_WK', 12003, 12011, 'e6b5eed6a1728e6508d8db4082c387514e9bc2a7f17cb06dcbf1cf55aa6bd839'),
-        ('capture:_G6R_WE', 12012, 12022, '844cef71b60f69d5813596e0fda01b9dd5faad3a32640b473ce3f45cb239ad80'),
-        ('capture:_G6R_VK', 12024, 12032, '9e0f60608b0c6ad9c6f92b91ed74edbe9c5f93ded40c03d2d6c2abd841c1293c'),
-        ('capture:_G6R_VE', 12033, 12043, '2ac33759997ea61d1d94f468056e46696058b126d8dcc8f061ca66abb965e72a'),
-        ('capture:_GENERATION6_R_CAPTURED_APPEND_EVENT_INTEGRITY', 12045, 12056, '07c139cabc8eeef3f9406c50c0f5a9bc4c3e8fc937e601aed870173ac371e2d1'),
-        ('capture:_GENERATION6_R_CAPTURED_APPEND_EVENT_CLOSURE_BINDINGS', 12057, 12057, '035c4d781ac2dbf6db381123b2b80cb644e5f9b725a6924346d3d21664d2570b'),
-        ('capture:_GENERATION6_R_CAPTURED_SCANDIR_PROXY_NEXT_INTEGRITY', 12058, 12069, '06d245cf910cbb98488592e8d14c762a100535ad251a46a281e3e1e98fa69144'),
-        ('capture:_GENERATION6_R_CAPTURED_SCANDIR_PROXY_NEXT_CLOSURE_BINDINGS', 12070, 12070, 'c33c46bff5005061366a89a4731704100c6eda404661c9167d7130e8db22f09b'),
-        ('capture:_GENERATION6_R_CAPTURED_AUTHORITY_EVENT_CLASS', 12071, 12071, '584e0aecddd20fbedd44ccf4c06f8da6648f4dd64c2ecc869494f86d822415cd'),
-        ('capture:_GENERATION6_R_CAPTURED_AUTHORITY_EVENT_INIT', 12072, 12072, 'e220423e16dcc58f9d61967e927ef993ae7a14ac62da29cb8afaae1885b01c20'),
-        ('capture:_GENERATION6_R_CAPTURED_AUTHORITY_EVENT_INIT_CLOSURE', 12073, 12075, '61a8ae0ab043925920f0444632f619d221399cc311f50fc0560a17d221722bb9'),
-        ('capture:_GENERATION6_R_CAPTURED_AUTHORITY_EVENT_INIT_CLOSURE_BINDINGS', 12076, 12092, '024ff3ceaea4c81c3fa520c44e6b04b5203b7456e5e1887ff53627904f2e2d04'),
-        ('capture:_GENERATION6_R_CAPTURED_AUTHORITY_EVENT_INIT_INTEGRITY', 12093, 12104, '52eb3675e03b85694e179fcf3f475201acc898053be21e9e38676e4e8131a315'),
-        ('capture:_GENERATION6_R_AUTHORITY_EVENT_CLASS_SEAL', 12105, 12120, '0450a0fabb48c950810d5dacef86bdc5d96f26e53322dd19c65ac90f0d04d511'),
-        ('capture:_GENERATION6_R_SCANDIR_PROXY_CLASS_SEAL', 12123, 12143, '8cbb915f2a7192bb7a2e0b8dc5b9c67dbfd7a58ae6b6ce7da6748b30f5aa15f1'),
-        ('capture:_GENERATION6_R_AUTHORITY_LEDGER_CLASS_SEAL', 12144, 12159, '1b1fdc44ed2ed443b43680bf2e093cbfa9982200ed28509252a568115c0904de'),
-        ('capture:_GENERATION6_R_ITERATOR_TOKEN_CLASS_SEAL', 12160, 12175, '3ae03c9119b1251adbc209afc556c5ef21c48c036ea1a07b4f51dca3319c178d'),
-        ('capture:_GENERATION6_R_OWNER_TOKEN_CLASS_SEAL', 12176, 12191, 'c430415d5df482839f286798c46e6cec7aec2ad7859b5125ff4409a59fcfec2f'),
-        ('capture:_G6R_SS', 12192, 12198, '13d3c89c27e07cda9f7c399992e6ef07520cc89f4cdbcd78266fcae7f52b59bf'),
-        ('capture:_G6R_SK', 12199, 12205, '830654b0eb83e99da1824ddd6f7485d6d3524200f120abed87674c60261f8346'),
-        ('capture:_G6R_SE', 12206, 12212, '1380bc697978439688ac1e306ee41a7b31e66a01b195726f89d5d75a631175d1'),
-        ('capture:_G6R_AF', 12213, 12213, '1c4b34fc8e9cb13d74db1d5ede5071cc54e49db1c1c1913c9df0ccf0d88c9c7a'),
-        ('capture:_G6R_AI', 12214, 12214, '8c884f6558e0d81b60ab0cf4d44fdc6c29d95302dbcf2ba186bf8f16ad238097'),
-        ('capture:_G6R_NF', 12215, 12215, '5832b78973762e5f96a2bbf2deeca3cee427260996a60e52e6c5529dde18cc28'),
-        ('capture:_G6R_NI', 12216, 12216, '35feae6405f85be98967fffde25bf0a950eef1609749ebc7a09391fdb353afd4'),
-        ('capture:_G6R_VC', 12217, 12217, '9fd0d7db641c6fa57c9674de2faf1b10bf9a5b8ef8d0b09a3f58793006f58fa4'),
-        ('capture:_G6R_VF', 12218, 12218, '32abebeccdbcddcbd52ed9a42cfd14e3a31a2c1b327b9e3b3b4b47f575a0d09c'),
-        ('capture:_G6R_VI', 12219, 12219, '551bac60799f16d3cd235442255c3af5c9bd646ee4476dd9c9aa801acbe95499'),
-        ('capture:_G6R_VB', 12220, 12220, 'f97c53ee9f8c10c5476c39cfef3b1bd81c44a33c450559b47b7ff10c8a10c452'),
-        ('capture:_G6R_G', 12221, 12221, '78aad8cafa09e936b8ce07fd9b2b3af8ff4f64811c119d4e759241b35443c070'),
-        ('capture:_G6R_D', 12222, 12222, '6c9469da5672e331e32b53fc76311fd67036278d7aebfa59f9bb66a35d5dc0a1'),
-        ('function:_generation6_r_socket_detach_handoff', 12225, 12292, '325903e60b35b06001b5adf00bffe7dae43e99deb63649a7859781f3529ed19b'),
-        ('class:_Generation6RAuthorityScope', 12295, 12506, '343db8cbeeab7d6484c63b56444173ebd9eb674930492f31a05574c51aa108c0'),
-        ('capture:_GENERATION6_R_NAMESPACE_REAL_OS_STAT', 12518, 12518, '781b33f1426a541fe177fd5c041a95d15e2ba9ed3f9bbb1ebdb44afdab2ae86c'),
-        ('capture:_GENERATION6_R_NAMESPACE_REAL_OS_OPEN', 12519, 12519, '02b606be65cc258a6db80ee03ba374f69b99d2af44c081eb2a6141209d8d4e96'),
-        ('capture:_GENERATION6_R_NAMESPACE_REAL_OS_FSTAT', 12520, 12520, 'c7d9ae2cbac9ebb3fd3705f22c215f8286d84c7f6f363892e7652893c32908ac'),
-        ('capture:_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK', 12521, 12521, 'aa2d85e59c70c8d4bcd7e7e3db12053ff5658bc8c76332d699ed6112bae9fb01'),
-        ('capture:_GENERATION6_R_NAMESPACE_REAL_OS_GETUID', 12522, 12522, '64363a327e44998cccda59fad2671adbdfd7ee8256749a9cc29ef474c02cff94'),
-        ('capture:_GENERATION6_R_NAMESPACE_REAL_FCNTL', 12523, 12523, 'c14e9461300f586d6d29589ae883a1493cd2a3c22b9305cc824ebfda4d7b9c37'),
-        ('capture:_GENERATION6_R_NAMESPACE_REAL_MONOTONIC_NS', 12524, 12524, '628a1819905413c4650464f40feb8e182e11167ad5fc09ac24a1e262c6349d83'),
-        ('capture:_GENERATION6_R_NAMESPACE_CLEANUP_MAX_DEPTH', 12525, 12525, '3c4cd231e5f664071c2d78009f80e6bb255a6f389d42d07d0dbfe013be3bb713'),
-        ('capture:_GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENTRIES', 12526, 12526, '81cf74e9d3fba5e15e66b92c65ec61bf56122eb029be06508fb9d3c606c247a1'),
-        ('capture:_GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENCODED_NAME_BYTES', 12527, 12527, '75a7ed32ca92c2d82e835c438823c25b62365bb703b955679602cd2715d05bbc'),
-        ('capture:_GENERATION6_R_NAMESPACE_CLEANUP_MAX_OPERATIONS', 12528, 12528, '6c4726d3e70af8b7daff48627e185c2a8dd1f0c0f2277cc4e482160d6288ebcc'),
-        ('capture:_GENERATION6_R_NAMESPACE_CLEANUP_DEADLINE_NS', 12529, 12529, '326de47ec9275a78f66858302b78e86db136794f7d7f0ee79e077ea6110b6aee'),
-        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT', 12530, 12530, 'e4858eb944ac24c2c455369fbed2b089a71883a685d84bfb1e0d80637d93512d'),
-        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD', 12531, 12531, 'f3808eb31b976df727953ca4a9ac0221b1bfee4e4620d4bb4b3b6916864bb88e'),
-        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_STABLE_DIRECTORY_MATCHES', 12532, 12532, '7729ec7884e600da2922e23894b4b28d1a4d9805882b7185781d0259bfc21da0'),
-        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_MOUNT_ID', 12533, 12533, '3a3c575d7e3bc72f9a4d4a763b7c3b0d1418db13d22315e2791655b83fd0b5f3'),
-        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_COMPONENT', 12534, 12534, '01f889f143cfbd65d03c90743ecca893dfc23549b97a2520dad96123b6ea2e86'),
-        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE', 12535, 12535, 'f03e968d55fef64a10f204ca3db3518c846224a5197d05eed16506e8c16a98c6'),
-        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT', 12536, 12536, 'fae13d99b1f49e563d28d6546e4609c85ec6ff00c01976d0be1cf25f75ebce8c'),
-        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_S_ISDIR', 12537, 12537, '8a9dea3342f709d43c54e19338bcc62a166dc70185f2a9b2373dc653f79b9a12'),
-        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_S_ISREG', 12538, 12538, '897c2bb4f84ca52ff11cd64cfe28772302195b1665ec4e063b097918b00447f2'),
-        ('capture:_GENERATION6_R_NAMESPACE_REAL_OS_FSENCODE', 12539, 12539, 'b3bebb9b9f233e1754e186345804f86eb35db8c61524d14561480f2d29200677'),
-        ('function:_generation6_r_namespace_filesystem_component', 12542, 12558, '4eb697dee939441e48603e32e37a2ed8670f7e55413a6b1fc48b1b1d820f7b02'),
-        ('class:_Generation6RNamespacePhase', 12561, 12568, 'e056572b79de1ac0fa2a496acd1c5db23941ca0719998e789cda8de78b366208'),
-        ('class:_Generation6RNamespaceTokenState', 12571, 12577, '523966853a766529aae62b551582d7964ff48ee6d883e99196208124d5612cdd'),
-        ('class:_Generation6RNamespaceAction', 12580, 12583, 'bcf06b9d24a6005451cc49fd26eb05c23632afdda142f9293f396b73a3b713f2'),
-        ('class:_Generation6RNamespaceNodeKind', 12586, 12595, 'b982d86aa4798552a9b1e900b765e18a23bde85983c60ea6bc0c41b34a06687c'),
-        ('class:_Generation6RNamespaceAuthorityKind', 12598, 12602, '211978a456705ef8221ca9f2e0d5297c0b5a316d2071e28e83f35cb4517bff3e'),
-        ('class:_Generation6RNamespaceOwnerState', 12605, 12610, '92066a52d3cdaeca0893b3d63649a86958df2d9c976273d67d3a84c97ddbe57a'),
-        ('class:_Generation6RNamespaceOwnerKind', 12613, 12615, '3a9c140d29cfad0672922012bc6a1b42d7d5f7d22d47020b851abd3e73d52c7f'),
-        ('class:_Generation6RNamespaceOwnerPurpose', 12618, 12622, '07357c4f426fafe4b7076e268e5c6644ea740903af124344a65e76cc9d7960d5'),
-        ('class:_Generation6RNamespaceContextState', 12625, 12631, '8db2ba8e537fe77e33c7029152afa9b94f26c3c82e859456142ac5429d065672'),
-        ('class:_Generation6RNamespaceCloseEvent', 12634, 12642, 'ba43272f0f7b4aea8861c497bc0f361cf0338dbbbbbbf4f291992c5178fe6830'),
-        ('class:_Generation6RNamespaceMutationPermitState', 12645, 12651, 'deef16f5eb4a3d28d2191e2af3e901fd7b45e98b3dedf62bbabd76127572f1bb'),
-        ('class:_Generation6RNamespaceCleanupBudgetState', 12654, 12659, 'ee84e73f84c6fe1f99febfa3f4b43e3c8223cdbaf2396bf5558edd6602a37ec5'),
-        ('class:_Generation6RNamespaceCleanupBudgetEvent', 12662, 12667, '7944ebb555ea7854575450c30bedad2f6a7337daa2e441937ed0ee2436af8ee7'),
-        ('capture:_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE', 12670, 12680, 'fb2d985af0fcbbd8e3fa2dd1242bfab66dc2c8228351415f182dd29487e2d083'),
-        ('class:_Generation6RNamespaceInventoryCursorState', 12683, 12688, '15c4d19782f30c8394cd09c55c455266aa54998ab44c172ccd5e9673ba90b15b'),
-        ('class:_Generation6RNamespaceInventoryScanState', 12691, 12697, '057680ca66527eb01f631838165cda203dfdf53a0254019e8133cf4f24d1dced'),
-        ('class:_Generation6RNamespaceInventoryAdvanceState', 12700, 12706, '060bb1d309703a518eea3e695cb1e7ff99ad387b26ed6e31ffac343e21d33fc7'),
-        ('class:_Generation6RNamespaceInventoryItemState', 12709, 12714, '42a82e5a860d6b5927f31d023ebbee6544630ab3b7d4ef5f22362e26ac1e72ef'),
-        ('class:_Generation6RNamespaceTerminalEvent', 12717, 12720, '0fcb9d3ed27a208f1735a254ed8904840a2102ca429aefec15824f49b0db8c78'),
-        ('class:_Generation6RNamespaceDirectoryFact', 12724, 12733, 'ce27561b712ce62a3c6906c8aea73c3afc0cc7858a3770f42918cf56831cd1b6'),
-        ('class:_Generation6RNamespaceNameFact', 12737, 12749, 'cf9d999acb9adde41dd2539b4aeda3105d4e3dfd583b5b0b41a66b37051b92eb'),
-        ('class:_Generation6RNamespaceDirectoryAuthority', 12753, 12755, '36981fc93f15ebb3d1111eb6b2fc39c902d5acff7c8c153eaf42bf4f891c7092'),
-        ('class:_Generation6RNamespaceDirectoryBinding', 12759, 12769, 'cfbc1e1ba2d84e469c64b56d81f1a6a622bab9d3f0b5ccbcfcffe189df150e15'),
-        ('class:_Generation6RNamespaceDirectoryRecord', 12773, 12776, '728dfd483b4b04574662d329d92851464557801ed85b9648dd7de2adfe53ebb6'),
-        ('class:_Generation6RNamespaceOwnerContextBinding', 12780, 12789, 'c025354e8c8ecfa799276e87f89640a16c59b8c66ba60543bbff3336110f4aad'),
-        ('class:_Generation6RNamespaceOwnerContext', 12793, 12798, 'fb55663dac360bc354932705723673fc88ef42469f8a49ac21f703049639e499'),
-        ('class:_Generation6RNamespacePresentToken', 12802, 12805, '92fed16e4fef518bbbbb2d650254c706f6fa35b1ea4cc06e3f642239db86fae4'),
-        ('class:_Generation6RNamespaceAbsenceToken', 12809, 12812, 'ef706da22d3e8de5b9ce2f29c2ca2c8e66a01a2a9b029396c9abd1c6fcb80533'),
-        ('class:_Generation6RNamespaceRenameToken', 12816, 12819, '141acc24bb0584dbacfef09135cd686f467b613255e8c84f514042d59dfd8a0a'),
-        ('class:_Generation6RNamespaceMutationPermit', 12823, 12825, '2a45fe0ee6fbed2d2d878720a1a41b450b38474ed9d2ca177469fcdf6088a128'),
-        ('alias:_Generation6RNamespaceLiveToken', 12828, 12832, 'fdb4a19a28d5c25f246c66f04446350c86808bf8ce1a038b32a9f97143c56bef'),
-        ('class:_Generation6RNamespaceCapabilityBinding', 12836, 12853, '52c1b242f514b78c82e38a5e86e9965e25b6ed92aa902db69d3d3c68a9f466c6'),
-        ('class:_Generation6RNamespaceCapabilityRecord', 12857, 12864, '06c2abbe3a9a9f9f5d2f9d8941b520cdb3bfa502aa5fd73b3318d73aa4d7f0e6'),
-        ('class:_Generation6RNamespaceUnlinkPreproof', 12868, 12887, '0ddb29f3dce844647999893dc8016f52a154aed0be35d96ea92a81878297caca'),
-        ('class:_Generation6RNamespaceMutationPermitBinding', 12891, 12908, '1a077f88b3e6f0d1e108542fa7435ad35d0b754f2bd4d16ddc539459aed6d8f4'),
-        ('class:_Generation6RNamespaceMutationPermitRecord', 12912, 12916, '9eca4a8269f97dd9bcb6a3f100da19c3f591b12f2aa0f735f8c9341416a12f8b'),
-        ('class:_Generation6RNamespaceCleanupBudgetEpoch', 12920, 12928, '8c739724edda18074efbbf66f35a7ac0775461181fc00b0bf386955c66088421'),
-        ('class:_Generation6RNamespaceInventoryCursor', 12932, 12934, '7196dae87eb9866de6af5f5ce1929c16f57e9a6a6f7434b706b49cb1a3ccdbc3'),
-        ('class:_Generation6RNamespaceInventoryScan', 12938, 12940, 'd10b709262c598509f1d6aa0dad27fa762624adb1ec766c5fab561aeea91bf94'),
-        ('class:_Generation6RNamespaceInventoryAdvance', 12944, 12946, 'bc92a4f162671ba50f738843c891b5f4b0df8708dd00af1d1c630952f971122c'),
-        ('class:_Generation6RNamespaceInventoryItem', 12950, 12952, 'b8be3d189457402f5c3332516bae6353c12719fd359356da02beb6c8b10dc841'),
-        ('class:_Generation6RNamespaceEmptyInventory', 12956, 12958, 'c219208d87693d8f2283ea17f6e7a7a16513506b34f6e14fe24fde1a1807da01'),
-        ('class:_Generation6RNamespaceReceipt', 12962, 12967, '41890e5df355c9b14565321ac90e4753586614c5ca96b496c88a087de20e5dd7'),
-        ('class:_Generation6RNamespaceCleanupBudgetRecord', 12971, 12980, 'b2014cd35ccbfe0a14b1de7342016468610e5bd3652591ae5d05139537d2a8d2'),
-        ('class:_Generation6RNamespaceInventoryCursorBinding', 12984, 13003, '1f69d457335ae01106c81547365160065c7f14f1982158b6304e6bf934b552aa'),
-        ('class:_Generation6RNamespaceInventoryCursorRecord', 13007, 13012, 'a4fd4e7c373a09b4b419df99e4f1c41e437fe4164c439b73c4c042d3ea6f220f'),
-        ('class:_Generation6RNamespaceInventoryScanBinding', 13016, 13036, '1baf21891584cf7b4775fb3bf67e3262ccc46bf808fd5a46f408d655795b31cb'),
-        ('class:_Generation6RNamespaceInventoryScanRecord', 13040, 13046, '5e87aa5e3d44393474d2500f1a5a59d59a49ea49adc83a682a20b502359fa30c'),
-        ('class:_Generation6RNamespaceInventoryAdvanceBinding', 13050, 13074, '4396a7fc1b81cecfadca42cde3ba885391c19844893a22235595a8862166b95f'),
-        ('class:_Generation6RNamespaceInventoryAdvanceRecord', 13078, 13088, '1d9419df2017a2ebf13791a838191dd0fe8a5704789187d7e4ab1fbd49963a9b'),
-        ('class:_Generation6RNamespaceInventoryItemBinding', 13092, 13117, '07a455028be308d20a35ba4396bc44580d967b9d341653bcc98a832c1d2a1b33'),
-        ('class:_Generation6RNamespaceInventoryItemRecord', 13121, 13126, '9e2e1cf8d08cdd72d2f4605fb94f73fd21072ee263972daa04365fde367063b6'),
-        ('class:_Generation6RNamespaceJournal', 13129, 18825, '6d8cc87fda7be40c12081d741327e1db1650ffbabe7e9208be6cc03bd0c0b8cd'),
+    expected_bundle_root_projection_inventory: tuple[tuple[str, int, int, int, str], ...] = (
+        ('capture:_GENERATION6_R_REAL_NEXT', 10578, 10578, 187, '4523be89a794e536cd2782d52d04479c3fda6839519e40ebadc3aa66b477c9a0'),
+        ('capture:_GENERATION6_R_REAL_STOP_ITERATION', 10579, 10579, 206, 'b3304f6ad1881a808b91ffef6d322df48b175df9baedeaabc6d4c5862e8a7057'),
+        ('capture:_GENERATION6_R_REAL_DIRENTRY_TYPE', 10580, 10580, 194, 'bffce5fe2eb9d26556233cab2d95f2a9bc8fe9205b036d43debb0eb355bed380'),
+        ('capture:_GENERATION6_R_REAL_LIST_APPEND', 10581, 10581, 192, '3f1a825607661cc1cd338b1866037abe4cbea4c4d75d011b39b9451b47985307'),
+        ('capture:_GENERATION6_R_REAL_LIST_GETITEM', 10582, 10582, 198, 'ef4f0db9d801560179d43eedb46025ea2cb9a34d96c76de051be9a1960be2d7d'),
+        ('capture:_GENERATION6_R_REAL_TYPE', 10583, 10583, 187, '7a28612077526fad17a0e48f0fe2ed31cf98dcc90478804fb1f0616041ca8533'),
+        ('capture:_GENERATION6_R_REAL_ID', 10584, 10584, 183, 'd8093d0865f2d3c08f78da09b5824bce5f5b2d5df104e95436bf0041f854d36b'),
+        ('capture:_GENERATION6_R_REAL_INT', 10585, 10585, 185, '3e8dace45fc9d8b59d69f970b7f89f0ce7d16e0f2970a58c23808806816e1d60'),
+        ('capture:_GENERATION6_R_REAL_BOOL', 10586, 10586, 187, '24a58e2265cc514dbede67d288a35e5485be9e498bf6aca6987f3dcd1a0a7249'),
+        ('capture:_GENERATION6_R_REAL_TUPLE', 10587, 10587, 189, 'eb3f6d15782886fea6ab194c930386a3d72a5751888450e7189d89db7cdcd45b'),
+        ('capture:_GENERATION6_R_REAL_DICT', 10588, 10588, 187, '972b3052bbcb4e4080380f0b0fd3b9632876afe8e317bdf62464d443c94e97e5'),
+        ('capture:_GENERATION6_R_REAL_LEN', 10589, 10589, 185, 'd72cfeb414f189b01a9f0e7997ff1093b7d6b56571ea563d2cb02cb15a359d8c'),
+        ('capture:_GENERATION6_R_REAL_GETATTR', 10590, 10590, 193, 'b91a19f4d8e4c9480515e07f17e6fa41c52f1acf3a4663aef4baa660d25c33a7'),
+        ('capture:_GENERATION6_R_REAL_DICT_ITEMS', 10591, 10591, 190, 'c1db68590cb848ed54a4659e58d842af0827ffd9ab1aa26d602ae0215164d4b7'),
+        ('capture:_GENERATION6_R_REAL_TYPE_GETATTRIBUTE', 10592, 10592, 208, '1d2aa49e145bf0a3c327030bea259a27315215af439377b6f8e2ed52cf1c743a'),
+        ('capture:_GENERATION6_R_REAL_OBJECT_GETATTRIBUTE', 10593, 10593, 212, '8be879e00782aefe3456bf80423f5bc7c19f0468514e78a8401e06691a4fd4f0'),
+        ('capture:_GENERATION6_R_REAL_OBJECT_SETATTR', 10594, 10594, 202, 'd4ad75cdebe258de12240823e33deb2b982bfb478e2d38688df6b0a9a524ee9c'),
+        ('capture:_GENERATION6_R_REAL_TUPLE_GETITEM', 10595, 10595, 200, '0c1bacd5f83335849e9766423421de9491a09f8e766e320748a832aeba8ebe12'),
+        ('capture:_GENERATION6_R_PY_TPFLAGS_IMMUTABLETYPE', 10596, 10596, 203, 'f231d5b595e2739db5de2ba3509c7636f1592bd87db6b94285ac98908319230a'),
+        ('capture:_GENERATION6_R_TPFLAGS_IMMUTABLETYPE', 10597, 10597, 200, 'c070a2cd8b00685f683c0e34b0f85a93fd0e68cf275bf7bea4e5e265ee2aaad5'),
+        ('capture:_GENERATION6_R_TPFLAGS_HEAPTYPE', 10598, 10598, 195, 'b603115bdadbb7cdc4778c08b8546c953750ea9b063f528b152765928eb69872'),
+        ('capture:_GENERATION6_R_TYPE_SECURITY_FLAGS_MASK', 10599, 10601, 279, '13e9e3a08383565cc85d747e35cc3af5dc1aacdfc1e3217bb79e2585cee77f4b'),
+        ('class:_Generation6RPhase', 10604, 10610, 749, '691be0936a9750ee16b859f7c9b4f8a0c9d0bd8e2e6f3adf46699515944a60d7'),
+        ('class:_Generation6RDescriptorState', 10613, 10617, 573, '77157c60a3de68e4d146fe33f8ffd3c0a7ff7ceda1bfc1e0ddf768d9aff23522'),
+        ('class:_Generation6ROwnerToken', 10621, 10630, 1207, '960301fbb1ae406f6cdf880daec0739a9b94af18fa2b995850c405a7e06644ac'),
+        ('class:_Generation6ROwnerRecord', 10634, 10639, 771, 'af61bbdc8b06bd74ab18eeea604e7fcb7d68a3e208890369c0f44925ff7541ae'),
+        ('class:_Generation6RAuthorityEvent', 10643, 10648, 739, '61084f31353997e93651c00af6cd1d71cedd3c96cae72dd743d497ef87b2c8f5'),
+        ('class:_Generation6RIteratorToken', 10652, 10660, 1337, 'a01c4dd454ab917ee5ef70cd7c5284698d46fcb008a83d2e9c7220a5f8d640b4'),
+        ('class:_Generation6RScandirCapability', 10664, 10668, 707, 'ec7cc0acd7d1f5fd94f25b7e3380461ad592aad173ff3c9dba77ba20e61873c6'),
+        ('class:_Generation6RAuthorityLedger', 10671, 11556, 148935, '68cb739f1a63b66a33a77242e44ad96934dd14b1a09afe95c5ebbb84e99a6d44'),
+        ('capture:_GENERATION6_R_CAPTURED_APPEND_EVENT', 11559, 11559, 228, 'a03cba48bb5cd0b0bf090d40385e7638968a9aa945debeb802c9f6f1d662bdf5'),
+        ('class:_Generation6RScandirProxy', 11562, 11860, 108330, '4a8e6ca7575089d0348242963c9b017b87e5d5f8eafd3837767a9aec1dc8cab6'),
+        ('capture:_GENERATION6_R_CAPTURED_SCANDIR_PROXY_NEXT', 11863, 11863, 226, '3a78fa0873709692b25da843d54995c46ec60279bd41367b4aa5f352e9960f4f'),
+        ('capture:_G6R_PN', 11864, 11887, 979, '872bb209694715e8069673888c57f779e243b87e6e3afba22b0bd5c5b03ad731'),
+        ('capture:_G6R_PK', 11889, 11897, 679, 'db46a5df7630c4508fe0244d8a352c65ce03bd21af9709943a02f5c6953bf91c'),
+        ('capture:_G6R_PE', 11898, 11908, 769, '954a8c4d7b63d023b7a45e029af7b5d500ec5c5e05e99e7731872bccee564ccf'),
+        ('capture:_G6R_IK', 11910, 11916, 628, 'e750f9701c102c9efede819966920f2d322678da8fa49575c6c73017a881b8df'),
+        ('capture:_G6R_IE', 11917, 11925, 718, 'df23cfd509ffa1720c7dc67571107b313d8e9a6081c274118fbc9dbd2dfdf0d1'),
+        ('capture:_G6R_BK', 11927, 11933, 628, '4e7004234edbc53d3ec968da2454f53a6b9ddf4509befdbb14ee33aa8a753c65'),
+        ('capture:_G6R_BE', 11934, 11942, 718, 'ca38832fbf0b8bc4225f8e55930feb052f1523d17a668be13296fc5e15460ceb'),
+        ('capture:_G6R_OK', 11944, 11950, 622, '5fe8d693115386d4cc27730799381f83675c8a1181d482da2ad0203c65577a50'),
+        ('capture:_G6R_OE', 11951, 11959, 712, '4a8d29ebd583532054036dd5ca90a60111ddf6c35651770a02d207c6bd0e80ae'),
+        ('capture:_G6R_LK', 11961, 11969, 688, '753c914fb12925cf314431d67b75487a6276fdfed2551ba487e600bab074a78e'),
+        ('capture:_G6R_LE', 11970, 11980, 778, '48390a13498aaf7934a45f077938182ad4d4f5589f91e93db2b2fa2db90a7245'),
+        ('capture:_G6R_TK', 11982, 11990, 682, '2a852da0570fb52a2dc190b4e580e2b8a915a26f49b4ca6ff9ef5ead025498e4'),
+        ('capture:_G6R_TE', 11991, 12001, 772, 'ed0885d23974dbdf0ff50af0556453d4afd53f1d192d13dbc95bf92d660ba7bb'),
+        ('capture:_G6R_WK', 12003, 12011, 673, 'e6b5eed6a1728e6508d8db4082c387514e9bc2a7f17cb06dcbf1cf55aa6bd839'),
+        ('capture:_G6R_WE', 12012, 12022, 763, '844cef71b60f69d5813596e0fda01b9dd5faad3a32640b473ce3f45cb239ad80'),
+        ('capture:_G6R_VK', 12024, 12032, 685, '9e0f60608b0c6ad9c6f92b91ed74edbe9c5f93ded40c03d2d6c2abd841c1293c'),
+        ('capture:_G6R_VE', 12033, 12043, 775, '2ac33759997ea61d1d94f468056e46696058b126d8dcc8f061ca66abb965e72a'),
+        ('capture:_GENERATION6_R_CAPTURED_APPEND_EVENT_INTEGRITY', 12045, 12056, 1294, '07c139cabc8eeef3f9406c50c0f5a9bc4c3e8fc937e601aed870173ac371e2d1'),
+        ('capture:_GENERATION6_R_CAPTURED_APPEND_EVENT_CLOSURE_BINDINGS', 12057, 12057, 173, '035c4d781ac2dbf6db381123b2b80cb644e5f9b725a6924346d3d21664d2570b'),
+        ('capture:_GENERATION6_R_CAPTURED_SCANDIR_PROXY_NEXT_INTEGRITY', 12058, 12069, 1348, '06d245cf910cbb98488592e8d14c762a100535ad251a46a281e3e1e98fa69144'),
+        ('capture:_GENERATION6_R_CAPTURED_SCANDIR_PROXY_NEXT_CLOSURE_BINDINGS', 12070, 12070, 179, 'c33c46bff5005061366a89a4731704100c6eda404661c9167d7130e8db22f09b'),
+        ('capture:_GENERATION6_R_CAPTURED_AUTHORITY_EVENT_CLASS', 12071, 12071, 192, '584e0aecddd20fbedd44ccf4c06f8da6648f4dd64c2ecc869494f86d822415cd'),
+        ('capture:_GENERATION6_R_CAPTURED_AUTHORITY_EVENT_INIT', 12072, 12072, 230, 'e220423e16dcc58f9d61967e927ef993ae7a14ac62da29cb8afaae1885b01c20'),
+        ('capture:_GENERATION6_R_CAPTURED_AUTHORITY_EVENT_INIT_CLOSURE', 12073, 12075, 258, '61a8ae0ab043925920f0444632f619d221399cc311f50fc0560a17d221722bb9'),
+        ('capture:_GENERATION6_R_CAPTURED_AUTHORITY_EVENT_INIT_CLOSURE_BINDINGS', 12076, 12092, 963, '024ff3ceaea4c81c3fa520c44e6b04b5203b7456e5e1887ff53627904f2e2d04'),
+        ('capture:_GENERATION6_R_CAPTURED_AUTHORITY_EVENT_INIT_INTEGRITY', 12093, 12104, 1332, '52eb3675e03b85694e179fcf3f475201acc898053be21e9e38676e4e8131a315'),
+        ('capture:_GENERATION6_R_AUTHORITY_EVENT_CLASS_SEAL', 12105, 12120, 2063, '0450a0fabb48c950810d5dacef86bdc5d96f26e53322dd19c65ac90f0d04d511'),
+        ('capture:_GENERATION6_R_SCANDIR_PROXY_CLASS_SEAL', 12123, 12143, 2476, '8cbb915f2a7192bb7a2e0b8dc5b9c67dbfd7a58ae6b6ce7da6748b30f5aa15f1'),
+        ('capture:_GENERATION6_R_AUTHORITY_LEDGER_CLASS_SEAL', 12144, 12159, 2188, '1b1fdc44ed2ed443b43680bf2e093cbfa9982200ed28509252a568115c0904de'),
+        ('capture:_GENERATION6_R_ITERATOR_TOKEN_CLASS_SEAL', 12160, 12175, 2166, '3ae03c9119b1251adbc209afc556c5ef21c48c036ea1a07b4f51dca3319c178d'),
+        ('capture:_GENERATION6_R_OWNER_TOKEN_CLASS_SEAL', 12176, 12191, 2133, 'c430415d5df482839f286798c46e6cec7aec2ad7859b5125ff4409a59fcfec2f'),
+        ('capture:_G6R_SS', 12192, 12198, 485, '13d3c89c27e07cda9f7c399992e6ef07520cc89f4cdbcd78266fcae7f52b59bf'),
+        ('capture:_G6R_SK', 12199, 12205, 749, '830654b0eb83e99da1824ddd6f7485d6d3524200f120abed87674c60261f8346'),
+        ('capture:_G6R_SE', 12206, 12212, 749, '1380bc697978439688ac1e306ee41a7b31e66a01b195726f89d5d75a631175d1'),
+        ('capture:_G6R_AF', 12213, 12213, 163, '1c4b34fc8e9cb13d74db1d5ede5071cc54e49db1c1c1913c9df0ccf0d88c9c7a'),
+        ('capture:_G6R_AI', 12214, 12214, 173, '8c884f6558e0d81b60ab0cf4d44fdc6c29d95302dbcf2ba186bf8f16ad238097'),
+        ('capture:_G6R_NF', 12215, 12215, 169, '5832b78973762e5f96a2bbf2deeca3cee427260996a60e52e6c5529dde18cc28'),
+        ('capture:_G6R_NI', 12216, 12216, 179, '35feae6405f85be98967fffde25bf0a950eef1609749ebc7a09391fdb353afd4'),
+        ('capture:_G6R_VC', 12217, 12217, 172, '9fd0d7db641c6fa57c9674de2faf1b10bf9a5b8ef8d0b09a3f58793006f58fa4'),
+        ('capture:_G6R_VF', 12218, 12218, 171, '32abebeccdbcddcbd52ed9a42cfd14e3a31a2c1b327b9e3b3b4b47f575a0d09c'),
+        ('capture:_G6R_VI', 12219, 12219, 181, '551bac60799f16d3cd235442255c3af5c9bd646ee4476dd9c9aa801acbe95499'),
+        ('capture:_G6R_VB', 12220, 12220, 188, 'f97c53ee9f8c10c5476c39cfef3b1bd81c44a33c450559b47b7ff10c8a10c452'),
+        ('capture:_G6R_G', 12221, 12221, 163, '78aad8cafa09e936b8ce07fd9b2b3af8ff4f64811c119d4e759241b35443c070'),
+        ('capture:_G6R_D', 12222, 12222, 128, '6c9469da5672e331e32b53fc76311fd67036278d7aebfa59f9bb66a35d5dc0a1'),
+        ('function:_generation6_r_socket_detach_handoff', 12225, 12292, 9410, '325903e60b35b06001b5adf00bffe7dae43e99deb63649a7859781f3529ed19b'),
+        ('class:_Generation6RAuthorityScope', 12295, 12506, 567011, '343db8cbeeab7d6484c63b56444173ebd9eb674930492f31a05574c51aa108c0'),
+        ('capture:_GENERATION6_R_NAMESPACE_REAL_OS_STAT', 12519, 12519, 194, '781b33f1426a541fe177fd5c041a95d15e2ba9ed3f9bbb1ebdb44afdab2ae86c'),
+        ('capture:_GENERATION6_R_NAMESPACE_REAL_OS_OPEN', 12520, 12520, 194, '02b606be65cc258a6db80ee03ba374f69b99d2af44c081eb2a6141209d8d4e96'),
+        ('capture:_GENERATION6_R_NAMESPACE_REAL_OS_FSTAT', 12521, 12521, 196, 'c7d9ae2cbac9ebb3fd3705f22c215f8286d84c7f6f363892e7652893c32908ac'),
+        ('capture:_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK', 12522, 12522, 198, 'aa2d85e59c70c8d4bcd7e7e3db12053ff5658bc8c76332d699ed6112bae9fb01'),
+        ('capture:_GENERATION6_R_NAMESPACE_REAL_OS_GETUID', 12523, 12523, 198, '64363a327e44998cccda59fad2671adbdfd7ee8256749a9cc29ef474c02cff94'),
+        ('capture:_GENERATION6_R_NAMESPACE_REAL_FCNTL', 12524, 12524, 196, 'c14e9461300f586d6d29589ae883a1493cd2a3c22b9305cc824ebfda4d7b9c37'),
+        ('capture:_GENERATION6_R_NAMESPACE_REAL_MONOTONIC_NS', 12525, 12525, 209, '628a1819905413c4650464f40feb8e182e11167ad5fc09ac24a1e262c6349d83'),
+        ('capture:_GENERATION6_R_NAMESPACE_CLEANUP_MAX_DEPTH', 12526, 12526, 158, '3c4cd231e5f664071c2d78009f80e6bb255a6f389d42d07d0dbfe013be3bb713'),
+        ('capture:_GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENTRIES', 12527, 12527, 164, '81cf74e9d3fba5e15e66b92c65ec61bf56122eb029be06508fb9d3c606c247a1'),
+        ('capture:_GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENCODED_NAME_BYTES', 12528, 12528, 177, '75a7ed32ca92c2d82e835c438823c25b62365bb703b955679602cd2715d05bbc'),
+        ('capture:_GENERATION6_R_NAMESPACE_CLEANUP_MAX_OPERATIONS', 12529, 12529, 167, '6c4726d3e70af8b7daff48627e185c2a8dd1f0c0f2277cc4e482160d6288ebcc'),
+        ('capture:_GENERATION6_R_NAMESPACE_CLEANUP_DEADLINE_NS', 12530, 12530, 169, '326de47ec9275a78f66858302b78e86db136794f7d7f0ee79e077ea6110b6aee'),
+        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT', 12531, 12531, 181, 'e4858eb944ac24c2c455369fbed2b089a71883a685d84bfb1e0d80637d93512d'),
+        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD', 12532, 12532, 177, 'f3808eb31b976df727953ca4a9ac0221b1bfee4e4620d4bb4b3b6916864bb88e'),
+        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_STABLE_DIRECTORY_MATCHES', 12533, 12533, 203, '7729ec7884e600da2922e23894b4b28d1a4d9805882b7185781d0259bfc21da0'),
+        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_MOUNT_ID', 12534, 12534, 171, '3a3c575d7e3bc72f9a4d4a763b7c3b0d1418db13d22315e2791655b83fd0b5f3'),
+        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_COMPONENT', 12535, 12535, 173, '01f889f143cfbd65d03c90743ecca893dfc23549b97a2520dad96123b6ea2e86'),
+        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE', 12536, 12536, 209, 'f03e968d55fef64a10f204ca3db3518c846224a5197d05eed16506e8c16a98c6'),
+        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT', 12537, 12537, 201, 'fae13d99b1f49e563d28d6546e4609c85ec6ff00c01976d0be1cf25f75ebce8c'),
+        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_S_ISDIR', 12538, 12538, 203, '8a9dea3342f709d43c54e19338bcc62a166dc70185f2a9b2373dc653f79b9a12'),
+        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_S_ISREG', 12539, 12539, 203, '897c2bb4f84ca52ff11cd64cfe28772302195b1665ec4e063b097918b00447f2'),
+        ('capture:_GENERATION6_R_NAMESPACE_REAL_OS_FSENCODE', 12540, 12540, 202, 'b3bebb9b9f233e1754e186345804f86eb35db8c61524d14561480f2d29200677'),
+        ('function:_generation6_r_namespace_filesystem_component', 12543, 12559, 3173, '4eb697dee939441e48603e32e37a2ed8670f7e55413a6b1fc48b1b1d820f7b02'),
+        ('class:_Generation6RNamespacePhase', 12562, 12569, 878, 'e056572b79de1ac0fa2a496acd1c5db23941ca0719998e789cda8de78b366208'),
+        ('class:_Generation6RNamespaceTokenState', 12572, 12578, 565, '523966853a766529aae62b551582d7964ff48ee6d883e99196208124d5612cdd'),
+        ('class:_Generation6RNamespaceAction', 12581, 12584, 441, 'bcf06b9d24a6005451cc49fd26eb05c23632afdda142f9293f396b73a3b713f2'),
+        ('class:_Generation6RNamespaceNodeKind', 12587, 12596, 833, 'b982d86aa4798552a9b1e900b765e18a23bde85983c60ea6bc0c41b34a06687c'),
+        ('class:_Generation6RNamespaceAuthorityKind', 12599, 12603, 384, '211978a456705ef8221ca9f2e0d5297c0b5a316d2071e28e83f35cb4517bff3e'),
+        ('class:_Generation6RNamespaceOwnerState', 12606, 12611, 449, '92066a52d3cdaeca0893b3d63649a86958df2d9c976273d67d3a84c97ddbe57a'),
+        ('class:_Generation6RNamespaceOwnerKind', 12614, 12616, 376, '3a9c140d29cfad0672922012bc6a1b42d7d5f7d22d47020b851abd3e73d52c7f'),
+        ('class:_Generation6RNamespaceOwnerPurpose', 12619, 12624, 735, '36885603daf726ea1c3053c0bc168e56d0d1972433d0eba9bc0ede79e7647d05'),
+        ('class:_Generation6RNamespaceContextState', 12627, 12633, 751, '8db2ba8e537fe77e33c7029152afa9b94f26c3c82e859456142ac5429d065672'),
+        ('class:_Generation6RNamespaceCloseEvent', 12636, 12646, 1533, '65b780f5f1f8607da24df8093618ed89641be93b99bded8c974ee12b97ef9c79'),
+        ('class:_Generation6RNamespaceMutationPermitState', 12649, 12655, 574, 'deef16f5eb4a3d28d2191e2af3e901fd7b45e98b3dedf62bbabd76127572f1bb'),
+        ('class:_Generation6RNamespaceCleanupBudgetState', 12658, 12663, 467, 'ee84e73f84c6fe1f99febfa3f4b43e3c8223cdbaf2396bf5558edd6602a37ec5'),
+        ('class:_Generation6RNamespaceCleanupBudgetEvent', 12666, 12671, 512, '7944ebb555ea7854575450c30bedad2f6a7337daa2e441937ed0ee2436af8ee7'),
+        ('capture:_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE', 12674, 12684, 835, 'fb2d985af0fcbbd8e3fa2dd1242bfab66dc2c8228351415f182dd29487e2d083'),
+        ('class:_Generation6RNamespaceInventoryCursorState', 12687, 12692, 467, '15c4d19782f30c8394cd09c55c455266aa54998ab44c172ccd5e9673ba90b15b'),
+        ('class:_Generation6RNamespaceInventoryScanState', 12695, 12701, 587, '057680ca66527eb01f631838165cda203dfdf53a0254019e8133cf4f24d1dced'),
+        ('class:_Generation6RNamespaceInventoryAdvanceState', 12704, 12710, 594, '060bb1d309703a518eea3e695cb1e7ff99ad387b26ed6e31ffac343e21d33fc7'),
+        ('class:_Generation6RNamespaceInventoryItemState', 12713, 12720, 787, '9451dbff6f76ef768e3b2494f80129c1164f13fb4cd6412d32f75b5b3ddd070c'),
+        ('class:_Generation6RNamespaceInventoryClassificationState', 12723, 12729, 657, '5e62d000b3694f8d2417ed7258da28b7d90e5242790fb036c2297eff8eca2e9c'),
+        ('class:_Generation6RNamespaceTerminalEvent', 12732, 12735, 554, '0fcb9d3ed27a208f1735a254ed8904840a2102ca429aefec15824f49b0db8c78'),
+        ('class:_Generation6RNamespaceDirectoryFact', 12739, 12748, 1274, 'ce27561b712ce62a3c6906c8aea73c3afc0cc7858a3770f42918cf56831cd1b6'),
+        ('class:_Generation6RNamespaceNameFact', 12752, 12764, 1578, 'cf9d999acb9adde41dd2539b4aeda3105d4e3dfd583b5b0b41a66b37051b92eb'),
+        ('class:_Generation6RNamespaceDirectoryAuthority', 12768, 12770, 476, '36981fc93f15ebb3d1111eb6b2fc39c902d5acff7c8c153eaf42bf4f891c7092'),
+        ('class:_Generation6RNamespaceDirectoryBinding', 12774, 12784, 1436, 'cfbc1e1ba2d84e469c64b56d81f1a6a622bab9d3f0b5ccbcfcffe189df150e15'),
+        ('class:_Generation6RNamespaceDirectoryRecord', 12788, 12791, 653, '728dfd483b4b04574662d329d92851464557801ed85b9648dd7de2adfe53ebb6'),
+        ('class:_Generation6RNamespaceOwnerContextBinding', 12795, 12804, 1330, 'c025354e8c8ecfa799276e87f89640a16c59b8c66ba60543bbff3336110f4aad'),
+        ('class:_Generation6RNamespaceOwnerContext', 12808, 12813, 987, 'fb55663dac360bc354932705723673fc88ef42469f8a49ac21f703049639e499'),
+        ('class:_Generation6RNamespacePresentToken', 12817, 12820, 594, '92fed16e4fef518bbbbb2d650254c706f6fa35b1ea4cc06e3f642239db86fae4'),
+        ('class:_Generation6RNamespaceAbsenceToken', 12824, 12827, 594, 'ef706da22d3e8de5b9ce2f29c2ca2c8e66a01a2a9b029396c9abd1c6fcb80533'),
+        ('class:_Generation6RNamespaceRenameToken', 12831, 12834, 593, '141acc24bb0584dbacfef09135cd686f467b613255e8c84f514042d59dfd8a0a'),
+        ('class:_Generation6RNamespaceMutationPermit', 12838, 12840, 472, '2a45fe0ee6fbed2d2d878720a1a41b450b38474ed9d2ca177469fcdf6088a128'),
+        ('alias:_Generation6RNamespaceLiveToken', 12843, 12847, 325, 'fdb4a19a28d5c25f246c66f04446350c86808bf8ce1a038b32a9f97143c56bef'),
+        ('class:_Generation6RNamespaceCapabilityBinding', 12851, 12868, 2710, '52c1b242f514b78c82e38a5e86e9965e25b6ed92aa902db69d3d3c68a9f466c6'),
+        ('class:_Generation6RNamespaceCapabilityRecord', 12872, 12879, 1371, '06c2abbe3a9a9f9f5d2f9d8941b520cdb3bfa502aa5fd73b3318d73aa4d7f0e6'),
+        ('class:_Generation6RNamespaceUnlinkPreproof', 12883, 12902, 2639, '0ddb29f3dce844647999893dc8016f52a154aed0be35d96ea92a81878297caca'),
+        ('class:_Generation6RNamespaceMutationPermitBinding', 12906, 12923, 2361, '1a077f88b3e6f0d1e108542fa7435ad35d0b754f2bd4d16ddc539459aed6d8f4'),
+        ('class:_Generation6RNamespaceMutationPermitRecord', 12927, 12931, 859, '9eca4a8269f97dd9bcb6a3f100da19c3f591b12f2aa0f735f8c9341416a12f8b'),
+        ('class:_Generation6RNamespaceCleanupBudgetEpoch', 12935, 12943, 1110, '8c739724edda18074efbbf66f35a7ac0775461181fc00b0bf386955c66088421'),
+        ('class:_Generation6RNamespaceInventoryCursor', 12947, 12949, 473, '7196dae87eb9866de6af5f5ce1929c16f57e9a6a6f7434b706b49cb1a3ccdbc3'),
+        ('class:_Generation6RNamespaceInventoryScan', 12953, 12955, 471, 'd10b709262c598509f1d6aa0dad27fa762624adb1ec766c5fab561aeea91bf94'),
+        ('class:_Generation6RNamespaceInventoryAdvance', 12959, 12961, 474, 'bc92a4f162671ba50f738843c891b5f4b0df8708dd00af1d1c630952f971122c'),
+        ('class:_Generation6RNamespaceInventoryItem', 12965, 12967, 471, 'b8be3d189457402f5c3332516bae6353c12719fd359356da02beb6c8b10dc841'),
+        ('class:_Generation6RNamespaceInventoryClassification', 12971, 12973, 481, 'feeaaee42e3f117b24f3320480770ba9d50a92ba6681263d30d253fa782571d0'),
+        ('class:_Generation6RNamespaceEmptyInventory', 12977, 12979, 472, 'c219208d87693d8f2283ea17f6e7a7a16513506b34f6e14fe24fde1a1807da01'),
+        ('class:_Generation6RNamespaceReceipt', 12983, 12988, 865, '41890e5df355c9b14565321ac90e4753586614c5ca96b496c88a087de20e5dd7'),
+        ('class:_Generation6RNamespaceCleanupBudgetRecord', 12992, 13001, 1389, 'b2014cd35ccbfe0a14b1de7342016468610e5bd3652591ae5d05139537d2a8d2'),
+        ('class:_Generation6RNamespaceInventoryCursorBinding', 13005, 13024, 2594, '1f69d457335ae01106c81547365160065c7f14f1982158b6304e6bf934b552aa'),
+        ('class:_Generation6RNamespaceInventoryCursorRecord', 13028, 13033, 965, 'a4fd4e7c373a09b4b419df99e4f1c41e437fe4164c439b73c4c042d3ea6f220f'),
+        ('class:_Generation6RNamespaceInventoryScanBinding', 13037, 13057, 2622, '1baf21891584cf7b4775fb3bf67e3262ccc46bf808fd5a46f408d655795b31cb'),
+        ('class:_Generation6RNamespaceInventoryScanRecord', 13061, 13067, 1070, '5e87aa5e3d44393474d2500f1a5a59d59a49ea49adc83a682a20b502359fa30c'),
+        ('class:_Generation6RNamespaceInventoryAdvanceBinding', 13071, 13095, 3120, '4396a7fc1b81cecfadca42cde3ba885391c19844893a22235595a8862166b95f'),
+        ('class:_Generation6RNamespaceInventoryAdvanceRecord', 13099, 13109, 1838, '1d9419df2017a2ebf13791a838191dd0fe8a5704789187d7e4ab1fbd49963a9b'),
+        ('class:_Generation6RNamespaceInventoryItemBinding', 13113, 13138, 3370, '07a455028be308d20a35ba4396bc44580d967b9d341653bcc98a832c1d2a1b33'),
+        ('class:_Generation6RNamespaceInventoryItemRecord', 13142, 13147, 957, '9e2e1cf8d08cdd72d2f4605fb94f73fd21072ee263972daa04365fde367063b6'),
+        ('class:_Generation6RNamespaceInventoryClassificationBinding', 13151, 13195, 5810, 'b7c50547783c7488fc13c9216a57d76bdf9806ad5d92777eb18cd5cff21a268a'),
+        ('class:_Generation6RNamespaceInventoryClassificationRecord', 13199, 13230, 5133, 'af45a9a8f60e03890d1bdb30ede5cd960f0fb3bf24b75c8d6dc1a7e26d9c722c'),
+        ('class:_Generation6RNamespaceJournal', 13233, 19969, 2701972, '83a4bc1ec6102ea09af302f3b0b193aa9f1c10804f4add151807bf145f9c9d99'),
     )
-    observed_bundle_root_projection_inventory = tuple((cap1_root_descriptor(node), node.lineno, cap1_end_line(node), hashlib.sha256(cap1_canonical_json(cap1_projection_encode(node))).hexdigest()) for node in namespace_bundle_nodes)
+    observed_bundle_root_projection_inventory = tuple((cap1_root_descriptor(node), node.lineno, cap1_end_line(node), len(root_canonical), hashlib.sha256(root_canonical).hexdigest()) for node in namespace_bundle_nodes for root_canonical in (cap1_canonical_json(cap1_projection_encode(node)),))
     _require(observed_bundle_root_projection_inventory == expected_bundle_root_projection_inventory, 'R CAP1 ordered bundle-root projection inventory differs')
     cap1_projection_payload: list[object] = [
         'TASK064-G6-R-CAP1-SEMANTIC-PROJECTION-V1',
         ['contract', 6, 'ec89a1df740805cc9b43e6f2530e940c0bf9b66e8f25ed878d3207d091c4bcb8'],
         ['python_ast', '3.13.14', 'attributes-excluded', 'schema-indexed-fields'],
         ['schema', cap1_schema_payload],
-        ['bundle', 10578, 18825, len(namespace_bundle_nodes), cap1_projection_encode(list(namespace_bundle_nodes))],
+        ['bundle', 10578, 19969, len(namespace_bundle_nodes), cap1_projection_encode(list(namespace_bundle_nodes))],
     ]
     cap1_projection_canonical = cap1_canonical_json(cap1_projection_payload)
     cap1_projection_preimage_digest = hashlib.sha256(cap1_projection_domain)
     cap1_projection_preimage_digest.update(cap1_projection_canonical)
-    _require(len(cap1_projection_domain) == 44 and len(cap1_projection_canonical) == 3513390 and hashlib.sha256(cap1_projection_canonical).hexdigest() == 'feea7ddba5e4fc207ac43dd9df0e1efc42f20d1e2221757b1643735d4543bcbb' and len(cap1_projection_domain) + len(cap1_projection_canonical) == 3513434 and cap1_projection_preimage_digest.hexdigest() == '0fb49e9b2a25390c6eb98118d3fbbc5b949949951d6a9c5556351264f9435613', 'R CAP1 lossless semantic projection differs')
-    final_capture_names = tuple(descriptor.removeprefix('capture:') for descriptor, _start, _end, _digest in expected_bundle_root_projection_inventory if descriptor.startswith('capture:'))
-    protected_helper_names = (
+    _require(len(cap1_projection_domain) == 44 and len(cap1_projection_canonical) == 3655899 and hashlib.sha256(cap1_projection_canonical).hexdigest() == '7c7125661417c3e981f3303daeca704680ca398f6df9ec8f2c1a1592c80e0a23' and len(cap1_projection_domain) + len(cap1_projection_canonical) == 3655943 and cap1_projection_preimage_digest.hexdigest() == '649e858681a618d4e22faee0fe0cec45eee54b5d80be91f2993b58f6e7baf9dc', 'R CAP1 lossless semantic projection differs')
+    final_capture_names = tuple(descriptor.removeprefix('capture:') for descriptor, _start, _end, _length, _digest in expected_bundle_root_projection_inventory if descriptor.startswith('capture:'))
+    protected_helper_names: tuple[str, ...] = (
         '_issue_inventory_cursor_provenance',
         '_require_inventory_cursor_provenance',
         '_issue_current_inventory_cursor',
@@ -19291,6 +20563,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         '_terminalize_inventory_item',
         '_yield_metered_inventory_item',
     )
+    protected_helper_names = (*protected_helper_names, '_require_pristine_inventory_classification', '_require_current_inventory_classification', '_reauthenticate_inventory_classification_parent', '_derive_inventory_classification', '_close_rejected_namespace_raw_once', '_close_inventory_classification_owner', '_register_inventory_classification_name_fact', '_terminalize_inventory_classification', '_fail_inventory_classification_uncertain', '_classify_metered_inventory_item')
     inventory_scan_helper_names = {'_acquire_metered_inventory_scan', '_require_current_inventory_scan', '_terminalize_inventory_scan'}
     namespace_constructor_names = set(namespace_class_names)
     namespace_calls = tuple(call for method in namespace_methods.values() for call in calls(method))
@@ -19315,7 +20588,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
         ('EXTERNAL_NAMESPACE_CONSTRUCTOR_CALL', cap1_external_namespace_constructor_calls),
         ('EXTERNAL_PROTECTED_TYPE_WRITE_OR_DELETE', cap1_external_protected_type_writes),
     )
-    _require(len(final_capture_names) == 91 and len(protected_helper_names) == 13 and len(namespace_constructor_names) == 51 and len(cap1_protected_type_names) == 54 and cap1_ordered_external_residuals == (('EXTERNAL_FINAL_CAPTURE_WRITE_OR_DELETE', ()), ('EXTERNAL_PROTECTED_HELPER_CALL', ()), ('EXTERNAL_NAMESPACE_CONSTRUCTOR_CALL', ()), ('EXTERNAL_PROTECTED_TYPE_WRITE_OR_DELETE', ())), 'R CAP1 ordered external residuals differ')
+    _require(len(final_capture_names) == 91 and len(protected_helper_names) == 23 and len(namespace_constructor_names) == 55 and len(cap1_protected_type_names) == 58 and cap1_ordered_external_residuals == (('EXTERNAL_FINAL_CAPTURE_WRITE_OR_DELETE', ()), ('EXTERNAL_PROTECTED_HELPER_CALL', ()), ('EXTERNAL_NAMESPACE_CONSTRUCTOR_CALL', ()), ('EXTERNAL_PROTECTED_TYPE_WRITE_OR_DELETE', ())), 'R CAP1 ordered external residuals differ')
     a2_budget_foundation_present = True
     a2_inventory_vocabulary_present = True
     a2_inventory_cursor_provenance_present = True
@@ -19328,11 +20601,15 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     a2_permanent_end_observation_present = True
     a2_owned_unclassified_item_evidence_present = True
     a2_budget_readiness = False
-    a2_budget_prerequisites = ('nofollow-stat-attempt-metering', 'open-attempt-metering', 'fstat-attempt-metering', 'mount-attempt-metering', 'time-sample-metering', 'preproof-attempt-metering', 'postproof-attempt-metering', 'unlink-attempt-metering')
+    a2_budget_prerequisites: tuple[str, ...] = ('nofollow-stat-attempt-metering', 'open-attempt-metering', 'fstat-attempt-metering', 'mount-attempt-metering', 'time-sample-metering', 'preproof-attempt-metering', 'postproof-attempt-metering', 'unlink-attempt-metering')
     a2_rmdir_readiness = False
     a2_rmdir_prerequisites = ('authenticated-empty-inventory',)
     _require(type(a2_budget_foundation_present) is bool and a2_budget_foundation_present and (type(a2_inventory_vocabulary_present) is bool) and a2_inventory_vocabulary_present and (type(a2_inventory_cursor_provenance_present) is bool) and a2_inventory_cursor_provenance_present and (type(a2_inventory_cursor_lifecycle_present) is bool) and a2_inventory_cursor_lifecycle_present and (type(a2_current_inventory_cursor) is bool) and a2_current_inventory_cursor and (type(a2_metered_scan_acquisition_present) is bool) and a2_metered_scan_acquisition_present and (type(a2_owned_inventory_scan_present) is bool) and a2_owned_inventory_scan_present and (type(a2_captured_iterator_consumption_present) is bool) and a2_captured_iterator_consumption_present and (type(a2_full_domain_name_byte_accounting_present) is bool) and a2_full_domain_name_byte_accounting_present and (type(a2_permanent_end_observation_present) is bool) and a2_permanent_end_observation_present and (type(a2_owned_unclassified_item_evidence_present) is bool) and a2_owned_unclassified_item_evidence_present and (type(a2_budget_readiness) is bool) and (not a2_budget_readiness) and (a2_budget_prerequisites == ('nofollow-stat-attempt-metering', 'open-attempt-metering', 'fstat-attempt-metering', 'mount-attempt-metering', 'time-sample-metering', 'preproof-attempt-metering', 'postproof-attempt-metering', 'unlink-attempt-metering')) and (type(a2_rmdir_readiness) is bool) and (not a2_rmdir_readiness) and (a2_rmdir_prerequisites == ('authenticated-empty-inventory',)) and all((name in namespace_classes for name in ('_Generation6RNamespaceInventoryCursor', '_Generation6RNamespaceInventoryScan', '_Generation6RNamespaceEmptyInventory'))) and all((fragment not in namespace_source for fragment in ('_Generation6RNamespaceEmptyInventory', 'consume_rmdir'))) and all((fragment in namespace_source for fragment in ('_Generation6RNamespaceCleanupBudgetEpoch', '_Generation6RNamespaceCleanupBudgetRecord', '_issue_cleanup_budget_epoch', '_charge_cleanup_budget', '_Generation6RNamespaceInventoryCursorBinding', '_Generation6RNamespaceInventoryCursorRecord', '_issue_inventory_cursor_provenance', '_require_inventory_cursor_provenance', '_issue_current_inventory_cursor', '_require_current_inventory_cursor', '_terminalize_inventory_cursor', '_Generation6RNamespaceInventoryScanState', '_Generation6RNamespaceInventoryScan', '_Generation6RNamespaceInventoryScanBinding', '_Generation6RNamespaceInventoryScanRecord', '_acquire_metered_inventory_scan', '_require_current_inventory_scan', '_terminalize_inventory_scan', '_Generation6RNamespaceInventoryAdvanceState', '_Generation6RNamespaceInventoryAdvance', '_Generation6RNamespaceInventoryAdvanceBinding', '_Generation6RNamespaceInventoryAdvanceRecord', '_Generation6RNamespaceInventoryItemState', '_Generation6RNamespaceInventoryItem', '_Generation6RNamespaceInventoryItemBinding', '_Generation6RNamespaceInventoryItemRecord', '_fail_inventory_advance_uncertain', '_terminalize_inventory_scan_end_observed', '_require_current_inventory_item', '_terminalize_inventory_item', '_yield_metered_inventory_item'))), 'R namespace A2f budget/RMDIR readiness and current capability differ')
+    a2_metered_item_classification_present = True
+    a2_budget_prerequisites = ('time-sample-metering', 'preproof-attempt-metering', 'postproof-attempt-metering', 'unlink-attempt-metering')
+    _require(type(a2_metered_item_classification_present) is bool and a2_metered_item_classification_present and (type(a2_budget_readiness) is bool) and (not a2_budget_readiness) and a2_budget_prerequisites == ('time-sample-metering', 'preproof-attempt-metering', 'postproof-attempt-metering', 'unlink-attempt-metering') and (type(a2_rmdir_readiness) is bool) and (not a2_rmdir_readiness) and a2_rmdir_prerequisites == ('authenticated-empty-inventory',) and all(fragment in namespace_source for fragment in ('_Generation6RNamespaceInventoryClassificationState', '_Generation6RNamespaceInventoryClassification', '_Generation6RNamespaceInventoryClassificationBinding', '_Generation6RNamespaceInventoryClassificationRecord', '_classify_metered_inventory_item')), 'R namespace A2g readiness transition differs')
     permanent_collection_names = {'self._authority_records_by_serial', 'self._authority_records_by_identity', 'self._authority_records_by_owner_identity', 'self._directory_facts_by_serial', 'self._name_facts_by_key', 'self._hardlink_groups', 'self._capability_records_by_serial', 'self._capability_records_by_identity', 'self._archived_capability_records', 'self._mutation_permit_records_by_serial', 'self._mutation_permit_records_by_identity', 'self._archived_mutation_permit_records', 'self._cleanup_budget_records_by_serial', 'self._cleanup_budget_records_by_identity', 'self._inventory_cursor_bindings_by_identity', 'self._inventory_cursor_bindings_by_serial', 'self._inventory_cursor_records_by_identity', 'self._inventory_cursor_records_by_serial', 'self._archived_inventory_cursor_records', 'self._inventory_scan_records_by_identity', 'self._inventory_scan_records_by_serial', 'self._archived_inventory_scan_records', 'self._inventory_scan_proxy_quarantine', 'self._inventory_advance_records_by_identity', 'self._inventory_advance_records_by_serial', 'self._archived_inventory_advance_records', 'self._inventory_item_records_by_identity', 'self._inventory_item_records_by_serial', 'self._archived_inventory_item_records', 'self._inventory_raw_entry_quarantine', 'self._namespace_owner_tokens', 'self._namespace_owner_contexts', 'self._receipts'}
+    permanent_collection_names = permanent_collection_names | {'self._inventory_classification_records_by_identity', 'self._inventory_classification_records_by_serial', 'self._archived_inventory_classification_records', 'self._inventory_classification_residue_evidence', 'self._inventory_classification_descriptor_quarantine', 'self._untransferred_raw_quarantine'}
     a1b_forbidden_collection_removals: tuple[str, ...] = tuple((ast.unparse(call) for call in namespace_calls if isinstance(call.func, ast.Attribute) and ast.unparse(call.func.value) in permanent_collection_names and (call.func.attr in {'clear', 'discard', 'pop', 'popitem', 'remove', '__delitem__'})))
     forbidden_collection_deletes = tuple((ast.unparse(node) for method in namespace_methods.values() for node in ast.walk(method) if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Del) and (ast.unparse(node.value) in permanent_collection_names)))
     destructive_targets = {'os.unlink', 'os.rmdir', 'os.remove', 'os.rename', 'os.replace', 'Path.unlink', 'pathlib.Path.unlink', 'shutil.rmtree', 'ctypes.CDLL', 'ctypes.PyDLL', 'syscall'}
@@ -19356,18 +20633,18 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     protected_exec_calls = tuple((ast.unparse(call.func) for scope in external_scope_nodes for call in calls(scope) if ast.unparse(call.func) in {'eval', 'exec'}))
     external_namespace_calls = tuple((call for node in syntax.body if node not in namespace_classes.values() and node is not namespace_gate_function for call in calls(node)))
     _require(not protected_external_name_loads and (not protected_external_name_writes) and (not protected_external_attributes) and (not protected_dynamic_subscripts) and (not protected_dynamic_calls) and (not protected_exec_calls) and (not any((ast.unparse(call.func) in namespace_constructor_names or (isinstance(call.func, ast.Attribute) and call.func.attr in namespace_public_calls) for call in external_namespace_calls))), 'R namespace static integration block has an external call site')
-    _require(type(namespace_gate_function.end_lineno) is int, 'R namespace A2f gate end differs')
+    _require(type(namespace_gate_function.end_lineno) is int, 'R namespace A2g gate end differs')
     gate_start = namespace_gate_function.lineno
     gate_end = cast(int, namespace_gate_function.end_lineno)
-    expected_gate_digest = '8ba3940f00f8ff7247ff10c0ff8301ef5c69293627c27271414ba604d2516a89'
+    expected_gate_digest = '3ed36b75ecf3ae9ade98f331a448b1fc87deb93e0618358e5e6d68a1782f9e56'
     normalized_gate_source = '\n'.join(source.splitlines()[gate_start - 1:gate_end]) + '\n'
-    _require(normalized_gate_source.count(expected_gate_digest) == 1, 'R namespace A2f gate digest token differs')
+    _require(normalized_gate_source.count(expected_gate_digest) == 1, 'R namespace A2g gate digest token differs')
     normalized_gate_source = normalized_gate_source.replace(expected_gate_digest, '0' * 64)
     gate_domain = b'TASK-064\x00GEN6\x00R-CAP1\x00gate-v1\x00'
     gate_preimage = gate_domain + normalized_gate_source.encode('utf-8')
     gate_digest = hashlib.sha256(gate_preimage).hexdigest()
     namespace_gate_index = syntax.body.index(namespace_gate_function)
-    _require(gate_start == 18828 and syntax.body[namespace_gate_index + 1] is top_function('_selftest_r_case') and (len(gate_preimage) == 100461) and (gate_digest == expected_gate_digest), 'R namespace A2f reviewed gate digest differs')
+    _require(gate_start == 19972 and gate_end == 20647 and syntax.body[namespace_gate_index + 1] is top_function('_selftest_r_case') and (len(gate_preimage) == 130806) and (gate_digest == expected_gate_digest), 'R namespace A2g reviewed gate digest differs')
     # fmt: on
 
 
