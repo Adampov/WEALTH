@@ -19969,683 +19969,579 @@ class _Generation6RNamespaceJournal:
             raise
 
 
+# fmt: off
 def _generation6_r_authority_source_gates(source: str) -> None:
-    # fmt: off
-    'Uncalled static proof for the deliberately integration-blocked R authority core.'
-    _require(type(source) is str and '\x00' not in source and 0 < len(source.encode('utf-8')) <= 1_868_927 and 2_000_000 - len(source.encode('utf-8')) >= 131_072, 'R authority source input differs')
-    syntax = ast.parse(source, filename='tests/ci_shard_runner.py', mode='exec')
-    def top_function(name: str) -> ast.FunctionDef:
-        matches = tuple((node for node in syntax.body if isinstance(node, ast.FunctionDef) and node.name == name))
-        _require(len(matches) == 1, f'R static function inventory differs: {name}')
-        return matches[0]
-    def top_class(name: str) -> ast.ClassDef:
-        matches = tuple((node for node in syntax.body if isinstance(node, ast.ClassDef) and node.name == name))
-        _require(len(matches) == 1, f'R static class inventory differs: {name}')
-        return matches[0]
-    def class_method(class_node: ast.ClassDef, name: str) -> ast.FunctionDef:
-        matches = tuple((node for node in class_node.body if isinstance(node, ast.FunctionDef) and node.name == name))
-        _require(len(matches) == 1, f'R static method inventory differs: {name}')
-        return matches[0]
-    def calls(node: ast.AST) -> tuple[ast.Call, ...]:
-        return tuple((candidate for candidate in ast.walk(node) if isinstance(candidate, ast.Call)))
-    def call_targets(node: ast.AST) -> tuple[str, ...]:
-        return tuple((ast.unparse(candidate.func) for candidate in calls(node)))
-    def normalized_node_source(node: ast.FunctionDef) -> str:
-        _require(type(node.end_lineno) is int, 'R static node source end differs')
-        return '\n'.join(source.splitlines()[node.lineno - 1:cast(int, node.end_lineno)]) + '\n'
-    capture_values = {'_GENERATION6_R_CAPTURED_FD_INIT': 'FdOwner.__init__', '_GENERATION6_R_CAPTURED_FD_REQUIRE': 'FdOwner.require', '_GENERATION6_R_CAPTURED_FD_DETACH': 'FdOwner.detach', '_GENERATION6_R_CAPTURED_FD_CLOSE_ONCE': 'FdOwner.close_once', '_GENERATION6_R_CAPTURED_SOCKET_DETACH': 'socket.socket.detach', '_GENERATION6_R_CAPTURED_SOCKET_FILENO': 'socket.socket.fileno', '_GENERATION6_R_CAPTURED_SNAPSHOT_STAT': '_snapshot_stat', '_GENERATION6_R_REAL_OS_CLOSE': 'os.close', '_GENERATION6_R_REAL_OS_OPEN': 'os.open', '_GENERATION6_R_REAL_OS_SCANDIR': 'os.scandir', '_GENERATION6_R_REAL_OS_FSTAT': 'os.fstat', '_GENERATION6_R_REAL_FCNTL': 'fcntl.fcntl'}
-    capture_nodes: dict[str, ast.AnnAssign] = {}
-    for name, expected_value in capture_values.items():
-        matches = tuple((node for node in syntax.body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and (node.target.id == name)))
-        _require(len(matches) == 1, f'R static capture inventory differs: {name}')
-        capture = matches[0]
-        _require(isinstance(capture.annotation, ast.Name) and capture.annotation.id == 'Final' and (capture.value is not None) and (ast.unparse(capture.value) == expected_value), f'R static capture binding differs: {name}')
-        capture_nodes[name] = capture
-    class_names = ('_Generation6RPhase', '_Generation6RDescriptorState', '_Generation6ROwnerToken', '_Generation6ROwnerRecord', '_Generation6RAuthorityEvent', '_Generation6RIteratorToken', '_Generation6RScandirCapability', '_Generation6RAuthorityLedger', '_Generation6RScandirProxy', '_Generation6RAuthorityScope')
-    classes = {name: top_class(name) for name in class_names}
-    phase_class = classes['_Generation6RPhase']
-    state_class = classes['_Generation6RDescriptorState']
-    _require(all((capture.lineno < phase_class.lineno for capture in capture_nodes.values())) and tuple((ast.unparse(base) for base in phase_class.bases)) == ('str', 'Enum') and (tuple((ast.unparse(base) for base in state_class.bases)) == ('str', 'Enum')), 'R static enum or capture ordering differs')
-    def enum_members(class_node: ast.ClassDef) -> tuple[tuple[str, object], ...]:
-        result: list[tuple[str, object]] = []
-        for node in class_node.body:
-            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Constant):
-                result.append((node.targets[0].id, node.value.value))
-        return tuple(result)
-    _require(enum_members(phase_class) == tuple(((value, value) for value in ('SETUP', 'SUBJECT', 'PRODUCTION', 'INJECTION', 'REUSE_TEARDOWN', 'TERMINAL'))) and enum_members(state_class) == tuple(((value, value) for value in ('LIVE', 'DETACHED', 'CLOSE_SUCCEEDED', 'CLOSE_UNCERTAIN'))), 'R static enum members differ')
-    owner_token_class = classes['_Generation6ROwnerToken']
-    token_fields = tuple((node.target.id for node in owner_token_class.body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)))
-    token_decorators = tuple((ast.unparse(value) for value in owner_token_class.decorator_list))
-    _require(token_fields == ('ordinal', 'generation', 'owner_identity', 'descriptor', 'label', 'acquired_phase', 'snapshot', 'fd_flags', 'status_flags') and token_decorators == ('dataclass(frozen=True, eq=False)',) and (tuple((ast.unparse(value) for value in classes['_Generation6RScandirCapability'].decorator_list)) == ('dataclass(frozen=True, eq=False)',)) and (tuple((ast.unparse(value) for value in classes['_Generation6ROwnerRecord'].decorator_list)) == ('dataclass',)), 'R static token mutability or field inventory differs')
-    ledger_class = classes['_Generation6RAuthorityLedger']
-    ledger_init = class_method(ledger_class, '__init__')
-    ledger_init_source = ast.unparse(ledger_init)
-    _require(all((fragment in ledger_init_source for fragment in ('self._generation_by_descriptor: dict[int, int] = {}', 'self._records_by_owner_identity', 'self._records_by_ordinal', 'self._current_by_descriptor', 'self._scan_capabilities_by_owner_identity', 'self._scan_capabilities_by_descriptor', 'self._live_scandir_proxies', 'self._uncertain_descriptors'))), 'R static ledger index inventory differs')
-    initialize_owner = class_method(ledger_class, 'initialize_owner')
-    initialize_source = ast.unparse(initialize_owner)
-    initialize_tries = tuple((node for node in initialize_owner.body if isinstance(node, ast.Try)))
-    _require(len(initialize_tries) == 1 and initialize_owner.body[-1] is initialize_tries[0] and (not any((isinstance(candidate, ast.Call) and isinstance(candidate.func, ast.Name) and (candidate.func.id == '_require') for statement in initialize_owner.body[:-1] for candidate in ast.walk(statement)))) and ('offered_unclaimed_descriptor' in initialize_source) and ('current is None or partial_is_current' in initialize_source) and ('partial_record=partial_record' in initialize_source) and ('owner_identity not in self._records_by_owner_identity' in initialize_source) and (call_targets(initialize_owner).count('_GENERATION6_R_REAL_OS_FSTAT') == 1) and (call_targets(initialize_owner).count('_GENERATION6_R_REAL_FCNTL') == 2) and (call_targets(initialize_owner).count('_Generation6RScandirCapability') == 1), 'R static total acquisition transaction differs')
-    partial_remove = class_method(ledger_class, '_remove_partial_registration')
-    partial_remove_source = ast.unparse(partial_remove)
-    registration_cleanup = class_method(ledger_class, '_close_registration_failure')
-    registration_cleanup_source = ast.unparse(registration_cleanup)
-    registration_cleanup_calls = calls(registration_cleanup)
-    registration_close_lines = tuple((call.lineno for call in registration_cleanup_calls if ast.unparse(call.func) == '_GENERATION6_R_REAL_OS_CLOSE'))
-    registration_poison_lines = tuple((call.lineno for call in registration_cleanup_calls if ast.unparse(call.func) == 'self._uncertain_descriptors.add'))
-    _require('record is expected' in partial_remove_source and 'current is expected.token' in partial_remove_source and ('capability.parent is expected.token' in partial_remove_source) and (call_targets(registration_cleanup).count('_GENERATION6_R_CAPTURED_FD_DETACH') == 1) and (len(registration_close_lines) == 1) and (len(registration_poison_lines) == 2) and all((line > registration_close_lines[0] for line in registration_poison_lines)) and ('if not initialized or cleanup_error is None' in registration_cleanup_source), 'R static registration cleanup authority differs')
-    record_for_owner = class_method(ledger_class, '_record_for_owner')
-    authorize_live = class_method(ledger_class, '_authorize_live')
-    authorize_source = ast.unparse(authorize_live)
-    immediate_token = class_method(ledger_class, '_token_after_immediate_acquisition')
-    _require('owner_identity = id(owner)' in ast.unparse(record_for_owner) and 'self._records_by_owner_identity.get(owner_identity)' in ast.unparse(record_for_owner) and ('record.token is token' in authorize_source) and ('self._records_by_ordinal.get(exact_token.ordinal) is record' in authorize_source) and ('self._generation_by_descriptor.get(exact_token.descriptor) == exact_token.generation' in authorize_source) and ('owner.label == exact_token.label' in authorize_source) and ('self._current_by_descriptor.get(exact_token.descriptor) is exact_token' in authorize_source) and ('_GENERATION6_R_REAL_OS_FSTAT' not in call_targets(authorize_live)) and ('_GENERATION6_R_REAL_FCNTL' not in call_targets(authorize_live)), 'R static exact live authorization differs')
-    _require(ast.unparse(immediate_token).endswith('return self._authorize_live(owner).token'), 'R static immediate acquisition authorization differs')
-    reauthorize_live = class_method(ledger_class, '_reauthorize_live')
-    reauthorize_source = ast.unparse(reauthorize_live)
-    _require(call_targets(reauthorize_live).count('_GENERATION6_R_REAL_OS_FSTAT') == 1 and call_targets(reauthorize_live).count('_GENERATION6_R_REAL_FCNTL') == 2 and ('self.phase is not _Generation6RPhase.PRODUCTION' in reauthorize_source), 'R static post-production reauthentication differs')
-    close_owner = class_method(ledger_class, 'close_owner_once')
-    close_targets = call_targets(close_owner)
-    close_begin = tuple((node for node in close_owner.body if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and (ast.unparse(node.value.func) == 'self._append_event') and any((isinstance(argument, ast.Constant) and argument.value == 'CLOSE_ONCE_BEGIN' for argument in node.value.args))))
-    close_guard = tuple((node for node in close_owner.body if isinstance(node, ast.Try) and any((ast.unparse(call.func) == 'owner.detach' for call in calls(node)))))
-    _require(len(close_begin) == 1 and len(close_guard) == 1 and (close_owner.body.index(close_guard[0]) == close_owner.body.index(close_begin[0]) + 1) and (close_targets.count('owner.detach') == 1) and (close_targets.count('_GENERATION6_R_REAL_OS_CLOSE') == 1) and (close_targets.count('_GENERATION6_R_CAPTURED_FD_CLOSE_ONCE') == 0) and (call_targets(close_guard[0]).count('self._mark_close_uncertain') == 1), 'R static normal close one-call guard differs')
-    inject_close = class_method(ledger_class, '_inject_close_uncertainty')
-    inject_targets = call_targets(inject_close)
-    inject_source = ast.unparse(inject_close)
-    injected_close_guards = tuple((node for node in inject_close.body if isinstance(node, ast.Try) and any((ast.unparse(call.func) == 'owner.detach' for call in calls(node)))))
-    open_calls = tuple((call for call in calls(inject_close) if ast.unparse(call.func) == '_GENERATION6_R_REAL_OS_OPEN'))
-    owner_adoptions = tuple((call for call in calls(inject_close) if ast.unparse(call.func) == 'FdOwner'))
-    raw_release_assignments = tuple((node for node in ast.walk(inject_close) if isinstance(node, ast.Assign) and any((isinstance(target, ast.Name) and target.id == 'raw_reuse' for target in node.targets)) and isinstance(node.value, ast.Name) and (node.value.id == '_PID_SENTINEL')))
-    _require(len(injected_close_guards) == 1 and call_targets(injected_close_guards[0]).count('owner.detach') == 1 and (call_targets(injected_close_guards[0]).count('_GENERATION6_R_REAL_OS_CLOSE') == 1) and (call_targets(injected_close_guards[0]).count('self._mark_close_uncertain') == 1) and (len(open_calls) == len(owner_adoptions) == len(raw_release_assignments) == 1) and (open_calls[0].lineno < raw_release_assignments[0].lineno < owner_adoptions[0].lineno) and ('self.phase = _Generation6RPhase.INJECTION' in inject_source) and ('reused_token.generation == token.generation + 1' in inject_source) and ('event.phase is _Generation6RPhase.PRODUCTION' in inject_source) and ('_GENERATION6_R_REAL_OS_FSTAT' not in inject_targets) and ('_GENERATION6_R_REAL_FCNTL' not in inject_targets), 'R static close-ambiguity adoption differs')
-    mark_uncertain = class_method(ledger_class, '_mark_close_uncertain')
-    mark_calls = calls(mark_uncertain)
-    state_assignments = tuple((node for node in ast.walk(mark_uncertain) if isinstance(node, ast.Assign) and any((ast.unparse(target) == 'record.state' for target in node.targets)) and (ast.unparse(node.value) == '_Generation6RDescriptorState.CLOSE_UNCERTAIN')))
-    current_removals = tuple((call for call in mark_calls if ast.unparse(call.func) == 'self._current_by_descriptor.pop'))
-    poison_additions = tuple((call for call in mark_calls if ast.unparse(call.func) == 'self._uncertain_descriptors.add'))
-    revoke_calls = tuple((call for call in mark_calls if ast.unparse(call.func) == 'self._revoke_scan_capability'))
-    _require(len(state_assignments) == len(current_removals) == len(poison_additions) == 1 and len(revoke_calls) == 1 and (max(state_assignments[0].lineno, current_removals[0].lineno, poison_additions[0].lineno) < revoke_calls[0].lineno) and ('secondary_errors.append(error)' in ast.unparse(mark_uncertain)), 'R static fail-closed uncertainty ordering differs')
-    scandir = class_method(ledger_class, 'scandir')
-    scandir_source = ast.unparse(scandir)
-    scandir_targets = call_targets(scandir)
-    raw_scandir_statements = tuple((statement for statement in scandir.body if isinstance(statement, ast.AnnAssign) and statement.value is not None and ast.unparse(statement.value) == '_GENERATION6_R_REAL_OS_SCANDIR(authorized_descriptor)'))
-    _require(len(raw_scandir_statements) == 1, 'R static scandir raw acquisition statement differs')
-    raw_scandir_statement = raw_scandir_statements[0]
-    raw_scandir_index = scandir.body.index(raw_scandir_statement)
-    _require(raw_scandir_index + 2 < len(scandir.body) and isinstance(scandir.body[raw_scandir_index + 1], ast.AnnAssign) and (ast.unparse(scandir.body[raw_scandir_index + 1]) == 'proxy: _Generation6RScandirProxy | None = None') and (not calls(scandir.body[raw_scandir_index + 1])) and isinstance(scandir.body[raw_scandir_index + 2], ast.Try), 'R static scandir immediate adoption boundary differs')
-    _require('self._scan_capabilities_by_descriptor.get(descriptor)' in scandir_source and 'self._current_by_descriptor.get(descriptor) is capability.parent' in scandir_source and ('self._records_by_owner_identity.get(exact_capability.owner_identity)' in scandir_source) and ('candidate_record.token is exact_capability.parent' in scandir_source) and ('self._authorize_live(record.owner, exact_capability.parent)' in scandir_source) and (scandir_targets.count('_GENERATION6_R_CAPTURED_FD_REQUIRE') == 1) and (scandir_targets.count('_GENERATION6_R_REAL_OS_SCANDIR') == 1) and ('_GENERATION6_R_REAL_OS_FSTAT' not in scandir_targets) and ('_GENERATION6_R_REAL_FCNTL' not in scandir_targets) and ('self._live_scandir_proxies[proxy_identity] = proxy' in scandir_source) and ('SCANDIR_AUTHORIZED' in scandir_source) and ('SCANDIR_ACQUIRE' in scandir_source), 'R static scandir selector authority differs')
-    release_proxy = class_method(ledger_class, '_release_scandir_proxy')
-    proxy_class = classes['_Generation6RScandirProxy']
-    proxy_init = class_method(proxy_class, '__init__')
-    proxy_iter = class_method(proxy_class, '__iter__')
-    proxy_next = class_method(proxy_class, '__next__')
-    proxy_close = class_method(proxy_class, 'close')
-    proxy_enter = class_method(proxy_class, '__enter__')
-    proxy_exit = class_method(proxy_class, '__exit__')
-    proxy_close_terminal_lines = tuple((node.lineno for node in ast.walk(proxy_close) if isinstance(node, ast.Assign) and any((ast.unparse(target) == 'self._terminal' for target in node.targets)) and (ast.unparse(node.value) == 'True')))
-    proxy_raw_close_lines = tuple((call.lineno for call in calls(proxy_close) if ast.unparse(call.func) == 'self._close_operation'))
-    _require('self._live_scandir_proxies.pop(proxy_identity, None)' in ast.unparse(release_proxy) and call_targets(proxy_close).count('self._close_operation') == 1 and (call_targets(proxy_close).count('self._ledger._release_scandir_proxy') == 1) and ('self._terminal = True' in ast.unparse(proxy_close)) and ("_require(not self._terminal, 'R scandir proxy close repeated')" in ast.unparse(proxy_close)) and ('self._close_attempts == 1' in ast.unparse(proxy_close)) and (len(proxy_close_terminal_lines) == len(proxy_raw_close_lines) == 1) and (proxy_close_terminal_lines[0] < proxy_raw_close_lines[0]), 'R static opaque iterator one-close authority differs')
-    close_reused = class_method(ledger_class, 'close_reused_after_production')
-    close_reused_source = ast.unparse(close_reused)
-    _require(call_targets(close_reused).count('self._reauthorize_live') == 1 and call_targets(close_reused).count('reused_owner.close_once') == 1 and ('self.phase is _Generation6RPhase.REUSE_TEARDOWN' in close_reused_source) and ('event.phase is _Generation6RPhase.PRODUCTION' in close_reused_source) and ('if record is not None' in close_reused_source), 'R static reused-descriptor teardown claim differs')
-    fd_owner_class = top_class('FdOwner')
-    original_close = class_method(fd_owner_class, 'close_once')
-    _require(call_targets(original_close).count('self.detach') == 1 and call_targets(original_close).count('os.close') == 1, 'R static captured FdOwner close semantics differ')
-    scope_class = classes['_Generation6RAuthorityScope']
-    scope_init = class_method(scope_class, '__init__')
-    nested_patch_closures = tuple((node.name for node in scope_init.body if isinstance(node, ast.FunctionDef)))
-    patch_calls = tuple((call for call in calls(scope_init) if isinstance(call.func, ast.Name) and call.func.id == '_Generation6SelftestPatch'))
-    patch_arguments = tuple((tuple((ast.unparse(argument) for argument in call.args)) for call in patch_calls))
-    _require(nested_patch_closures == ('initialize', 'detach', 'close_once', 'scandir') and patch_arguments == (('FdOwner', "'__init__'", 'self._initialize'), ('FdOwner', "'detach'", 'self._detach'), ('FdOwner', "'close_once'", 'self._close_once'), ('os', "'scandir'", 'self._scandir')), 'R static exact-four patch inventory differs')
-    restore_all = class_method(scope_class, '_restore_all')
-    restore_source = ast.unparse(restore_all)
-    scope_exit = class_method(scope_class, '__exit__')
-    explicit_gate_required_markers = ('_G6R_PK[2][15]', '_G6R_PE[2][15]', '_G6R_IK[2][7]', '_G6R_IE[2][7]', '_G6R_BK[2][7]', '_G6R_BE[2][7]', '_G6R_OK[2][31]', '_G6R_OE[2][31]', '_G6R_LK[2][31]', '_G6R_LE[2][31]', '_G6R_TK[2][23]', '_G6R_TE[2][23]', '_G6R_WK[2][23]', '_G6R_WE[2][23]', '_G6R_VK[2][23]', '_G6R_VE[2][23]', '_GENERATION6_R_AUTHORITY_EVENT_CLASS_SEAL', '_G6R_SS', '_G6R_SK', '_G6R_SE', '_G6R_AF', '_G6R_AI', '_G6R_NF', '_G6R_NI', '_G6R_VC', '_G6R_VF', '_G6R_VI', '_G6R_VB', '_G6R_G', '_G6R_D', '__dict__', 'cell_contents')
-    original_identity_method = class_method(scope_class, '_require_original_identities')
-    original_identity_source = ast.unparse(original_identity_method)
-    original_identity_gate = original_identity_method.body[0]
-    original_identity_call = original_identity_gate.value if isinstance(original_identity_gate, ast.Expr) and isinstance(original_identity_gate.value, ast.Call) else None
-    original_identity_forbidden_nodes = tuple(node for node in ast.walk(original_identity_gate) if isinstance(node, (ast.Store, ast.For, ast.AsyncFor, ast.While, ast.DictComp, ast.GeneratorExp, ast.ListComp, ast.NamedExpr, ast.SetComp)))
-    original_identity_namespace_equality_acceptance = tuple(node for node in ast.walk(original_identity_gate) if isinstance(node, ast.Compare) and any(isinstance(operator, (ast.Eq, ast.NotEq)) for operator in node.ops) and isinstance(node.left, ast.Subscript) and ast.unparse(node.left).endswith(('[5]', '[6]')))
-    _require('for proxy in tuple(self.ledger._live_scandir_proxies.values())' in restore_source and 'reversed(tuple(zip(self._patches, self._bindings, strict=True)))' in restore_source and ('observed is not original' in restore_source and 'setattr(target, name, original)' in restore_source and 'getattr(target, name) is original' in restore_source and '_GENERATION6_ACTIVE_PATCHES.clear()' in restore_source) and call_targets(scope_exit).count('self._restore_all') == 1 and all(value in original_identity_source for value in capture_values) and 'FdOwner.require is _GENERATION6_R_CAPTURED_FD_REQUIRE' in original_identity_source and len(original_identity_method.body) == 1 and isinstance(original_identity_gate, ast.Expr) and isinstance(original_identity_call, ast.Call) and ast.unparse(original_identity_call.func) == '_require' and len(original_identity_call.args) == 2 and not original_identity_call.keywords and isinstance(original_identity_call.args[0], ast.BoolOp) and isinstance(original_identity_call.args[0].op, ast.And) and ast.literal_eval(original_identity_call.args[1]) == 'R authority original identity differs' and not original_identity_forbidden_nodes and 'all(' not in original_identity_source and not original_identity_namespace_equality_acceptance and all(marker in original_identity_source for marker in explicit_gate_required_markers), 'R static composite restoration differs')
-    inherited_scan_source_digests = {'ledger_release': (release_proxy, '761d737f43e588f5f2359d4515eec29db109a73d93e760baf2229b1bc0ca38f9'), 'ledger_scandir': (scandir, 'fdbf92ce985ded9000566e4ccc238df2a81c845b085fd149525c25df155ed9a3'), 'proxy_init': (proxy_init, '4a4849ebdfdacfc72d25408c44175f18616f9c36bbada0a68585ff4af6163c1b'), 'proxy_iter': (proxy_iter, 'a38cbeec6321c63f6b99511ff83a6f2a94fcbb50810dee6572eaa73f21445e1d'), 'proxy_next': (proxy_next, '7057f8c8c45095aba4d5b2eecd9ffb27904dc571edc429f16d29a63a103e9b2c'), 'proxy_close': (proxy_close, '178673fda75e17bcee1cb1353f817416160eba2dd8d908562d05a1070dda7214'), 'proxy_enter': (proxy_enter, 'e089e2efd7c5f5cdb7ad4c780cafcd814c34483055165b6147468c2050b233ad'), 'proxy_exit': (proxy_exit, '9eb49de03029b8639465268a5ecd592361fedaf3b2d59ba499500ecba8e6f499'), 'scope_restore_all': (restore_all, '4c63e52b114bae74b061bd921a8df898e3e91c2a630ea60172cb0742f3488271')}
-    _require(all((hashlib.sha256(normalized_node_source(node).encode('utf-8')).hexdigest() == expected_digest for node, expected_digest in inherited_scan_source_digests.values())), 'R static inherited scan source binding differs')
-    socket_handoff = top_function('_generation6_r_socket_detach_handoff')
-    socket_source = ast.unparse(socket_handoff)
-    _require(call_targets(socket_handoff).count('_GENERATION6_R_CAPTURED_SOCKET_DETACH') == 1 and call_targets(socket_handoff).count('_GENERATION6_R_CAPTURED_SOCKET_FILENO') == 2 and (call_targets(socket_handoff).count('_GENERATION6_R_CAPTURED_SNAPSHOT_STAT') == 1) and ('owner = FdOwner(detached, exact_label)' in socket_source), 'R static socket handoff differs')
-    authority_nodes: tuple[ast.AST, ...] = (*capture_nodes.values(), *classes.values(), socket_handoff)
-    authority_calls = tuple((call for node in authority_nodes for call in calls(node)))
-    authority_targets = tuple((ast.unparse(call.func) for call in authority_calls))
-    authority_source = '\n'.join((ast.unparse(node) for node in authority_nodes))
-    _require(not any((target in {'os.close', 'os.open', 'os.fstat', 'fcntl.fcntl', 'os.unlink', 'os.rmdir', 'os.rename', 'os.replace', 'os.stat', 'os.dup', 'os.dup2', 'os.dup3'} for target in authority_targets)) and authority_targets.count('_GENERATION6_R_CAPTURED_FD_CLOSE_ONCE') == 0 and ('_pending_scandir_permit' not in authority_source) and ('_uncertain_descriptors.discard' not in authority_source) and ('_uncertain_descriptors.remove' not in authority_source) and ('_uncertain_descriptors.clear' not in authority_source), 'R static forbidden syscall or poison mutation differs')
-    stub = top_function('_selftest_r_case')
-    _require(len(stub.body) == 1 and isinstance(stub.body[0], ast.Raise) and isinstance(stub.body[0].exc, ast.Call) and isinstance(stub.body[0].exc.func, ast.Name) and (stub.body[0].exc.func.id == 'ContractError') and (len(stub.body[0].exc.args) == 1) and isinstance(stub.body[0].exc.args[0], ast.Constant) and (stub.body[0].exc.args[0].value == 'Generation-6 R authority integration is blocked'), 'R static blocked stub differs')
-    full_calls = tuple((call for node in syntax.body for call in calls(node)))
-    forbidden_runtime_constructors = {'_selftest_r_case', '_Generation6RAuthorityLedger', '_Generation6RAuthorityScope', '_Generation6RNamespaceJournal', '_generation6_r_socket_detach_handoff', '_generation6_r_authority_source_gates'}
-    _require(not any((ast.unparse(call.func) in forbidden_runtime_constructors for call in full_calls)), 'R static integration block has a runtime call site')
-    driver_function = top_function('_run_generation6_case_body_for_test')
-    driver_assignments = tuple((node for node in driver_function.body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and (node.target.id == 'drivers') and isinstance(node.value, ast.Dict)))
-    _require(len(driver_assignments) == 1 and all((not (isinstance(key, ast.Constant) and key.value == 'R') for key in cast(ast.Dict, driver_assignments[0].value).keys)) and ('_selftest_r_case' not in ast.unparse(driver_assignments[0])), 'R static runtime driver is unexpectedly wired')
-    protocol_groups = tuple((node for node in syntax.body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and (node.target.id == 'GENERATION6_PROTOCOL_CASE_GROUPS')))
-    r_rejections = tuple((node for node in syntax.body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and (node.target.id == '_GENERATION6_R_REJECTIONS') and isinstance(node.value, ast.Dict)))
-    temporary_unwired = tuple((node for node in syntax.body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and (node.target.id == '_GENERATION6_TEMPORARILY_UNWIRED_CASES')))
-    _require(len(protocol_groups) == len(r_rejections) == len(temporary_unwired) == 1 and "_generation6_case_ids('R', 24)" in ast.unparse(protocol_groups[0]) and (tuple((key.value for key in cast(ast.Dict, r_rejections[0].value).keys if isinstance(key, ast.Constant) and type(key.value) is str)) == tuple((f'R{ordinal:02d}' for ordinal in range(1, 13)))) and ("_generation6_case_ids('R'" not in ast.unparse(temporary_unwired[0])), 'R static R13-R24 registry block differs')
-    process_state = top_function('_generation6_process_state')
-    process_state_source = ast.unparse(process_state)
-    _require(all((fragment in process_state_source for fragment in ("('runner.FdOwner.__init__', FdOwner, '__init__')", "('runner.FdOwner.require', FdOwner, 'require')", "('runner.FdOwner.detach', FdOwner, 'detach')", "('runner.FdOwner.close_once', FdOwner, 'close_once')"))), 'R static process-reset FdOwner authority differs')
-    namespace_capture_values = {'_GENERATION6_R_NAMESPACE_REAL_OS_STAT': 'os.stat', '_GENERATION6_R_NAMESPACE_REAL_OS_OPEN': 'os.open', '_GENERATION6_R_NAMESPACE_REAL_OS_FSTAT': 'os.fstat', '_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK': 'os.unlink', '_GENERATION6_R_NAMESPACE_REAL_OS_GETUID': 'os.getuid', '_GENERATION6_R_NAMESPACE_REAL_FCNTL': 'fcntl.fcntl', '_GENERATION6_R_NAMESPACE_REAL_MONOTONIC_NS': 'time.monotonic_ns', '_GENERATION6_R_NAMESPACE_CLEANUP_MAX_DEPTH': '64', '_GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENTRIES': '100000', '_GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENCODED_NAME_BYTES': '16777216', '_GENERATION6_R_NAMESPACE_CLEANUP_MAX_OPERATIONS': '500000', '_GENERATION6_R_NAMESPACE_CLEANUP_DEADLINE_NS': '60000000000', '_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE': '{_Generation6RNamespaceCleanupBudgetState.ACTIVE: _Generation6RNamespaceCleanupBudgetEvent.ISSUED, _Generation6RNamespaceCleanupBudgetState.EXHAUSTED: _Generation6RNamespaceCleanupBudgetEvent.EXHAUSTED, _Generation6RNamespaceCleanupBudgetState.UNCERTAIN: _Generation6RNamespaceCleanupBudgetEvent.UNCERTAIN}', '_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT': '_snapshot_stat', '_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD': '_snapshot_fd', '_GENERATION6_R_NAMESPACE_CAPTURED_STABLE_DIRECTORY_MATCHES': '_stable_directory_matches', '_GENERATION6_R_NAMESPACE_CAPTURED_MOUNT_ID': '_mount_id', '_GENERATION6_R_NAMESPACE_CAPTURED_COMPONENT': '_component', '_GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE': 'FdOwner.require', '_GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT': 'stat.S_IFMT', '_GENERATION6_R_NAMESPACE_CAPTURED_S_ISDIR': 'stat.S_ISDIR', '_GENERATION6_R_NAMESPACE_CAPTURED_S_ISREG': 'stat.S_ISREG', '_GENERATION6_R_NAMESPACE_REAL_OS_FSENCODE': 'os.fsencode'}
-    namespace_capture_nodes: dict[str, ast.AnnAssign] = {}
-    observed_namespace_capture_names = {node.target.id for node in syntax.body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id.startswith('_GENERATION6_R_NAMESPACE_')}
-    _require(observed_namespace_capture_names == set(namespace_capture_values), 'R namespace static capture inventory differs')
-    for name, expected_value in namespace_capture_values.items():
-        matches = tuple((node for node in syntax.body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and (node.target.id == name)))
-        _require(len(matches) == 1, f'R namespace static capture differs: {name}')
-        capture = matches[0]
-        _require(isinstance(capture.annotation, ast.Name) and capture.annotation.id == 'Final' and (capture.value is not None) and (ast.unparse(capture.value) == expected_value), f'R namespace static capture binding differs: {name}')
-        namespace_capture_nodes[name] = capture
-    namespace_capture_rebindings = tuple(((type(node).__name__, ast.unparse(target)) for node in ast.walk(syntax) if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr)) for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,)) if isinstance(target, ast.Name) and target.id in namespace_capture_values and (node is not namespace_capture_nodes[target.id])))
-    _require(not namespace_capture_rebindings, 'R namespace static capture rebinding surface differs')
-    namespace_class_names: tuple[str, ...] = ('_Generation6RNamespacePhase', '_Generation6RNamespaceTokenState', '_Generation6RNamespaceAction', '_Generation6RNamespaceNodeKind', '_Generation6RNamespaceAuthorityKind', '_Generation6RNamespaceOwnerState', '_Generation6RNamespaceOwnerKind', '_Generation6RNamespaceOwnerPurpose', '_Generation6RNamespaceContextState', '_Generation6RNamespaceCloseEvent', '_Generation6RNamespaceMutationPermitState', '_Generation6RNamespaceCleanupBudgetState', '_Generation6RNamespaceCleanupBudgetEvent', '_Generation6RNamespaceInventoryCursorState', '_Generation6RNamespaceInventoryScanState', '_Generation6RNamespaceInventoryAdvanceState', '_Generation6RNamespaceInventoryItemState', '_Generation6RNamespaceTerminalEvent', '_Generation6RNamespaceDirectoryFact', '_Generation6RNamespaceNameFact', '_Generation6RNamespaceDirectoryAuthority', '_Generation6RNamespaceDirectoryBinding', '_Generation6RNamespaceDirectoryRecord', '_Generation6RNamespaceOwnerContextBinding', '_Generation6RNamespaceOwnerContext', '_Generation6RNamespacePresentToken', '_Generation6RNamespaceAbsenceToken', '_Generation6RNamespaceRenameToken', '_Generation6RNamespaceMutationPermit', '_Generation6RNamespaceCapabilityBinding', '_Generation6RNamespaceCapabilityRecord', '_Generation6RNamespaceUnlinkPreproof', '_Generation6RNamespaceMutationPermitBinding', '_Generation6RNamespaceMutationPermitRecord', '_Generation6RNamespaceCleanupBudgetEpoch', '_Generation6RNamespaceInventoryCursor', '_Generation6RNamespaceInventoryScan', '_Generation6RNamespaceInventoryAdvance', '_Generation6RNamespaceInventoryItem', '_Generation6RNamespaceEmptyInventory', '_Generation6RNamespaceReceipt', '_Generation6RNamespaceCleanupBudgetRecord', '_Generation6RNamespaceInventoryCursorBinding', '_Generation6RNamespaceInventoryCursorRecord', '_Generation6RNamespaceInventoryScanBinding', '_Generation6RNamespaceInventoryScanRecord', '_Generation6RNamespaceInventoryAdvanceBinding', '_Generation6RNamespaceInventoryAdvanceRecord', '_Generation6RNamespaceInventoryItemBinding', '_Generation6RNamespaceInventoryItemRecord', '_Generation6RNamespaceJournal')
-    namespace_class_names = (
-        *namespace_class_names[:17],
-        '_Generation6RNamespaceInventoryClassificationState',
-        *namespace_class_names[17:39],
-        '_Generation6RNamespaceInventoryClassification',
-        *namespace_class_names[39:50],
-        '_Generation6RNamespaceInventoryClassificationBinding',
-        '_Generation6RNamespaceInventoryClassificationRecord',
-        *namespace_class_names[50:],
-    )
-    observed_namespace_class_names = tuple((node.name for node in syntax.body if isinstance(node, ast.ClassDef) and node.name.startswith('_Generation6RNamespace')))
-    _require(observed_namespace_class_names == namespace_class_names, 'R namespace static class inventory differs')
-    namespace_classes = {name: top_class(name) for name in namespace_class_names}
-    namespace_phase_class = namespace_classes['_Generation6RNamespacePhase']
-    _require(all((capture.lineno < namespace_phase_class.lineno for name, capture in namespace_capture_nodes.items() if name != '_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE')) and namespace_capture_nodes['_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE'].lineno > namespace_classes['_Generation6RNamespaceCleanupBudgetEvent'].lineno and (namespace_capture_nodes['_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE'].lineno < namespace_classes['_Generation6RNamespaceInventoryCursorState'].lineno < namespace_classes['_Generation6RNamespaceInventoryScanState'].lineno < namespace_classes['_Generation6RNamespaceInventoryAdvanceState'].lineno < namespace_classes['_Generation6RNamespaceInventoryItemState'].lineno < namespace_classes['_Generation6RNamespaceTerminalEvent'].lineno), 'R namespace static capture/class ordering differs')
-    namespace_enum_members = {'_Generation6RNamespacePhase': ('BUILDING', 'SEALED', 'PATCH_ACTIVE', 'PATCH_RESTORED', 'TEARDOWN_ACTIVE', 'COMPLETE', 'UNCERTAIN'), '_Generation6RNamespaceTokenState': ('AUTHORIZED', 'ATTEMPTED', 'CONSUMED', 'UNCERTAIN'), '_Generation6RNamespaceAction': ('UNLINK', 'RMDIR', 'RENAME'), '_Generation6RNamespaceNodeKind': ('DIRECTORY', 'REGULAR', 'SYMLINK', 'SOCKET', 'FIFO', 'HARDLINK', 'SPECIAL'), '_Generation6RNamespaceAuthorityKind': ('BORROWED_GUARD', 'OWNED_CURSOR'), '_Generation6RNamespaceOwnerState': ('LIVE', 'CLOSED', 'UNCERTAIN'), '_Generation6RNamespaceOwnerKind': ('OWNED_CURSOR', 'ENTRY_HANDLE'), '_Generation6RNamespaceOwnerPurpose': ('OWNED_CURSOR', 'SEALED_ENTRY', 'PRESENT_TOKEN', 'RENAME_TOKEN'), '_Generation6RNamespaceContextState': ('OPENING', 'LIVE', 'TRANSFERRED', 'ATTEMPTED', 'CLOSED', 'UNCERTAIN'), '_Generation6RNamespaceCloseEvent': ('OWNED_CURSOR_ABORT_CLOSED', 'OWNED_CURSOR_CLOSED', 'ENTRY_HANDLE_ABORT_CLOSED', 'SEALED_ENTRY_HANDLE_CLOSED', 'SEALED_ENTRY_ABORT_CLOSED', 'PRESENT_TOKEN_ABORT_CLOSED', 'RENAME_TOKEN_ABORT_CLOSED', 'MUTATION_TOKEN_HANDLE_CLOSED'), '_Generation6RNamespaceMutationPermitState': ('AUTHORIZED', 'ATTEMPTED', 'CONSUMED', 'UNCERTAIN'), '_Generation6RNamespaceCleanupBudgetState': ('ACTIVE', 'EXHAUSTED', 'UNCERTAIN'), '_Generation6RNamespaceCleanupBudgetEvent': ('ISSUED', 'EXHAUSTED', 'UNCERTAIN'), '_Generation6RNamespaceInventoryCursorState': ('CURRENT', 'RETIRED', 'UNCERTAIN'), '_Generation6RNamespaceInventoryScanState': ('LIVE', 'CLOSED_UNEXHAUSTED', 'END_OBSERVED', 'UNCERTAIN'), '_Generation6RNamespaceInventoryAdvanceState': ('ATTEMPTING', 'ENTRY_RETURNED', 'END_OBSERVED', 'UNCERTAIN'), '_Generation6RNamespaceInventoryItemState': ('LIVE_UNCLASSIFIED', 'ABANDONED_UNCLASSIFIED', 'UNCERTAIN'), '_Generation6RNamespaceTerminalEvent': ('ABSENCE_TOKEN_ABANDONED', 'MUTATION_TOKEN_ABANDONED', 'PRESENT_UNLINK_CONSUMED')}
-    namespace_enum_members = {
-        **namespace_enum_members,
-        '_Generation6RNamespaceOwnerPurpose': (*namespace_enum_members['_Generation6RNamespaceOwnerPurpose'], 'INVENTORY_CLASSIFICATION_ENTRY'),
-        '_Generation6RNamespaceCloseEvent': (*namespace_enum_members['_Generation6RNamespaceCloseEvent'], 'INVENTORY_CLASSIFICATION_HANDLE_CLOSED', 'INVENTORY_CLASSIFICATION_ABORT_CLOSED'),
-        '_Generation6RNamespaceInventoryItemState': (*namespace_enum_members['_Generation6RNamespaceInventoryItemState'], 'CLASSIFIED_REMOVABLE_CANDIDATE', 'CLASSIFIED_KNOWN_RESIDUE'),
-        '_Generation6RNamespaceInventoryClassificationState': ('ATTEMPTING', 'CLASSIFIED_REMOVABLE_CANDIDATE', 'CLASSIFIED_KNOWN_RESIDUE', 'UNCERTAIN'),
-    }
-    for name, expected_members in namespace_enum_members.items():
-        class_node = namespace_classes[name]
-        expected_values = tuple(((member, f'CLEANUP_BUDGET_{member}' if name == '_Generation6RNamespaceCleanupBudgetEvent' else member) for member in expected_members))
-        _require(tuple((ast.unparse(base) for base in class_node.bases)) == ('str', 'Enum') and enum_members(class_node) == expected_values, f'R namespace static enum differs: {name}')
-    def namespace_fields(name: str) -> tuple[str, ...]:
-        return tuple((node.target.id for node in namespace_classes[name].body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)))
-    expected_namespace_fields = {'_Generation6RNamespaceDirectoryFact': ('serial', 'issuer_identity', 'name', 'relative', 'device', 'inode', 'uid', 'mode', 'mount_id'), '_Generation6RNamespaceNameFact': ('serial', 'issuer_identity', 'parent_authority', 'name', 'kind', 'device', 'inode', 'uid', 'mode', 'link_count', 'mount_id', 'hardlink_group'), '_Generation6RNamespaceDirectoryAuthority': ('serial', 'issuer_identity'), '_Generation6RNamespaceDirectoryBinding': ('serial', 'issuer_identity', 'authority', 'kind', 'owner', 'owner_identity', 'fd_owner_identity', 'snapshot_identity', 'descriptor_token', 'fact'), '_Generation6RNamespaceDirectoryRecord': ('binding', 'state', 'close_receipt'), '_Generation6RNamespaceOwnerContextBinding': ('serial', 'issuer_identity', 'owner', 'owner_identity', 'descriptor_token', 'token_generation', 'kind', 'purpose', 'origin_authority_record'), '_Generation6RNamespaceOwnerContext': ('binding', 'authority_record', 'state', 'capability_record', 'close_receipt'), '_Generation6RNamespacePresentToken': ('serial', 'issuer_identity', 'action'), '_Generation6RNamespaceAbsenceToken': ('serial', 'issuer_identity', 'action'), '_Generation6RNamespaceRenameToken': ('serial', 'issuer_identity', 'action'), '_Generation6RNamespaceMutationPermit': ('serial', 'issuer_identity'), '_Generation6RNamespaceCapabilityBinding': ('serial', 'issuer_identity', 'token', 'token_serial', 'token_issuer_identity', 'action', 'authority', 'authority_record', 'fact', 'name', 'path_owner', 'descriptor_token', 'owner_context', 'owner_state', 'destination_authority', 'destination_record', 'destination_name'), '_Generation6RNamespaceCapabilityRecord': ('binding', 'state', 'owner_state', 'authorization_receipt', 'armed_receipt', 'close_receipt', 'terminal_receipt'), '_Generation6RNamespaceUnlinkPreproof': ('capability_record', 'capability_binding', 'token', 'token_serial', 'action', 'authority', 'authority_record', 'parent_binding', 'name', 'parent_descriptor', 'parent_snapshot', 'path_owner', 'owner_context', 'owner_context_binding', 'descriptor_token', 'target_descriptor', 'target_snapshot', 'target_mount_id', 'current_uid'), '_Generation6RNamespaceMutationPermitBinding': ('serial', 'issuer_identity', 'permit', 'permit_serial', 'permit_issuer_identity', 'capability_record', 'capability_binding', 'capability_token', 'capability_token_serial', 'capability_token_issuer_identity', 'action', 'name', 'authority', 'authority_serial', 'authority_record', 'preproof', 'preproof_identity'), '_Generation6RNamespaceMutationPermitRecord': ('binding', 'state', 'authorization_receipt', 'terminal_receipt'), '_Generation6RNamespaceCleanupBudgetEpoch': ('serial', 'issuer_identity', 'issued_ns', 'deadline_ns', 'max_depth', 'max_entries', 'max_encoded_name_bytes', 'max_operations'), '_Generation6RNamespaceInventoryCursor': ('serial', 'issuer_identity'), '_Generation6RNamespaceInventoryScan': ('serial', 'issuer_identity'), '_Generation6RNamespaceInventoryAdvance': ('serial', 'issuer_identity'), '_Generation6RNamespaceInventoryItem': ('serial', 'issuer_identity'), '_Generation6RNamespaceEmptyInventory': ('serial', 'issuer_identity'), '_Generation6RNamespaceReceipt': ('serial', 'issuer_identity', 'token_serial', 'authority_serial', 'event'), '_Generation6RNamespaceCleanupBudgetRecord': ('epoch', 'state', 'depth_high_water', 'entry_count', 'encoded_name_bytes', 'operation_count', 'last_monotonic_ns', 'issuance_receipt', 'terminal_receipt'), '_Generation6RNamespaceInventoryCursorBinding': ('serial', 'issuer_identity', 'cursor', 'cursor_identity', 'cursor_serial', 'cursor_issuer_identity', 'authority', 'authority_identity', 'authority_serial', 'authority_record', 'authority_record_identity', 'authority_binding', 'authority_binding_identity', 'cleanup_epoch', 'cleanup_epoch_identity', 'cleanup_epoch_serial', 'cleanup_epoch_issuer_identity', 'cleanup_budget_record', 'cleanup_budget_record_identity'), '_Generation6RNamespaceInventoryCursorRecord': ('binding', 'binding_identity', 'state', 'current_receipt', 'terminal_receipt'), '_Generation6RNamespaceInventoryScanBinding': ('serial', 'issuer_identity', 'scan', 'scan_identity', 'scan_serial', 'scan_issuer_identity', 'cursor_record', 'cursor_record_identity', 'cursor_binding', 'cursor_binding_identity', 'proxy', 'proxy_identity', 'iterator_token', 'iterator_token_identity', 'descriptor', 'depth', 'cleanup_epoch', 'cleanup_epoch_identity', 'cleanup_epoch_serial', 'cleanup_epoch_issuer_identity'), '_Generation6RNamespaceInventoryScanRecord': ('binding', 'binding_identity', 'state', 'close_attempts', 'acquisition_receipt', 'terminal_receipt'), '_Generation6RNamespaceInventoryAdvanceBinding': ('serial', 'issuer_identity', 'advance', 'advance_identity', 'advance_serial', 'advance_issuer_identity', 'scan_record', 'scan_record_identity', 'scan_binding', 'scan_binding_identity', 'proxy', 'proxy_identity', 'iterator_token', 'iterator_token_identity', 'descriptor', 'scan_depth', 'next_depth', 'cleanup_epoch', 'cleanup_epoch_identity', 'cleanup_budget_record', 'cleanup_budget_record_identity', 'operation_count_before', 'entry_count_before', 'encoded_name_bytes_before'), '_Generation6RNamespaceInventoryAdvanceRecord': ('binding', 'binding_identity', 'state', 'advance_attempts', 'raw_entry', 'raw_entry_identity', 'item_record', 'attempt_receipt', 'outcome_receipt', 'terminal_receipt'), '_Generation6RNamespaceInventoryItemBinding': ('serial', 'issuer_identity', 'item', 'item_identity', 'item_serial', 'item_issuer_identity', 'advance_record', 'advance_record_identity', 'advance_binding', 'advance_binding_identity', 'scan_record', 'scan_record_identity', 'scan_binding', 'scan_binding_identity', 'raw_entry', 'raw_entry_identity', 'component', 'encoded_name_bytes', 'cleanup_epoch', 'cleanup_epoch_identity', 'cleanup_budget_record', 'cleanup_budget_record_identity', 'operation_count_after', 'entry_count_after', 'encoded_name_bytes_after'), '_Generation6RNamespaceInventoryItemRecord': ('binding', 'binding_identity', 'state', 'yield_receipt', 'terminal_receipt')}
-    expected_namespace_annotations = {'_Generation6RNamespaceDirectoryFact': ('int', 'int', 'str', 'tuple[str, ...]', 'int', 'int', 'int', 'int', 'int'), '_Generation6RNamespaceNameFact': ('int', 'int', '_Generation6RNamespaceDirectoryAuthority', 'str', '_Generation6RNamespaceNodeKind', 'int', 'int', 'int', 'int', 'int', 'int', 'str | None'), '_Generation6RNamespaceDirectoryAuthority': ('int', 'int'), '_Generation6RNamespaceDirectoryBinding': ('int', 'int', '_Generation6RNamespaceDirectoryAuthority', '_Generation6RNamespaceAuthorityKind', 'DirectoryOwner', 'int', 'int', 'int', '_Generation6ROwnerToken', '_Generation6RNamespaceDirectoryFact'), '_Generation6RNamespaceDirectoryRecord': ('_Generation6RNamespaceDirectoryBinding', '_Generation6RNamespaceOwnerState', '_Generation6RNamespaceReceipt | None'), '_Generation6RNamespaceOwnerContextBinding': ('int', 'int', 'FdOwner', 'int', '_Generation6ROwnerToken', 'int', '_Generation6RNamespaceOwnerKind', '_Generation6RNamespaceOwnerPurpose', '_Generation6RNamespaceDirectoryRecord'), '_Generation6RNamespaceOwnerContext': ('_Generation6RNamespaceOwnerContextBinding', '_Generation6RNamespaceDirectoryRecord', '_Generation6RNamespaceContextState', '_Generation6RNamespaceCapabilityRecord | None', '_Generation6RNamespaceReceipt | None'), '_Generation6RNamespacePresentToken': ('int', 'int', '_Generation6RNamespaceAction'), '_Generation6RNamespaceAbsenceToken': ('int', 'int', '_Generation6RNamespaceAction'), '_Generation6RNamespaceRenameToken': ('int', 'int', '_Generation6RNamespaceAction'), '_Generation6RNamespaceMutationPermit': ('int', 'int'), '_Generation6RNamespaceCapabilityBinding': ('int', 'int', '_Generation6RNamespaceLiveToken', 'int', 'int', '_Generation6RNamespaceAction', '_Generation6RNamespaceDirectoryAuthority', '_Generation6RNamespaceDirectoryRecord', '_Generation6RNamespaceNameFact | None', 'str', 'FdOwner | None', '_Generation6ROwnerToken | None', '_Generation6RNamespaceOwnerContext | None', '_Generation6RNamespaceOwnerState | None', '_Generation6RNamespaceDirectoryAuthority | None', '_Generation6RNamespaceDirectoryRecord | None', 'str | None'), '_Generation6RNamespaceCapabilityRecord': ('_Generation6RNamespaceCapabilityBinding', '_Generation6RNamespaceTokenState', '_Generation6RNamespaceOwnerState | None', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None'), '_Generation6RNamespaceUnlinkPreproof': ('_Generation6RNamespaceCapabilityRecord', '_Generation6RNamespaceCapabilityBinding', '_Generation6RNamespacePresentToken', 'int', '_Generation6RNamespaceAction', '_Generation6RNamespaceDirectoryAuthority', '_Generation6RNamespaceDirectoryRecord', '_Generation6RNamespaceDirectoryBinding', 'str', 'int', 'DescriptorSnapshot', 'FdOwner', '_Generation6RNamespaceOwnerContext', '_Generation6RNamespaceOwnerContextBinding', '_Generation6ROwnerToken', 'int', 'DescriptorSnapshot', 'int', 'int'), '_Generation6RNamespaceMutationPermitBinding': ('int', 'int', '_Generation6RNamespaceMutationPermit', 'int', 'int', '_Generation6RNamespaceCapabilityRecord', '_Generation6RNamespaceCapabilityBinding', '_Generation6RNamespacePresentToken', 'int', 'int', '_Generation6RNamespaceAction', 'str', '_Generation6RNamespaceDirectoryAuthority', 'int', '_Generation6RNamespaceDirectoryRecord', '_Generation6RNamespaceUnlinkPreproof', 'int'), '_Generation6RNamespaceMutationPermitRecord': ('_Generation6RNamespaceMutationPermitBinding', '_Generation6RNamespaceMutationPermitState', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None'), '_Generation6RNamespaceCleanupBudgetEpoch': ('int', 'int', 'int', 'int', 'int', 'int', 'int', 'int'), '_Generation6RNamespaceInventoryCursor': ('int', 'int'), '_Generation6RNamespaceInventoryScan': ('int', 'int'), '_Generation6RNamespaceInventoryAdvance': ('int', 'int'), '_Generation6RNamespaceInventoryItem': ('int', 'int'), '_Generation6RNamespaceEmptyInventory': ('int', 'int'), '_Generation6RNamespaceReceipt': ('int', 'int', 'int | None', 'int | None', 'str'), '_Generation6RNamespaceCleanupBudgetRecord': ('_Generation6RNamespaceCleanupBudgetEpoch', '_Generation6RNamespaceCleanupBudgetState', 'int', 'int', 'int', 'int', 'int', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None'), '_Generation6RNamespaceInventoryCursorBinding': ('int', 'int', '_Generation6RNamespaceInventoryCursor', 'int', 'int', 'int', '_Generation6RNamespaceDirectoryAuthority', 'int', 'int', '_Generation6RNamespaceDirectoryRecord', 'int', '_Generation6RNamespaceDirectoryBinding', 'int', '_Generation6RNamespaceCleanupBudgetEpoch', 'int', 'int', 'int', '_Generation6RNamespaceCleanupBudgetRecord', 'int'), '_Generation6RNamespaceInventoryCursorRecord': ('_Generation6RNamespaceInventoryCursorBinding', 'int', '_Generation6RNamespaceInventoryCursorState', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None'), '_Generation6RNamespaceInventoryScanBinding': ('int', 'int', '_Generation6RNamespaceInventoryScan', 'int', 'int', 'int', '_Generation6RNamespaceInventoryCursorRecord', 'int', '_Generation6RNamespaceInventoryCursorBinding', 'int', '_Generation6RScandirProxy', 'int', '_Generation6RIteratorToken', 'int', 'int', 'int', '_Generation6RNamespaceCleanupBudgetEpoch', 'int', 'int', 'int'), '_Generation6RNamespaceInventoryScanRecord': ('_Generation6RNamespaceInventoryScanBinding', 'int', '_Generation6RNamespaceInventoryScanState', 'int', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None'), '_Generation6RNamespaceInventoryAdvanceBinding': ('int', 'int', '_Generation6RNamespaceInventoryAdvance', 'int', 'int', 'int', '_Generation6RNamespaceInventoryScanRecord', 'int', '_Generation6RNamespaceInventoryScanBinding', 'int', '_Generation6RScandirProxy', 'int', '_Generation6RIteratorToken', 'int', 'int', 'int', 'int', '_Generation6RNamespaceCleanupBudgetEpoch', 'int', '_Generation6RNamespaceCleanupBudgetRecord', 'int', 'int', 'int', 'int'), '_Generation6RNamespaceInventoryAdvanceRecord': ('_Generation6RNamespaceInventoryAdvanceBinding', 'int', '_Generation6RNamespaceInventoryAdvanceState', 'int', 'os.DirEntry[str] | None', 'int | None', '_Generation6RNamespaceInventoryItemRecord | None', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None'), '_Generation6RNamespaceInventoryItemBinding': ('int', 'int', '_Generation6RNamespaceInventoryItem', 'int', 'int', 'int', '_Generation6RNamespaceInventoryAdvanceRecord', 'int', '_Generation6RNamespaceInventoryAdvanceBinding', 'int', '_Generation6RNamespaceInventoryScanRecord', 'int', '_Generation6RNamespaceInventoryScanBinding', 'int', 'os.DirEntry[str]', 'int', 'str', 'int', '_Generation6RNamespaceCleanupBudgetEpoch', 'int', '_Generation6RNamespaceCleanupBudgetRecord', 'int', 'int', 'int', 'int'), '_Generation6RNamespaceInventoryItemRecord': ('_Generation6RNamespaceInventoryItemBinding', 'int', '_Generation6RNamespaceInventoryItemState', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None')}
-    frozen_namespace_classes = {'_Generation6RNamespaceDirectoryFact', '_Generation6RNamespaceNameFact', '_Generation6RNamespaceDirectoryAuthority', '_Generation6RNamespaceDirectoryBinding', '_Generation6RNamespaceOwnerContextBinding', '_Generation6RNamespacePresentToken', '_Generation6RNamespaceAbsenceToken', '_Generation6RNamespaceRenameToken', '_Generation6RNamespaceMutationPermit', '_Generation6RNamespaceCapabilityBinding', '_Generation6RNamespaceUnlinkPreproof', '_Generation6RNamespaceMutationPermitBinding', '_Generation6RNamespaceCleanupBudgetEpoch', '_Generation6RNamespaceInventoryCursor', '_Generation6RNamespaceInventoryScan', '_Generation6RNamespaceInventoryAdvance', '_Generation6RNamespaceInventoryItem', '_Generation6RNamespaceEmptyInventory', '_Generation6RNamespaceReceipt', '_Generation6RNamespaceInventoryCursorBinding', '_Generation6RNamespaceInventoryScanBinding', '_Generation6RNamespaceInventoryAdvanceBinding', '_Generation6RNamespaceInventoryItemBinding'}
-    mutable_namespace_record_classes = {'_Generation6RNamespaceDirectoryRecord', '_Generation6RNamespaceOwnerContext', '_Generation6RNamespaceCapabilityRecord', '_Generation6RNamespaceMutationPermitRecord', '_Generation6RNamespaceCleanupBudgetRecord', '_Generation6RNamespaceInventoryCursorRecord', '_Generation6RNamespaceInventoryScanRecord', '_Generation6RNamespaceInventoryAdvanceRecord', '_Generation6RNamespaceInventoryItemRecord'}
-    expected_namespace_fields = {
-        **expected_namespace_fields,
-        '_Generation6RNamespaceInventoryClassification': ('serial', 'issuer_identity'),
-        '_Generation6RNamespaceInventoryClassificationBinding': ('serial', 'issuer_identity', 'classification', 'classification_identity', 'classification_serial', 'classification_issuer_identity', 'item_record', 'item_record_identity', 'item_binding', 'item_binding_identity', 'item', 'item_identity', 'advance_record', 'advance_record_identity', 'advance_binding', 'advance_binding_identity', 'scan_record', 'scan_record_identity', 'scan_binding', 'scan_binding_identity', 'cursor_record', 'cursor_record_identity', 'cursor_binding', 'cursor_binding_identity', 'authority', 'authority_identity', 'authority_record', 'authority_record_identity', 'authority_binding', 'authority_binding_identity', 'raw_entry', 'raw_entry_identity', 'component', 'encoded_name_bytes', 'parent_descriptor', 'item_depth', 'cleanup_epoch', 'cleanup_epoch_identity', 'cleanup_budget_record', 'cleanup_budget_record_identity', 'operation_count_before', 'entry_count_before', 'encoded_name_bytes_before', 'depth_high_water_before'),
-        '_Generation6RNamespaceInventoryClassificationRecord': ('binding', 'binding_identity', 'state', 'stat_attempts', 'open_attempts', 'named_snapshot', 'entry_owner', 'descriptor_token', 'owner_context', 'owner_state', 'opened_snapshot', 'entry_mount_id', 'parent_snapshot', 'parent_mount_id', 'current_uid', 'descriptor_flags', 'status_flags', 'operation_count_after_stat', 'operation_count_after_open', 'entry_count_after', 'encoded_name_bytes_after', 'depth_high_water_after', 'node_kind', 'hardlink_group', 'fact', 'attempt_receipt', 'stat_receipt', 'open_receipt', 'close_receipt', 'outcome_receipt', 'terminal_receipt'),
-    }
-    expected_namespace_annotations = {
-        **expected_namespace_annotations,
-        '_Generation6RNamespaceInventoryClassification': ('int', 'int'),
-        '_Generation6RNamespaceInventoryClassificationBinding': ('int', 'int', '_Generation6RNamespaceInventoryClassification', 'int', 'int', 'int', '_Generation6RNamespaceInventoryItemRecord', 'int', '_Generation6RNamespaceInventoryItemBinding', 'int', '_Generation6RNamespaceInventoryItem', 'int', '_Generation6RNamespaceInventoryAdvanceRecord', 'int', '_Generation6RNamespaceInventoryAdvanceBinding', 'int', '_Generation6RNamespaceInventoryScanRecord', 'int', '_Generation6RNamespaceInventoryScanBinding', 'int', '_Generation6RNamespaceInventoryCursorRecord', 'int', '_Generation6RNamespaceInventoryCursorBinding', 'int', '_Generation6RNamespaceDirectoryAuthority', 'int', '_Generation6RNamespaceDirectoryRecord', 'int', '_Generation6RNamespaceDirectoryBinding', 'int', 'os.DirEntry[str]', 'int', 'str', 'int', 'int', 'int', '_Generation6RNamespaceCleanupBudgetEpoch', 'int', '_Generation6RNamespaceCleanupBudgetRecord', 'int', 'int', 'int', 'int', 'int'),
-        '_Generation6RNamespaceInventoryClassificationRecord': ('_Generation6RNamespaceInventoryClassificationBinding', 'int', '_Generation6RNamespaceInventoryClassificationState', 'int', 'int', 'DescriptorSnapshot | None', 'FdOwner | None', '_Generation6ROwnerToken | None', '_Generation6RNamespaceOwnerContext | None', '_Generation6RNamespaceOwnerState | None', 'DescriptorSnapshot | None', 'int | None', 'DescriptorSnapshot | None', 'int | None', 'int | None', 'int | None', 'int | None', 'int | None', 'int | None', 'int | None', 'int | None', 'int | None', '_Generation6RNamespaceNodeKind | None', 'str | None', '_Generation6RNamespaceNameFact | None', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None', '_Generation6RNamespaceReceipt | None'),
-    }
-    frozen_namespace_classes = frozen_namespace_classes | {'_Generation6RNamespaceInventoryClassification', '_Generation6RNamespaceInventoryClassificationBinding'}
-    mutable_namespace_record_classes = mutable_namespace_record_classes | {'_Generation6RNamespaceInventoryClassificationRecord'}
-    for name, expected_fields in expected_namespace_fields.items():
-        class_node = namespace_classes[name]
-        decorators = tuple((ast.unparse(value) for value in class_node.decorator_list))
-        expected_decorators = ('dataclass(frozen=True, eq=False)',) if name in frozen_namespace_classes else ('dataclass(eq=False)',)
-        _require(namespace_fields(name) == expected_fields and tuple((ast.unparse(node.annotation) for node in class_node.body if isinstance(node, ast.AnnAssign))) == expected_namespace_annotations[name] and (decorators == expected_decorators) and (not class_node.bases) and (not class_node.keywords) and (len(class_node.body) == len(expected_fields)) and all((isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and (node.simple == 1) and (node.value is None) for node in class_node.body)), f'R namespace static identity class differs: {name}')
-    _require(set(expected_namespace_fields) == frozen_namespace_classes | mutable_namespace_record_classes, 'R namespace static frozen/private record split differs')
-    namespace_aliases = tuple((node for node in syntax.body if isinstance(node, ast.Assign) and any((isinstance(target, ast.Name) and target.id == '_Generation6RNamespaceLiveToken' for target in node.targets))))
-    _require(len(namespace_aliases) == 1 and ast.unparse(namespace_aliases[0].value) == '_Generation6RNamespacePresentToken | _Generation6RNamespaceAbsenceToken | _Generation6RNamespaceRenameToken', 'R namespace static live-token union differs')
-    namespace_journal = namespace_classes['_Generation6RNamespaceJournal']
-    namespace_method_inventory: tuple[str, ...] = ('__init__', '_require_dependencies', '_issue_serial', '_append_receipt', '_read_cleanup_budget_clock', '_issue_cleanup_budget_epoch', '_require_live_cleanup_budget', '_terminalize_cleanup_budget', '_charge_cleanup_budget', '_begin_publication', '_finish_publication', '_fail_publication', '_require_clean_guard', '_require_building', '_copy_directory_fact', '_register_authority', '_require_authority', '_reauthenticate_directory', '_issue_inventory_cursor_provenance', '_require_inventory_cursor_provenance', '_issue_current_inventory_cursor', '_require_current_inventory_cursor', '_terminalize_inventory_cursor', '_acquire_metered_inventory_scan', '_require_current_inventory_scan', '_terminalize_inventory_scan', '_fail_inventory_advance_uncertain', '_terminalize_inventory_scan_end_observed', '_require_current_inventory_item', '_terminalize_inventory_item', '_yield_metered_inventory_item', 'register_borrowed_directory', '_retain_uncertain_owner', '_reconcile_mount_poison', '_namespace_mount_id', '_close_namespace_owner', '_namespace_owner_close_verified', '_retain_untransferred_raw', '_open_namespace_owner', '_require_same_parent_proof', 'open_owned_cursor', 'close_owned_cursor', '_acquire_name_owner', '_validate_node_kind', '_copy_name_fact', '_register_name_fact', 'seal_name', '_require_name_fact', '_name_fact_matches', 'seal', '_require_teardown_authorization', '_require_name_absent', '_require_live_capability_slot', '_receipt_binding_matches', '_require_receipt_binding', '_publish_capability', '_require_live_capability', '_preauthorize_present_unlink', '_postauthorize_present_unlink', '_issue_a2_mutation_permit', '_preproof_parent_authority_matches', '_postissuer_capability_matches', '_terminal_unlink_capability_matches', '_trusted_live_mutation_permit', '_require_returned_mutation_permit', '_fail_present_unlink_preproof', '_fail_invalid_mutation_permit', '_fail_present_unlink_attempt', '_fail_present_unlink_terminal', '_archive_mutation_permit', 'consume_present', '_archive_capability', 'authorize_present', 'authorize_absence', 'authorize_rename', 'abandon_token')
-    namespace_method_inventory = (
-        *namespace_method_inventory[:31],
-        '_require_pristine_inventory_classification',
-        '_require_current_inventory_classification',
-        '_reauthenticate_inventory_classification_parent',
-        '_derive_inventory_classification',
-        '_close_inventory_classification_owner',
-        '_terminalize_inventory_classification',
-        '_fail_inventory_classification_uncertain',
-        '_classify_metered_inventory_item',
-        *namespace_method_inventory[31:38],
-        '_close_rejected_namespace_raw_once',
-        *namespace_method_inventory[38:47],
-        '_register_inventory_classification_name_fact',
-        *namespace_method_inventory[47:],
-    )
-    observed_namespace_methods = tuple((node.name for node in namespace_journal.body if isinstance(node, ast.FunctionDef)))
-    _require(observed_namespace_methods == namespace_method_inventory, 'R namespace static journal method inventory differs')
-    namespace_methods = {name: class_method(namespace_journal, name) for name in namespace_method_inventory}
-    a2g_helper_names = ('_require_pristine_inventory_classification', '_require_current_inventory_classification', '_reauthenticate_inventory_classification_parent', '_derive_inventory_classification', '_close_rejected_namespace_raw_once', '_close_inventory_classification_owner', '_register_inventory_classification_name_fact', '_terminalize_inventory_classification', '_fail_inventory_classification_uncertain', '_classify_metered_inventory_item')
-    _require(len(a2g_helper_names) == 10 and all(name in namespace_methods for name in a2g_helper_names), 'R namespace A2g helper-role inventory differs')
-    expected_a2g_signatures = {
-        '_require_pristine_inventory_classification': ('self, item: _Generation6RNamespaceInventoryItem', '_Generation6RNamespaceInventoryItemRecord'),
-        '_require_current_inventory_classification': ('self, classification: _Generation6RNamespaceInventoryClassification', '_Generation6RNamespaceInventoryClassificationRecord'),
-        '_reauthenticate_inventory_classification_parent': ('self, record: _Generation6RNamespaceInventoryClassificationRecord', 'tuple[_Generation6RNamespaceDirectoryRecord, _Generation6ROwnerRecord, int, DescriptorSnapshot, int, int, int]'),
-        '_derive_inventory_classification': ('self, snapshot: DescriptorSnapshot, mount_id: int, expected_uid: int, expected_mount_id: int', 'tuple[_Generation6RNamespaceNodeKind, _Generation6RNamespaceInventoryClassificationState, str | None]'),
-        '_close_rejected_namespace_raw_once': ('self, raw_descriptor: int', 'None'),
-        '_close_inventory_classification_owner': ('self, record: _Generation6RNamespaceInventoryClassificationRecord, *, event: _Generation6RNamespaceCloseEvent', 'None'),
-        '_register_inventory_classification_name_fact': ('self, record: _Generation6RNamespaceInventoryClassificationRecord', '_Generation6RNamespaceNameFact'),
-        '_terminalize_inventory_classification': ('self, record: _Generation6RNamespaceInventoryClassificationRecord, state: _Generation6RNamespaceInventoryClassificationState', 'None'),
-        '_fail_inventory_classification_uncertain': ('self, record: _Generation6RNamespaceInventoryClassificationRecord | None, item_record: _Generation6RNamespaceInventoryItemRecord | None, owner: FdOwner | None, primary: BaseException', 'None'),
-        '_classify_metered_inventory_item': ('self, item: _Generation6RNamespaceInventoryItem', '_Generation6RNamespaceInventoryClassification'),
-    }
-    _require(all(ast.unparse(namespace_methods[name].args) == signature and namespace_methods[name].returns is not None and ast.unparse(cast(ast.AST, namespace_methods[name].returns)) == returns for name, (signature, returns) in expected_a2g_signatures.items()), 'R namespace A2g helper signatures differ')
-    def namespace_callers(target: str) -> tuple[tuple[str, int], ...]:
-        return tuple((name, count) for name in namespace_method_inventory if (count := call_targets(namespace_methods[name]).count(f'self.{target}')))
-    _require(namespace_callers('_validate_node_kind') == (('_copy_name_fact', 1),) and namespace_callers('_copy_name_fact') == (('seal_name', 1), ('_register_inventory_classification_name_fact', 1)) and namespace_callers('_register_name_fact') == (('seal_name', 1), ('_register_inventory_classification_name_fact', 1)) and namespace_callers('_close_inventory_classification_owner') == (('_fail_inventory_classification_uncertain', 1), ('_classify_metered_inventory_item', 1)) and namespace_callers('_close_namespace_owner') == (('_close_inventory_classification_owner', 1), ('open_owned_cursor', 1), ('close_owned_cursor', 1), ('_acquire_name_owner', 1), ('seal_name', 2), ('_fail_present_unlink_preproof', 1), ('_fail_invalid_mutation_permit', 1), ('_fail_present_unlink_attempt', 1), ('consume_present', 1), ('authorize_present', 1), ('authorize_rename', 1), ('abandon_token', 1)) and namespace_callers('_charge_cleanup_budget') == (('_acquire_metered_inventory_scan', 1), ('_yield_metered_inventory_item', 1), ('_classify_metered_inventory_item', 2)) and namespace_callers('_open_namespace_owner') == (('_classify_metered_inventory_item', 1), ('open_owned_cursor', 1), ('_acquire_name_owner', 1)) and namespace_callers('_close_rejected_namespace_raw_once') == (('_open_namespace_owner', 1),) and namespace_callers('_require_current_inventory_item') == (('_require_pristine_inventory_classification', 1),), 'R namespace A2g exact caller/count inventory differs')
-    validate_kind = namespace_methods['_validate_node_kind']
-    copy_name_fact = namespace_methods['_copy_name_fact']
-    _require(ast.unparse(validate_kind.args) == 'self, snapshot: DescriptorSnapshot, mount_id: int, kind: _Generation6RNamespaceNodeKind, hardlink_group: str | None' and call_targets(copy_name_fact).count('self._validate_node_kind') == 1 and 'self._validate_node_kind(snapshot, mount_id, kind, hardlink_group)' in ast.unparse(copy_name_fact), 'R namespace A2g validate/copy signature propagation differs')
-    classifier = namespace_methods['_classify_metered_inventory_item']
-    parent_reauthentication = namespace_methods['_reauthenticate_inventory_classification_parent']
-    rejected_close = namespace_methods['_close_rejected_namespace_raw_once']
-    open_namespace_owner = namespace_methods['_open_namespace_owner']
-    classifier_targets = call_targets(classifier)
-    parent_targets = call_targets(parent_reauthentication)
-    rejected_targets = call_targets(rejected_close)
-    open_targets = call_targets(open_namespace_owner)
-    _require(classifier_targets.count('self._charge_cleanup_budget') == 2 and classifier_targets.count('_GENERATION6_R_NAMESPACE_REAL_OS_STAT') == 1 and classifier_targets.count('self._open_namespace_owner') == 1 and classifier_targets.count('self._namespace_mount_id') == 1 and classifier_targets.count('self._reauthenticate_inventory_classification_parent') == 1 and classifier_targets.count('_GENERATION6_R_NAMESPACE_REAL_OS_GETUID') == 1 and classifier_targets.count('_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD') == 0 and classifier_targets.count('_GENERATION6_R_NAMESPACE_REAL_OS_FSTAT') == 0 and classifier_targets.count('_GENERATION6_R_NAMESPACE_REAL_FCNTL') == 0 and parent_targets.count('_GENERATION6_R_NAMESPACE_REAL_OS_FSTAT') == 1 and parent_targets.count('self._namespace_mount_id') == 1 and parent_targets.count('_GENERATION6_R_NAMESPACE_REAL_FCNTL') == 2 and parent_targets.count('_GENERATION6_R_NAMESPACE_REAL_OS_STAT') == 0 and parent_targets.count('self._charge_cleanup_budget') == 0, 'R namespace A2g exact observation inventory differs')
-    classifier_source = ast.unparse(classifier)
-    classifier_calls = calls(classifier)
-    classifier_charge_calls = tuple(call for call in classifier_calls if ast.unparse(call.func) == 'self._charge_cleanup_budget')
-    classifier_stat_calls = tuple(call for call in classifier_calls if ast.unparse(call.func) == '_GENERATION6_R_NAMESPACE_REAL_OS_STAT')
-    classifier_open_calls = tuple(call for call in classifier_calls if ast.unparse(call.func) == 'self._open_namespace_owner')
-    classifier_authentication_fragments = ('binding.raw_entry.name == binding.component', 'opened_snapshot == named_snapshot', 'descriptor_token.snapshot == opened_snapshot', 'named_snapshot.uid == current_uid', 'named_snapshot.uid == authority_binding.fact.uid', 'entry_mount_id == parent_mount_id', 'entry_mount_id == authority_binding.fact.mount_id', 'parent_snapshot == parent_descriptor_record.token.snapshot', 'descriptor_flags == fcntl.FD_CLOEXEC', 'status_flags & os.O_ACCMODE == os.O_RDONLY', 'status_flags & os.O_PATH == os.O_PATH')
-    _require(len(classifier_charge_calls) == 2 and len(classifier_stat_calls) == 1 and len(classifier_open_calls) == 1 and classifier_charge_calls[0].lineno < classifier_stat_calls[0].lineno < classifier_charge_calls[1].lineno < classifier_open_calls[0].lineno and classifier_source.find('classification_record.stat_attempts = 1') < classifier_source.find('_GENERATION6_R_NAMESPACE_REAL_OS_STAT') and classifier_source.find('classification_record.open_attempts = 1') < classifier_source.find('self._open_namespace_owner') and classifier_source.count('entry_increment=0') == 2 and classifier_source.count('encoded_name_bytes_increment=0') == 2 and 'os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC' in classifier_source and 'descriptor_token.snapshot' in classifier_source and 'descriptor_token.fd_flags' in classifier_source and 'descriptor_token.status_flags' in classifier_source and all(fragment in classifier_source for fragment in classifier_authentication_fragments) and not any(target.startswith('binding.raw_entry.') for target in classifier_targets) and 'budget_record.operation_count == binding.operation_count_before + 2' in classifier_source and 'budget_record.entry_count == binding.entry_count_before' in classifier_source and 'budget_record.encoded_name_bytes == binding.encoded_name_bytes_before' in classifier_source, 'R namespace A2g metering/authentication source differs')
-    open_source = ast.unparse(open_namespace_owner)
-    open_order = tuple(open_source.find(fragment) for fragment in ('owner = object.__new__(FdOwner)', 'vars(owner) == {}', 'raw_result = _GENERATION6_R_NAMESPACE_REAL_OS_OPEN', 'invalid_evidence = raw_result', 'raw_result = _PID_SENTINEL', '_GENERATION6_R_REAL_LIST_APPEND', 'low_descriptor = raw_result', 'self._close_rejected_namespace_raw_once(low_descriptor)', 'accepted_descriptor = raw_result', 'initialization_descriptor = accepted_descriptor', 'initialization_started = True', 'accepted_descriptor = _PID_SENTINEL', 'FdOwner.__init__(owner, initialization_descriptor, exact_label)'))
-    _require(all(index >= 0 for index in open_order) and all(open_order[index] < open_order[index + 1] for index in range(len(open_order) - 1)) and open_targets.count('object.__new__') == 1 and open_targets.count('_GENERATION6_R_NAMESPACE_REAL_OS_OPEN') == 1 and open_targets.count('_GENERATION6_R_REAL_LIST_APPEND') == 1 and open_targets.count('self._close_rejected_namespace_raw_once') == 1 and open_targets.count('FdOwner.__init__') == 1 and open_targets.count('_GENERATION6_R_REAL_OS_CLOSE') == 0 and open_targets.count('self._retain_untransferred_raw') == 0 and not any(node.finalbody for node in ast.walk(open_namespace_owner) if isinstance(node, ast.Try)), 'R namespace A2g post-open responsibility partition differs')
-    rejected_source = ast.unparse(rejected_close)
-    rejected_order = tuple(rejected_source.find(fragment) for fragment in ('_GENERATION6_R_REAL_LIST_APPEND', '_GENERATION6_R_REAL_OS_CLOSE', 'self._poisoned_descriptors.add', 'self._phase = _Generation6RNamespacePhase.UNCERTAIN'))
-    rejected_top_level_tries = tuple(node for node in rejected_close.body if isinstance(node, ast.Try))
-    _require(rejected_targets.count('_GENERATION6_R_REAL_LIST_APPEND') == 1 and rejected_targets.count('_GENERATION6_R_REAL_OS_CLOSE') == 1 and all(index >= 0 for index in rejected_order) and all(rejected_order[index] < rejected_order[index + 1] for index in range(len(rejected_order) - 1)) and len(rejected_top_level_tries) == 2 and call_targets(rejected_top_level_tries[0]).count('_GENERATION6_R_REAL_LIST_APPEND') == 1 and call_targets(rejected_top_level_tries[1]).count('_GENERATION6_R_REAL_OS_CLOSE') == 1 and rejected_targets.count('self._descriptor_ledger.initialize_owner') == 0 and rejected_targets.count('self._namespace_mount_id') == 0 and rejected_targets.count('_GENERATION6_R_NAMESPACE_REAL_OS_FSTAT') == 0 and rejected_targets.count('_GENERATION6_R_NAMESPACE_REAL_FCNTL') == 0 and rejected_targets.count('self._register_name_fact') == 0, 'R namespace A2g rejected-descriptor close differs')
-    a2g_graph_nodes = (*tuple(namespace_methods[name] for name in a2g_helper_names), open_namespace_owner)
-    a2g_graph_targets = tuple(target for node in a2g_graph_nodes for target in call_targets(node))
-    a2g_graph_names = tuple(candidate.id for node in a2g_graph_nodes for candidate in ast.walk(node) if isinstance(candidate, ast.Name))
-    _require(all(a2g_graph_targets.count(f'self.{name}') == 0 for name in ('_acquire_name_owner', '_reauthenticate_directory', '_terminalize_inventory_item', 'seal_name', '_publish_capability')) and '_Generation6RNamespaceEmptyInventory' not in a2g_graph_names and a2g_graph_targets.count('_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK') == 0 and a2g_graph_targets.count('os.rmdir') == 0 and a2g_graph_targets.count('os.unlink') == 0 and namespace_callers('_classify_metered_inventory_item') == (), 'R namespace A2g integration/exclusion graph differs')
-    namespace_call_targets = call_targets(namespace_journal)
-    empty_inventory_roots = tuple(node for node in syntax.body if isinstance(node, ast.ClassDef) and node.name == '_Generation6RNamespaceEmptyInventory')
-    empty_inventory_constructors = tuple(call for call in calls(syntax) if ast.unparse(call.func) == '_Generation6RNamespaceEmptyInventory')
-    unlink_capture_roots = tuple(node for node in syntax.body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == '_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK')
-    unlink_callers = tuple(name for name in namespace_method_inventory if call_targets(namespace_methods[name]).count('_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK'))
-    publish_definitions = tuple(node for node in namespace_journal.body if isinstance(node, ast.FunctionDef) and node.name == '_publish_capability')
-    forbidden_a2g_surface_fragments = ('dispatch', 'runtime', 'remote', 'production', 'trading', 'broker', 'exchange', 'order', 'publish')
-    _require(len(empty_inventory_roots) == 1 and len(empty_inventory_constructors) == 0 and a2g_graph_names.count('_Generation6RNamespaceEmptyInventory') == 0 and len(unlink_capture_roots) == 1 and namespace_call_targets.count('_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK') == 1 and unlink_callers == ('consume_present',) and a2g_graph_targets.count('_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK') == 0 and len(publish_definitions) == 1 and namespace_callers('_publish_capability') == (('authorize_present', 1), ('authorize_absence', 1), ('authorize_rename', 1)) and namespace_call_targets.count('self._publish_capability') == 3 and a2g_graph_targets.count('self._publish_capability') == 0 and namespace_call_targets.count('os.rmdir') == 0 and call_targets(syntax).count('os.rmdir') == 2 and not any(fragment in target.lower() for fragment in forbidden_a2g_surface_fragments for target in a2g_graph_targets), 'R namespace A2g scoped inherited surface differs')
-    derive_source = ast.unparse(namespace_methods['_derive_inventory_classification'])
-    register_source = ast.unparse(namespace_methods['_register_name_fact'])
-    seal_source = ast.unparse(namespace_methods['seal'])
-    hardlink_static_cases = ((1, 'REGULAR'), (2, 'HARDLINK'), (3, 'HARDLINK'), (17, 'HARDLINK'))
-    _require(hardlink_static_cases == tuple((count, 'HARDLINK' if count > 1 else 'REGULAR') for count in (1, 2, 3, 17)) and 'snapshot.link_count > 1' in derive_source and 'snapshot.link_count == 1' in derive_source and 'r6-hardlink:{mount_id}:{snapshot.device}:{snapshot.inode}' in derive_source and 'len(group) < fact.link_count' in register_source and 'candidate.link_count == fact.link_count' in register_source and '1 <= len(members) <= members[0].link_count' in seal_source and 'members[0].link_count > 1' in seal_source and 'len(members) == 2' not in seal_source, 'R namespace A2g hardlink generalization differs')
-    a2g_event_vocabulary = ('INVENTORY_CLASSIFICATION_ATTEMPTING', 'INVENTORY_CLASSIFICATION_NOFOLLOW_STAT_OBSERVED', 'INVENTORY_CLASSIFICATION_HANDLE_AUTHENTICATED', 'INVENTORY_CLASSIFICATION_HANDLE_CLOSED', 'INVENTORY_CLASSIFICATION_ABORT_CLOSED', 'INVENTORY_CLASSIFICATION_REMOVABLE_CANDIDATE', 'INVENTORY_CLASSIFICATION_KNOWN_RESIDUE', 'INVENTORY_ITEM_CLASSIFIED_REMOVABLE_CANDIDATE', 'INVENTORY_ITEM_CLASSIFIED_KNOWN_RESIDUE', 'INVENTORY_CLASSIFICATION_UNCERTAIN', 'INVENTORY_ITEM_CLASSIFICATION_UNCERTAIN', 'NAME_FACT_SEALED')
-    a2g_string_values = tuple(candidate.value for node in a2g_graph_nodes for candidate in ast.walk(node) if isinstance(candidate, ast.Constant) and type(candidate.value) is str)
-    _require(all(value in a2g_string_values or value in tuple(member for members in namespace_enum_members.values() for member in members) for value in a2g_event_vocabulary), 'R namespace A2g receipt vocabulary differs')
-    terminalize_classification = namespace_methods['_terminalize_inventory_classification']
-    fail_classification = namespace_methods['_fail_inventory_classification_uncertain']
-    classifier_try = tuple(node for node in classifier.body if isinstance(node, ast.Try))
-    _require(len(classifier_try) == 1 and isinstance(classifier_try[0].body[-1], ast.Return) and isinstance(classifier_try[0].body[-2], ast.Expr) and isinstance(classifier_try[0].body[-2].value, ast.Call) and ast.unparse(classifier_try[0].body[-2].value.func) == 'self._terminalize_inventory_classification' and isinstance(terminalize_classification.body[-1], ast.Assign) and ast.unparse(terminalize_classification.body[-1].targets[0]) == 'self._live_inventory_classification_record' and isinstance(terminalize_classification.body[-1].value, ast.Constant) and terminalize_classification.body[-1].value.value is None and isinstance(fail_classification.body[-2], ast.Assign) and ast.unparse(fail_classification.body[-2].targets[0]) == 'self._live_inventory_classification_record' and isinstance(fail_classification.body[-2].value, ast.Constant) and fail_classification.body[-2].value.value is None and isinstance(fail_classification.body[-1], ast.Raise), 'R namespace A2g final publication/failure ordering differs')
-    classifier_success_order = tuple(classifier_source.find(fragment) for fragment in ('self._derive_inventory_classification', 'self._close_inventory_classification_owner', 'self._register_inventory_classification_name_fact', 'self._terminalize_inventory_classification', 'return classification'))
-    terminalize_source = ast.unparse(terminalize_classification)
-    terminalize_success_order = tuple(terminalize_source.find(fragment) for fragment in ('record.state = state', 'item_record.state = item_state', 'outcome_receipt = self._append_receipt', 'record.outcome_receipt = outcome_receipt', 'terminal_receipt = self._append_receipt', '\n    item_record.terminal_receipt = terminal_receipt', '\n    record.terminal_receipt = terminal_receipt', 'self._archived_inventory_item_records.append(item_record)', 'self._archived_inventory_classification_records.append(record)', 'self._inventory_classification_residue_evidence.append(record)', 'self._live_inventory_item_record = None', 'self._live_inventory_classification_record = None'))
-    fail_source = ast.unparse(fail_classification)
-    failure_order = tuple(fail_source.find(fragment) for fragment in ('exact_record.state = _Generation6RNamespaceInventoryClassificationState.UNCERTAIN', 'exact_item_record.state = _Generation6RNamespaceInventoryItemState.UNCERTAIN', 'self._close_inventory_classification_owner', 'classification_receipt = self._append_receipt', 'item_receipt = self._append_receipt', 'self._archived_inventory_item_records.append(exact_item_record)', 'self._archived_inventory_classification_records.append(exact_record)', 'self._inventory_classification_residue_evidence.append(exact_record)', 'self._live_inventory_item_record = None', 'self._live_inventory_classification_record = None', 'raise primary'))
-    _require(all(index >= 0 for index in classifier_success_order) and all(classifier_success_order[index] < classifier_success_order[index + 1] for index in range(len(classifier_success_order) - 1)) and all(index >= 0 for index in terminalize_success_order) and all(terminalize_success_order[index] < terminalize_success_order[index + 1] for index in range(len(terminalize_success_order) - 1)) and all(index >= 0 for index in failure_order) and all(failure_order[index] < failure_order[index + 1] for index in range(len(failure_order) - 1)) and terminalize_source.count('self._live_inventory_classification_record = None') == 1 and fail_source.count('self._live_inventory_classification_record = None') == 1, 'R namespace A2g exact success/failure publication sequence differs')
-    namespace_init_source = ast.unparse(namespace_methods['__init__'])
-    a2g_store_fragments = ('self._inventory_classification_records_by_identity', 'self._inventory_classification_records_by_serial', 'self._live_inventory_classification_record', 'self._archived_inventory_classification_records', 'self._inventory_classification_residue_evidence', 'self._inventory_classification_descriptor_quarantine', 'self._inventory_classification_faulted')
-    _require(all(namespace_init_source.count(fragment) == 1 for fragment in a2g_store_fragments), 'R namespace A2g exact store inventory differs')
-    namespace_source = ast.unparse(namespace_journal)
-    bundle_start_nodes = tuple((node for node in syntax.body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and (node.target.id == '_GENERATION6_R_REAL_NEXT')))
-    _require(len(bundle_start_nodes) == 1, 'R namespace static A2g bundle start differs')
-    bundle_start = bundle_start_nodes[0].lineno
-    _require(type(namespace_journal.end_lineno) is int, 'R namespace static bundle end differs')
-    bundle_end = cast(int, namespace_journal.end_lineno)
-    namespace_bundle_nodes = tuple((node for node in syntax.body if bundle_start <= node.lineno <= bundle_end))
-    observed_bundle_inventory = tuple((f'capture:{node.target.id}' if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) else f'class:{node.name}' if isinstance(node, ast.ClassDef) else f'function:{node.name}' if isinstance(node, ast.FunctionDef) else 'alias:_Generation6RNamespaceLiveToken' if isinstance(node, ast.Assign) and any((isinstance(target, ast.Name) and target.id == '_Generation6RNamespaceLiveToken' for target in node.targets)) else f'unexpected:{type(node).__name__}' for node in namespace_bundle_nodes))
-    canonical_capture_names = ('_G6R_PN', '_G6R_PK', '_G6R_PE', '_G6R_IK', '_G6R_IE', '_G6R_BK', '_G6R_BE', '_G6R_OK', '_G6R_OE', '_G6R_LK', '_G6R_LE', '_G6R_TK', '_G6R_TE', '_G6R_WK', '_G6R_WE', '_G6R_VK', '_G6R_VE', '_GENERATION6_R_AUTHORITY_EVENT_CLASS_SEAL', '_G6R_SS', '_G6R_SK', '_G6R_SE', '_G6R_AF', '_G6R_AI', '_G6R_NF', '_G6R_NI', '_G6R_VC', '_G6R_VF', '_G6R_VI', '_G6R_VB', '_G6R_G', '_G6R_D')
-    _require(len(namespace_bundle_nodes) == 159 and all(f'capture:{name}' in observed_bundle_inventory for name in canonical_capture_names) and not any(label.startswith('unexpected:') for label in observed_bundle_inventory), 'R namespace canonical capture inventory differs')
-    normalized_bundle_source = '\n'.join(source.splitlines()[bundle_start - 1:bundle_end]) + '\n'
-    bundle_domain = b'TASK-064\x00GEN6\x00R-A2g\x00source-v1\x00'
-    bundle_preimage = bundle_domain + normalized_bundle_source.encode('utf-8')
-    bundle_digest = hashlib.sha256(bundle_preimage).hexdigest()
-    _require(bundle_start == 10578 and bundle_end == 19969 and (namespace_bundle_nodes[0] is bundle_start_nodes[0]) and (namespace_bundle_nodes[-1] is namespace_journal) and all((type(node.end_lineno) is int and node.end_lineno < namespace_bundle_nodes[index + 1].lineno for index, node in enumerate(namespace_bundle_nodes[:-1]))) and (len(bundle_preimage) == 791648) and (bundle_digest == '2682341b75ab6bcef8ca26a846f7ea6ccd43c59be49ea0a08508a3feeb3e0694'), 'R namespace A2g reviewed source-bundle digest differs')
-    cap1_schema_domain = b'TASK-064\x00GEN6\x00R-CAP1\x00ast-schema-v1\x00'
-    cap1_projection_domain = b'TASK-064\x00GEN6\x00R-CAP1\x00semantic-projection-v1\x00'
-    _require(sys.version_info[:3] == (3, 13, 14), 'R CAP1 Python AST runtime differs')
-    cap1_bundle_walk = tuple(candidate for node in namespace_bundle_nodes for candidate in ast.walk(node))
-    cap1_schema_rows = tuple(sorted({(type(node).__name__, tuple(node._fields)) for node in cap1_bundle_walk}))
-    cap1_schema_index = {row: index for index, row in enumerate(cap1_schema_rows)}
-    _require(len(cap1_bundle_walk) == 181988 and len(cap1_schema_rows) == 63 and len(cap1_schema_index) == 63, 'R CAP1 AST inventory differs')
-    def cap1_canonical_json(value: object) -> bytes:
-        return json.dumps(value, ensure_ascii=True, allow_nan=False, separators=(',', ':'), sort_keys=False).encode('ascii')
-    def cap1_scalar(value: object) -> list[object]:
-        if value is None:
-            return ['z']
-        if value is Ellipsis:
-            return ['e']
-        if type(value) is bool:
-            return ['b', 1 if value else 0]
-        if type(value) is int:
-            return ['i', str(value)]
-        if type(value) is str:
-            return ['s', value]
-        if type(value) is bytes:
-            return ['y', value.hex()]
-        if type(value) is float:
-            exact_float = value
-            if not math.isfinite(exact_float):
-                raise ContractError('R CAP1 non-finite AST float')
-            return ['f', exact_float.hex()]
-        if type(value) is complex:
-            exact_complex = value
-            if not math.isfinite(exact_complex.real) or not math.isfinite(exact_complex.imag):
-                raise ContractError('R CAP1 non-finite AST complex')
-            return ['c', exact_complex.real.hex(), exact_complex.imag.hex()]
-        raise ContractError('R CAP1 unsupported AST scalar')
-    def cap1_projection_encode(value: object) -> list[object]:
-        if isinstance(value, ast.AST):
-            row = (type(value).__name__, tuple(value._fields))
-            schema_ordinal = cap1_schema_index.get(row)
-            if schema_ordinal is None:
-                raise ContractError('R CAP1 unknown AST schema row')
-            return ['n', schema_ordinal, [cap1_projection_encode(getattr(value, field)) for field in value._fields]]
-        if isinstance(value, list):
-            return ['l', [cap1_projection_encode(item) for item in value]]
-        return cap1_scalar(value)
-    cap1_schema_payload = [[name, list(fields)] for name, fields in cap1_schema_rows]
-    cap1_schema_canonical = cap1_canonical_json(cap1_schema_payload)
-    cap1_schema_preimage_digest = hashlib.sha256(cap1_schema_domain)
-    cap1_schema_preimage_digest.update(cap1_schema_canonical)
-    _require(len(cap1_schema_domain) == 35 and len(cap1_schema_canonical) == 1773 and hashlib.sha256(cap1_schema_canonical).hexdigest() == '486a9f82f88f635adf07611fab7ccc6446cd8acc5e82606f606866e299dc15b3' and len(cap1_schema_domain) + len(cap1_schema_canonical) == 1808 and cap1_schema_preimage_digest.hexdigest() == '86297c6227cac657ba4f56a8101e59231bc7f4ff3855a6f23f45fde178279d04', 'R CAP1 AST schema projection differs')
-    def cap1_root_descriptor(node: ast.stmt) -> str:
-        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            return f'capture:{node.target.id}'
-        if isinstance(node, ast.ClassDef):
-            return f'class:{node.name}'
-        if isinstance(node, ast.FunctionDef):
-            return f'function:{node.name}'
-        if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == '_Generation6RNamespaceLiveToken' for target in node.targets):
-            return 'alias:_Generation6RNamespaceLiveToken'
-        raise ContractError('R CAP1 unsupported bundle root')
-    def cap1_end_line(node: ast.stmt) -> int:
-        if type(node.end_lineno) is not int:
-            raise ContractError('R CAP1 bundle root end line differs')
-        return node.end_lineno
-    expected_bundle_root_projection_inventory: tuple[tuple[str, int, int, int, str], ...] = (
-        ('capture:_GENERATION6_R_REAL_NEXT', 10578, 10578, 187, '4523be89a794e536cd2782d52d04479c3fda6839519e40ebadc3aa66b477c9a0'),
-        ('capture:_GENERATION6_R_REAL_STOP_ITERATION', 10579, 10579, 206, 'b3304f6ad1881a808b91ffef6d322df48b175df9baedeaabc6d4c5862e8a7057'),
-        ('capture:_GENERATION6_R_REAL_DIRENTRY_TYPE', 10580, 10580, 194, 'bffce5fe2eb9d26556233cab2d95f2a9bc8fe9205b036d43debb0eb355bed380'),
-        ('capture:_GENERATION6_R_REAL_LIST_APPEND', 10581, 10581, 192, '3f1a825607661cc1cd338b1866037abe4cbea4c4d75d011b39b9451b47985307'),
-        ('capture:_GENERATION6_R_REAL_LIST_GETITEM', 10582, 10582, 198, 'ef4f0db9d801560179d43eedb46025ea2cb9a34d96c76de051be9a1960be2d7d'),
-        ('capture:_GENERATION6_R_REAL_TYPE', 10583, 10583, 187, '7a28612077526fad17a0e48f0fe2ed31cf98dcc90478804fb1f0616041ca8533'),
-        ('capture:_GENERATION6_R_REAL_ID', 10584, 10584, 183, 'd8093d0865f2d3c08f78da09b5824bce5f5b2d5df104e95436bf0041f854d36b'),
-        ('capture:_GENERATION6_R_REAL_INT', 10585, 10585, 185, '3e8dace45fc9d8b59d69f970b7f89f0ce7d16e0f2970a58c23808806816e1d60'),
-        ('capture:_GENERATION6_R_REAL_BOOL', 10586, 10586, 187, '24a58e2265cc514dbede67d288a35e5485be9e498bf6aca6987f3dcd1a0a7249'),
-        ('capture:_GENERATION6_R_REAL_TUPLE', 10587, 10587, 189, 'eb3f6d15782886fea6ab194c930386a3d72a5751888450e7189d89db7cdcd45b'),
-        ('capture:_GENERATION6_R_REAL_DICT', 10588, 10588, 187, '972b3052bbcb4e4080380f0b0fd3b9632876afe8e317bdf62464d443c94e97e5'),
-        ('capture:_GENERATION6_R_REAL_LEN', 10589, 10589, 185, 'd72cfeb414f189b01a9f0e7997ff1093b7d6b56571ea563d2cb02cb15a359d8c'),
-        ('capture:_GENERATION6_R_REAL_GETATTR', 10590, 10590, 193, 'b91a19f4d8e4c9480515e07f17e6fa41c52f1acf3a4663aef4baa660d25c33a7'),
-        ('capture:_GENERATION6_R_REAL_DICT_ITEMS', 10591, 10591, 190, 'c1db68590cb848ed54a4659e58d842af0827ffd9ab1aa26d602ae0215164d4b7'),
-        ('capture:_GENERATION6_R_REAL_TYPE_GETATTRIBUTE', 10592, 10592, 208, '1d2aa49e145bf0a3c327030bea259a27315215af439377b6f8e2ed52cf1c743a'),
-        ('capture:_GENERATION6_R_REAL_OBJECT_GETATTRIBUTE', 10593, 10593, 212, '8be879e00782aefe3456bf80423f5bc7c19f0468514e78a8401e06691a4fd4f0'),
-        ('capture:_GENERATION6_R_REAL_OBJECT_SETATTR', 10594, 10594, 202, 'd4ad75cdebe258de12240823e33deb2b982bfb478e2d38688df6b0a9a524ee9c'),
-        ('capture:_GENERATION6_R_REAL_TUPLE_GETITEM', 10595, 10595, 200, '0c1bacd5f83335849e9766423421de9491a09f8e766e320748a832aeba8ebe12'),
-        ('capture:_GENERATION6_R_PY_TPFLAGS_IMMUTABLETYPE', 10596, 10596, 203, 'f231d5b595e2739db5de2ba3509c7636f1592bd87db6b94285ac98908319230a'),
-        ('capture:_GENERATION6_R_TPFLAGS_IMMUTABLETYPE', 10597, 10597, 200, 'c070a2cd8b00685f683c0e34b0f85a93fd0e68cf275bf7bea4e5e265ee2aaad5'),
-        ('capture:_GENERATION6_R_TPFLAGS_HEAPTYPE', 10598, 10598, 195, 'b603115bdadbb7cdc4778c08b8546c953750ea9b063f528b152765928eb69872'),
-        ('capture:_GENERATION6_R_TYPE_SECURITY_FLAGS_MASK', 10599, 10601, 279, '13e9e3a08383565cc85d747e35cc3af5dc1aacdfc1e3217bb79e2585cee77f4b'),
-        ('class:_Generation6RPhase', 10604, 10610, 749, '691be0936a9750ee16b859f7c9b4f8a0c9d0bd8e2e6f3adf46699515944a60d7'),
-        ('class:_Generation6RDescriptorState', 10613, 10617, 573, '77157c60a3de68e4d146fe33f8ffd3c0a7ff7ceda1bfc1e0ddf768d9aff23522'),
-        ('class:_Generation6ROwnerToken', 10621, 10630, 1207, '960301fbb1ae406f6cdf880daec0739a9b94af18fa2b995850c405a7e06644ac'),
-        ('class:_Generation6ROwnerRecord', 10634, 10639, 771, 'af61bbdc8b06bd74ab18eeea604e7fcb7d68a3e208890369c0f44925ff7541ae'),
-        ('class:_Generation6RAuthorityEvent', 10643, 10648, 739, '61084f31353997e93651c00af6cd1d71cedd3c96cae72dd743d497ef87b2c8f5'),
-        ('class:_Generation6RIteratorToken', 10652, 10660, 1337, 'a01c4dd454ab917ee5ef70cd7c5284698d46fcb008a83d2e9c7220a5f8d640b4'),
-        ('class:_Generation6RScandirCapability', 10664, 10668, 707, 'ec7cc0acd7d1f5fd94f25b7e3380461ad592aad173ff3c9dba77ba20e61873c6'),
-        ('class:_Generation6RAuthorityLedger', 10671, 11556, 148935, '68cb739f1a63b66a33a77242e44ad96934dd14b1a09afe95c5ebbb84e99a6d44'),
-        ('capture:_GENERATION6_R_CAPTURED_APPEND_EVENT', 11559, 11559, 228, 'a03cba48bb5cd0b0bf090d40385e7638968a9aa945debeb802c9f6f1d662bdf5'),
-        ('class:_Generation6RScandirProxy', 11562, 11860, 108330, '4a8e6ca7575089d0348242963c9b017b87e5d5f8eafd3837767a9aec1dc8cab6'),
-        ('capture:_GENERATION6_R_CAPTURED_SCANDIR_PROXY_NEXT', 11863, 11863, 226, '3a78fa0873709692b25da843d54995c46ec60279bd41367b4aa5f352e9960f4f'),
-        ('capture:_G6R_PN', 11864, 11887, 979, '872bb209694715e8069673888c57f779e243b87e6e3afba22b0bd5c5b03ad731'),
-        ('capture:_G6R_PK', 11889, 11897, 679, 'db46a5df7630c4508fe0244d8a352c65ce03bd21af9709943a02f5c6953bf91c'),
-        ('capture:_G6R_PE', 11898, 11908, 769, '954a8c4d7b63d023b7a45e029af7b5d500ec5c5e05e99e7731872bccee564ccf'),
-        ('capture:_G6R_IK', 11910, 11916, 628, 'e750f9701c102c9efede819966920f2d322678da8fa49575c6c73017a881b8df'),
-        ('capture:_G6R_IE', 11917, 11925, 718, 'df23cfd509ffa1720c7dc67571107b313d8e9a6081c274118fbc9dbd2dfdf0d1'),
-        ('capture:_G6R_BK', 11927, 11933, 628, '4e7004234edbc53d3ec968da2454f53a6b9ddf4509befdbb14ee33aa8a753c65'),
-        ('capture:_G6R_BE', 11934, 11942, 718, 'ca38832fbf0b8bc4225f8e55930feb052f1523d17a668be13296fc5e15460ceb'),
-        ('capture:_G6R_OK', 11944, 11950, 622, '5fe8d693115386d4cc27730799381f83675c8a1181d482da2ad0203c65577a50'),
-        ('capture:_G6R_OE', 11951, 11959, 712, '4a8d29ebd583532054036dd5ca90a60111ddf6c35651770a02d207c6bd0e80ae'),
-        ('capture:_G6R_LK', 11961, 11969, 688, '753c914fb12925cf314431d67b75487a6276fdfed2551ba487e600bab074a78e'),
-        ('capture:_G6R_LE', 11970, 11980, 778, '48390a13498aaf7934a45f077938182ad4d4f5589f91e93db2b2fa2db90a7245'),
-        ('capture:_G6R_TK', 11982, 11990, 682, '2a852da0570fb52a2dc190b4e580e2b8a915a26f49b4ca6ff9ef5ead025498e4'),
-        ('capture:_G6R_TE', 11991, 12001, 772, 'ed0885d23974dbdf0ff50af0556453d4afd53f1d192d13dbc95bf92d660ba7bb'),
-        ('capture:_G6R_WK', 12003, 12011, 673, 'e6b5eed6a1728e6508d8db4082c387514e9bc2a7f17cb06dcbf1cf55aa6bd839'),
-        ('capture:_G6R_WE', 12012, 12022, 763, '844cef71b60f69d5813596e0fda01b9dd5faad3a32640b473ce3f45cb239ad80'),
-        ('capture:_G6R_VK', 12024, 12032, 685, '9e0f60608b0c6ad9c6f92b91ed74edbe9c5f93ded40c03d2d6c2abd841c1293c'),
-        ('capture:_G6R_VE', 12033, 12043, 775, '2ac33759997ea61d1d94f468056e46696058b126d8dcc8f061ca66abb965e72a'),
-        ('capture:_GENERATION6_R_CAPTURED_APPEND_EVENT_INTEGRITY', 12045, 12056, 1294, '07c139cabc8eeef3f9406c50c0f5a9bc4c3e8fc937e601aed870173ac371e2d1'),
-        ('capture:_GENERATION6_R_CAPTURED_APPEND_EVENT_CLOSURE_BINDINGS', 12057, 12057, 173, '035c4d781ac2dbf6db381123b2b80cb644e5f9b725a6924346d3d21664d2570b'),
-        ('capture:_GENERATION6_R_CAPTURED_SCANDIR_PROXY_NEXT_INTEGRITY', 12058, 12069, 1348, '06d245cf910cbb98488592e8d14c762a100535ad251a46a281e3e1e98fa69144'),
-        ('capture:_GENERATION6_R_CAPTURED_SCANDIR_PROXY_NEXT_CLOSURE_BINDINGS', 12070, 12070, 179, 'c33c46bff5005061366a89a4731704100c6eda404661c9167d7130e8db22f09b'),
-        ('capture:_GENERATION6_R_CAPTURED_AUTHORITY_EVENT_CLASS', 12071, 12071, 192, '584e0aecddd20fbedd44ccf4c06f8da6648f4dd64c2ecc869494f86d822415cd'),
-        ('capture:_GENERATION6_R_CAPTURED_AUTHORITY_EVENT_INIT', 12072, 12072, 230, 'e220423e16dcc58f9d61967e927ef993ae7a14ac62da29cb8afaae1885b01c20'),
-        ('capture:_GENERATION6_R_CAPTURED_AUTHORITY_EVENT_INIT_CLOSURE', 12073, 12075, 258, '61a8ae0ab043925920f0444632f619d221399cc311f50fc0560a17d221722bb9'),
-        ('capture:_GENERATION6_R_CAPTURED_AUTHORITY_EVENT_INIT_CLOSURE_BINDINGS', 12076, 12092, 963, '024ff3ceaea4c81c3fa520c44e6b04b5203b7456e5e1887ff53627904f2e2d04'),
-        ('capture:_GENERATION6_R_CAPTURED_AUTHORITY_EVENT_INIT_INTEGRITY', 12093, 12104, 1332, '52eb3675e03b85694e179fcf3f475201acc898053be21e9e38676e4e8131a315'),
-        ('capture:_GENERATION6_R_AUTHORITY_EVENT_CLASS_SEAL', 12105, 12120, 2063, '0450a0fabb48c950810d5dacef86bdc5d96f26e53322dd19c65ac90f0d04d511'),
-        ('capture:_GENERATION6_R_SCANDIR_PROXY_CLASS_SEAL', 12123, 12143, 2476, '8cbb915f2a7192bb7a2e0b8dc5b9c67dbfd7a58ae6b6ce7da6748b30f5aa15f1'),
-        ('capture:_GENERATION6_R_AUTHORITY_LEDGER_CLASS_SEAL', 12144, 12159, 2188, '1b1fdc44ed2ed443b43680bf2e093cbfa9982200ed28509252a568115c0904de'),
-        ('capture:_GENERATION6_R_ITERATOR_TOKEN_CLASS_SEAL', 12160, 12175, 2166, '3ae03c9119b1251adbc209afc556c5ef21c48c036ea1a07b4f51dca3319c178d'),
-        ('capture:_GENERATION6_R_OWNER_TOKEN_CLASS_SEAL', 12176, 12191, 2133, 'c430415d5df482839f286798c46e6cec7aec2ad7859b5125ff4409a59fcfec2f'),
-        ('capture:_G6R_SS', 12192, 12198, 485, '13d3c89c27e07cda9f7c399992e6ef07520cc89f4cdbcd78266fcae7f52b59bf'),
-        ('capture:_G6R_SK', 12199, 12205, 749, '830654b0eb83e99da1824ddd6f7485d6d3524200f120abed87674c60261f8346'),
-        ('capture:_G6R_SE', 12206, 12212, 749, '1380bc697978439688ac1e306ee41a7b31e66a01b195726f89d5d75a631175d1'),
-        ('capture:_G6R_AF', 12213, 12213, 163, '1c4b34fc8e9cb13d74db1d5ede5071cc54e49db1c1c1913c9df0ccf0d88c9c7a'),
-        ('capture:_G6R_AI', 12214, 12214, 173, '8c884f6558e0d81b60ab0cf4d44fdc6c29d95302dbcf2ba186bf8f16ad238097'),
-        ('capture:_G6R_NF', 12215, 12215, 169, '5832b78973762e5f96a2bbf2deeca3cee427260996a60e52e6c5529dde18cc28'),
-        ('capture:_G6R_NI', 12216, 12216, 179, '35feae6405f85be98967fffde25bf0a950eef1609749ebc7a09391fdb353afd4'),
-        ('capture:_G6R_VC', 12217, 12217, 172, '9fd0d7db641c6fa57c9674de2faf1b10bf9a5b8ef8d0b09a3f58793006f58fa4'),
-        ('capture:_G6R_VF', 12218, 12218, 171, '32abebeccdbcddcbd52ed9a42cfd14e3a31a2c1b327b9e3b3b4b47f575a0d09c'),
-        ('capture:_G6R_VI', 12219, 12219, 181, '551bac60799f16d3cd235442255c3af5c9bd646ee4476dd9c9aa801acbe95499'),
-        ('capture:_G6R_VB', 12220, 12220, 188, 'f97c53ee9f8c10c5476c39cfef3b1bd81c44a33c450559b47b7ff10c8a10c452'),
-        ('capture:_G6R_G', 12221, 12221, 163, '78aad8cafa09e936b8ce07fd9b2b3af8ff4f64811c119d4e759241b35443c070'),
-        ('capture:_G6R_D', 12222, 12222, 128, '6c9469da5672e331e32b53fc76311fd67036278d7aebfa59f9bb66a35d5dc0a1'),
-        ('function:_generation6_r_socket_detach_handoff', 12225, 12292, 9410, '325903e60b35b06001b5adf00bffe7dae43e99deb63649a7859781f3529ed19b'),
-        ('class:_Generation6RAuthorityScope', 12295, 12506, 567011, '343db8cbeeab7d6484c63b56444173ebd9eb674930492f31a05574c51aa108c0'),
-        ('capture:_GENERATION6_R_NAMESPACE_REAL_OS_STAT', 12519, 12519, 194, '781b33f1426a541fe177fd5c041a95d15e2ba9ed3f9bbb1ebdb44afdab2ae86c'),
-        ('capture:_GENERATION6_R_NAMESPACE_REAL_OS_OPEN', 12520, 12520, 194, '02b606be65cc258a6db80ee03ba374f69b99d2af44c081eb2a6141209d8d4e96'),
-        ('capture:_GENERATION6_R_NAMESPACE_REAL_OS_FSTAT', 12521, 12521, 196, 'c7d9ae2cbac9ebb3fd3705f22c215f8286d84c7f6f363892e7652893c32908ac'),
-        ('capture:_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK', 12522, 12522, 198, 'aa2d85e59c70c8d4bcd7e7e3db12053ff5658bc8c76332d699ed6112bae9fb01'),
-        ('capture:_GENERATION6_R_NAMESPACE_REAL_OS_GETUID', 12523, 12523, 198, '64363a327e44998cccda59fad2671adbdfd7ee8256749a9cc29ef474c02cff94'),
-        ('capture:_GENERATION6_R_NAMESPACE_REAL_FCNTL', 12524, 12524, 196, 'c14e9461300f586d6d29589ae883a1493cd2a3c22b9305cc824ebfda4d7b9c37'),
-        ('capture:_GENERATION6_R_NAMESPACE_REAL_MONOTONIC_NS', 12525, 12525, 209, '628a1819905413c4650464f40feb8e182e11167ad5fc09ac24a1e262c6349d83'),
-        ('capture:_GENERATION6_R_NAMESPACE_CLEANUP_MAX_DEPTH', 12526, 12526, 158, '3c4cd231e5f664071c2d78009f80e6bb255a6f389d42d07d0dbfe013be3bb713'),
-        ('capture:_GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENTRIES', 12527, 12527, 164, '81cf74e9d3fba5e15e66b92c65ec61bf56122eb029be06508fb9d3c606c247a1'),
-        ('capture:_GENERATION6_R_NAMESPACE_CLEANUP_MAX_ENCODED_NAME_BYTES', 12528, 12528, 177, '75a7ed32ca92c2d82e835c438823c25b62365bb703b955679602cd2715d05bbc'),
-        ('capture:_GENERATION6_R_NAMESPACE_CLEANUP_MAX_OPERATIONS', 12529, 12529, 167, '6c4726d3e70af8b7daff48627e185c2a8dd1f0c0f2277cc4e482160d6288ebcc'),
-        ('capture:_GENERATION6_R_NAMESPACE_CLEANUP_DEADLINE_NS', 12530, 12530, 169, '326de47ec9275a78f66858302b78e86db136794f7d7f0ee79e077ea6110b6aee'),
-        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT', 12531, 12531, 181, 'e4858eb944ac24c2c455369fbed2b089a71883a685d84bfb1e0d80637d93512d'),
-        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD', 12532, 12532, 177, 'f3808eb31b976df727953ca4a9ac0221b1bfee4e4620d4bb4b3b6916864bb88e'),
-        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_STABLE_DIRECTORY_MATCHES', 12533, 12533, 203, '7729ec7884e600da2922e23894b4b28d1a4d9805882b7185781d0259bfc21da0'),
-        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_MOUNT_ID', 12534, 12534, 171, '3a3c575d7e3bc72f9a4d4a763b7c3b0d1418db13d22315e2791655b83fd0b5f3'),
-        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_COMPONENT', 12535, 12535, 173, '01f889f143cfbd65d03c90743ecca893dfc23549b97a2520dad96123b6ea2e86'),
-        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE', 12536, 12536, 209, 'f03e968d55fef64a10f204ca3db3518c846224a5197d05eed16506e8c16a98c6'),
-        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT', 12537, 12537, 201, 'fae13d99b1f49e563d28d6546e4609c85ec6ff00c01976d0be1cf25f75ebce8c'),
-        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_S_ISDIR', 12538, 12538, 203, '8a9dea3342f709d43c54e19338bcc62a166dc70185f2a9b2373dc653f79b9a12'),
-        ('capture:_GENERATION6_R_NAMESPACE_CAPTURED_S_ISREG', 12539, 12539, 203, '897c2bb4f84ca52ff11cd64cfe28772302195b1665ec4e063b097918b00447f2'),
-        ('capture:_GENERATION6_R_NAMESPACE_REAL_OS_FSENCODE', 12540, 12540, 202, 'b3bebb9b9f233e1754e186345804f86eb35db8c61524d14561480f2d29200677'),
-        ('function:_generation6_r_namespace_filesystem_component', 12543, 12559, 3173, '4eb697dee939441e48603e32e37a2ed8670f7e55413a6b1fc48b1b1d820f7b02'),
-        ('class:_Generation6RNamespacePhase', 12562, 12569, 878, 'e056572b79de1ac0fa2a496acd1c5db23941ca0719998e789cda8de78b366208'),
-        ('class:_Generation6RNamespaceTokenState', 12572, 12578, 565, '523966853a766529aae62b551582d7964ff48ee6d883e99196208124d5612cdd'),
-        ('class:_Generation6RNamespaceAction', 12581, 12584, 441, 'bcf06b9d24a6005451cc49fd26eb05c23632afdda142f9293f396b73a3b713f2'),
-        ('class:_Generation6RNamespaceNodeKind', 12587, 12596, 833, 'b982d86aa4798552a9b1e900b765e18a23bde85983c60ea6bc0c41b34a06687c'),
-        ('class:_Generation6RNamespaceAuthorityKind', 12599, 12603, 384, '211978a456705ef8221ca9f2e0d5297c0b5a316d2071e28e83f35cb4517bff3e'),
-        ('class:_Generation6RNamespaceOwnerState', 12606, 12611, 449, '92066a52d3cdaeca0893b3d63649a86958df2d9c976273d67d3a84c97ddbe57a'),
-        ('class:_Generation6RNamespaceOwnerKind', 12614, 12616, 376, '3a9c140d29cfad0672922012bc6a1b42d7d5f7d22d47020b851abd3e73d52c7f'),
-        ('class:_Generation6RNamespaceOwnerPurpose', 12619, 12624, 735, '36885603daf726ea1c3053c0bc168e56d0d1972433d0eba9bc0ede79e7647d05'),
-        ('class:_Generation6RNamespaceContextState', 12627, 12633, 751, '8db2ba8e537fe77e33c7029152afa9b94f26c3c82e859456142ac5429d065672'),
-        ('class:_Generation6RNamespaceCloseEvent', 12636, 12646, 1533, '65b780f5f1f8607da24df8093618ed89641be93b99bded8c974ee12b97ef9c79'),
-        ('class:_Generation6RNamespaceMutationPermitState', 12649, 12655, 574, 'deef16f5eb4a3d28d2191e2af3e901fd7b45e98b3dedf62bbabd76127572f1bb'),
-        ('class:_Generation6RNamespaceCleanupBudgetState', 12658, 12663, 467, 'ee84e73f84c6fe1f99febfa3f4b43e3c8223cdbaf2396bf5558edd6602a37ec5'),
-        ('class:_Generation6RNamespaceCleanupBudgetEvent', 12666, 12671, 512, '7944ebb555ea7854575450c30bedad2f6a7337daa2e441937ed0ee2436af8ee7'),
-        ('capture:_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE', 12674, 12684, 835, 'fb2d985af0fcbbd8e3fa2dd1242bfab66dc2c8228351415f182dd29487e2d083'),
-        ('class:_Generation6RNamespaceInventoryCursorState', 12687, 12692, 467, '15c4d19782f30c8394cd09c55c455266aa54998ab44c172ccd5e9673ba90b15b'),
-        ('class:_Generation6RNamespaceInventoryScanState', 12695, 12701, 587, '057680ca66527eb01f631838165cda203dfdf53a0254019e8133cf4f24d1dced'),
-        ('class:_Generation6RNamespaceInventoryAdvanceState', 12704, 12710, 594, '060bb1d309703a518eea3e695cb1e7ff99ad387b26ed6e31ffac343e21d33fc7'),
-        ('class:_Generation6RNamespaceInventoryItemState', 12713, 12720, 787, '9451dbff6f76ef768e3b2494f80129c1164f13fb4cd6412d32f75b5b3ddd070c'),
-        ('class:_Generation6RNamespaceInventoryClassificationState', 12723, 12729, 657, '5e62d000b3694f8d2417ed7258da28b7d90e5242790fb036c2297eff8eca2e9c'),
-        ('class:_Generation6RNamespaceTerminalEvent', 12732, 12735, 554, '0fcb9d3ed27a208f1735a254ed8904840a2102ca429aefec15824f49b0db8c78'),
-        ('class:_Generation6RNamespaceDirectoryFact', 12739, 12748, 1274, 'ce27561b712ce62a3c6906c8aea73c3afc0cc7858a3770f42918cf56831cd1b6'),
-        ('class:_Generation6RNamespaceNameFact', 12752, 12764, 1578, 'cf9d999acb9adde41dd2539b4aeda3105d4e3dfd583b5b0b41a66b37051b92eb'),
-        ('class:_Generation6RNamespaceDirectoryAuthority', 12768, 12770, 476, '36981fc93f15ebb3d1111eb6b2fc39c902d5acff7c8c153eaf42bf4f891c7092'),
-        ('class:_Generation6RNamespaceDirectoryBinding', 12774, 12784, 1436, 'cfbc1e1ba2d84e469c64b56d81f1a6a622bab9d3f0b5ccbcfcffe189df150e15'),
-        ('class:_Generation6RNamespaceDirectoryRecord', 12788, 12791, 653, '728dfd483b4b04574662d329d92851464557801ed85b9648dd7de2adfe53ebb6'),
-        ('class:_Generation6RNamespaceOwnerContextBinding', 12795, 12804, 1330, 'c025354e8c8ecfa799276e87f89640a16c59b8c66ba60543bbff3336110f4aad'),
-        ('class:_Generation6RNamespaceOwnerContext', 12808, 12813, 987, 'fb55663dac360bc354932705723673fc88ef42469f8a49ac21f703049639e499'),
-        ('class:_Generation6RNamespacePresentToken', 12817, 12820, 594, '92fed16e4fef518bbbbb2d650254c706f6fa35b1ea4cc06e3f642239db86fae4'),
-        ('class:_Generation6RNamespaceAbsenceToken', 12824, 12827, 594, 'ef706da22d3e8de5b9ce2f29c2ca2c8e66a01a2a9b029396c9abd1c6fcb80533'),
-        ('class:_Generation6RNamespaceRenameToken', 12831, 12834, 593, '141acc24bb0584dbacfef09135cd686f467b613255e8c84f514042d59dfd8a0a'),
-        ('class:_Generation6RNamespaceMutationPermit', 12838, 12840, 472, '2a45fe0ee6fbed2d2d878720a1a41b450b38474ed9d2ca177469fcdf6088a128'),
-        ('alias:_Generation6RNamespaceLiveToken', 12843, 12847, 325, 'fdb4a19a28d5c25f246c66f04446350c86808bf8ce1a038b32a9f97143c56bef'),
-        ('class:_Generation6RNamespaceCapabilityBinding', 12851, 12868, 2710, '52c1b242f514b78c82e38a5e86e9965e25b6ed92aa902db69d3d3c68a9f466c6'),
-        ('class:_Generation6RNamespaceCapabilityRecord', 12872, 12879, 1371, '06c2abbe3a9a9f9f5d2f9d8941b520cdb3bfa502aa5fd73b3318d73aa4d7f0e6'),
-        ('class:_Generation6RNamespaceUnlinkPreproof', 12883, 12902, 2639, '0ddb29f3dce844647999893dc8016f52a154aed0be35d96ea92a81878297caca'),
-        ('class:_Generation6RNamespaceMutationPermitBinding', 12906, 12923, 2361, '1a077f88b3e6f0d1e108542fa7435ad35d0b754f2bd4d16ddc539459aed6d8f4'),
-        ('class:_Generation6RNamespaceMutationPermitRecord', 12927, 12931, 859, '9eca4a8269f97dd9bcb6a3f100da19c3f591b12f2aa0f735f8c9341416a12f8b'),
-        ('class:_Generation6RNamespaceCleanupBudgetEpoch', 12935, 12943, 1110, '8c739724edda18074efbbf66f35a7ac0775461181fc00b0bf386955c66088421'),
-        ('class:_Generation6RNamespaceInventoryCursor', 12947, 12949, 473, '7196dae87eb9866de6af5f5ce1929c16f57e9a6a6f7434b706b49cb1a3ccdbc3'),
-        ('class:_Generation6RNamespaceInventoryScan', 12953, 12955, 471, 'd10b709262c598509f1d6aa0dad27fa762624adb1ec766c5fab561aeea91bf94'),
-        ('class:_Generation6RNamespaceInventoryAdvance', 12959, 12961, 474, 'bc92a4f162671ba50f738843c891b5f4b0df8708dd00af1d1c630952f971122c'),
-        ('class:_Generation6RNamespaceInventoryItem', 12965, 12967, 471, 'b8be3d189457402f5c3332516bae6353c12719fd359356da02beb6c8b10dc841'),
-        ('class:_Generation6RNamespaceInventoryClassification', 12971, 12973, 481, 'feeaaee42e3f117b24f3320480770ba9d50a92ba6681263d30d253fa782571d0'),
-        ('class:_Generation6RNamespaceEmptyInventory', 12977, 12979, 472, 'c219208d87693d8f2283ea17f6e7a7a16513506b34f6e14fe24fde1a1807da01'),
-        ('class:_Generation6RNamespaceReceipt', 12983, 12988, 865, '41890e5df355c9b14565321ac90e4753586614c5ca96b496c88a087de20e5dd7'),
-        ('class:_Generation6RNamespaceCleanupBudgetRecord', 12992, 13001, 1389, 'b2014cd35ccbfe0a14b1de7342016468610e5bd3652591ae5d05139537d2a8d2'),
-        ('class:_Generation6RNamespaceInventoryCursorBinding', 13005, 13024, 2594, '1f69d457335ae01106c81547365160065c7f14f1982158b6304e6bf934b552aa'),
-        ('class:_Generation6RNamespaceInventoryCursorRecord', 13028, 13033, 965, 'a4fd4e7c373a09b4b419df99e4f1c41e437fe4164c439b73c4c042d3ea6f220f'),
-        ('class:_Generation6RNamespaceInventoryScanBinding', 13037, 13057, 2622, '1baf21891584cf7b4775fb3bf67e3262ccc46bf808fd5a46f408d655795b31cb'),
-        ('class:_Generation6RNamespaceInventoryScanRecord', 13061, 13067, 1070, '5e87aa5e3d44393474d2500f1a5a59d59a49ea49adc83a682a20b502359fa30c'),
-        ('class:_Generation6RNamespaceInventoryAdvanceBinding', 13071, 13095, 3120, '4396a7fc1b81cecfadca42cde3ba885391c19844893a22235595a8862166b95f'),
-        ('class:_Generation6RNamespaceInventoryAdvanceRecord', 13099, 13109, 1838, '1d9419df2017a2ebf13791a838191dd0fe8a5704789187d7e4ab1fbd49963a9b'),
-        ('class:_Generation6RNamespaceInventoryItemBinding', 13113, 13138, 3370, '07a455028be308d20a35ba4396bc44580d967b9d341653bcc98a832c1d2a1b33'),
-        ('class:_Generation6RNamespaceInventoryItemRecord', 13142, 13147, 957, '9e2e1cf8d08cdd72d2f4605fb94f73fd21072ee263972daa04365fde367063b6'),
-        ('class:_Generation6RNamespaceInventoryClassificationBinding', 13151, 13195, 5810, 'b7c50547783c7488fc13c9216a57d76bdf9806ad5d92777eb18cd5cff21a268a'),
-        ('class:_Generation6RNamespaceInventoryClassificationRecord', 13199, 13230, 5133, 'af45a9a8f60e03890d1bdb30ede5cd960f0fb3bf24b75c8d6dc1a7e26d9c722c'),
-        ('class:_Generation6RNamespaceJournal', 13233, 19969, 2701972, '83a4bc1ec6102ea09af302f3b0b193aa9f1c10804f4add151807bf145f9c9d99'),
-    )
-    observed_bundle_root_projection_inventory = tuple((cap1_root_descriptor(node), node.lineno, cap1_end_line(node), len(root_canonical), hashlib.sha256(root_canonical).hexdigest()) for node in namespace_bundle_nodes for root_canonical in (cap1_canonical_json(cap1_projection_encode(node)),))
-    _require(observed_bundle_root_projection_inventory == expected_bundle_root_projection_inventory, 'R CAP1 ordered bundle-root projection inventory differs')
-    cap1_projection_payload: list[object] = [
-        'TASK064-G6-R-CAP1-SEMANTIC-PROJECTION-V1',
-        ['contract', 6, 'ec89a1df740805cc9b43e6f2530e940c0bf9b66e8f25ed878d3207d091c4bcb8'],
-        ['python_ast', '3.13.14', 'attributes-excluded', 'schema-indexed-fields'],
-        ['schema', cap1_schema_payload],
-        ['bundle', 10578, 19969, len(namespace_bundle_nodes), cap1_projection_encode(list(namespace_bundle_nodes))],
-    ]
-    cap1_projection_canonical = cap1_canonical_json(cap1_projection_payload)
-    cap1_projection_preimage_digest = hashlib.sha256(cap1_projection_domain)
-    cap1_projection_preimage_digest.update(cap1_projection_canonical)
-    _require(len(cap1_projection_domain) == 44 and len(cap1_projection_canonical) == 3655899 and hashlib.sha256(cap1_projection_canonical).hexdigest() == '7c7125661417c3e981f3303daeca704680ca398f6df9ec8f2c1a1592c80e0a23' and len(cap1_projection_domain) + len(cap1_projection_canonical) == 3655943 and cap1_projection_preimage_digest.hexdigest() == '649e858681a618d4e22faee0fe0cec45eee54b5d80be91f2993b58f6e7baf9dc', 'R CAP1 lossless semantic projection differs')
-    final_capture_names = tuple(descriptor.removeprefix('capture:') for descriptor, _start, _end, _length, _digest in expected_bundle_root_projection_inventory if descriptor.startswith('capture:'))
-    protected_helper_names: tuple[str, ...] = (
-        '_issue_inventory_cursor_provenance',
-        '_require_inventory_cursor_provenance',
-        '_issue_current_inventory_cursor',
-        '_require_current_inventory_cursor',
-        '_terminalize_inventory_cursor',
-        '_acquire_metered_inventory_scan',
-        '_require_current_inventory_scan',
-        '_terminalize_inventory_scan',
-        '_fail_inventory_advance_uncertain',
-        '_terminalize_inventory_scan_end_observed',
-        '_require_current_inventory_item',
-        '_terminalize_inventory_item',
-        '_yield_metered_inventory_item',
-    )
-    protected_helper_names = (*protected_helper_names, '_require_pristine_inventory_classification', '_require_current_inventory_classification', '_reauthenticate_inventory_classification_parent', '_derive_inventory_classification', '_close_rejected_namespace_raw_once', '_close_inventory_classification_owner', '_register_inventory_classification_name_fact', '_terminalize_inventory_classification', '_fail_inventory_classification_uncertain', '_classify_metered_inventory_item')
-    inventory_scan_helper_names = {'_acquire_metered_inventory_scan', '_require_current_inventory_scan', '_terminalize_inventory_scan'}
-    namespace_constructor_names = set(namespace_class_names)
-    namespace_calls = tuple(call for method in namespace_methods.values() for call in calls(method))
-    cap1_gate_function = top_function('_generation6_r_authority_source_gates')
-    cap1_external_scope_nodes = tuple(node for node in syntax.body if node not in namespace_bundle_nodes and node is not cap1_gate_function)
-    cap1_final_capture_name_set = set(final_capture_names)
-    cap1_protected_helper_name_set = set(protected_helper_names)
-    cap1_protected_type_names = namespace_constructor_names | {'DirectoryOwner', 'FdOwner', 'PrivateRoot'}
-    def cap1_terminal_call_name(node: ast.expr) -> str:
-        if isinstance(node, ast.Name):
-            return node.id
-        if isinstance(node, ast.Attribute):
-            return node.attr
-        return ''
-    cap1_external_final_capture_writes = tuple((type(node.ctx).__name__, node.id) for scope in cap1_external_scope_nodes for node in ast.walk(scope) if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)) and node.id in cap1_final_capture_name_set)
-    cap1_external_protected_helper_calls = tuple((cap1_terminal_call_name(call.func), ast.unparse(call.func)) for scope in cap1_external_scope_nodes for call in calls(scope) if cap1_terminal_call_name(call.func) in cap1_protected_helper_name_set)
-    cap1_external_namespace_constructor_calls = tuple(ast.unparse(call.func) for scope in cap1_external_scope_nodes for call in calls(scope) if ast.unparse(call.func) in namespace_constructor_names)
-    cap1_external_protected_type_writes = tuple((type(node.ctx).__name__, node.id) for scope in cap1_external_scope_nodes for node in ast.walk(scope) if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)) and node.id in cap1_protected_type_names)
-    cap1_ordered_external_residuals = (
-        ('EXTERNAL_FINAL_CAPTURE_WRITE_OR_DELETE', cap1_external_final_capture_writes),
-        ('EXTERNAL_PROTECTED_HELPER_CALL', cap1_external_protected_helper_calls),
-        ('EXTERNAL_NAMESPACE_CONSTRUCTOR_CALL', cap1_external_namespace_constructor_calls),
-        ('EXTERNAL_PROTECTED_TYPE_WRITE_OR_DELETE', cap1_external_protected_type_writes),
-    )
-    _require(len(final_capture_names) == 91 and len(protected_helper_names) == 23 and len(namespace_constructor_names) == 55 and len(cap1_protected_type_names) == 58 and cap1_ordered_external_residuals == (('EXTERNAL_FINAL_CAPTURE_WRITE_OR_DELETE', ()), ('EXTERNAL_PROTECTED_HELPER_CALL', ()), ('EXTERNAL_NAMESPACE_CONSTRUCTOR_CALL', ()), ('EXTERNAL_PROTECTED_TYPE_WRITE_OR_DELETE', ())), 'R CAP1 ordered external residuals differ')
-    a2_budget_foundation_present = True
-    a2_inventory_vocabulary_present = True
-    a2_inventory_cursor_provenance_present = True
-    a2_inventory_cursor_lifecycle_present = True
-    a2_current_inventory_cursor = True
-    a2_metered_scan_acquisition_present = True
-    a2_owned_inventory_scan_present = True
-    a2_captured_iterator_consumption_present = True
-    a2_full_domain_name_byte_accounting_present = True
-    a2_permanent_end_observation_present = True
-    a2_owned_unclassified_item_evidence_present = True
-    a2_budget_readiness = False
-    a2_budget_prerequisites: tuple[str, ...] = ('nofollow-stat-attempt-metering', 'open-attempt-metering', 'fstat-attempt-metering', 'mount-attempt-metering', 'time-sample-metering', 'preproof-attempt-metering', 'postproof-attempt-metering', 'unlink-attempt-metering')
-    a2_rmdir_readiness = False
-    a2_rmdir_prerequisites = ('authenticated-empty-inventory',)
-    _require(type(a2_budget_foundation_present) is bool and a2_budget_foundation_present and (type(a2_inventory_vocabulary_present) is bool) and a2_inventory_vocabulary_present and (type(a2_inventory_cursor_provenance_present) is bool) and a2_inventory_cursor_provenance_present and (type(a2_inventory_cursor_lifecycle_present) is bool) and a2_inventory_cursor_lifecycle_present and (type(a2_current_inventory_cursor) is bool) and a2_current_inventory_cursor and (type(a2_metered_scan_acquisition_present) is bool) and a2_metered_scan_acquisition_present and (type(a2_owned_inventory_scan_present) is bool) and a2_owned_inventory_scan_present and (type(a2_captured_iterator_consumption_present) is bool) and a2_captured_iterator_consumption_present and (type(a2_full_domain_name_byte_accounting_present) is bool) and a2_full_domain_name_byte_accounting_present and (type(a2_permanent_end_observation_present) is bool) and a2_permanent_end_observation_present and (type(a2_owned_unclassified_item_evidence_present) is bool) and a2_owned_unclassified_item_evidence_present and (type(a2_budget_readiness) is bool) and (not a2_budget_readiness) and (a2_budget_prerequisites == ('nofollow-stat-attempt-metering', 'open-attempt-metering', 'fstat-attempt-metering', 'mount-attempt-metering', 'time-sample-metering', 'preproof-attempt-metering', 'postproof-attempt-metering', 'unlink-attempt-metering')) and (type(a2_rmdir_readiness) is bool) and (not a2_rmdir_readiness) and (a2_rmdir_prerequisites == ('authenticated-empty-inventory',)) and all((name in namespace_classes for name in ('_Generation6RNamespaceInventoryCursor', '_Generation6RNamespaceInventoryScan', '_Generation6RNamespaceEmptyInventory'))) and all((fragment not in namespace_source for fragment in ('_Generation6RNamespaceEmptyInventory', 'consume_rmdir'))) and all((fragment in namespace_source for fragment in ('_Generation6RNamespaceCleanupBudgetEpoch', '_Generation6RNamespaceCleanupBudgetRecord', '_issue_cleanup_budget_epoch', '_charge_cleanup_budget', '_Generation6RNamespaceInventoryCursorBinding', '_Generation6RNamespaceInventoryCursorRecord', '_issue_inventory_cursor_provenance', '_require_inventory_cursor_provenance', '_issue_current_inventory_cursor', '_require_current_inventory_cursor', '_terminalize_inventory_cursor', '_Generation6RNamespaceInventoryScanState', '_Generation6RNamespaceInventoryScan', '_Generation6RNamespaceInventoryScanBinding', '_Generation6RNamespaceInventoryScanRecord', '_acquire_metered_inventory_scan', '_require_current_inventory_scan', '_terminalize_inventory_scan', '_Generation6RNamespaceInventoryAdvanceState', '_Generation6RNamespaceInventoryAdvance', '_Generation6RNamespaceInventoryAdvanceBinding', '_Generation6RNamespaceInventoryAdvanceRecord', '_Generation6RNamespaceInventoryItemState', '_Generation6RNamespaceInventoryItem', '_Generation6RNamespaceInventoryItemBinding', '_Generation6RNamespaceInventoryItemRecord', '_fail_inventory_advance_uncertain', '_terminalize_inventory_scan_end_observed', '_require_current_inventory_item', '_terminalize_inventory_item', '_yield_metered_inventory_item'))), 'R namespace A2f budget/RMDIR readiness and current capability differ')
-    a2_metered_item_classification_present = True
-    a2_budget_prerequisites = ('time-sample-metering', 'preproof-attempt-metering', 'postproof-attempt-metering', 'unlink-attempt-metering')
-    _require(type(a2_metered_item_classification_present) is bool and a2_metered_item_classification_present and (type(a2_budget_readiness) is bool) and (not a2_budget_readiness) and a2_budget_prerequisites == ('time-sample-metering', 'preproof-attempt-metering', 'postproof-attempt-metering', 'unlink-attempt-metering') and (type(a2_rmdir_readiness) is bool) and (not a2_rmdir_readiness) and a2_rmdir_prerequisites == ('authenticated-empty-inventory',) and all(fragment in namespace_source for fragment in ('_Generation6RNamespaceInventoryClassificationState', '_Generation6RNamespaceInventoryClassification', '_Generation6RNamespaceInventoryClassificationBinding', '_Generation6RNamespaceInventoryClassificationRecord', '_classify_metered_inventory_item')), 'R namespace A2g readiness transition differs')
-    permanent_collection_names = {'self._authority_records_by_serial', 'self._authority_records_by_identity', 'self._authority_records_by_owner_identity', 'self._directory_facts_by_serial', 'self._name_facts_by_key', 'self._hardlink_groups', 'self._capability_records_by_serial', 'self._capability_records_by_identity', 'self._archived_capability_records', 'self._mutation_permit_records_by_serial', 'self._mutation_permit_records_by_identity', 'self._archived_mutation_permit_records', 'self._cleanup_budget_records_by_serial', 'self._cleanup_budget_records_by_identity', 'self._inventory_cursor_bindings_by_identity', 'self._inventory_cursor_bindings_by_serial', 'self._inventory_cursor_records_by_identity', 'self._inventory_cursor_records_by_serial', 'self._archived_inventory_cursor_records', 'self._inventory_scan_records_by_identity', 'self._inventory_scan_records_by_serial', 'self._archived_inventory_scan_records', 'self._inventory_scan_proxy_quarantine', 'self._inventory_advance_records_by_identity', 'self._inventory_advance_records_by_serial', 'self._archived_inventory_advance_records', 'self._inventory_item_records_by_identity', 'self._inventory_item_records_by_serial', 'self._archived_inventory_item_records', 'self._inventory_raw_entry_quarantine', 'self._namespace_owner_tokens', 'self._namespace_owner_contexts', 'self._receipts'}
-    permanent_collection_names = permanent_collection_names | {'self._inventory_classification_records_by_identity', 'self._inventory_classification_records_by_serial', 'self._archived_inventory_classification_records', 'self._inventory_classification_residue_evidence', 'self._inventory_classification_descriptor_quarantine', 'self._untransferred_raw_quarantine'}
-    a1b_forbidden_collection_removals: tuple[str, ...] = tuple((ast.unparse(call) for call in namespace_calls if isinstance(call.func, ast.Attribute) and ast.unparse(call.func.value) in permanent_collection_names and (call.func.attr in {'clear', 'discard', 'pop', 'popitem', 'remove', '__delitem__'})))
-    forbidden_collection_deletes = tuple((ast.unparse(node) for method in namespace_methods.values() for node in ast.walk(method) if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Del) and (ast.unparse(node.value) in permanent_collection_names)))
-    destructive_targets = {'os.unlink', 'os.rmdir', 'os.remove', 'os.rename', 'os.replace', 'Path.unlink', 'pathlib.Path.unlink', 'shutil.rmtree', 'ctypes.CDLL', 'ctypes.PyDLL', 'syscall'}
-    forbidden_destructive_calls = tuple((ast.unparse(call.func) for call in namespace_calls if ast.unparse(call.func) in destructive_targets))
-    forbidden_destructive_aliases = tuple((ast.unparse(node) for method in namespace_methods.values() for node in ast.walk(method) if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)) and node.value is not None and (ast.unparse(node.value) in {'_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK', *destructive_targets})))
-    namespace_event_strings = tuple((node.value for method in namespace_methods.values() for node in ast.walk(method) if isinstance(node, ast.Constant) and type(node.value) is str))
-    _require(not a1b_forbidden_collection_removals and (not forbidden_collection_deletes) and (not forbidden_destructive_calls) and (not forbidden_destructive_aliases) and (call_targets(namespace_journal).count('_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK') == 1) and (not any(('RMDIR_' in value or 'RMDIR_CONSUMED' in value or 'PRESENT_RMDIR' in value for value in namespace_event_strings))) and ('_GENERATION6_R_NAMESPACE_REAL_OS_RMDIR' not in namespace_source) and ('os.remove' not in namespace_source) and ('os.rename(' not in namespace_source) and ('os.replace' not in namespace_source) and ('pathlib' not in namespace_source.lower()) and ('shutil' not in namespace_source.lower()) and ('syscall' not in namespace_source.lower()), 'R namespace A1b destructive/strong-reference surface differs')
-    namespace_public_calls = {'register_borrowed_directory', 'open_owned_cursor', 'close_owned_cursor', 'seal_name', 'seal', 'authorize_present', 'authorize_absence', 'authorize_rename', 'consume_present', 'abandon_token'}
-    namespace_gate_function = top_function('_generation6_r_authority_source_gates')
-    external_scope_nodes = tuple((node for node in syntax.body if node not in namespace_bundle_nodes and node is not namespace_gate_function))
-    protected_global_names = {*namespace_capture_values, *namespace_class_names, '_Generation6RNamespaceLiveToken'}
-    sensitive_dynamic_names = protected_global_names | namespace_public_calls | inventory_scan_helper_names
-    sensitive_string_aliases = {target.id for node in ast.walk(syntax) if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str) and (node.value.value in sensitive_dynamic_names) for target in (tuple(node.targets) if isinstance(node, ast.Assign) else (node.target,)) if isinstance(target, ast.Name)}
-    def sensitive_key(node: ast.expr) -> bool:
-        return isinstance(node, ast.Constant) and isinstance(node.value, str) and (node.value in sensitive_dynamic_names) or (isinstance(node, ast.Name) and node.id in sensitive_string_aliases)
-    protected_external_name_loads = tuple((node.id for scope in external_scope_nodes for node in ast.walk(scope) if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and (node.id in protected_global_names)))
-    protected_external_name_writes = tuple(((type(node.ctx).__name__, node.id) for scope in external_scope_nodes for node in ast.walk(scope) if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)) and (node.id in protected_global_names)))
-    protected_external_attributes = tuple((ast.unparse(node) for scope in external_scope_nodes for node in ast.walk(scope) if isinstance(node, ast.Attribute) and node.attr in protected_global_names))
-    protected_dynamic_subscripts = tuple((ast.unparse(node) for scope in external_scope_nodes for node in ast.walk(scope) if isinstance(node, ast.Subscript) and sensitive_key(node.slice)))
-    protected_dynamic_calls = tuple((ast.unparse(call) for scope in external_scope_nodes for call in calls(scope) if (ast.unparse(call.func) in {'delattr', 'dict.__setitem__', 'getattr', 'operator.setitem', 'setattr', 'type.__setattr__'} or (isinstance(call.func, ast.Attribute) and call.func.attr in {'__getitem__', '__setitem__', 'get', 'pop', 'setdefault', 'update'})) and any((sensitive_key(argument) for argument in call.args))))
-    protected_exec_calls = tuple((ast.unparse(call.func) for scope in external_scope_nodes for call in calls(scope) if ast.unparse(call.func) in {'eval', 'exec'}))
-    external_namespace_calls = tuple((call for node in syntax.body if node not in namespace_classes.values() and node is not namespace_gate_function for call in calls(node)))
-    _require(not protected_external_name_loads and (not protected_external_name_writes) and (not protected_external_attributes) and (not protected_dynamic_subscripts) and (not protected_dynamic_calls) and (not protected_exec_calls) and (not any((ast.unparse(call.func) in namespace_constructor_names or (isinstance(call.func, ast.Attribute) and call.func.attr in namespace_public_calls) for call in external_namespace_calls))), 'R namespace static integration block has an external call site')
-    _require(type(namespace_gate_function.end_lineno) is int, 'R namespace A2g gate end differs')
-    gate_start = namespace_gate_function.lineno
-    gate_end = cast(int, namespace_gate_function.end_lineno)
-    expected_gate_digest = '3ed36b75ecf3ae9ade98f331a448b1fc87deb93e0618358e5e6d68a1782f9e56'
-    normalized_gate_source = '\n'.join(source.splitlines()[gate_start - 1:gate_end]) + '\n'
-    _require(normalized_gate_source.count(expected_gate_digest) == 1, 'R namespace A2g gate digest token differs')
-    normalized_gate_source = normalized_gate_source.replace(expected_gate_digest, '0' * 64)
-    gate_domain = b'TASK-064\x00GEN6\x00R-CAP1\x00gate-v1\x00'
-    gate_preimage = gate_domain + normalized_gate_source.encode('utf-8')
-    gate_digest = hashlib.sha256(gate_preimage).hexdigest()
-    namespace_gate_index = syntax.body.index(namespace_gate_function)
-    _require(gate_start == 19972 and gate_end == 20647 and syntax.body[namespace_gate_index + 1] is top_function('_selftest_r_case') and (len(gate_preimage) == 130806) and (gate_digest == expected_gate_digest), 'R namespace A2g reviewed gate digest differs')
-    # fmt: on
+ """Uncalled static proof for the deliberately integration-blocked R authority core."""
+ A=ast
+ H=hashlib
+ J=json
+ M=math
+ Y=sys
+ Z=isinstance
+ T=tuple
+ L=len
+ OO=all
+ N=any
+ K=type
+ E=ContractError
+ Q=_require
+ a0=A.unparse
+ a1=A.Name
+ a2=A.AnnAssign
+ a3=A.walk
+ a4=A.Constant
+ a5=A.Assign
+ a6=A.FunctionDef
+ a7=A.Attribute
+ a8=A.ClassDef
+ a9=A.Call
+ a10=A.NamedExpr
+ a11=A.Subscript
+ a12=A.Try
+ a13=A.Store
+ a14=A.Expr
+ a15=A.Del
+ a16=A.Raise
+ a17=A.Dict
+ a18=A.Load
+ d=('_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK','_classify_metered_inventory_item','_Generation6RNamespaceEmptyInventory','self._live_inventory_classification_record = None','_GENERATION6_R_REAL_OS_CLOSE','_register_inventory_classification_name_fact','_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE','_fail_inventory_classification_uncertain','_GENERATION6_R_REAL_LIST_APPEND','_GENERATION6_R_NAMESPACE_REAL_OS_STAT','_close_inventory_classification_owner','_reauthenticate_inventory_classification_parent','_GENERATION6_R_REAL_OS_FSTAT','_close_rejected_namespace_raw_once','_require_pristine_inventory_classification','self._live_inventory_classification_record','_Generation6RNamespaceLiveToken','_acquire_metered_inventory_scan','_GENERATION6_R_REAL_FCNTL','_GENERATION6_R_NAMESPACE_REAL_OS_FSTAT','_generation6_r_authority_source_gates','_terminalize_inventory_classification','_Generation6RNamespaceInventoryClassificationBinding','self._inventory_classification_descriptor_quarantine','_Generation6RNamespaceInventoryClassificationRecord','_GENERATION6_R_NAMESPACE_REAL_FCNTL','self._inventory_classification_records_by_identity','postproof-attempt-metering','self._inventory_classification_records_by_serial','self._archived_inventory_classification_records','self._inventory_classification_residue_evidence','_derive_inventory_classification','dataclass(frozen=True, eq=False)','preproof-attempt-metering','_Generation6RNamespaceInventoryClassification','_require_current_inventory_item','_require_current_inventory_scan','event.phase is _Generation6RPhase.PRODUCTION','_Generation6RNamespaceInventoryAdvanceState','_Generation6RScandirCapability','self._close_inventory_classification_owner','self._terminalize_inventory_classification','unlink-attempt-metering','_yield_metered_inventory_item','authenticated-empty-inventory','_GENERATION6_R_AUTHORITY_EVENT_CLASS_SEAL','_require_current_inventory_classification','_Generation6RAuthorityLedger','_Generation6RNamespaceCleanupBudgetEvent','_Generation6RNamespaceInventoryItemState','_Generation6RNamespaceInventoryScanState','_terminalize_inventory_scan_end_observed','EXTERNAL_PROTECTED_TYPE_WRITE_OR_DELETE','self._live_inventory_item_record = None','_Generation6RAuthorityScope','_terminalize_inventory_item','_terminalize_inventory_scan','self._charge_cleanup_budget','EXTERNAL_FINAL_CAPTURE_WRITE_OR_DELETE','_GENERATION6_R_CAPTURED_FD_CLOSE_ONCE','alias:_Generation6RNamespaceLiveToken','self._open_namespace_owner','_generation6_r_socket_detach_handoff','_require_inventory_cursor_provenance','time-sample-metering','EXTERNAL_NAMESPACE_CONSTRUCTOR_CALL','_Generation6RNamespaceInventoryScan','_issue_inventory_cursor_provenance','self._namespace_mount_id','_fail_inventory_advance_uncertain','_require_current_inventory_cursor','_issue_current_inventory_cursor','self._uncertain_descriptors.add','EXTERNAL_PROTECTED_HELPER_CALL','nofollow-stat-attempt-metering','_open_namespace_owner','_Generation6RNamespaceJournal','_terminalize_inventory_cursor','_Generation6RDescriptorState','_selftest_r_case','_acquire_name_owner','_publish_capability','self._mark_close_uncertain','_GENERATION6_R_NAMESPACE_','_Generation6RScandirProxy','_Generation6ROwnerRecord','self._publish_capability','authorize_present','open_owned_cursor','_Generation6ROwnerToken','_Generation6RNamespace','_charge_cleanup_budget','authorize_rename','fstat-attempt-metering','mount-attempt-metering','open-attempt-metering','self._close_operation','_copy_name_fact','consume_present','owner.detach','_register_name_fact','_validate_node_kind','_Generation6RPhase','close_owned_cursor','authorize_absence','seal_name','os.rmdir','abandon_token','os.replace','HARDLINK','__init__','os.unlink','close_once','os.remove','os.rename')
+ def _g6r3_decode(e:str)->tuple[tuple[str,...],tuple[str,...],tuple[tuple[tuple[str,str],...],...],tuple[tuple[tuple[str,...],tuple[str,...],bool],...],tuple[tuple[str,str],...],tuple[str,...],tuple[tuple[int,int,int,str],...]]:
+  m='R CAP3 payload differs'
+  def r(ok:bool)->None:
+   if type(ok)is not bool or not ok:
+    raise ContractError(m)
+  alphabet='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~'
+  r(type(e)is str and len(e)==14223 and e.isascii()and(not any((c.isspace()for c in e)))and(set(e)<=set(alphabet)))
+  r(hashlib.sha256(e.encode('ascii')).hexdigest()=='1d0f6a4c3721f023173b23855aebdc1453298ee3ab117f207dcdcca68829fbc4')
+  b=base64.b85decode(e)
+  r(type(b)is bytes and len(b)==11378 and(hashlib.sha256(b).hexdigest()=='9818746c3fb447f0ee564eb48318d1b0b4859dbaaab2c0f2fc19ffae97527b7c')and(base64.b85encode(b).decode('ascii')==e))
+  hf='>8sBBHIB4B'
+  h=struct.unpack_from(hf,b)
+  r(struct.calcsize(hf)==21 and h==(b'G6R3A1\x00\x00',1,128,335,2743,9,30,60,230,15))
+  p=21
+  aa:list[bytes]=[]
+  for i in range(128):
+   q=b[p:p+2]
+   p+=2
+   r(len(q)==2 and all((x>=128 or x<i for x in q)))
+   v=b''.join((aa[x]if x<128 else bytes((x-128,))for x in q))
+   r(0<len(v)<=45 and all((32<=x<127 for x in v))and(v not in aa))
+   aa.append(v)
+  a=tuple(aa)
+  r(p==277 and len(a)==128 and(max(map(len,a))==45))
+  z=p+2*h[3]+h[4]
+  ss:list[str]=[]
+  largest=0
+  for _ in range(335):
+   r(p+2<=z)
+   n=struct.unpack_from('>H',b,p)[0]
+   p+=2
+   r(type(n)is int and 0<n<=107 and(p+n<=z))
+   q=b[p:p+n]
+   p+=n
+   v=b''.join((a[x]if x<128 else bytes((x-128,))for x in q))
+   r(0<len(v)<=306 and all((32<=x<127 for x in v)))
+   largest=max(largest,n)
+   ss.append(v.decode('ascii'))
+  s=tuple(ss)
+  c=(s[:30],s[30:90],s[90:320],s[320:335])
+  r(p==z==3690 and largest==107 and(max(map(len,s))==306)and(tuple(map(len,c))==(30,60,230,15)))
+  r(all((all((g[i]<g[i+1]for i in range(len(g)-1)))for g in c)))
+  sc=((1,12,1),(2,23,1),(3,19,1),(4,82,2),(5,35,2),(6,348,2),(7,10,2),(8,9,32),(9,159,40))
+  bb:list[bytes]=[]
+  oo=[21,277,p]
+  for expected in sc:
+   r(p+4<=len(b)and struct.unpack_from('>BHB',b,p)==expected)
+   p+=4
+   end=p+expected[1]*expected[2]
+   r(end<=len(b))
+   bb.append(b[p:end])
+   p=end
+   oo.append(p)
+  blocks=tuple(bb)
+  r(tuple(oo)==(21,277,3690,3706,3733,3756,3924,3998,4698,4722,5014,11378)and p==len(b)and(len(blocks)==9)and(struct.calcsize('>HHI32s')==40))
+  av,nv,ec,ep,dh,dp,sg,ih,rt=blocks
+  r(all((x<30 for x in av+nv))and all((x<60 for x in ep))and all((x<230 for x in dp))and all((x<15 for x in sg)))
+  r(all((dh[i+1]in(0,1)for i in range(0,len(dh),2))))
+  def pairs(q:bytes,g:tuple[str,...])->tuple[tuple[str,str],...]:
+   return tuple(((g[q[i]],g[q[i+1]])for i in range(0,len(q),2)))
+  auth=tuple((c[0][x]for x in av))
+  namespace=tuple((c[0][x]for x in nv))
+  counts=tuple(ec)
+  enums=pairs(ep,c[1])
+  headers=tuple(((dh[i],bool(dh[i+1]))for i in range(0,len(dh),2)))
+  fields=pairs(dp,c[2])
+  sigs=pairs(sg,c[3])
+  inherited=tuple((ih[i:i+32]for i in range(0,len(ih),32)))
+  roots=tuple((struct.unpack_from('>HHI32s',rt,i)for i in range(0,len(rt),40)))
+  r(len(auth)==12 and len(namespace)==23 and(len(counts)==19)and all((type(n)is int and 0<n<=10 for n in counts))and(sum(counts)==len(enums)==82))
+  r(len(headers)==35 and all((type(n)is int and 0<n<=44 and(type(f)is bool)for n,f in headers))and(sum((n for n,_ in headers))==len(fields)==348)and(len(sigs)==10))
+  r(len(inherited)==len(set(inherited))==9 and all((type(x)is bytes and len(x)==32 for x in inherited)))
+  r(len(roots)==159 and roots[0][0]==10578 and(roots[-1][1]==19969)and(max((x[2]for x in roots))==2701972))
+  r(all((type(lo)is int and type(hi)is int and(type(n)is int)and(type(d)is bytes)and(0<lo<=hi)and(0<n<=2701972)and(len(d)==32)for lo,hi,n,d in roots)))
+  r(all((left[1]<right[0]for left,right in zip(roots[:-1],roots[1:],strict=True))))  # noqa: RUF007
+  eg:list[tuple[tuple[str,str],...]]=[]
+  ei=0
+  for n in counts:
+   eg.append(enums[ei:ei+n])
+   ei+=n
+  dg:list[tuple[tuple[str,...],tuple[str,...],bool]]=[]
+  di=0
+  for n,frozen in headers:
+   group=fields[di:di+n]
+   dg.append((tuple((x[0]for x in group)),tuple((x[1]for x in group)),frozen))
+   di+=n
+  d=(auth,namespace,tuple(eg),tuple(dg),sigs,tuple((x.hex()for x in inherited)),tuple(((lo,hi,n,digest.hex())for lo,hi,n,digest in roots)))
+  r(ei==82 and di==348 and(tuple(map(len,d))==(12,23,19,35,10,9,159)))
+  r(all((type(x)is str for group in d[:2]for x in group))and all((type(x)is str and len(x)==64 for x in d[5])))
+  r(all((type(frozen)is bool and len(names)==len(annotations)for names,annotations,frozen in d[3])))
+  r(all((type(lo)is int and type(hi)is int and(type(n)is int)and(type(digest)is str)and(len(digest)==64)for lo,hi,n,digest in d[6])))
+  return d
+ D=_g6r3_decode('M>bM3K`{UT0e}Hd000WN2_8J=59RLk>E-h8?(gye1K|bZ<>mA6;Q|KX?Enhj#|*X&4iD1K3kV4i5fTRz6zT5t`2h6a>Gb90<Hf|`?iu6+`2^$}Aodsl0UjeH7x47-;T6duA1LlBDHi1O^Q@rX^2N^X0{1Z%=Nj!SGvDIm<>@BF%){*I7X#(aJm2%~^d}miJ)rzTLAs#QA?5Vx<Mr^*GWGN==|=`j=1oknu;EVQ@9*<3A<xp&K<fbSR`oyi@*POy9pmifTIWU`2Qbu1=wSrO&gt^+^anULHDWu#&fhuT;pFygU*%@>0xLQ#^)GH&^Keje1kclU9O3NY@Okrk=zC@Ed;;lycmM>kPfxG_2(h-ex3{vfwg3dRPfxG_2DVR6Pft$(0=BdO3&!M0uHWAl>Ga><01C$BNv>Q{<=+Db00_q9Nv=01<LCei#^gz^^5yaMWaR(`-%;)G0~i1W-|g>M9smVCec$Hf00lmMJ}2}55<Vy5?B(C&WE=D!-|gY_<LC$g3FhNJ?5^hHKkNVnQm$N5<p2j#uIBRqQ8xevQm*FnC-eXYQm$V0>Er+fQm*gt000J3uJc>uWB>(HuJb4K00&a8_3rEz>i`h*@8j!6uJiBX>qf3OC*$Y<5%cfk>qf5g@8j!6uIB0N0Pg?_^C$GK)8EO)&C~!3^C$GK)8EO{#L3bC3-c%RuG8Pi)6&Jq01N@`<*w}mWdldw?(+a^`xQD}!u8}{Rj$Fq)XCPxL=`$+!u8}{#UifB)6>-)E)_am!u8}{Rj$R@$idaq)Eq<=I$gr`<X*)huEp5M!PV2$94-|)UBdO`URAEu&cnsh)WKs!6*^tQ_2gc~BCgfW!^P6n!DIaZ62Zc0#Lvzg-__1J!PC>p#>pH26T!mMFvG>))X&Q>-@(FZ#Lvzg00zOs)XCPx00_a<)Wyxv)Eoc_!PL~n&Ct|i#{dYy)zrvT$=VzM3&K>=&(|Cc)xpxl00+X=$;`xK#{d>N!PC>p#>pJt%g)c&&fn6-)5*lu#Q+;Q!PC>p#>pJt(#6fs*1^Ke#oxne#L2|L)WrZ5ImKz!(BHz<#K*<d-^JL-!PV2$8~_qI#c9>h-@?_z$Hmm&$<x!-8~_zL#c9>h-@?_z$Hmm&)y~7k($v9Y00KF801Y{J-__2=*vP@v)6^UQ2*c0K(9Ffu#Q+Dx&(71;%^Uy)!`0H#U;qfj$<oEc)Ku933NXaq&%)Ei($*XR31HIM-^gji%*6l@VA9#&$Z5pP#oxigRMcvB01IH!+27K|)Ya0?8~_N#*vP@v)6^UQ1jfn6&j1I=!P3OcW6J;;W7c3)*=oVl)5*rk!@<<a&(7b$!c^31cK{Y+)?ifGYQfXf$;QdU!PLpm&fj3t*#H`2)?ifGYQfXf$;QdU!PLpm&fmys#LUHNcK`*+)6>-)00hj**2Mr1%*ocp-__1J!PC>p#>pH270uPu!PLpm&fnC}%P`-;!fC|M&Kv+0&DGSw)XC4z-_*~`FyF{&#LUHNcK`*?&@f}i01D67&K%#v)zZ^c01?mE&K%#v)zZ^c-@(FE)M|GC4A0lj9N)v$($iFGcK{5~!PLXZ-@(Jw$=1aH4A8;U!^q###naSO8~_T?(#6wY-_*~`FaQzI(#6wY-_*~`FyFz#RMcvB029#C#nWKl)y~Xg%iqJ#&ePS+8~_K>#mCjm!O{Q)(lEiz#Q+M@Fu~2m-_*~`FaQzKFu~2m-_*~`FyFz#RMcvB00z><)XCBu00q*`#L3bC1=GdB%p3p-)5XEe9N%El*#HpJ#lg%R-(b?&-@(FE)M|GC5!1!N%pBif(%Ik0X~fLMYIgtz)6c`p#nb=?)6m7k$-&G32GiNi%wx*{57foM(!|f#&fmeq)XCPx014F6Y178V($X9N2-VKR#nRNlV*mx!&dg)W00_hg<MKEJ(|rI5#0cZ^I0VyuLjVTEWE=D!NdN=J<VgSo#^gyu00<DtZ{hR=)K>rm6~W^L00kAnXv-`B3KhfQ3F7JOJHj;p2^GWP3F7JOJ4FBr6~o~P;_2)=MMD4#6*^tQ_2gc~@bBa300<R2UBdO`UPS;16*^tQ_2gbv00$Mr0~+}BRR9PT#AF-vAHiq<2^GX-8}uK+XhQ%96~ts4^dG`C016evWE=D!#^K}i00$MsWE=D!MF0pD#AF-vA4Nj|11rI800k?-ZNfDG1S`R9MF0dV!EIFl0dxQZbiy?N0(4aX11rOI00k?<b;30O1S`XJMF0dV!*x{v11rfi00k?_G{Q9i1S`ojMF0gW$uvbn00b+^G*titE7My51uN5A!ZiQ{E7My=00b-3TU7uD70l`O<<wUI2^Gys2G9cS>GS{#70pTp&;sr0^ujd&3Kh*t2G9cS>GV|q2o(|K#^K}iLjVR9&hIzNEC2@;&hIzNEJFYX6-mPb8u;`82o*`g0~+}BLjVaCNy7sg`1Hax00b3D%Par~6-m%p@KWUf0~JYC00b3DRYL#=70~hs7}Qq)1QpV5LjVL7)K^si4i(kz>=x_L^5yXI@9*XS1Q1EoR{#YNNz_+E016P(TjXTW^6&Wh014sa@%8ER=>>8C1L5NZ00QA{00-f1YxFcG^8f?kZD#-k;caIn00ZG|B>)EDZ5eR_B>)5AZBqaQ;cZhT00iM}K7RlP;qvX}<Z=K7;q){nasUG1XaED@XlDQf;b><i00ZG@B>)5AXj1?L;b>DO00iM^K7RlP;bQ6f266xb;xzyR;x#1z2;<=i;_2)=X8;J};R)jD>^oBc3gh7k;_2)=-}F}i4&&ho;_2)=-}F}*aRMa(4CCPm;_2)=-}F~Le*gkpPyhp5P$d8cTu>Qt0wn+hTu?rL00&%MHudCQQve8DT{iXPUQ;Ci2wYv?<?!$0=l}^^UEk&K@8jqt01RAR-{tV{<LDW20wn+nTwUMg@bBa3K7RlRTvFw0^fV^(00dl8<#GT8QSI;p7yt$1S@IZi00`q*@)+Os>Er+c<8=T7<8@~M1mksQB>)5CbtM1><8>Kv0wn+g<8@O21mks6B>)8Dbv}Op2{+;7>=xzU?(+ZxHzw!+3^yj|-{|S*=->C@ZvYQBCg|Vj>F4O*_u+4A=5GKIHzw%c=;`O^-}m8fHs$67<p2ic2;=fN1ON==2;=fN1mEWD;pg)J3FHXl@;C(F^j81}<Ol)o25V>l3FHU??groP3*`U?<Ol)o22%h8H}>fV01N<8H{{>$3*|QX^aubC08uyO-|h?LHu>}jYvykN5dcv)<lpWK<u>{B2sY*B1myq*81nhwQCI*881nhwQCMr{ZvYDz^7-FUST^P61myq-81nhw?eAC~00tQH`QPs{00rgn@8jqI0_7qA1m@x6^Z*9t<lpZyB>)WQ;qv6{7VF>V^6y9h0~YT$00I{D00S2ELjVNnabI!(2kCL;<lpY|00ilA0wn+f=`;WX=`?2m1nD$qB>)ELG~YKS=l}!hG$jBA=`<N}0wn+g=`>RS1nD$WB>)8JG(LX-2<dO(^aS7ZR{#m=Z{hR=-}F}{00QeQ01fQn^Yq{C17!n8-|q7O2J9B=-%(fq2kqhb-!~@c01)lr_}>6gH{{>$3*|QX^aub5?cw;}81m@|00`~j_}}mF3iAL1?e8}L1nuuw9smRG3*`U??hEDQK79ZP?&bLO-!~@c00!>wH{a_l00{5!0BiI#Ci4IU@9+R}00-~z0OjO9eE<gU@Cx5iSO5v{@Cx5iSZn5Q01fZ(3g1y!Yvym?@9+Qs4Dav?-%(g==5IbH^Z*O*@Cx5iST^P61myq+1nK7%YiLsd4N|VeWW_)7`P=jK^4$OqQm({g#Xs`-+w=7D-9rEd?@Cea<#GT5?=k=g?=s)x0~+}B0159h-{S)s`1EH01Me~=00i$cK0p8k3Gx_gXaEEW@)&0T3JLNU-{c76@;C$l2nq5S-|g>M9smUi@)$mS00s&4=-=-$00r;@?dkLY3Gf2#>GT<K0wn+k@B;1W^ge$82=Mad@bd5P<^T!s^5yXI@9*X%00r>!@A&xu2JrIl`1vIO1@Kw$Qsn>#^5OU281nf52=d|g-x%`wB>)HV<?P`B_T>Nq^IHG|^IK;C1oK;GB>)EVTi-V(=l}!rTO|Mn^II8l0wn+g^IKB@1oK-{B>)8TTRwjP0`q?W1M__)00{FZ^lS7qCi4IU^C$Fj00Q$s01NXc^!4-K=Ir6;^8f?$^zr}%^YrpV017AaUf<*h<MKEJ00<}YUf=ESSRMccC-PoCeE<b-?G|`)00Q(^00s0{-{%Yf2J}}MaRMa(1oT%ve*g{iNbKd?^YrpAuCA`#00Z^u<NyZw>E-O?asUB600DFW0(3<H1S`ojMF0mC5#`3=<MaRt^X2U3E?iJVbN~zU<?QAz=`=(u$us~G^X2U3F7n~`-{c76@;C%U7W4oL^X2U3F7hEnbVUF!^X2U3F7hEnbVWlh=`>SBE6FrPLoV+!M8@PvLoV?0>Fwe2`9#9u^X0|(2k->|7W3uo<}UIfM07<isxIXsL=`$x<;5ZZ5cB2i<}UIfM07<i^FTy&RRA^f<?QAz^L<3b2;=fN1k-&k?eAC~L>BZe<@oR$8sy*g>EuKf^e*N2@EaQB-|g>M9z+)O04DTE?B&}P#AF-vA4M(@NkuLe^e)5*<MKEJ(|s-$^ez_kE*A9N02K5{?B&}P&hIzNEG~3aF7x#AL)`%Y3;_iQ2L=}y3=b0&5e@<X7XcL$5f%~-90ULX0s|ck3k?bh2pJk15CZ@c0S5#F2Lb~E1qKQP0|NsD1O)>G1OQS32L~}RCMG8*I5-avIywaf0|O8cIyyT$Ffc4E5)vybH#apk7#JBDHZ}$ZBO@Lj4GlUvBO??PBO@|0C@3v08yg}b9v(S40|N~WIyxjIB_$OVG&D0aDJd>4At4+b8X5%!0|O8cIywRZ7Z*A@9Sau<It&pJFE2Ve9v%)36B9Z*1Oyfq6B9Z*A0Ge!Iywmn2nYcIARsC#1Oy2Q2nael1pp%g2>}cN0s#sE0{{sD1pos90|5g80s#>L2LKZR5dj1M2mt~C0s#U60s#U61px^F69EMP6afYR7y$|Z836?V0s$-m9{>gcTmsXJkBg+)$>V&Bii_lnqKl)8(~FObxeuh-n=X8dii_lnqKlo2ql<~!(~FOb(~FObOAng|v;wz_h>O&Vcsqv@QxVrSWjND|kBhVew~Kf?;ES6x#x$@KQ!-Bz*A7++WjND|kBdJB(~FObKL*o_kBdJB(~FOb(~FOb-znmY;fp^8OAk*Ihb^Spz65wYwK2Fhc@TRPdfHP6*EzU0QaDLCWjNkARtZ%I-#6lmKL$$=PZPQkq}jWRy#T%gwJ^3acstvR-2mK+Xp7T}kBh%5!Hd9)RtZ%IS2tOUSc^Xfq}fXkQHxI#!aBo?Q!CdjQaIi?(~FObj*D@No{ON1pNpZ3(~FOb(~FOb(~FOb(~FOb(~FOb(~FOb;*3#@hS`M+*9~)vfQx;LtBahAjX2&o(~FObX&h{eaEon=OAk(qQHxI#P>W0vO^aX)VT)snVvAl3UyD;6REyUiXE@$C(~FOb$|cT=(u>cFZXR!oY8`8f#687}nFX4Qc8hY0U<+Z3V~b*oQzlf4*C=F*J~-Yu(~FObKovxbNQ*^_&?nK0%O=c=#687}nFX4Qc8kr6ri)+;VT)c2UyHAcf{TBPQx;T<*BC*I$Fj(bmLp0yvpC*3(~FObkRX(cn2VK*Mi)nmLKZ`d&?nK0%O=c=$FazZX4!p<U<+Z3UJPH0tc!t*ev4BfREyUn<v89r(~FOb(~FObS{Yl5U5i|cmLivnks*?ckRX(cMi)nmLKZ`d&?nK0%O=c=ZXR!oY8`8fOAk(qPZLm!Oc70s$FazZX4!p<yNi>HU<+Z3UJPH0uZx0<e~WdCQyNr@*BjM~sEefmgamjzwK2FhssV$Hy#c(8XpDD^*o>}>t&D+;evEXCr!R@xhb>At);Os+WjM1q-Z%#U3IYZL1p){S3=RhX3IGTM3jhfK1_1~F2_SYIbALnSi1qR{okbPy!kw`Rr#+MBV7l@mn;XE&IQjj*lFpc2?T`RgZcNN0jq<1*gj)z-(MeKVCEpcZ*`rEGN$cO*&&Mq#K#W8eUl?I;oHo0ypr(a||4Q~2JR75ozU*Tm#y@MBQ6Km^Zz`1hyHJ4*?qzc7r#~S?UL9~(_{hXim8+!HvhK~F`zMf1#c}P#De-M7raBNln=BWGbN#1Y7rgEqu{A$|bQTs4x-Hn*2v#ixp$84xaunc+;_uhR_06}fOn3~h&4ElbNHA3vTVY2=j37|5Gp(Mqo!~GjxMP%MCW>CoStDWo+Vis2o1~dg4$G+K^qEX!<tq_Ou5_?ry^<P@_?YAA94ccDrU7!x2SW2mf^i7|pC~C(DN+Cc0J}vazKN%l<u=VHg4HbqN1Q*}XgN`yK<ll;s%Erz$)G7yDN_Id0M4^8PioPK8i0$D|L<)wE%b{QUHQ80>Z``o#fC15a91f*DO3Oe0K&ig<^C?Y(q&d7JgY60@~OO!=^$GJZA0F>4zpFh(|{>eDOCUf0Kh*Qf>sA+9Kp>qix_4DdcI7)q{P=<0UJ5FMH@$$QwJ$lDOLag0LJf64Y}9>Rsng`KJBz%CF(4>qfM5_ZQxP9ni*ieEqy6hDOUgh0K0l9VIX%>Z><-g<c|;H?J>`o+{pxZfKRdTVPHYZg)=EwDOdmi0Jqo)JqTs;)4-2-+6lFSOU_?gEnV>h=~Onq073Xv(`zYNDOmsj0J%PmtmI$G*tMN$`Ea-RpA6^GZVxGNrHmthhz5af9bhS1DOvyk0J|imjv{5uQBA(yXVQqHUQ~s?o=J=LtfrWMJ<S>la!Dy$DO&&l0KMx!Z54PZhW@6j8BCJ{hNIUiS5b(BQ0Ew(iQ9bK)LSWBDO>;m0K1nfFjBkAPC$S-4+{^|xnn4Huju0!z4jzz)I-Tmm*pv4DO~^n0J+yJ{<IYFiLe@<4tbaV5R<powPkVYRy{1REU{WOos217DP8~o0KvH$8T8oX$w&ni;C~n9`a#7n8qYdLW3KeNreM-sGp8wEDPI5p0KUQ7Xju%nNbOXlWu92rLazuX|Jkb=qHSO*;2}|D)VC>MDPRBq0MH#Oq@EO8@T0>g0}JXUnkO+*6|X~+ceeQA?NZMibUG<vDPaHr0Mv`<dEf_vuKqMuzkotNTgSnl1ZYuCc&I=g25A~k)bJ@{DPjNs0Ls*@b<OMISl$vO2qWV?>noTm`$vu~IB1Rbu&Jda?wl!ODPsTt0LTm*tkw84HH4m*W<oR}-jtD`pN@8JG6zVgGOoIgz7i>9DP#Zu0L$_*)wPx4bDg!`E2B`Hb~f=@E7*Ouxk81kn2>`RBMK>HDP;fv0LZ{_qRoo{XkTbN4m7a%T9f?_XwN5G_r9d%;$`kCs?{lGDP{lw0K>Ke5nI~Zx6Q<Nj0m_?Y?U`q>YD~XQi~NQWs;7zm~ts+DQN%z0T&bL<Di3sR$Rzkbbd9=I`!Ndtlz=oA$zx;C56uCe@iKBDRKY+0_|xV;FD^XQ0^AES@+4b_@K$qy^bz#I^RZVl@*jqVAm;iDR}?@0zG#Xd|;#AXynmG{xkUh)4-?yeC?sX!QkEZXxXpwH6kf}DTV+51h<w00sFD8KyPf{hz+j5bDEo!uNe9(nOIQ71*hO<M64-_DUSdE0|T#NyWEQgy>zP>?&@Gpf6IMnqv8mO18KnYNhSYvL9Qv2DVP8N0^?x_Pcbz)m+3Z9zzX)w9dXXxJeJDmE!RWTm+yzN$n`0lDWm`Z1v#J`P1IDYk$&axaLs&DglUaN{ICe9JuaMbAf@=$K(r~SDXahh0>kWlz^vEN_5GCcTYfWuMjF+Us?l@*Je|6Cx*+BlbH*vJEhGQ}MaO8%bDtVxwrVq{azf-v*=aQ06tSS1{*}e+yM*bQZA2|6Ehhi~0OX)Nx=6cR(6GM=4L~?vb~u)bnyE$JzPJL(_VLzYz4a|BE>r*krz%R0Y^PUHiO@8HLY6$60egq#)%fcDI5&2Bn(Q6O%C;_7E>{2m0OC4$`UrDymXfkvs6*9BmBenw0(rebHhW5?^HS-S4^J*wE^hz;1Jj2qvI%KN73c<*bBK&r_j%$&xPERr`=Tog)y1$n*D)?}E_na|0;k(XrQdci#88jmBu$DnEM?9Ey&<oc36wel^~RMu`5Z2KE`$I80|Avvj7@uE&?C2`UILo;wbcOZTwVp~o_8^aE6nazOwTTcE{p&G0(9q4`EVQ%ES~<}fthBK4=pk#c-oJom379)Fc+wSxZf^~E|mZP0?ywf&(#V4p>hm;#&vNJdoewZnqYy#bP<odoxLsn@X;=pE}Z}X0(4Gr1S3w{#XUaBXxb!H^*U>v-$e<&{ks(IGpdSpJY_DPE~Wqg0?x`fgD<}ei^L*dj#ZNn>jf_rBhh+hi{Ubs{9YAC4C^kaF0KFo0&ZXE){_xahSba_a|f9?AA@IHiV=a-g4!z3AUtJPdQdK}F1G*x0?0~@DeKjPQy^3WZPm(<rU4P%_QO_DcM1a12gbb)fUYjNF2Mi*0<d*Fkx#KHCC@QLG1hx^NP1#+{r=Kb8>ENk0J^Yrr;aYdF3bP`0}4nv3KL0+uX!}2Uk7<O7%J4%^;n;g={>Tt`YpK%az!rAF4h150;(#7EudEqwJI&akhJB1;<%|5qHjsG%5VAaUabODnB*?kF5v(G0|e~|h0-~6+uslM3h-5AQ`E23KOGq@6WhsK`7LG(r@JoWF6#gQ0-@%$?$)7lj%5hg+dzWDhfz+O!l&_kux-on&sC~x*f}ojF7^Nb0{eta?{T&dY1M%>mf-!M8=ckqtvWJf3r9TT^jxwzt$;50F8}}l0<E48U|@?3YT3s5E0OJV?Y^8}lit(}1Jc&QtJp!oDLgL$FAD$w0|zR@H(8l}rX3xW^k@ZcMrmMJu_oBu$nasxW~;en=PEA^FBkv-1r7(nIm*0_?(_LTY*4`Usk}@+kI6UY0j}6^7dpdn;?XY|FBt#;0IdUDO?Vo@+xFWy5hJp=47Nn&`L`vel0!z*(iUXWR|_v1FC_o~1w;nYMbD88yO>CYlIYP)b}A4BHLWEYMxue^;pva2kwh;hFD3v00JFn9M!)p{P+>M|iKKHE1P}~v+CWBO$rgQaFzDMN@S86uFDC#10KiyI3hdp|55C<*%=Ex-jizLeP1Z~<%!ZVd_-%qD70oXwFDL*20OsN#LOvGU#gCm~mVT0c`ID}C6s%&}Da(rbt{8=|93U?#FDn250RmyDt_rY2l35_|L`E|98PXv+oWl|I55QIm7t$eeE4eQ$FFXJM1H%GO^UkiM$Q(bVAjD2<1hpVLbXMizh=27qCy-ArEd(z;FGv6Y1vFCYHg(`Tg=tO~pU*!>QUR>Um<2oH9-cU7Zcc$QqZKbnFIWHo2oD5Mp!&N=$xwj}U99hhy~WvYCgn3C-5JJO$qx+#)e$dSFK++<39O8}kzXotlDm2?3ysCO#(lrnrHbaZ&V8nIi!k-774a`{FMj|42#gya+(hjz)I+p3fWIyYJin=!A^`0uP?A!mXc1fq1l})zFOL8K2zEN)Jdqi(B^ukp39rRg#qS}+j00|=pnFeI+@mp^7mY8FFP{Ja2vx)|L0w(+f`gwZXPCrpZ0vgMD%XXZQ6>LG38kOU>@P2%FQxzh0p%0Z$ebtOeA=IUIhm5??*~#0$e&Ex&3Gnn%IEbfS-&r*FRcIo0_}qaRIuxV>7Aj1P2F#Fh1SzjLICj~tL=wpOkgG-gGMi|FSGyv0__ukylHuOLzalF9x!g?8hbJ3Y5}p8a&L*%*IHu{b<r=iFSP&w0HYjBH2jX7u|0I#9bVp0am-ZYow32ekvyI7%<$NZoO&;|FSY;x0IiIOPi0u(*c)K04D{4b+-xb?Qv%!1E1`zJj~1;XfR`_~FSh^y0I66qw~2FhE?<_SyYk-bqt4_fCJC0N4pQdDQk~uy%qTCoFSq~z0JAmzu4D!HTj_~s|NY`y@TpMl@nDxp>&Kvzk^Qq%uhcKOFS!5!0IZ+T*V|+qZ>4;eblxwo8xX&mTaNh9u$n(uc`yd`kEAcUFS-B#0IM>q>+H?E-OJT3*`zG}6yu{BEE_U=o;y2BNA-1}(3~&3FS`H$0JT*ctYCSc7SqimR6-?OI`zrDWNzd~ZQ04HfEvr`RGBZlFT4N%0KEBpQ|_OP5XDDqInVDq8`vB~qdY|gS+sk9@eGO(#8NN4FTDT&0Hb)S*vk3|={C5|2mPBXI{5!jWPuzJolbR<L9<jtz;G|VFTMZ(0Dx?iY1&qD<1ynaQ~Y)@AJ%X-CyjdR`dRtAW}{tQz@aa}Fa!VqB*HRT1Lg}guwVhTt?&!~=i1~xnclWGNvDOEf%8(H(VH*_FxmhJrsFg{xXbRVePo2jJ61$NbL-jbXGt(gFEOB1bj2E>2*5DsFy{aO0K#}1Gx0)dR3G7Y{ageZmC;@+sqH_TyB@u?O8u)U=xi|PFz5gP0Kx*c2EJv?C5mmh4&XbZboQH>(yv6of$J(^K_H!tPL?p~FzEmQ0K~`Ht}MFA>$Ckg1@bH*UxJ3%On+}SIFjdOD3ik}2&^#bFzNsR0LH2<h2@-Z$ke>o=i}QF1wZv=i^#`gGS->xVG_FO`vEZPFzWyS0LElCIx>DlnT*WZS^Cmv8r$F3?t)fynw-L(^mM>1|CBK7Fzf&T0K~yglwmLrSZ!@7SeodAp-DW_qrxkb1<Zm@zuHZEoHsD-Fzo;U0MTNK7#WaM6U1c%Wb_Z~ju<Wx7JAkE39KZc;$p@$or5s$Fzx^V0G>Qd(lO=sWCt8AcmSV(=DQ_YZ#bPo(0vWR;1j+(w-Ye$Fz)~W0HlG>bm`OkrQu#?xh!SuVZT-qF0d)S22hW=)5ZqEN1-tAFz^5X0I_wa?J~-e!q_f@TtkQ>!dqfCTekzbRcDq0%_kMmTf8vwF!2BY0H<t6Ce!B%__x~sNMe2%Tq=#x@WApXe8l8}77b#E>&!6nF!BHZ0I4!<<bKH~T6p$oSTHMi=xwn!c~5<R4(FZ+ex?x%YVI)eF!KNa0JY?Wj=4mvB*Mg1HlM!Iu!*M_gQkVpOZy%TfMb1=Q7tg^F!TTb0I~Ccj<Xw=ZTBaYJfx|t0wJ-#?oLJ^)VoVNX%>b{xQ;OOF!cZc0LynN?0AIc0NN=c;y9GFvW*%|m<5O{afNst0$IPp9iTAwF!lfd0INDYS6zNP$1j>qN_IPZI}H>V+Y{0w72<goRk%OUwev9dF!ule0IdP|iSa|vy=BlmkaRxGsFUBqHA%U8B_P__VI#KcE`~7pF!%rf0MYP1mW@^Z_DT@)1j;?LQH+FQB&8XB1@6&h2I#?Rn8q;qF!=xg0Ll8{J(;oeo>o05)>Ljr3CLc?{{X-lcF?{Y@?Ul9&WtenF!}%h0LzM<>N7(33Di7P;gdML#wr$V#{q@%sj@dc##8s3ni4SkF#7-i0LzJdE427br7!Uu)=d5=cOwEBTNY*PP6j&(c^I$+NAfWIF#G@j0LrtzyPKaQJ{MHshBR0N_-?aZxW*ME(M4fM4=pJm26r(3F%JL$3}sHXm)_|)L>@?BJ~HEaF4$)eepNv_Yahgm8y$iVdjc^MF&O{=18(3}S1Wnm8o>H0Novg;U9ver$_E*lj(D8fjpvItVhAxDF(Lo}0yR=OW`#O-WhtuWD^(SO*OpK8j^@~d>5-Nofh5&oEZs3BF(?240lB>JYn>#f08~-TN&P141;REmuic?S`6)j+YjdNw6Y?=DF*E=G13|fh*lMJCg;J@p=>WH7;ff=@=vjlt4yL>eL9<E*XnZj@F*^VN0e~SHc%)WvUicy$sq)~}DSQiBF>N4m;*Nv!T(nVp|2{E3F+%_V0l|_6YEsk9uF43Lv(`3AsA*W=Eu5EPbJl%2gvou|<$5tjF-QOa0eCu`6b&iQtp;+EAQHT48$#FB_tGs#0t<y2y*_i*EPpXeF;D;i0^c@>Rs-7iCh8n8Q^33yj#kjomn1XL>#4jB-g)O_eFZU7F<Afr0`HBox{gzS=YBKC0+CX$sku)k!^kd$lvWff#X_A1R&p_1F=hY&1^s2Wfc5eCV11%Z_z5-`?TKU?={uRd?TnXB;VYN#oOv;6F>e3>0zTgF7WL~&Jt)!{9xC(c0sVVL>5Dz>_A9!*b`o`R@w+i{F?Rp}0n_e;=RbtT{vVnCzoYcDK0JaW&AReAYxPx*-DU!#e#J3*F@FF60swhL>$O$tcvM$ZP{RxDtuJbGH`=1)L6d&a?j$y^j^{CgF^m8J14H{Qm|F1syV&FUEzu+^`nGMt$RdMLL0=dx(v*kd(1S6LF_ZuR0n-)4(U*er41<)-3B_DRQf8`DnToVb7c9+QmUFt0v0E{hF`WPa0!syUfXZf4ey|^77&sPO+8{ms^*RDn0iJ;~&rc-L-0d--F{S_j0#XJGvC|1~I#G`5K51OB=l_|lID01TZZZF?G(I8IKgThtF|Yst0~3@{+y8HN?{<zmB$W68DZv&`6Z=foK`k=(TU$Nd2MjT@F}VN$0+C)~&;YY(PmLrO?Q&S!D7V=TQbKtTur|Uee*ccjE}SvEF~0x+0xA#7oj%ffAdeR{qEzjP1cVA90?I;~@9Y(VPf4)bjCe7_G0Xq}1p3Y=RvU3F<|;gC2FR|bJUaXg$AyYFaP%n{&sKvR(Y7(rG28$E1}e{;nVQR*-Q*q8Q=3ZdqYzzAJ^ffaTMI#^Yc~ZOlIt<xG2#FK0o*p2AIU!z>$A}j9=5XlImrUmtp9wB6+W**zfXxAaFQ|RG4KEY1)R^k9vh<APDY$$wQYg%rlumgxzq5q%)I>n;fdcB4iz!<G4}uf0*!Kw{YX1Y1Xo64(<#{~QAR~qfF9UemPp-w;;sHu>$WlbG6Vns1v0=THBO9<&!?FuZio1mK%s0|xW;Ry1w*_4Gd2+qO06;oG7SI#1KaymW<9Jn3&T{CCk1jgbNq<!LPnp8Nvt9F0|b^i<e4%NG86y+0#cIx(QZ%gQH#5~EoA~!#|HNLHL>bUz-~WeB01ZJ`s6YgG8+H@0#fgAZK5qcjpez{FDb&xERJTN8Y-Itla|S=(Z>9^1v4@qG9mx~0#Oti%p|)7gxjqC@R2pmXm3V)VKP<d$WKu~Le-u9iV89&GAIB50oW=<{to8*?JX^bhajP(8$}B^M^4$&$`^EL{NG@Rp(rvdGA{rC0Y&|^p_(Yw!e1n8X7EHtH4KJ;i}=nO1B)`L`Ef(VYwt2MGDH9X3YJpAvO@I~w~T`0ie854mR=>c?UJgHEw-IKJZP!(X2vo|GEV>i1zQHftG+s#pPyYXoryuUAkDMCr2?v7*E=&9*E*!v@a8g8GG+h(3QrB&Df8UuL}YoHi9N^xZ&IODuF$?U*>0&Sfro;Z%E~foGJ6032{{@Ee~7c@@X_H2R4=DPTGL$%bx$kQ(QVvQlv%FU*z_`gGJ^mB16!WTN`h(mec8OWqwxUR8N>CFu`ep1_ci#*G!z!0FN-pVGLHZN1Xhf5mn7}l7za-Kzh?7Vdcb#7VHh943k&mxm0V^BgdsAMGL--T0oieu+US0{hHd7rUtHmmoEG(dnrd%!G`9w{oUx<K+ru)MGMfMZ0oTzBaFSxhm{6Y`YM|QEf2U$%O4}aCX2troVXo?tzmzhcGNAwf0ouHhr14^B8>J6(h(pMcwe+yxhX~yOuN@p?2~zoS5-c*MGN%9l0oS;`Js6Z%KrdV~GEr-;V^hH=8T~brR@wr-w#cy!$U!ozGOYjr0pb4YuH-I15ql)_G6aBk3#ru#lDcMrCOt6HQ~G!%anLfcGP3{x0ocMBAdQD<J&z)T>KFFsr=evNP-`^y;ZNdE-WnJO+5s}RGQ0o)17Sgl4qfwA$+1OcG8)MaM^jj46vfJxw3f(<2z}xXUDq<eGRXh{1#PkcOw(M;{t6Va-g80$WN2XyThnDFk*-|@6O}j8sM0dcGT;CJ3L+nA)K@cF;1LGM6-PEvU<O=&6!DlLShg@uYxy*_QmQiKGU)&S1I48MPJA~y3AD5s-<jm`#2!O`<Q7arn{&j#LeuJRA`dd{GXVeq3O*aJA&C`)&wEF8`#bi2GGffcYxoHLT1NB;)>V01G0QUrGYbF!1TJ2Os$M-rIW%<AP!AefS=E|J>PfB0I%p~&wE{JtqYN_-GbaE53@}5Mr~Dg%&d;sNLe1m4h*Oclm_&&>A|q9msD>eCxnDCYGc^DJ2QD3y8Q&lmqU-TDk*GKs9nk)YR|I&Ghu7q*AH7MII-4^&Gg1Hm4JrquRRW9S2+|5Qx<i({L|6@$dz~~EQ@qKFgDf2?8#6OjGg|-v1HGOu9Qe?T-Ez|OU|+dUbNwL)F5+XCEvf`IU*0xwW41G2Gm8KK7P7a+1xI*1bcp;D$suZ2*K6OH2CZF^cYd*q)z9)8CW<qUGp+yt6b-LMsi^i21BneA+c53r&6W=jv%e&_T#aqPr{Zm#ax62kP5}TZI+TN?ydK67E})w80`su3ld7K_5P(lg-4z%IzZ74botX')
+ ROWS=((19975,19979,19983,19987,19994,20000,20002,20008,20015,20019,20023,20027,20035,20040,20041,20044,20049,20057,20064,20069,20072,20073,20084,20084,20087,20090,20096,20107,20109,20112,20117,20119,20122,20125,20129,20132,20136,20139,20141,20144,20157,20160,20172,20197,20198,20200,20220,20223,20236,20239,20242,20251,20258,20261,20265,20269,20277,20282,20285,20289,20295,20298,20301,20303,20308,20313,20316,20320,20361,20538,20549,20591,20607,20610,20619,20635,20636,20641,20647),'0000000000000000000000000000000000001111111111122222222222222233335333345555555','0111011000000000000000200000000000000110001100000000000000000000000000000000000')
+ def prove(fy:int,fB:bool,fz:str)->None:
+  Q(fB,fz)
+ prove(0,K(source)is str and '\x00' not in source and(0<L(source.encode('utf-8'))<=1868927)and(2000000-L(source.encode('utf-8'))>=131072),'R authority source input differs')
+ U=A.parse(source,filename='tests/ci_shard_runner.py',mode='exec')
+ def bf(m:str)->ast.FunctionDef:
+  aJ=T((a for a in U.body if isinstance(a,a6)and a.name==m))
+  prove(1,L(aJ)==1,f'R static function inventory differs: {m}')
+  return aJ[0]
+ def eG(m:str)->ast.ClassDef:
+  aJ=T((a for a in U.body if isinstance(a,a8)and a.name==m))
+  prove(2,L(aJ)==1,f'R static class inventory differs: {m}')
+  return aJ[0]
+ def e(ao:ast.ClassDef,m:str)->ast.FunctionDef:
+  aJ=T((a for a in ao.body if isinstance(a,a6)and a.name==m))
+  prove(3,L(aJ)==1,f'R static method inventory differs: {m}')
+  return aJ[0]
+ def aT(a:ast.AST)->tuple[ast.Call,...]:
+  return T((w for w in a3(a)if isinstance(w,a9)))
+ def b(a:ast.AST)->tuple[str,...]:
+  return T((a0(w.func)for w in aT(a)))
+ def eK(a:ast.FunctionDef)->str:
+  prove(4,type(a.end_lineno)is int,'R static node source end differs')
+  return '\n'.join(source.splitlines()[a.lineno-1:cast(int,a.end_lineno)])+'\n'
+ dD=dict(zip(T(('_GENERATION6_R_'+fD for fD in ['CAPTURED_FD_INIT', 'CAPTURED_FD_REQUIRE', 'CAPTURED_FD_DETACH', 'CAPTURED_FD_CLOSE_ONCE', 'CAPTURED_SOCKET_DETACH', 'CAPTURED_SOCKET_FILENO', 'CAPTURED_SNAPSHOT_STAT', 'REAL_OS_CLOSE', 'REAL_OS_OPEN', 'REAL_OS_SCANDIR', 'REAL_OS_FSTAT', 'REAL_FCNTL'])),D[0],strict=True))
+ cJ:dict[str,ast.AnnAssign]={}
+ for m,cv in dD.items():
+  aJ=T((a for a in U.body if isinstance(a,a2)and isinstance(a.target,a1)and(a.target.id==m)))
+  prove(5,L(aJ)==1,f'R static capture inventory differs: {m}')
+  ax=aJ[0]
+  prove(6,isinstance(ax.annotation,a1)and ax.annotation.id=='Final' and(ax.value is not None)and(a0(ax.value)==cv),f'R static capture binding differs: {m}')
+  cJ[m]=ax
+ eL=(d[102],d[78],d[89],d[85],'_Generation6RAuthorityEvent','_Generation6RIteratorToken',d[39],d[47],d[84],d[54])
+ bP={m:eG(m)for m in eL}
+ dz=bP[d[102]]
+ ej=bP[d[78]]
+ prove(7,OO((ax.lineno<dz.lineno for ax in cJ.values()))and T((a0(eU)for eU in dz.bases))==('str','Enum')and(T((a0(eU)for eU in ej.bases))==('str','Enum')),'R static enum or capture ordering differs')
+ def dX(ao:ast.ClassDef)->tuple[tuple[str,object],...]:
+  fe:list[tuple[str,object]]=[]
+  for a in ao.body:
+   if isinstance(a,a5)and L(a.targets)==1 and isinstance(a.targets[0],a1)and isinstance(a.value,a4):
+    fe.append((a.targets[0].id,a.value.value))
+  return T(fe)
+ prove(8,dX(dz)==T(((k,k)for k in('SETUP','SUBJECT','PRODUCTION','INJECTION','REUSE_TEARDOWN','TERMINAL')))and dX(ej)==T(((k,k)for k in('LIVE','DETACHED','CLOSE_SUCCEEDED','CLOSE_UNCERTAIN'))),'R static enum members differ')
+ cO=bP[d[89]]
+ eI=T((a.target.id for a in cO.body if isinstance(a,a2)and isinstance(a.target,a1)))
+ ek=T((a0(k)for k in cO.decorator_list))
+ prove(9,eI==('ordinal','generation','owner_identity','descriptor','label','acquired_phase','snapshot','fd_flags','status_flags')and ek==(d[32],)and(T((a0(k)for k in bP[d[39]].decorator_list))==(d[32],))and(T((a0(k)for k in bP[d[85]].decorator_list))==('dataclass',)),'R static token mutability or field inventory differs')
+ p=bP[d[47]]
+ eP=e(p,d[110])
+ dV=a0(eP)
+ prove(10,OO((ll in dV for ll in('self._generation_by_descriptor: dict[int, int] = {}','self._records_by_owner_identity','self._records_by_ordinal','self._current_by_descriptor','self._scan_capabilities_by_owner_identity','self._scan_capabilities_by_descriptor','self._live_scandir_proxies','self._uncertain_descriptors'))),'R static ledger index inventory differs')
+ ab=e(p,'initialize_owner')
+ aV=a0(ab)
+ cX=T((a for a in ab.body if Z(a,a12)))
+ prove(11,L(cX)==1 and ab.body[-1]is cX[0]and(not N((isinstance(w,a9)and isinstance(w.func,a1)and(w.func.id=='_require')for ck in ab.body[:-1]for w in a3(ck))))and('offered_unclaimed_descriptor' in aV)and('current is None or partial_is_current' in aV)and('partial_record=partial_record' in aV)and('owner_identity not in self._records_by_owner_identity' in aV)and(b(ab).count(d[12])==1)and(b(ab).count(d[18])==2)and(b(ab).count(d[39])==1),'R static total acquisition transaction differs')
+ ez=e(p,'_remove_partial_registration')
+ aX=a0(ez)
+ bh=e(p,'_close_registration_failure')
+ cz=a0(bh)
+ bk=aT(bh)
+ bt=T((g.lineno for g in bk if a0(g.func)==d[4]))
+ bp=T((g.lineno for g in bk if a0(g.func)==d[72]))
+ prove(12,'record is expected' in aX and 'current is expected.token' in aX and('capability.parent is expected.token' in aX)and(b(bh).count('_GENERATION6_R_CAPTURED_FD_DETACH')==1)and(L(bt)==1)and(L(bp)==2)and OO((ft>bt[0]for ft in bp))and('if not initialized or cleanup_error is None' in cz),'R static registration cleanup authority differs')
+ da=e(p,'_record_for_owner')
+ ct=e(p,'_authorize_live')
+ aH=a0(ct)
+ ep=e(p,'_token_after_immediate_acquisition')
+ prove(13,'owner_identity = id(owner)' in a0(da)and 'self._records_by_owner_identity.get(owner_identity)' in a0(da)and('record.token is token' in aH)and('self._records_by_ordinal.get(exact_token.ordinal) is record' in aH)and('self._generation_by_descriptor.get(exact_token.descriptor) == exact_token.generation' in aH)and('owner.label == exact_token.label' in aH)and('self._current_by_descriptor.get(exact_token.descriptor) is exact_token' in aH)and(d[12]not in b(ct))and(d[18]not in b(ct)),'R static exact live authorization differs')
+ prove(14,a0(ep).endswith('return self._authorize_live(owner).token'),'R static immediate acquisition authorization differs')
+ bY=e(p,'_reauthorize_live')
+ dW=a0(bY)
+ prove(15,b(bY).count(d[12])==1 and b(bY).count(d[18])==2 and('self.phase is not _Generation6RPhase.PRODUCTION' in dW),'R static post-production reauthentication differs')
+ bT=e(p,'close_owner_once')
+ cK=b(bT)
+ ec=T((a for a in bT.body if isinstance(a,a14)and isinstance(a.value,a9)and(a0(a.value.func)=='self._append_event')and N((isinstance(cG,a4)and cG.value=='CLOSE_ONCE_BEGIN' for cG in a.value.args))))
+ ds=T((a for a in bT.body if Z(a,a12)and N((a0(g.func)==d[99]for g in aT(a)))))
+ prove(16,L(ec)==1 and L(ds)==1 and(bT.body.index(ds[0])==bT.body.index(ec[0])+1)and(cK.count(d[99])==1)and(cK.count(d[4])==1)and(cK.count(d[59])==0)and(b(ds[0]).count(d[82])==1),'R static normal close one-call guard differs')
+ be=e(p,'_inject_close_uncertainty')
+ dF=b(be)
+ cM=a0(be)
+ aw=T((a for a in be.body if Z(a,a12)and N((a0(g.func)==d[99]for g in aT(a)))))
+ eu=T((g for g in aT(be)if a0(g.func)=='_GENERATION6_R_REAL_OS_OPEN'))
+ dp=T((g for g in aT(be)if a0(g.func)=='FdOwner'))
+ bA=T((a for a in a3(be)if isinstance(a,a5)and N((isinstance(r,a1)and r.id=='raw_reuse' for r in a.targets))and isinstance(a.value,a1)and(a.value.id=='_PID_SENTINEL')))
+ prove(17,L(aw)==1 and b(aw[0]).count(d[99])==1 and(b(aw[0]).count(d[4])==1)and(b(aw[0]).count(d[82])==1)and(L(eu)==L(dp)==L(bA)==1)and(eu[0].lineno<bA[0].lineno<dp[0].lineno)and('self.phase = _Generation6RPhase.INJECTION' in cM)and('reused_token.generation == token.generation + 1' in cM)and(d[37]in cM)and(d[12]not in dF)and(d[18]not in dF),'R static close-ambiguity adoption differs')
+ cy=e(p,'_mark_close_uncertain')
+ dS=aT(cy)
+ cP=T((a for a in a3(cy)if isinstance(a,a5)and N((a0(r)=='record.state' for r in a.targets))and(a0(a.value)=='_Generation6RDescriptorState.CLOSE_UNCERTAIN')))
+ cW=T((g for g in dS if a0(g.func)=='self._current_by_descriptor.pop'))
+ cZ=T((g for g in dS if a0(g.func)==d[72]))
+ dZ=T((g for g in dS if a0(g.func)=='self._revoke_scan_capability'))
+ prove(18,L(cP)==L(cW)==L(cZ)==1 and L(dZ)==1 and(max(cP[0].lineno,cW[0].lineno,cZ[0].lineno)<dZ[0].lineno)and('secondary_errors.append(error)' in a0(cy)),'R static fail-closed uncertainty ordering differs')
+ bB=e(p,'scandir')
+ af=a0(bB)
+ bs=b(bB)
+ bK=T((ck for ck in bB.body if isinstance(ck,a2)and ck.value is not None and(a0(ck.value)=='_GENERATION6_R_REAL_OS_SCANDIR(authorized_descriptor)')))
+ prove(19,L(bK)==1,'R static scandir raw acquisition statement differs')
+ dA=bK[0]
+ ay=bB.body.index(dA)
+ prove(20,ay+2<L(bB.body)and Z(bB.body[ay+1],a2)and(a0(bB.body[ay+1])=='proxy: _Generation6RScandirProxy | None = None')and(not aT(bB.body[ay+1]))and Z(bB.body[ay+2],a12),'R static scandir immediate adoption boundary differs')
+ prove(21,'self._scan_capabilities_by_descriptor.get(descriptor)' in af and 'self._current_by_descriptor.get(descriptor) is capability.parent' in af and('self._records_by_owner_identity.get(exact_capability.owner_identity)' in af)and('candidate_record.token is exact_capability.parent' in af)and('self._authorize_live(record.owner, exact_capability.parent)' in af)and(bs.count('_GENERATION6_R_CAPTURED_FD_REQUIRE')==1)and(bs.count('_GENERATION6_R_REAL_OS_SCANDIR')==1)and(d[12]not in bs)and(d[18]not in bs)and('self._live_scandir_proxies[proxy_identity] = proxy' in af)and('SCANDIR_AUTHORIZED' in af)and('SCANDIR_ACQUIRE' in af),'R static scandir selector authority differs')
+ dU=e(p,'_release_scandir_proxy')
+ br=bP[d[84]]
+ eY=e(br,d[110])
+ eZ=e(br,'__iter__')
+ fa=e(br,'__next__')
+ aK=e(br,'close')
+ eS=e(br,'__enter__')
+ eX=e(br,'__exit__')
+ bj=T((a.lineno for a in a3(aK)if isinstance(a,a5)and N((a0(r)=='self._terminal' for r in a.targets))and(a0(a.value)=='True')))
+ bX=T((g.lineno for g in aT(aK)if a0(g.func)==d[96]))
+ prove(22,"_require(not self._terminal, 'R scandir proxy close repeated')" in a0(aK),'R scandir proxy close repeated')
+ prove(23,'self._live_scandir_proxies.pop(proxy_identity, None)' in a0(dU)and b(aK).count(d[96])==1 and(b(aK).count('self._ledger._release_scandir_proxy')==1)and('self._terminal = True' in a0(aK))and('self._close_attempts == 1' in a0(aK))and(L(bj)==L(bX)==1)and(bj[0]<bX[0]),'R static opaque iterator one-close authority differs')
+ df=e(p,'close_reused_after_production')
+ bm=a0(df)
+ prove(24,b(df).count('self._reauthorize_live')==1 and b(df).count('reused_owner.close_once')==1 and('self.phase is _Generation6RPhase.REUSE_TEARDOWN' in bm)and(d[37]in bm)and('if record is not None' in bm),'R static reused-descriptor teardown claim differs')
+ ey=eG('FdOwner')
+ dG=e(ey,d[112])
+ prove(25,b(dG).count('self.detach')==1 and b(dG).count('os.close')==1,'R static captured FdOwner close semantics differ')
+ cF=bP[d[54]]
+ ev=e(cF,d[110])
+ dy=T((a.name for a in ev.body if isinstance(a,a6)))
+ eR=T((g for g in aT(ev)if isinstance(g.func,a1)and g.func.id=='_Generation6SelftestPatch'))
+ eq=T((T((a0(cG)for cG in g.args))for g in eR))
+ prove(26,dy==('initialize','detach',d[112],'scandir')and eq==(('FdOwner',"'__init__'",'self._initialize'),('FdOwner',"'detach'",'self._detach'),('FdOwner',"'close_once'",'self._close_once'),('os',"'scandir'",'self._scandir')),'R static exact-four patch inventory differs')
+ ei=e(cF,'_restore_all')
+ aD=a0(ei)
+ fb=e(cF,'__exit__')
+ cb=('_G6R_PK[2][15]','_G6R_PE[2][15]','_G6R_IK[2][7]','_G6R_IE[2][7]','_G6R_BK[2][7]','_G6R_BE[2][7]','_G6R_OK[2][31]','_G6R_OE[2][31]','_G6R_LK[2][31]','_G6R_LE[2][31]','_G6R_TK[2][23]','_G6R_TE[2][23]','_G6R_WK[2][23]','_G6R_WE[2][23]','_G6R_VK[2][23]','_G6R_VE[2][23]',d[45],'_G6R_SS','_G6R_SK','_G6R_SE','_G6R_AF','_G6R_AI','_G6R_NF','_G6R_NI','_G6R_VC','_G6R_VF','_G6R_VI','_G6R_VB','_G6R_G','_G6R_D','__dict__','cell_contents')
+ aA=e(cF,'_require_original_identities')
+ ak=a0(aA)
+ v=aA.body[0]
+ o=v.value if isinstance(v,a14)and isinstance(v.value,a9)else None
+ bG=T((a for a in a3(v)if Z(a,(a13,A.For,A.AsyncFor,A.While,A.DictComp,A.GeneratorExp,A.ListComp,a10,A.SetComp))))
+ aB=T((a for a in a3(v)if isinstance(a,A.Compare)and N((isinstance(ff,(A.Eq,A.NotEq))for ff in a.ops))and isinstance(a.left,a11)and a0(a.left).endswith(('[5]','[6]'))))
+ prove(27,'for proxy in tuple(self.ledger._live_scandir_proxies.values())' in aD and 'reversed(tuple(zip(self._patches, self._bindings, strict=True)))' in aD and('observed is not original' in aD and 'setattr(target, name, original)' in aD and('getattr(target, name) is original' in aD)and('_GENERATION6_ACTIVE_PATCHES.clear()' in aD))and(b(fb).count('self._restore_all')==1)and OO((k in ak for k in dD))and('FdOwner.require is _GENERATION6_R_CAPTURED_FD_REQUIRE' in ak)and(L(aA.body)==1)and isinstance(v,a14)and isinstance(o,a9)and(a0(o.func)=='_require')and(L(o.args)==2)and(not o.keywords)and isinstance(o.args[0],A.BoolOp)and isinstance(o.args[0].op,A.And)and(A.literal_eval(o.args[1])=='R authority original identity differs')and(not bG)and('all(' not in ak)and(not aB)and OO((fm in ak for fm in cb)),'R static composite restoration differs')
+ ch=dict(zip(('ledger_release','ledger_scandir','proxy_init','proxy_iter','proxy_next','proxy_close','proxy_enter','proxy_exit','scope_restore_all'),zip((dU,bB,eY,eZ,fa,aK,eS,eX,ei),D[5],strict=True),strict=True))
+ prove(28,OO((H.sha256(eK(a).encode('utf-8')).hexdigest()==en for a,en in ch.values())),'R static inherited scan source binding differs')
+ bd=bf(d[62])
+ eF=a0(bd)
+ prove(29,b(bd).count('_GENERATION6_R_CAPTURED_SOCKET_DETACH')==1 and b(bd).count('_GENERATION6_R_CAPTURED_SOCKET_FILENO')==2 and(b(bd).count('_GENERATION6_R_CAPTURED_SNAPSHOT_STAT')==1)and('owner = FdOwner(detached, exact_label)' in eF),'R static socket handoff differs')
+ dl:tuple[ast.AST,...]=(*cJ.values(),*bP.values(),bd)
+ el=T((g for a in dl for g in aT(a)))
+ cH=T((a0(g.func)for g in el))
+ bi='\n'.join((a0(a)for a in dl))
+ prove(30,not N((r in{'os.close','os.open','os.fstat','fcntl.fcntl',d[111],d[106],d[114],d[108],'os.stat','os.dup','os.dup2','os.dup3'}for r in cH))and cH.count(d[59])==0 and('_pending_scandir_permit' not in bi)and('_uncertain_descriptors.discard' not in bi)and('_uncertain_descriptors.remove' not in bi)and('_uncertain_descriptors.clear' not in bi),'R static forbidden syscall or poison mutation differs')
+ ex=bf(d[79])
+ prove(31,L(ex.body)==1 and isinstance(ex.body[0],a16)and isinstance(ex.body[0].exc,a9)and isinstance(ex.body[0].exc.func,a1)and(ex.body[0].exc.func.id=='ContractError')and(L(ex.body[0].exc.args)==1)and isinstance(ex.body[0].exc.args[0],a4)and(ex.body[0].exc.args[0].value=='Generation-6 R authority integration is blocked'),'R static blocked stub differs')
+ eW=T((g for a in U.body for g in aT(a)))
+ cc={d[79],d[47],d[54],d[76],d[62],d[20]}
+ prove(32,not N((a0(g.func)in cc for g in eW)),'R static integration block has a runtime call site')
+ em=bf('_run_generation6_case_body_for_test')
+ by=T((a for a in em.body if isinstance(a,a2)and isinstance(a.target,a1)and(a.target.id=='drivers')and isinstance(a.value,a17)))
+ prove(33,L(by)==1 and OO((not(isinstance(key,a4)and key.value=='R')for key in cast(ast.Dict,by[0].value).keys))and(d[79]not in a0(by[0])),'R static runtime driver is unexpectedly wired')
+ dq=T((a for a in U.body if isinstance(a,a2)and isinstance(a.target,a1)and(a.target.id=='GENERATION6_PROTOCOL_CASE_GROUPS')))
+ dY=T((a for a in U.body if isinstance(a,a2)and isinstance(a.target,a1)and(a.target.id=='_GENERATION6_R_REJECTIONS')and isinstance(a.value,a17)))
+ cQ=T((a for a in U.body if isinstance(a,a2)and isinstance(a.target,a1)and(a.target.id=='_GENERATION6_TEMPORARILY_UNWIRED_CASES')))
+ prove(34,L(dq)==L(dY)==L(cQ)==1 and "_generation6_case_ids('R', 24)" in a0(dq[0])and(T((key.value for key in cast(ast.Dict,dY[0].value).keys if isinstance(key,a4)and type(key.value)is str))==T((f'R{fi:02d}' for fi in range(1,13))))and("_generation6_case_ids('R'" not in a0(cQ[0])),'R static R13-R24 registry block differs')
+ eD=bf('_generation6_process_state')
+ dL=a0(eD)
+ prove(35,OO((ll in dL for ll in("('runner.FdOwner.__init__', FdOwner, '__init__')","('runner.FdOwner.require', FdOwner, 'require')","('runner.FdOwner.detach', FdOwner, 'detach')","('runner.FdOwner.close_once', FdOwner, 'close_once')"))),'R static process-reset FdOwner authority differs')
+ aj=dict(zip(T((d[83]+fD for fD in ['REAL_OS_STAT', 'REAL_OS_OPEN', 'REAL_OS_FSTAT', 'REAL_OS_UNLINK', 'REAL_OS_GETUID', 'REAL_FCNTL', 'REAL_MONOTONIC_NS', 'CLEANUP_MAX_DEPTH', 'CLEANUP_MAX_ENTRIES', 'CLEANUP_MAX_ENCODED_NAME_BYTES', 'CLEANUP_MAX_OPERATIONS', 'CLEANUP_DEADLINE_NS', 'CLEANUP_BUDGET_EVENT_BY_STATE', 'CAPTURED_SNAPSHOT_STAT', 'CAPTURED_SNAPSHOT_FD', 'CAPTURED_STABLE_DIRECTORY_MATCHES', 'CAPTURED_MOUNT_ID', 'CAPTURED_COMPONENT', 'CAPTURED_FD_REQUIRE', 'CAPTURED_S_IFMT', 'CAPTURED_S_ISDIR', 'CAPTURED_S_ISREG', 'REAL_OS_FSENCODE'])),D[1],strict=True))
+ z:dict[str,ast.AnnAssign]={}
+ bL={a.target.id for a in U.body if isinstance(a,a2)and isinstance(a.target,a1)and a.target.id.startswith(d[83])}
+ prove(36,bL==set(aj),'R namespace static capture inventory differs')
+ for m,cv in aj.items():
+  aJ=T((a for a in U.body if isinstance(a,a2)and isinstance(a.target,a1)and(a.target.id==m)))
+  prove(37,L(aJ)==1,f'R namespace static capture differs: {m}')
+  ax=aJ[0]
+  prove(38,isinstance(ax.annotation,a1)and ax.annotation.id=='Final' and(ax.value is not None)and(a0(ax.value)==cv),f'R namespace static capture binding differs: {m}')
+  z[m]=ax
+ cr=T(((type(a).__name__,a0(r))for a in a3(U)if isinstance(a,(a5,a2,A.AugAssign,a10))for r in(T(a.targets)if isinstance(a,a5)else(a.target,))if isinstance(r,a1)and r.id in aj and(a is not z[r.id])))
+ prove(39,not cr,'R namespace static capture rebinding surface differs')
+ x:tuple[str,...]=T((d[90]+fD for fD in ['Phase', 'TokenState', 'Action', 'NodeKind', 'AuthorityKind', 'OwnerState', 'OwnerKind', 'OwnerPurpose', 'ContextState', 'CloseEvent', 'MutationPermitState', 'CleanupBudgetState', 'CleanupBudgetEvent', 'InventoryCursorState', 'InventoryScanState', 'InventoryAdvanceState', 'InventoryItemState', 'InventoryClassificationState', 'TerminalEvent', 'DirectoryFact', 'NameFact', 'DirectoryAuthority', 'DirectoryBinding', 'DirectoryRecord', 'OwnerContextBinding', 'OwnerContext', 'PresentToken', 'AbsenceToken', 'RenameToken', 'MutationPermit', 'CapabilityBinding', 'CapabilityRecord', 'UnlinkPreproof', 'MutationPermitBinding', 'MutationPermitRecord', 'CleanupBudgetEpoch', 'InventoryCursor', 'InventoryScan', 'InventoryAdvance', 'InventoryItem', 'InventoryClassification', 'EmptyInventory', 'Receipt', 'CleanupBudgetRecord', 'InventoryCursorBinding', 'InventoryCursorRecord', 'InventoryScanBinding', 'InventoryScanRecord', 'InventoryAdvanceBinding', 'InventoryAdvanceRecord', 'InventoryItemBinding', 'InventoryItemRecord', 'InventoryClassificationBinding', 'InventoryClassificationRecord', 'Journal']))
+ cd=T((a.name for a in U.body if isinstance(a,a8)and a.name.startswith(d[90])))
+ prove(40,cd==x,'R namespace static class inventory differs')
+ i={m:eG(m)for m in x}
+ dx=i['_Generation6RNamespacePhase']
+ prove(41,OO((ax.lineno<dx.lineno for m,ax in z.items()if m!=d[6]))and z[d[6]].lineno>i[d[48]].lineno and(z[d[6]].lineno<i['_Generation6RNamespaceInventoryCursorState'].lineno<i[d[50]].lineno<i[d[38]].lineno<i[d[49]].lineno<i['_Generation6RNamespaceTerminalEvent'].lineno),'R namespace static capture/class ordering differs')
+ bI=dict(zip((*x[:17],x[18],x[17]),D[2],strict=True))
+ for m,ee in bI.items():
+  ao=i[m]
+  eo=ee
+  prove(42,T((a0(eU)for eU in ao.bases))==('str','Enum')and dX(ao)==eo,f'R namespace static enum differs: {m}')
+ def fd(m:str)->tuple[str,...]:
+  return T((a.target.id for a in i[m].body if isinstance(a,a2)and isinstance(a.target,a1)))
+ bD=x[19:54]
+ bn={fA:fC[0]for fA,fC in zip(bD,D[3],strict=True)}
+ ca={fA:fC[1]for fA,fC in zip(bD,D[3],strict=True)}
+ ai={fA for fA,fC in zip(bD,D[3],strict=True)if fC[2]}
+ V={fA for fA,fC in zip(bD,D[3],strict=True)if not fC[2]}
+ ai=ai|{d[34],d[22]}
+ V=V|{d[24]}
+ for m,dn in bn.items():
+  ao=i[m]
+  eV=T((a0(k)for k in ao.decorator_list))
+  dQ=(d[32],)if m in ai else('dataclass(eq=False)',)
+  prove(43,fd(m)==dn and T((a0(a.annotation)for a in ao.body if isinstance(a,a2)))==ca[m]and(eV==dQ)and(not ao.bases)and(not ao.keywords)and(L(ao.body)==L(dn))and OO((isinstance(a,a2)and isinstance(a.target,a1)and(a.simple==1)and(a.value is None)for a in ao.body)),f'R namespace static identity class differs: {m}')
+ prove(44,set(bn)==ai|V,'R namespace static frozen/private record split differs')
+ cN=T((a for a in U.body if isinstance(a,a5)and N((isinstance(r,a1)and r.id==d[16]for r in a.targets))))
+ prove(45,L(cN)==1 and a0(cN[0].value)=='_Generation6RNamespacePresentToken | _Generation6RNamespaceAbsenceToken | _Generation6RNamespaceRenameToken','R namespace static live-token union differs')
+ s=i[d[76]]
+ R:tuple[str,...]=T(['__init__', '_require_dependencies', '_issue_serial', '_append_receipt', '_read_cleanup_budget_clock', '_issue_cleanup_budget_epoch', '_require_live_cleanup_budget', '_terminalize_cleanup_budget', '_charge_cleanup_budget', '_begin_publication', '_finish_publication', '_fail_publication', '_require_clean_guard', '_require_building', '_copy_directory_fact', '_register_authority', '_require_authority', '_reauthenticate_directory', '_issue_inventory_cursor_provenance', '_require_inventory_cursor_provenance', '_issue_current_inventory_cursor', '_require_current_inventory_cursor', '_terminalize_inventory_cursor', '_acquire_metered_inventory_scan', '_require_current_inventory_scan', '_terminalize_inventory_scan', '_fail_inventory_advance_uncertain', '_terminalize_inventory_scan_end_observed', '_require_current_inventory_item', '_terminalize_inventory_item', '_yield_metered_inventory_item', '_require_pristine_inventory_classification', '_require_current_inventory_classification', '_reauthenticate_inventory_classification_parent', '_derive_inventory_classification', '_close_inventory_classification_owner', '_terminalize_inventory_classification', '_fail_inventory_classification_uncertain', '_classify_metered_inventory_item', 'register_borrowed_directory', '_retain_uncertain_owner', '_reconcile_mount_poison', '_namespace_mount_id', '_close_namespace_owner', '_namespace_owner_close_verified', '_retain_untransferred_raw', '_close_rejected_namespace_raw_once', '_open_namespace_owner', '_require_same_parent_proof', 'open_owned_cursor', 'close_owned_cursor', '_acquire_name_owner', '_validate_node_kind', '_copy_name_fact', '_register_name_fact', 'seal_name', '_register_inventory_classification_name_fact', '_require_name_fact', '_name_fact_matches', 'seal', '_require_teardown_authorization', '_require_name_absent', '_require_live_capability_slot', '_receipt_binding_matches', '_require_receipt_binding', '_publish_capability', '_require_live_capability', '_preauthorize_present_unlink', '_postauthorize_present_unlink', '_issue_a2_mutation_permit', '_preproof_parent_authority_matches', '_postissuer_capability_matches', '_terminal_unlink_capability_matches', '_trusted_live_mutation_permit', '_require_returned_mutation_permit', '_fail_present_unlink_preproof', '_fail_invalid_mutation_permit', '_fail_present_unlink_attempt', '_fail_present_unlink_terminal', '_archive_mutation_permit', 'consume_present', '_archive_capability', 'authorize_present', 'authorize_absence', 'authorize_rename', 'abandon_token'])
+ cE=T((a.name for a in s.body if isinstance(a,a6)))
+ prove(46,cE==R,'R namespace static journal method inventory differs')
+ c={m:e(s,m)for m in R}
+ bM=(d[14],d[46],d[11],d[31],d[13],d[10],d[5],d[21],d[7],d[1])
+ prove(47,L(bM)==10 and OO((m in c for m in bM)),'R namespace A2g helper-role inventory differs')
+ dg=dict(zip(T(['_require_pristine_inventory_classification', '_require_current_inventory_classification', '_reauthenticate_inventory_classification_parent', '_derive_inventory_classification', '_close_rejected_namespace_raw_once', '_close_inventory_classification_owner', '_register_inventory_classification_name_fact', '_terminalize_inventory_classification', '_fail_inventory_classification_uncertain', '_classify_metered_inventory_item']),D[4],strict=True))
+ prove(48,OO((a0(c[m].args)==fc and c[m].returns is not None and(a0(cast(ast.AST,c[m].returns))==fj)for m,(fc,fj)in dg.items())),'R namespace A2g helper signatures differ')
+ def n(r:str)->tuple[tuple[str,int],...]:
+  return T(((m,eM)for m in R if(eM:=b(c[m]).count(f'self.{r}'))))
+ prove(49,n(d[101])==((d[97],1),)and n(d[97])==((d[105],1),(d[5],1))and(n(d[100])==((d[105],1),(d[5],1)))and(n(d[10])==((d[7],1),(d[1],1)))and(n('_close_namespace_owner')==((d[10],1),(d[88],1),(d[103],1),(d[80],1),(d[105],2),('_fail_present_unlink_preproof',1),('_fail_invalid_mutation_permit',1),('_fail_present_unlink_attempt',1),(d[98],1),(d[87],1),(d[92],1),(d[107],1)))and(n(d[91])==((d[17],1),(d[43],1),(d[1],2)))and(n(d[75])==((d[1],1),(d[88],1),(d[80],1)))and(n(d[13])==((d[75],1),))and(n(d[35])==((d[14],1),)),'R namespace A2g exact caller/count inventory differs')
+ eH=c[d[101]]
+ dE=c[d[97]]
+ prove(50,a0(eH.args)=='self, snapshot: DescriptorSnapshot, mount_id: int, kind: _Generation6RNamespaceNodeKind, hardlink_group: str | None' and b(dE).count('self._validate_node_kind')==1 and('self._validate_node_kind(snapshot, mount_id, kind, hardlink_group)' in a0(dE)),'R namespace A2g validate/copy signature propagation differs')
+ cV=c[d[1]]
+ di=c[d[11]]
+ cA=c[d[13]]
+ az=c[d[75]]
+ j=b(cV)
+ bc=b(di)
+ ac=b(cA)
+ aN=b(az)
+ prove(51,j.count(d[57])==2 and j.count(d[9])==1 and(j.count(d[61])==1)and(j.count(d[68])==1)and(j.count('self._reauthenticate_inventory_classification_parent')==1)and(j.count('_GENERATION6_R_NAMESPACE_REAL_OS_GETUID')==1)and(j.count('_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD')==0)and(j.count(d[19])==0)and(j.count(d[25])==0)and(bc.count(d[19])==1)and(bc.count(d[68])==1)and(bc.count(d[25])==2)and(bc.count(d[9])==0)and(bc.count(d[57])==0),'R namespace A2g exact observation inventory differs')
+ h=a0(cV)
+ bQ=aT(cV)
+ aM=T((g for g in bQ if a0(g.func)==d[57]))
+ bS=T((g for g in bQ if a0(g.func)==d[9]))
+ bR=T((g for g in bQ if a0(g.func)==d[61]))
+ bx=('binding.raw_entry.name == binding.component','opened_snapshot == named_snapshot','descriptor_token.snapshot == opened_snapshot','named_snapshot.uid == current_uid','named_snapshot.uid == authority_binding.fact.uid','entry_mount_id == parent_mount_id','entry_mount_id == authority_binding.fact.mount_id','parent_snapshot == parent_descriptor_record.token.snapshot','descriptor_flags == fcntl.FD_CLOEXEC','status_flags & os.O_ACCMODE == os.O_RDONLY','status_flags & os.O_PATH == os.O_PATH')
+ prove(52,L(aM)==2 and L(bS)==1 and(L(bR)==1)and(aM[0].lineno<bS[0].lineno<aM[1].lineno<bR[0].lineno)and(h.find('classification_record.stat_attempts = 1')<h.find(d[9]))and(h.find('classification_record.open_attempts = 1')<h.find(d[61]))and(h.count('entry_increment=0')==2)and(h.count('encoded_name_bytes_increment=0')==2)and('os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC' in h)and('descriptor_token.snapshot' in h)and('descriptor_token.fd_flags' in h)and('descriptor_token.status_flags' in h)and OO((ll in h for ll in bx))and(not N((r.startswith('binding.raw_entry.')for r in j)))and('budget_record.operation_count == binding.operation_count_before + 2' in h)and('budget_record.entry_count == binding.entry_count_before' in h)and('budget_record.encoded_name_bytes == binding.encoded_name_bytes_before' in h),'R namespace A2g metering/authentication source differs')
+ eQ=a0(az)
+ cY=T((eQ.find(ll)for ll in('owner = object.__new__(FdOwner)','vars(owner) == {}','raw_result = _GENERATION6_R_NAMESPACE_REAL_OS_OPEN','invalid_evidence = raw_result','raw_result = _PID_SENTINEL',d[8],'low_descriptor = raw_result','self._close_rejected_namespace_raw_once(low_descriptor)','accepted_descriptor = raw_result','initialization_descriptor = accepted_descriptor','initialization_started = True','accepted_descriptor = _PID_SENTINEL','FdOwner.__init__(owner, initialization_descriptor, exact_label)')))
+ prove(53,OO((ag>=0 for ag in cY))and OO((cY[ag]<cY[ag+1]for ag in range(L(cY)-1)))and(aN.count('object.__new__')==1)and(aN.count('_GENERATION6_R_NAMESPACE_REAL_OS_OPEN')==1)and(aN.count(d[8])==1)and(aN.count('self._close_rejected_namespace_raw_once')==1)and(aN.count('FdOwner.__init__')==1)and(aN.count(d[4])==0)and(aN.count('self._retain_untransferred_raw')==0)and(not N((a.finalbody for a in a3(az)if isinstance(a,a12)))),'R namespace A2g post-open responsibility partition differs')
+ er=a0(cA)
+ bE=T((er.find(ll)for ll in(d[8],d[4],'self._poisoned_descriptors.add','self._phase = _Generation6RNamespacePhase.UNCERTAIN')))
+ aC=T((a for a in cA.body if Z(a,a12)))
+ prove(54,ac.count(d[8])==1 and ac.count(d[4])==1 and OO((ag>=0 for ag in bE))and OO((bE[ag]<bE[ag+1]for ag in range(L(bE)-1)))and(L(aC)==2)and(b(aC[0]).count(d[8])==1)and(b(aC[1]).count(d[4])==1)and(ac.count('self._descriptor_ledger.initialize_owner')==0)and(ac.count(d[68])==0)and(ac.count(d[19])==0)and(ac.count(d[25])==0)and(ac.count('self._register_name_fact')==0),'R namespace A2g rejected-descriptor close differs')
+ cf=(*T((c[m]for m in bM)),az)
+ C=T((r for a in cf for r in b(a)))
+ dk=T((w.id for a in cf for w in a3(a)if isinstance(w,a1)))
+ prove(55,OO((C.count(f'self.{m}')==0 for m in(d[80],'_reauthenticate_directory',d[55],d[105],d[81])))and d[2]not in dk and(C.count(d[0])==0)and(C.count(d[106])==0)and(C.count(d[111])==0)and(n(d[1])==()),'R namespace A2g integration/exclusion graph differs')
+ aR=b(s)
+ dt=T((a for a in U.body if isinstance(a,a8)and a.name==d[2]))
+ co=T((g for g in aT(U)if a0(g.func)==d[2]))
+ dN=T((a for a in U.body if isinstance(a,a2)and isinstance(a.target,a1)and(a.target.id==d[0])))
+ eA=T((m for m in R if b(c[m]).count(d[0])))
+ dT=T((a for a in s.body if isinstance(a,a6)and a.name==d[81]))
+ bW=('dispatch','runtime','remote','production','trading','broker','exchange','order','publish')
+ prove(56,L(dt)==1 and L(co)==0 and(dk.count(d[2])==0)and(L(dN)==1)and(aR.count(d[0])==1)and(eA==(d[98],))and(C.count(d[0])==0)and(L(dT)==1)and(n(d[81])==((d[87],1),(d[104],1),(d[92],1)))and(aR.count(d[86])==3)and(C.count(d[86])==0)and(aR.count(d[106])==0)and(b(U).count(d[106])==2)and(not N((ll in r.lower()for ll in bW for r in C))),'R namespace A2g scoped inherited surface differs')
+ cL=a0(c[d[31]])
+ dr=a0(c[d[100]])
+ dB=a0(c['seal'])
+ du=((1,'REGULAR'),(2,d[109]),(3,d[109]),(17,d[109]))
+ prove(57,du==T(((eM,d[109]if eM>1 else 'REGULAR')for eM in(1,2,3,17)))and 'snapshot.link_count > 1' in cL and('snapshot.link_count == 1' in cL)and('r6-hardlink:{mount_id}:{snapshot.device}:{snapshot.inode}' in cL)and('len(group) < fact.link_count' in dr)and('candidate.link_count == fact.link_count' in dr)and('1 <= len(members) <= members[0].link_count' in dB)and('members[0].link_count > 1' in dB)and('len(members) == 2' not in dB),'R namespace A2g hardlink generalization differs')
+ dJ=('INVENTORY_CLASSIFICATION_ATTEMPTING','INVENTORY_CLASSIFICATION_NOFOLLOW_STAT_OBSERVED','INVENTORY_CLASSIFICATION_HANDLE_AUTHENTICATED','INVENTORY_CLASSIFICATION_HANDLE_CLOSED','INVENTORY_CLASSIFICATION_ABORT_CLOSED','INVENTORY_CLASSIFICATION_REMOVABLE_CANDIDATE','INVENTORY_CLASSIFICATION_KNOWN_RESIDUE','INVENTORY_ITEM_CLASSIFIED_REMOVABLE_CANDIDATE','INVENTORY_ITEM_CLASSIFIED_KNOWN_RESIDUE','INVENTORY_CLASSIFICATION_UNCERTAIN','INVENTORY_ITEM_CLASSIFICATION_UNCERTAIN','NAME_FACT_SEALED')
+ ea=T((w.value for a in cf for w in a3(a)if isinstance(w,a4)and type(w.value)is str))
+ prove(58,OO((k in ea or k in T((eg[0]for fh in bI.values()for eg in fh))for k in dJ)),'R namespace A2g receipt vocabulary differs')
+ u=c[d[21]]
+ P=c[d[7]]
+ bb=T((a for a in cV.body if isinstance(a,a12)))
+ prove(59,L(bb)==1 and isinstance(bb[0].body[-1],A.Return)and isinstance(bb[0].body[-2],a14)and isinstance(bb[0].body[-2].value,a9)and(a0(bb[0].body[-2].value.func)==d[41])and isinstance(u.body[-1],a5)and(a0(u.body[-1].targets[0])==d[15])and isinstance(u.body[-1].value,a4)and(u.body[-1].value.value is None)and isinstance(P.body[-2],a5)and(a0(P.body[-2].targets[0])==d[15])and isinstance(P.body[-2].value,a4)and(P.body[-2].value.value is None)and isinstance(P.body[-1],a16),'R namespace A2g final publication/failure ordering differs')
+ ah=T((h.find(ll)for ll in('self._derive_inventory_classification',d[40],'self._register_inventory_classification_name_fact',d[41],'return classification')))
+ cD=a0(u)
+ ad=T((cD.find(ll)for ll in('record.state = state','item_record.state = item_state','outcome_receipt = self._append_receipt','record.outcome_receipt = outcome_receipt','terminal_receipt = self._append_receipt','\n    item_record.terminal_receipt = terminal_receipt','\n    record.terminal_receipt = terminal_receipt','self._archived_inventory_item_records.append(item_record)','self._archived_inventory_classification_records.append(record)','self._inventory_classification_residue_evidence.append(record)',d[53],d[3])))
+ ef=a0(P)
+ bV=T((ef.find(ll)for ll in('exact_record.state = _Generation6RNamespaceInventoryClassificationState.UNCERTAIN','exact_item_record.state = _Generation6RNamespaceInventoryItemState.UNCERTAIN',d[40],'classification_receipt = self._append_receipt','item_receipt = self._append_receipt','self._archived_inventory_item_records.append(exact_item_record)','self._archived_inventory_classification_records.append(exact_record)','self._inventory_classification_residue_evidence.append(exact_record)',d[53],d[3],'raise primary')))
+ prove(60,OO((ag>=0 for ag in ah))and OO((ah[ag]<ah[ag+1]for ag in range(L(ah)-1)))and OO((ag>=0 for ag in ad))and OO((ad[ag]<ad[ag+1]for ag in range(L(ad)-1)))and OO((ag>=0 for ag in bV))and OO((bV[ag]<bV[ag+1]for ag in range(L(bV)-1)))and(cD.count(d[3])==1)and(ef.count(d[3])==1),'R namespace A2g exact success/failure publication sequence differs')
+ dw=a0(c[d[110]])
+ dO=(d[26],d[28],d[15],d[29],d[30],d[23],'self._inventory_classification_faulted')
+ prove(61,OO((dw.count(ll)==1 for ll in dO)),'R namespace A2g exact store inventory differs')
+ q=a0(s)
+ bu=T((a for a in U.body if isinstance(a,a2)and isinstance(a.target,a1)and(a.target.id=='_GENERATION6_R_REAL_NEXT')))
+ prove(62,L(bu)==1,'R namespace static A2g bundle start differs')
+ db=bu[0].lineno
+ prove(63,K(s.end_lineno)is int,'R namespace static bundle end differs')
+ dP=cast(int,s.end_lineno)
+ f=T((a for a in U.body if db<=a.lineno<=dP))
+ bo=T((f'capture:{a.target.id}' if isinstance(a,a2)and isinstance(a.target,a1)else f'class:{a.name}' if isinstance(a,a8)else f'function:{a.name}' if isinstance(a,a6)else d[60]if isinstance(a,a5)and N((isinstance(r,a1)and r.id==d[16]for r in a.targets))else f'unexpected:{type(a).__name__}' for a in f))
+ dc=('_G6R_PN','_G6R_PK','_G6R_PE','_G6R_IK','_G6R_IE','_G6R_BK','_G6R_BE','_G6R_OK','_G6R_OE','_G6R_LK','_G6R_LE','_G6R_TK','_G6R_TE','_G6R_WK','_G6R_WE','_G6R_VK','_G6R_VE',d[45],'_G6R_SS','_G6R_SK','_G6R_SE','_G6R_AF','_G6R_AI','_G6R_NF','_G6R_NI','_G6R_VC','_G6R_VF','_G6R_VI','_G6R_VB','_G6R_G','_G6R_D')
+ prove(64,L(f)==159 and OO((f'capture:{m}' in bo for m in dc))and(not N((fo.startswith('unexpected:')for fo in bo))),'R namespace canonical capture inventory differs')
+ cS='\n'.join(source.splitlines()[db-1:dP])+'\n'
+ eC=b'TASK-064\x00GEN6\x00R-A2g\x00source-v1\x00'
+ dm=eC+cS.encode('utf-8')
+ eB=H.sha256(dm).hexdigest()
+ prove(65,db==10578 and dP==19969 and(f[0]is bu[0])and(f[-1]is s)and OO((type(a.end_lineno)is int and a.end_lineno<f[ag+1].lineno for ag,a in enumerate(f[:-1])))and(L(dm)==791648)and(eB=='2682341b75ab6bcef8ca26a846f7ea6ccd43c59be49ea0a08508a3feeb3e0694'),'R namespace A2g reviewed source-bundle digest differs')
+ bw=b'TASK-064\x00GEN6\x00R-CAP1\x00ast-schema-v1\x00'
+ aP=b'TASK-064\x00GEN6\x00R-CAP1\x00semantic-projection-v1\x00'
+ prove(66,Y.version_info[:3]==(3,13,14),'R CAP1 Python AST runtime differs')
+ cU=T((w for a in f for w in a3(a)))
+ bO=T(sorted({(K(a).__name__,T(a._fields))for a in cU}))
+ cI={fp:ag for ag,fp in enumerate(bO)}
+ prove(67,L(cU)==181988 and L(bO)==63 and(L(cI)==63),'R CAP1 AST inventory differs')
+ def cl(k:object)->bytes:
+  return J.dumps(k,ensure_ascii=True,allow_nan=False,separators=(',',':'),sort_keys=False).encode('ascii')
+ def fk(k:object)->list[object]:
+  if k is None:
+   return['z']
+  if k is Ellipsis:
+   return['e']
+  if type(k)is bool:
+   return['b',1 if k else 0]
+  if type(k)is int:
+   return['i',str(k)]
+  if type(k)is str:
+   return['s',k]
+  if type(k)is bytes:
+   return['y',k.hex()]
+  if type(k)is float:
+   ed=k
+   if not M.isfinite(ed):
+    raise E('R CAP1 non-finite AST float')
+   return['f',ed.hex()]
+  if type(k)is complex:
+   bU=k
+   if not M.isfinite(bU.real)or not M.isfinite(bU.imag):
+    raise E('R CAP1 non-finite AST complex')
+   return['c',bU.real.hex(),bU.imag.hex()]
+  raise E('R CAP1 unsupported AST scalar')
+ def aQ(k:object)->list[object]:
+  if isinstance(k,A.AST):
+   fp=(type(k).__name__,T(k._fields))
+   dI=cI.get(fp)
+   if dI is None:
+    raise E('R CAP1 unknown AST schema row')
+   return['n',dI,[aQ(getattr(k,fn))for fn in k._fields]]
+  if isinstance(k,list):
+   return['l',[aQ(fs)for fs in k]]
+  return fk(k)
+ cm=[[m,list(fl)]for m,fl in bO]
+ av=cl(cm)
+ ba=H.sha256(bw)
+ ba.update(av)
+ prove(68,L(bw)==35 and L(av)==1773 and(H.sha256(av).hexdigest()=='486a9f82f88f635adf07611fab7ccc6446cd8acc5e82606f606866e299dc15b3')and(L(bw)+L(av)==1808)and(ba.hexdigest()=='86297c6227cac657ba4f56a8101e59231bc7f4ff3855a6f23f45fde178279d04'),'R CAP1 AST schema projection differs')
+ def eT(a:ast.stmt)->str:
+  if isinstance(a,a2)and isinstance(a.target,a1):
+   return f'capture:{a.target.id}'
+  if isinstance(a,a8):
+   return f'class:{a.name}'
+  if isinstance(a,a6):
+   return f'function:{a.name}'
+  if isinstance(a,a5)and N((isinstance(r,a1)and r.id==d[16]for r in a.targets)):
+   return d[60]
+  raise E('R CAP1 unsupported bundle root')
+ def fg(a:ast.stmt)->int:
+  if type(a.end_lineno)is not int:
+   raise E('R CAP1 bundle root end line differs')
+  return a.end_lineno
+ aa:tuple[tuple[str,int,int,int,str],...]=T(((fw,*fx)for fw,fx in zip(T((fD.replace('@','capture:_GENERATION6_R_NAMESPACE_').replace('#','capture:_GENERATION6_R_').replace('!','capture:_G6R_').replace('%','class:_Generation6RNamespace').replace('&','class:_Generation6R').replace('?','function:_generation6_r_').replace('~','alias:_Generation6RNamespace')for fD in ['#REAL_NEXT', '#REAL_STOP_ITERATION', '#REAL_DIRENTRY_TYPE', '#REAL_LIST_APPEND', '#REAL_LIST_GETITEM', '#REAL_TYPE', '#REAL_ID', '#REAL_INT', '#REAL_BOOL', '#REAL_TUPLE', '#REAL_DICT', '#REAL_LEN', '#REAL_GETATTR', '#REAL_DICT_ITEMS', '#REAL_TYPE_GETATTRIBUTE', '#REAL_OBJECT_GETATTRIBUTE', '#REAL_OBJECT_SETATTR', '#REAL_TUPLE_GETITEM', '#PY_TPFLAGS_IMMUTABLETYPE', '#TPFLAGS_IMMUTABLETYPE', '#TPFLAGS_HEAPTYPE', '#TYPE_SECURITY_FLAGS_MASK', '&Phase', '&DescriptorState', '&OwnerToken', '&OwnerRecord', '&AuthorityEvent', '&IteratorToken', '&ScandirCapability', '&AuthorityLedger', '#CAPTURED_APPEND_EVENT', '&ScandirProxy', '#CAPTURED_SCANDIR_PROXY_NEXT', '!PN', '!PK', '!PE', '!IK', '!IE', '!BK', '!BE', '!OK', '!OE', '!LK', '!LE', '!TK', '!TE', '!WK', '!WE', '!VK', '!VE', '#CAPTURED_APPEND_EVENT_INTEGRITY', '#CAPTURED_APPEND_EVENT_CLOSURE_BINDINGS', '#CAPTURED_SCANDIR_PROXY_NEXT_INTEGRITY', '#CAPTURED_SCANDIR_PROXY_NEXT_CLOSURE_BINDINGS', '#CAPTURED_AUTHORITY_EVENT_CLASS', '#CAPTURED_AUTHORITY_EVENT_INIT', '#CAPTURED_AUTHORITY_EVENT_INIT_CLOSURE', '#CAPTURED_AUTHORITY_EVENT_INIT_CLOSURE_BINDINGS', '#CAPTURED_AUTHORITY_EVENT_INIT_INTEGRITY', '#AUTHORITY_EVENT_CLASS_SEAL', '#SCANDIR_PROXY_CLASS_SEAL', '#AUTHORITY_LEDGER_CLASS_SEAL', '#ITERATOR_TOKEN_CLASS_SEAL', '#OWNER_TOKEN_CLASS_SEAL', '!SS', '!SK', '!SE', '!AF', '!AI', '!NF', '!NI', '!VC', '!VF', '!VI', '!VB', '!G', '!D', '?socket_detach_handoff', '&AuthorityScope', '@REAL_OS_STAT', '@REAL_OS_OPEN', '@REAL_OS_FSTAT', '@REAL_OS_UNLINK', '@REAL_OS_GETUID', '@REAL_FCNTL', '@REAL_MONOTONIC_NS', '@CLEANUP_MAX_DEPTH', '@CLEANUP_MAX_ENTRIES', '@CLEANUP_MAX_ENCODED_NAME_BYTES', '@CLEANUP_MAX_OPERATIONS', '@CLEANUP_DEADLINE_NS', '@CAPTURED_SNAPSHOT_STAT', '@CAPTURED_SNAPSHOT_FD', '@CAPTURED_STABLE_DIRECTORY_MATCHES', '@CAPTURED_MOUNT_ID', '@CAPTURED_COMPONENT', '@CAPTURED_FD_REQUIRE', '@CAPTURED_S_IFMT', '@CAPTURED_S_ISDIR', '@CAPTURED_S_ISREG', '@REAL_OS_FSENCODE', '?namespace_filesystem_component', '%Phase', '%TokenState', '%Action', '%NodeKind', '%AuthorityKind', '%OwnerState', '%OwnerKind', '%OwnerPurpose', '%ContextState', '%CloseEvent', '%MutationPermitState', '%CleanupBudgetState', '%CleanupBudgetEvent', '@CLEANUP_BUDGET_EVENT_BY_STATE', '%InventoryCursorState', '%InventoryScanState', '%InventoryAdvanceState', '%InventoryItemState', '%InventoryClassificationState', '%TerminalEvent', '%DirectoryFact', '%NameFact', '%DirectoryAuthority', '%DirectoryBinding', '%DirectoryRecord', '%OwnerContextBinding', '%OwnerContext', '%PresentToken', '%AbsenceToken', '%RenameToken', '%MutationPermit', '~LiveToken', '%CapabilityBinding', '%CapabilityRecord', '%UnlinkPreproof', '%MutationPermitBinding', '%MutationPermitRecord', '%CleanupBudgetEpoch', '%InventoryCursor', '%InventoryScan', '%InventoryAdvance', '%InventoryItem', '%InventoryClassification', '%EmptyInventory', '%Receipt', '%CleanupBudgetRecord', '%InventoryCursorBinding', '%InventoryCursorRecord', '%InventoryScanBinding', '%InventoryScanRecord', '%InventoryAdvanceBinding', '%InventoryAdvanceRecord', '%InventoryItemBinding', '%InventoryItemRecord', '%InventoryClassificationBinding', '%InventoryClassificationRecord', '%Journal'])),D[6],strict=True)))
+ aW=T(((eT(a),a.lineno,fg(a),L(dH),H.sha256(dH).hexdigest())for a in f for dH in(cl(aQ(a)),)))
+ prove(69,aW==aa,'R CAP1 ordered bundle-root projection inventory differs')
+ dd:list[object]=['TASK064-G6-R-CAP1-SEMANTIC-PROJECTION-V1',['contract',6,'ec89a1df740805cc9b43e6f2530e940c0bf9b66e8f25ed878d3207d091c4bcb8'],['python_ast','3.13.14','attributes-excluded','schema-indexed-fields'],['schema',cm],['bundle',10578,19969,L(f),aQ(list(f))]]
+ X=cl(dd)
+ aI=H.sha256(aP)
+ aI.update(X)
+ prove(70,L(aP)==44 and L(X)==3655899 and(H.sha256(X).hexdigest()=='7c7125661417c3e981f3303daeca704680ca398f6df9ec8f2c1a1592c80e0a23')and(L(aP)+L(X)==3655943)and(aI.hexdigest()=='649e858681a618d4e22faee0fe0cec45eee54b5d80be91f2993b58f6e7baf9dc'),'R CAP1 lossless semantic projection differs')
+ cp=T((es.removeprefix('capture:')for es,fu,fv,fr,fq in aa if es.startswith('capture:')))
+ at:tuple[str,...]=(d[67],d[63],d[71],d[70],d[77],d[17],d[36],d[56],d[69],d[51],d[35],d[55],d[43])
+ at=(*at,d[14],d[46],d[11],d[31],d[13],d[10],d[5],d[21],d[7],d[1])
+ cx={d[17],d[36],d[56]}
+ B=set(x)
+ do=T((g for dv in c.values()for g in aT(dv)))
+ cB=bf(d[20])
+ eb=T(a3(cB))
+ ew=lambda fD:(fD.lineno,fD.col_offset)  # noqa: E731
+ eh=T(sorted((fD for fD in eb if isinstance(fD,a9)and isinstance(fD.func,a1)and(fD.func.id=='prove')),key=ew))
+ cC=T(sorted((fD for fD in eb if isinstance(fD,a11)and isinstance(fD.value,a1)and(fD.value.id=='D')and isinstance(fD.slice,a4)and(type(fD.slice.value)is int)),key=ew))
+ if not(T(map(L,ROWS))==(79,79,79)and L(eh)==79 and(T((fD.args[0].value for fD in eh if L(fD.args)==3 and isinstance(fD.args[0],a4)and(type(fD.args[0].value)is int)))==T(range(79)))and(sum((1 for fD in eb if isinstance(fD,a1)and isinstance(fD.ctx,a18)and(fD.id=='D')))==L(cC)==10)and(T((cast(ast.Constant,fD.slice).value for fD in cC))==(0,5,1,2,3,3,3,3,4,6))):
+  raise E('R CAP2-R5 static proof/RHS consumer binding differs')
+ W=T((a for a in U.body if a not in f and a is not cB))
+ cu=set(cp)
+ bZ=set(at)
+ bl=B|{'DirectoryOwner','FdOwner','PrivateRoot'}
+ def de(a:ast.expr)->str:
+  if isinstance(a,a1):
+   return a.id
+  if isinstance(a,a7):
+   return a.attr
+  return ''
+ bz=T(((type(a.ctx).__name__,a.id)for aY in W for a in a3(aY)if isinstance(a,a1)and isinstance(a.ctx,(a13,a15))and(a.id in cu)))
+ bq=T(((de(g.func),a0(g.func))for aY in W for g in aT(aY)if de(g.func)in bZ))
+ aU=T((a0(g.func)for aY in W for g in aT(aY)if a0(g.func)in B))
+ bv=T(((type(a.ctx).__name__,a.id)for aY in W for a in a3(aY)if isinstance(a,a1)and isinstance(a.ctx,(a13,a15))and(a.id in bl)))
+ bN=((d[58],bz),(d[73],bq),(d[65],aU),(d[52],bv))
+ prove(71,L(cp)==91 and L(at)==23 and(L(B)==55)and(L(bl)==58)and(bN==((d[58],()),(d[73],()),(d[65],()),(d[52],()))),'R CAP1 ordered external residuals differ')
+ aS=True
+ aF=True
+ al=True
+ an=True
+ aZ=True
+ au=True
+ aG=True
+ ae=True
+ F=True
+ ap=True
+ G=True
+ aE=False
+ aL:tuple[str,...]=(d[74],d[95],d[93],d[94],d[64],d[33],d[27],d[42])
+ aO=False
+ bH=(d[44],)
+ prove(72,K(aS)is bool and aS and(K(aF)is bool)and aF and(K(al)is bool)and al and(K(an)is bool)and an and(K(aZ)is bool)and aZ and(K(au)is bool)and au and(K(aG)is bool)and aG and(K(ae)is bool)and ae and(K(F)is bool)and F and(K(ap)is bool)and ap and(K(G)is bool)and G and(K(aE)is bool)and(not aE)and(aL==(d[74],d[95],d[93],d[94],d[64],d[33],d[27],d[42]))and(K(aO)is bool)and(not aO)and(bH==(d[44],))and OO((m in i for m in('_Generation6RNamespaceInventoryCursor',d[66],d[2])))and OO((ll not in q for ll in(d[2],'consume_rmdir')))and OO((ll in q for ll in('_Generation6RNamespaceCleanupBudgetEpoch','_Generation6RNamespaceCleanupBudgetRecord','_issue_cleanup_budget_epoch',d[91],'_Generation6RNamespaceInventoryCursorBinding','_Generation6RNamespaceInventoryCursorRecord',d[67],d[63],d[71],d[70],d[77],d[50],d[66],'_Generation6RNamespaceInventoryScanBinding','_Generation6RNamespaceInventoryScanRecord',d[17],d[36],d[56],d[38],'_Generation6RNamespaceInventoryAdvance','_Generation6RNamespaceInventoryAdvanceBinding','_Generation6RNamespaceInventoryAdvanceRecord',d[49],'_Generation6RNamespaceInventoryItem','_Generation6RNamespaceInventoryItemBinding','_Generation6RNamespaceInventoryItemRecord',d[69],d[51],d[35],d[55],d[43]))),'R namespace A2f budget/RMDIR readiness and current capability differ')
+ am=True
+ aL=(d[64],d[33],d[27],d[42])
+ prove(73,K(am)is bool and am and(K(aE)is bool)and(not aE)and(aL==(d[64],d[33],d[27],d[42]))and(K(aO)is bool)and(not aO)and(bH==(d[44],))and OO((ll in q for ll in('_Generation6RNamespaceInventoryClassificationState',d[34],d[22],d[24],d[1]))),'R namespace A2g readiness transition differs')
+ S={'self._authority_records_by_serial','self._authority_records_by_identity','self._authority_records_by_owner_identity','self._directory_facts_by_serial','self._name_facts_by_key','self._hardlink_groups','self._capability_records_by_serial','self._capability_records_by_identity','self._archived_capability_records','self._mutation_permit_records_by_serial','self._mutation_permit_records_by_identity','self._archived_mutation_permit_records','self._cleanup_budget_records_by_serial','self._cleanup_budget_records_by_identity','self._inventory_cursor_bindings_by_identity','self._inventory_cursor_bindings_by_serial','self._inventory_cursor_records_by_identity','self._inventory_cursor_records_by_serial','self._archived_inventory_cursor_records','self._inventory_scan_records_by_identity','self._inventory_scan_records_by_serial','self._archived_inventory_scan_records','self._inventory_scan_proxy_quarantine','self._inventory_advance_records_by_identity','self._inventory_advance_records_by_serial','self._archived_inventory_advance_records','self._inventory_item_records_by_identity','self._inventory_item_records_by_serial','self._archived_inventory_item_records','self._inventory_raw_entry_quarantine','self._namespace_owner_tokens','self._namespace_owner_contexts','self._receipts'}
+ S=S|{d[26],d[28],d[29],d[30],d[23],'self._untransferred_raw_quarantine'}
+ bF:tuple[str,...]=T((a0(g)for g in do if isinstance(g.func,a7)and a0(g.func.value)in S and(g.func.attr in{'clear','discard','pop','popitem','remove','__delitem__'})))
+ cq=T((a0(a)for dv in c.values()for a in a3(dv)if isinstance(a,a11)and isinstance(a.ctx,a15)and(a0(a.value)in S)))
+ cn={d[111],d[106],d[113],d[114],d[108],'Path.unlink','pathlib.Path.unlink','shutil.rmtree','ctypes.CDLL','ctypes.PyDLL','syscall'}
+ cw=T((a0(g.func)for g in do if a0(g.func)in cn))
+ cg=T((a0(a)for dv in c.values()for a in a3(dv)if isinstance(a,(a5,a2,a10))and a.value is not None and(a0(a.value)in{d[0],*cn})))
+ dh=T((a.value for dv in c.values()for a in a3(dv)if isinstance(a,a4)and type(a.value)is str))
+ prove(74,not bF and(not cq)and(not cw)and(not cg)and(b(s).count(d[0])==1)and(not N(('RMDIR_' in k or 'RMDIR_CONSUMED' in k or 'PRESENT_RMDIR' in k for k in dh)))and('_GENERATION6_R_NAMESPACE_REAL_OS_RMDIR' not in q)and(d[113]not in q)and('os.rename(' not in q)and(d[108]not in q)and('pathlib' not in q.lower())and('shutil' not in q.lower())and('syscall' not in q.lower()),'R namespace A1b destructive/strong-reference surface differs')
+ bJ={'register_borrowed_directory',d[88],d[103],d[105],'seal',d[87],d[104],d[92],d[98],d[107]}
+ t=bf(d[20])
+ y=T((a for a in U.body if a not in f and a is not t))
+ ar={*aj,*x,d[16]}
+ bC=ar|bJ|cx
+ cT={r.id for a in a3(U)if isinstance(a,(a5,a2,a10))and isinstance(a.value,a4)and isinstance(a.value.value,str)and(a.value.value in bC)for r in(T(a.targets)if isinstance(a,a5)else(a.target,))if isinstance(r,a1)}
+ def eE(a:ast.expr)->bool:
+  return isinstance(a,a4)and isinstance(a.value,str)and(a.value in bC)or(isinstance(a,a1)and a.id in cT)
+ cj=T((a.id for aY in y for a in a3(aY)if isinstance(a,a1)and isinstance(a.ctx,a18)and(a.id in ar)))
+ ce=T(((type(a.ctx).__name__,a.id)for aY in y for a in a3(aY)if isinstance(a,a1)and isinstance(a.ctx,(a13,a15))and(a.id in ar)))
+ ci=T((a0(a)for aY in y for a in a3(aY)if isinstance(a,a7)and a.attr in ar))
+ cs=T((a0(a)for aY in y for a in a3(aY)if isinstance(a,a11)and eE(a.slice)))
+ dj=T((a0(g)for aY in y for g in aT(aY)if(a0(g.func)in{'delattr','dict.__setitem__','getattr','operator.setitem','setattr','type.__setattr__'}or(isinstance(g.func,a7)and g.func.attr in{'__getitem__','__setitem__','get','pop','setdefault','update'}))and N((eE(cG)for cG in g.args))))
+ dM=T((a0(g.func)for aY in y for g in aT(aY)if a0(g.func)in{'eval','exec'}))
+ cR=T((g for a in U.body if a not in i.values()and a is not t for g in aT(a)))
+ prove(75,not cj and(not ce)and(not ci)and(not cs)and(not dj)and(not dM)and(not N((a0(g.func)in B or(isinstance(g.func,a7)and g.func.attr in bJ)for g in cR))),'R namespace static integration block has an external call site')
+ prove(76,K(t.end_lineno)is int,'R namespace A2g gate end differs')
+ et=t.lineno
+ eJ=cast(int,t.end_lineno)
+ bg='c664dd84d0fa6a3482dcf233f572199271e76dc38280cf16f77c44436f9859f1'
+ aq='\n'.join(source.splitlines()[et-1:eJ])+'\n'
+ prove(77,aq.count(bg)==1,'R namespace A2g gate digest token differs')
+ aq=aq.replace(bg,'0'*64)
+ eO=b'TASK-064\x00GEN6\x00R-CAP2-R6\x00gate-v1\x00'
+ dR=eO+aq.encode('utf-8')
+ eN=H.sha256(dR).hexdigest()
+ dK=U.body.index(t)
+ prove(78,et==19973 and eJ==20543 and(U.body[dK+1]is bf(d[79]))and(L(dR)==74013)and(eN==bg),'R namespace A2g reviewed gate digest differs')
+# fmt: on
 
 
 # R-AUTH is intentionally integration-blocked until its namespace journal and teardown
