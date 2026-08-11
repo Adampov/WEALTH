@@ -12729,6 +12729,14 @@ class _Generation6RNamespaceInventoryClassificationState(  # noqa: UP042 - exact
     UNCERTAIN = "UNCERTAIN"
 
 
+class _Generation6RNamespaceEmptyInventoryState(  # noqa: UP042 - exact contract
+    str, Enum
+):
+    AUTHENTICATING = "AUTHENTICATING"
+    AUTHENTICATED = "AUTHENTICATED"
+    UNCERTAIN = "UNCERTAIN"
+
+
 class _Generation6RNamespaceTerminalEvent(str, Enum):  # noqa: UP042 - exact contract
     ABSENCE_TOKEN_ABANDONED = "ABSENCE_TOKEN_ABANDONED"
     MUTATION_TOKEN_ABANDONED = "MUTATION_TOKEN_ABANDONED"
@@ -12977,6 +12985,45 @@ class _Generation6RNamespaceInventoryClassification:
 class _Generation6RNamespaceEmptyInventory:
     serial: int
     issuer_identity: int
+
+
+@dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceEmptyInventoryBinding:
+    serial: int
+    issuer_identity: int
+    empty_inventory: _Generation6RNamespaceEmptyInventory
+    empty_inventory_identity: int
+    empty_inventory_serial: int
+    empty_inventory_issuer_identity: int
+    cursor_record: _Generation6RNamespaceInventoryCursorRecord
+    cursor_record_identity: int
+    cursor_binding: _Generation6RNamespaceInventoryCursorBinding
+    cursor_binding_identity: int
+    scan_record: _Generation6RNamespaceInventoryScanRecord
+    scan_record_identity: int
+    scan_binding: _Generation6RNamespaceInventoryScanBinding
+    scan_binding_identity: int
+    advance_record: _Generation6RNamespaceInventoryAdvanceRecord
+    advance_record_identity: int
+    advance_binding: _Generation6RNamespaceInventoryAdvanceBinding
+    advance_binding_identity: int
+    cleanup_epoch: _Generation6RNamespaceCleanupBudgetEpoch
+    cleanup_epoch_identity: int
+    cleanup_budget_record: _Generation6RNamespaceCleanupBudgetRecord
+    cleanup_budget_record_identity: int
+    operation_count_at_end: int
+    entry_count_at_end: int
+    encoded_name_bytes_at_end: int
+    depth_high_water_at_end: int
+
+
+@dataclass(eq=False)
+class _Generation6RNamespaceEmptyInventoryRecord:
+    binding: _Generation6RNamespaceEmptyInventoryBinding
+    binding_identity: int
+    state: _Generation6RNamespaceEmptyInventoryState
+    attempt_receipt: _Generation6RNamespaceReceipt | None
+    outcome_receipt: _Generation6RNamespaceReceipt | None
 
 
 @dataclass(frozen=True, eq=False)
@@ -13355,6 +13402,17 @@ class _Generation6RNamespaceJournal:
         ] = []
         self._inventory_classification_descriptor_quarantine: list[FdOwner] = []
         self._inventory_classification_faulted = False
+        self._empty_inventory_records_by_identity: dict[
+            int, _Generation6RNamespaceEmptyInventoryRecord
+        ] = {}
+        self._empty_inventory_records_by_serial: dict[
+            int, _Generation6RNamespaceEmptyInventoryRecord
+        ] = {}
+        self._live_empty_inventory_record: _Generation6RNamespaceEmptyInventoryRecord | None = None
+        self._archived_empty_inventory_records: list[
+            _Generation6RNamespaceEmptyInventoryRecord
+        ] = []
+        self._empty_inventory_lifecycle_faulted = False
         self._pending_publication: object | None = None
         self._poisoned_descriptors: set[int] = set()
         self._namespace_owner_tokens: dict[int, _Generation6ROwnerToken] = {}
@@ -16612,6 +16670,913 @@ class _Generation6RNamespaceJournal:
                 owner,
                 primary,
             )
+            raise
+
+    def _require_current_empty_inventory(
+        self,
+        empty_inventory: _Generation6RNamespaceEmptyInventory,
+    ) -> _Generation6RNamespaceEmptyInventoryRecord:
+        live_record = self._live_empty_inventory_record
+        _require(
+            type(self._empty_inventory_lifecycle_faulted) is bool
+            and not self._empty_inventory_lifecycle_faulted
+            and type(self._empty_inventory_records_by_identity) is dict
+            and type(self._empty_inventory_records_by_serial) is dict
+            and type(self._archived_empty_inventory_records) is list
+            and not self._archived_empty_inventory_records
+            and type(live_record) is _Generation6RNamespaceEmptyInventoryRecord,
+            "R namespace current empty inventory trusted live slot differs",
+        )
+        if type(live_record) is not _Generation6RNamespaceEmptyInventoryRecord:
+            raise ContractError("R namespace current empty inventory trusted live slot differs")
+        record = live_record
+        binding = record.binding
+        _require(
+            type(binding) is _Generation6RNamespaceEmptyInventoryBinding,
+            "R namespace current empty inventory trusted binding type differs",
+        )
+        trusted_empty_inventory = binding.empty_inventory
+        cursor_record = binding.cursor_record
+        cursor_binding = binding.cursor_binding
+        scan_record = binding.scan_record
+        scan_binding = binding.scan_binding
+        advance_record = binding.advance_record
+        advance_binding = binding.advance_binding
+        cleanup_epoch = binding.cleanup_epoch
+        budget_record = binding.cleanup_budget_record
+        attempt_receipt = record.attempt_receipt
+        _exact_keys(
+            vars(record),
+            ("binding", "binding_identity", "state", "attempt_receipt", "outcome_receipt"),
+            "R namespace current empty inventory record",
+        )
+        _exact_keys(
+            vars(binding),
+            (
+                "serial",
+                "issuer_identity",
+                "empty_inventory",
+                "empty_inventory_identity",
+                "empty_inventory_serial",
+                "empty_inventory_issuer_identity",
+                "cursor_record",
+                "cursor_record_identity",
+                "cursor_binding",
+                "cursor_binding_identity",
+                "scan_record",
+                "scan_record_identity",
+                "scan_binding",
+                "scan_binding_identity",
+                "advance_record",
+                "advance_record_identity",
+                "advance_binding",
+                "advance_binding_identity",
+                "cleanup_epoch",
+                "cleanup_epoch_identity",
+                "cleanup_budget_record",
+                "cleanup_budget_record_identity",
+                "operation_count_at_end",
+                "entry_count_at_end",
+                "encoded_name_bytes_at_end",
+                "depth_high_water_at_end",
+            ),
+            "R namespace current empty inventory binding",
+        )
+        _require(
+            record.binding_identity == id(binding)
+            and type(binding.serial) is int
+            and binding.serial > 0
+            and binding.issuer_identity == self._issuer_identity
+            and type(trusted_empty_inventory) is _Generation6RNamespaceEmptyInventory
+            and binding.empty_inventory_identity == id(trusted_empty_inventory)
+            and binding.empty_inventory_serial == trusted_empty_inventory.serial
+            and binding.empty_inventory_issuer_identity == trusted_empty_inventory.issuer_identity
+            and trusted_empty_inventory.issuer_identity == self._issuer_identity
+            and self._empty_inventory_records_by_identity.get(binding.empty_inventory_identity)
+            is record
+            and self._empty_inventory_records_by_serial.get(binding.empty_inventory_serial)
+            is record
+            and record.state is _Generation6RNamespaceEmptyInventoryState.AUTHENTICATING
+            and type(attempt_receipt) is _Generation6RNamespaceReceipt
+            and attempt_receipt.issuer_identity == self._issuer_identity
+            and attempt_receipt.token_serial == binding.empty_inventory_serial
+            and attempt_receipt.authority_serial == cursor_binding.authority_serial
+            and attempt_receipt.event == "INVENTORY_EMPTY_AUTHENTICATING"
+            and record.outcome_receipt is None
+            and type(cursor_record) is _Generation6RNamespaceInventoryCursorRecord
+            and binding.cursor_record_identity == id(cursor_record)
+            and type(cursor_binding) is _Generation6RNamespaceInventoryCursorBinding
+            and binding.cursor_binding_identity == id(cursor_binding)
+            and cursor_record.binding is cursor_binding
+            and cursor_record.state is _Generation6RNamespaceInventoryCursorState.CURRENT
+            and cursor_record.terminal_receipt is None
+            and self._live_inventory_cursor_record is cursor_record
+            and type(scan_record) is _Generation6RNamespaceInventoryScanRecord
+            and binding.scan_record_identity == id(scan_record)
+            and type(scan_binding) is _Generation6RNamespaceInventoryScanBinding
+            and binding.scan_binding_identity == id(scan_binding)
+            and scan_record.binding is scan_binding
+            and scan_binding.cursor_record is cursor_record
+            and scan_binding.cursor_binding is cursor_binding
+            and scan_record.state is _Generation6RNamespaceInventoryScanState.END_OBSERVED
+            and scan_record.close_attempts == 1
+            and self._live_inventory_scan_record is None
+            and type(advance_record) is _Generation6RNamespaceInventoryAdvanceRecord
+            and binding.advance_record_identity == id(advance_record)
+            and type(advance_binding) is _Generation6RNamespaceInventoryAdvanceBinding
+            and binding.advance_binding_identity == id(advance_binding)
+            and advance_record.binding is advance_binding
+            and advance_binding.scan_record is scan_record
+            and advance_binding.scan_binding is scan_binding
+            and advance_record.state is _Generation6RNamespaceInventoryAdvanceState.END_OBSERVED
+            and advance_record.advance_attempts == 1
+            and advance_record.raw_entry is None
+            and advance_record.raw_entry_identity is None
+            and advance_record.item_record is None
+            and type(cleanup_epoch) is _Generation6RNamespaceCleanupBudgetEpoch
+            and binding.cleanup_epoch_identity == id(cleanup_epoch)
+            and cleanup_epoch is cursor_binding.cleanup_epoch
+            and cleanup_epoch is advance_binding.cleanup_epoch
+            and type(budget_record) is _Generation6RNamespaceCleanupBudgetRecord
+            and binding.cleanup_budget_record_identity == id(budget_record)
+            and budget_record is cursor_binding.cleanup_budget_record
+            and budget_record is advance_binding.cleanup_budget_record
+            and budget_record.epoch is cleanup_epoch
+            and self._live_cleanup_budget_record is budget_record
+            and budget_record.state is _Generation6RNamespaceCleanupBudgetState.ACTIVE
+            and binding.operation_count_at_end == budget_record.operation_count
+            and binding.entry_count_at_end == budget_record.entry_count
+            and binding.encoded_name_bytes_at_end == budget_record.encoded_name_bytes
+            and binding.depth_high_water_at_end == budget_record.depth_high_water,
+            "R namespace current empty inventory trusted evidence differs",
+        )
+        _require(
+            type(empty_inventory) is _Generation6RNamespaceEmptyInventory,
+            "R namespace current empty inventory caller type differs",
+        )
+        _exact_keys(
+            vars(empty_inventory),
+            ("serial", "issuer_identity"),
+            "R namespace current empty inventory caller",
+        )
+        _require(
+            empty_inventory.serial == binding.empty_inventory_serial
+            and empty_inventory.issuer_identity == binding.empty_inventory_issuer_identity,
+            "R namespace current empty inventory caller fields differ",
+        )
+        _require(
+            empty_inventory is trusted_empty_inventory,
+            "R namespace current empty inventory caller identity differs",
+        )
+        return record
+
+    def _require_authenticated_empty_inventory(
+        self,
+        empty_inventory: _Generation6RNamespaceEmptyInventory,
+    ) -> _Generation6RNamespaceEmptyInventoryRecord:
+        self._require_building()
+        archive = self._archived_empty_inventory_records
+        _require(
+            type(self._empty_inventory_lifecycle_faulted) is bool
+            and not self._empty_inventory_lifecycle_faulted
+            and type(self._empty_inventory_records_by_identity) is dict
+            and type(self._empty_inventory_records_by_serial) is dict
+            and self._live_empty_inventory_record is None
+            and type(archive) is list
+            and len(archive) == 1
+            and type(archive[0]) is _Generation6RNamespaceEmptyInventoryRecord,
+            "R namespace authenticated empty inventory trusted archive differs",
+        )
+        record = archive[0]
+        if type(record) is not _Generation6RNamespaceEmptyInventoryRecord:
+            raise ContractError("R namespace authenticated empty inventory trusted archive differs")
+        binding = record.binding
+        _require(
+            type(binding) is _Generation6RNamespaceEmptyInventoryBinding,
+            "R namespace authenticated empty inventory trusted binding type differs",
+        )
+        trusted_empty_inventory = binding.empty_inventory
+        cursor_record = binding.cursor_record
+        cursor_binding = binding.cursor_binding
+        scan_record = binding.scan_record
+        scan_binding = binding.scan_binding
+        advance_record = binding.advance_record
+        advance_binding = binding.advance_binding
+        cleanup_epoch = binding.cleanup_epoch
+        budget_record = binding.cleanup_budget_record
+        attempt_receipt = record.attempt_receipt
+        outcome_receipt = record.outcome_receipt
+        _exact_keys(
+            vars(record),
+            ("binding", "binding_identity", "state", "attempt_receipt", "outcome_receipt"),
+            "R namespace authenticated empty inventory record",
+        )
+        _exact_keys(
+            vars(binding),
+            (
+                "serial",
+                "issuer_identity",
+                "empty_inventory",
+                "empty_inventory_identity",
+                "empty_inventory_serial",
+                "empty_inventory_issuer_identity",
+                "cursor_record",
+                "cursor_record_identity",
+                "cursor_binding",
+                "cursor_binding_identity",
+                "scan_record",
+                "scan_record_identity",
+                "scan_binding",
+                "scan_binding_identity",
+                "advance_record",
+                "advance_record_identity",
+                "advance_binding",
+                "advance_binding_identity",
+                "cleanup_epoch",
+                "cleanup_epoch_identity",
+                "cleanup_budget_record",
+                "cleanup_budget_record_identity",
+                "operation_count_at_end",
+                "entry_count_at_end",
+                "encoded_name_bytes_at_end",
+                "depth_high_water_at_end",
+            ),
+            "R namespace authenticated empty inventory binding",
+        )
+        _require(
+            record.binding_identity == id(binding)
+            and type(binding.serial) is int
+            and binding.serial > 0
+            and binding.issuer_identity == self._issuer_identity
+            and type(trusted_empty_inventory) is _Generation6RNamespaceEmptyInventory
+            and binding.empty_inventory_identity == id(trusted_empty_inventory)
+            and binding.empty_inventory_serial == trusted_empty_inventory.serial
+            and binding.empty_inventory_issuer_identity == trusted_empty_inventory.issuer_identity
+            and trusted_empty_inventory.issuer_identity == self._issuer_identity
+            and self._empty_inventory_records_by_identity.get(binding.empty_inventory_identity)
+            is record
+            and self._empty_inventory_records_by_serial.get(binding.empty_inventory_serial)
+            is record
+            and record.state is _Generation6RNamespaceEmptyInventoryState.AUTHENTICATED
+            and type(attempt_receipt) is _Generation6RNamespaceReceipt
+            and attempt_receipt.issuer_identity == self._issuer_identity
+            and attempt_receipt.token_serial == binding.empty_inventory_serial
+            and attempt_receipt.authority_serial == cursor_binding.authority_serial
+            and attempt_receipt.event == "INVENTORY_EMPTY_AUTHENTICATING"
+            and type(outcome_receipt) is _Generation6RNamespaceReceipt
+            and outcome_receipt.issuer_identity == self._issuer_identity
+            and outcome_receipt.token_serial == binding.empty_inventory_serial
+            and outcome_receipt.authority_serial == cursor_binding.authority_serial
+            and outcome_receipt.event == "INVENTORY_EMPTY_AUTHENTICATED"
+            and type(cursor_record) is _Generation6RNamespaceInventoryCursorRecord
+            and binding.cursor_record_identity == id(cursor_record)
+            and type(cursor_binding) is _Generation6RNamespaceInventoryCursorBinding
+            and binding.cursor_binding_identity == id(cursor_binding)
+            and cursor_record.binding is cursor_binding
+            and self._inventory_cursor_records_by_identity.get(cursor_binding.cursor_identity)
+            is cursor_record
+            and self._inventory_cursor_records_by_serial.get(cursor_binding.cursor_serial)
+            is cursor_record
+            and cursor_record.state is _Generation6RNamespaceInventoryCursorState.RETIRED
+            and type(cursor_record.current_receipt) is _Generation6RNamespaceReceipt
+            and cursor_record.current_receipt.event == "INVENTORY_CURSOR_CURRENT"
+            and type(cursor_record.terminal_receipt) is _Generation6RNamespaceReceipt
+            and cursor_record.terminal_receipt.event == "INVENTORY_CURSOR_RETIRED"
+            and self._live_inventory_cursor_record is None
+            and type(self._archived_inventory_cursor_records) is list
+            and len(self._archived_inventory_cursor_records) == 1
+            and self._archived_inventory_cursor_records[0] is cursor_record
+            and type(scan_record) is _Generation6RNamespaceInventoryScanRecord
+            and binding.scan_record_identity == id(scan_record)
+            and type(scan_binding) is _Generation6RNamespaceInventoryScanBinding
+            and binding.scan_binding_identity == id(scan_binding)
+            and scan_record.binding is scan_binding
+            and scan_binding.cursor_record is cursor_record
+            and scan_binding.cursor_binding is cursor_binding
+            and self._inventory_scan_records_by_identity.get(scan_binding.scan_identity)
+            is scan_record
+            and self._inventory_scan_records_by_serial.get(scan_binding.scan_serial) is scan_record
+            and scan_record.state is _Generation6RNamespaceInventoryScanState.END_OBSERVED
+            and scan_record.close_attempts == 1
+            and type(scan_record.acquisition_receipt) is _Generation6RNamespaceReceipt
+            and scan_record.acquisition_receipt.event == "INVENTORY_SCAN_ACQUIRED"
+            and type(scan_record.terminal_receipt) is _Generation6RNamespaceReceipt
+            and scan_record.terminal_receipt.event == "INVENTORY_SCAN_END_OBSERVED"
+            and self._live_inventory_scan_record is None
+            and type(self._archived_inventory_scan_records) is list
+            and len(self._archived_inventory_scan_records) == 1
+            and self._archived_inventory_scan_records[0] is scan_record
+            and type(scan_binding.proxy) is _Generation6RScandirProxy
+            and scan_binding.proxy._terminal
+            and scan_binding.proxy._close_attempts == 1
+            and self._descriptor_ledger._live_scandir_proxies.get(scan_binding.proxy_identity)
+            is None
+            and not self._inventory_scan_proxy_quarantine
+            and type(advance_record) is _Generation6RNamespaceInventoryAdvanceRecord
+            and binding.advance_record_identity == id(advance_record)
+            and type(advance_binding) is _Generation6RNamespaceInventoryAdvanceBinding
+            and binding.advance_binding_identity == id(advance_binding)
+            and advance_record.binding is advance_binding
+            and advance_binding.scan_record is scan_record
+            and advance_binding.scan_binding is scan_binding
+            and self._inventory_advance_records_by_identity.get(advance_binding.advance_identity)
+            is advance_record
+            and self._inventory_advance_records_by_serial.get(advance_binding.advance_serial)
+            is advance_record
+            and advance_record.state is _Generation6RNamespaceInventoryAdvanceState.END_OBSERVED
+            and advance_record.advance_attempts == 1
+            and advance_record.raw_entry is None
+            and advance_record.raw_entry_identity is None
+            and advance_record.item_record is None
+            and type(advance_record.attempt_receipt) is _Generation6RNamespaceReceipt
+            and advance_record.attempt_receipt.event == "INVENTORY_ADVANCE_ATTEMPTING"
+            and type(advance_record.outcome_receipt) is _Generation6RNamespaceReceipt
+            and advance_record.outcome_receipt.event == "INVENTORY_ADVANCE_END_OBSERVED"
+            and advance_record.terminal_receipt is None
+            and self._live_inventory_advance_record is None
+            and type(self._archived_inventory_advance_records) is list
+            and len(self._archived_inventory_advance_records) == 1
+            and self._archived_inventory_advance_records[0] is advance_record
+            and type(cleanup_epoch) is _Generation6RNamespaceCleanupBudgetEpoch
+            and binding.cleanup_epoch_identity == id(cleanup_epoch)
+            and cleanup_epoch is cursor_binding.cleanup_epoch
+            and cleanup_epoch is advance_binding.cleanup_epoch
+            and type(budget_record) is _Generation6RNamespaceCleanupBudgetRecord
+            and binding.cleanup_budget_record_identity == id(budget_record)
+            and budget_record is cursor_binding.cleanup_budget_record
+            and budget_record is advance_binding.cleanup_budget_record
+            and budget_record.epoch is cleanup_epoch
+            and self._live_cleanup_budget_record is budget_record
+            and budget_record.state is _Generation6RNamespaceCleanupBudgetState.ACTIVE
+            and binding.operation_count_at_end == budget_record.operation_count
+            and binding.entry_count_at_end == budget_record.entry_count
+            and binding.encoded_name_bytes_at_end == budget_record.encoded_name_bytes
+            and binding.depth_high_water_at_end == budget_record.depth_high_water
+            and not self._inventory_item_records_by_identity
+            and not self._inventory_item_records_by_serial
+            and self._live_inventory_item_record is None
+            and not self._archived_inventory_item_records
+            and not self._inventory_raw_entry_quarantine
+            and not self._inventory_classification_records_by_identity
+            and not self._inventory_classification_records_by_serial
+            and self._live_inventory_classification_record is None
+            and not self._archived_inventory_classification_records
+            and not self._inventory_classification_residue_evidence
+            and not self._inventory_classification_descriptor_quarantine
+            and not self._inventory_cursor_issuance_faulted
+            and not self._inventory_cursor_lifecycle_faulted
+            and not self._inventory_scan_lifecycle_faulted
+            and not self._inventory_advance_item_lifecycle_faulted
+            and not self._inventory_classification_faulted,
+            "R namespace authenticated empty inventory trusted evidence differs",
+        )
+        _require(
+            type(empty_inventory) is _Generation6RNamespaceEmptyInventory,
+            "R namespace authenticated empty inventory caller type differs",
+        )
+        _exact_keys(
+            vars(empty_inventory),
+            ("serial", "issuer_identity"),
+            "R namespace authenticated empty inventory caller",
+        )
+        _require(
+            empty_inventory.serial == binding.empty_inventory_serial
+            and empty_inventory.issuer_identity == binding.empty_inventory_issuer_identity,
+            "R namespace authenticated empty inventory caller fields differ",
+        )
+        _require(
+            empty_inventory is trusted_empty_inventory,
+            "R namespace authenticated empty inventory caller identity differs",
+        )
+        return record
+
+    def _fail_empty_inventory_uncertain(
+        self,
+        record: _Generation6RNamespaceEmptyInventoryRecord | None,
+        primary: BaseException,
+    ) -> None:
+        self._empty_inventory_lifecycle_faulted = True
+        self._phase = _Generation6RNamespacePhase.UNCERTAIN
+        if type(record) is not _Generation6RNamespaceEmptyInventoryRecord:
+            return
+        exact_record = record
+        try:
+            exact_record.state = _Generation6RNamespaceEmptyInventoryState.UNCERTAIN
+        except BaseException as state_error:
+            with suppress(BaseException):
+                primary.add_note(
+                    f"R namespace empty inventory uncertainty state failed: {state_error!r}"
+                )
+        if exact_record.outcome_receipt is None:
+            try:
+                binding = exact_record.binding
+                _require(
+                    type(binding) is _Generation6RNamespaceEmptyInventoryBinding,
+                    "R namespace empty inventory uncertainty binding differs",
+                )
+                exact_record.outcome_receipt = self._append_receipt(
+                    token_serial=binding.empty_inventory_serial,
+                    authority_serial=binding.cursor_binding.authority_serial,
+                    event="INVENTORY_EMPTY_UNCERTAIN",
+                )
+            except BaseException as receipt_error:
+                with suppress(BaseException):
+                    primary.add_note(
+                        f"R namespace empty inventory uncertainty receipt failed: {receipt_error!r}"
+                    )
+        try:
+            if not any(
+                candidate is exact_record for candidate in self._archived_empty_inventory_records
+            ):
+                self._archived_empty_inventory_records.append(exact_record)
+        except BaseException as archive_error:
+            with suppress(BaseException):
+                primary.add_note(
+                    f"R namespace empty inventory uncertainty archive failed: {archive_error!r}"
+                )
+        if self._live_empty_inventory_record is exact_record:
+            self._live_empty_inventory_record = None
+
+    def _authenticate_empty_inventory(
+        self,
+        scan: _Generation6RNamespaceInventoryScan,
+    ) -> _Generation6RNamespaceEmptyInventory:
+        record: _Generation6RNamespaceEmptyInventoryRecord | None = None
+        try:
+            self._require_building()
+            scan_archive = self._archived_inventory_scan_records
+            _require(
+                type(self._empty_inventory_lifecycle_faulted) is bool
+                and not self._empty_inventory_lifecycle_faulted
+                and type(self._empty_inventory_records_by_identity) is dict
+                and not self._empty_inventory_records_by_identity
+                and type(self._empty_inventory_records_by_serial) is dict
+                and not self._empty_inventory_records_by_serial
+                and self._live_empty_inventory_record is None
+                and type(self._archived_empty_inventory_records) is list
+                and not self._archived_empty_inventory_records
+                and type(scan_archive) is list
+                and len(scan_archive) == 1
+                and type(scan_archive[0]) is _Generation6RNamespaceInventoryScanRecord
+                and type(self._inventory_scan_records_by_identity) is dict
+                and type(self._inventory_scan_records_by_serial) is dict,
+                "R namespace empty inventory trusted scan archive differs",
+            )
+            scan_record = scan_archive[0]
+            if type(scan_record) is not _Generation6RNamespaceInventoryScanRecord:
+                raise ContractError("R namespace empty inventory trusted scan archive differs")
+            scan_binding = scan_record.binding
+            _require(
+                type(scan_binding) is _Generation6RNamespaceInventoryScanBinding,
+                "R namespace empty inventory trusted scan binding type differs",
+            )
+            trusted_scan = scan_binding.scan
+            trusted_proxy = scan_binding.proxy
+            trusted_iterator_token = scan_binding.iterator_token
+            scan_acquisition_receipt = scan_record.acquisition_receipt
+            scan_terminal_receipt = scan_record.terminal_receipt
+            _exact_keys(
+                vars(scan_record),
+                (
+                    "binding",
+                    "binding_identity",
+                    "state",
+                    "close_attempts",
+                    "acquisition_receipt",
+                    "terminal_receipt",
+                ),
+                "R namespace empty inventory scan record",
+            )
+            _exact_keys(
+                vars(scan_binding),
+                (
+                    "serial",
+                    "issuer_identity",
+                    "scan",
+                    "scan_identity",
+                    "scan_serial",
+                    "scan_issuer_identity",
+                    "cursor_record",
+                    "cursor_record_identity",
+                    "cursor_binding",
+                    "cursor_binding_identity",
+                    "proxy",
+                    "proxy_identity",
+                    "iterator_token",
+                    "iterator_token_identity",
+                    "descriptor",
+                    "depth",
+                    "cleanup_epoch",
+                    "cleanup_epoch_identity",
+                    "cleanup_epoch_serial",
+                    "cleanup_epoch_issuer_identity",
+                ),
+                "R namespace empty inventory scan binding",
+            )
+            _require(
+                scan_record.binding_identity == id(scan_binding)
+                and type(scan_binding.serial) is int
+                and scan_binding.serial > 0
+                and scan_binding.issuer_identity == self._issuer_identity
+                and type(trusted_scan) is _Generation6RNamespaceInventoryScan
+                and scan_binding.scan_identity == id(trusted_scan)
+                and scan_binding.scan_serial == trusted_scan.serial
+                and scan_binding.scan_issuer_identity == trusted_scan.issuer_identity
+                and trusted_scan.issuer_identity == self._issuer_identity
+                and self._inventory_scan_records_by_identity.get(scan_binding.scan_identity)
+                is scan_record
+                and self._inventory_scan_records_by_serial.get(scan_binding.scan_serial)
+                is scan_record
+                and scan_record.state is _Generation6RNamespaceInventoryScanState.END_OBSERVED
+                and scan_record.close_attempts == 1
+                and type(scan_acquisition_receipt) is _Generation6RNamespaceReceipt
+                and scan_acquisition_receipt.issuer_identity == self._issuer_identity
+                and scan_acquisition_receipt.token_serial == scan_binding.scan_serial
+                and scan_acquisition_receipt.authority_serial
+                == scan_binding.cursor_binding.authority_serial
+                and scan_acquisition_receipt.event == "INVENTORY_SCAN_ACQUIRED"
+                and type(scan_terminal_receipt) is _Generation6RNamespaceReceipt
+                and scan_terminal_receipt.issuer_identity == self._issuer_identity
+                and scan_terminal_receipt.token_serial == scan_binding.scan_serial
+                and scan_terminal_receipt.authority_serial
+                == scan_binding.cursor_binding.authority_serial
+                and scan_terminal_receipt.event == "INVENTORY_SCAN_END_OBSERVED"
+                and self._live_inventory_scan_record is None
+                and type(trusted_proxy) is _Generation6RScandirProxy
+                and scan_binding.proxy_identity == id(trusted_proxy)
+                and trusted_proxy._ledger is self._descriptor_ledger
+                and type(trusted_iterator_token) is _Generation6RIteratorToken
+                and scan_binding.iterator_token_identity == id(trusted_iterator_token)
+                and trusted_proxy._token is trusted_iterator_token
+                and trusted_iterator_token.parent
+                is scan_binding.cursor_binding.authority_binding.descriptor_token
+                and trusted_iterator_token.iterator_identity == id(trusted_proxy._iterator)
+                and trusted_iterator_token.acquired_phase is _Generation6RPhase.PRODUCTION
+                and trusted_proxy._terminal
+                and trusted_proxy._close_attempts == 1
+                and self._descriptor_ledger._live_scandir_proxies.get(scan_binding.proxy_identity)
+                is None
+                and type(self._inventory_scan_proxy_quarantine) is list
+                and not self._inventory_scan_proxy_quarantine,
+                "R namespace empty inventory trusted scan evidence differs",
+            )
+            _require(
+                type(scan) is _Generation6RNamespaceInventoryScan,
+                "R namespace empty inventory caller scan type differs",
+            )
+            _exact_keys(
+                vars(scan),
+                ("serial", "issuer_identity"),
+                "R namespace empty inventory caller scan",
+            )
+            _require(
+                scan.serial == scan_binding.scan_serial
+                and scan.issuer_identity == scan_binding.scan_issuer_identity,
+                "R namespace empty inventory caller scan fields differ",
+            )
+            _require(
+                scan is trusted_scan,
+                "R namespace empty inventory caller scan identity differs",
+            )
+            advance_archive = self._archived_inventory_advance_records
+            _require(
+                type(self._inventory_advance_records_by_identity) is dict
+                and type(self._inventory_advance_records_by_serial) is dict
+                and self._live_inventory_advance_record is None
+                and type(advance_archive) is list
+                and len(advance_archive) == 1
+                and type(advance_archive[0]) is _Generation6RNamespaceInventoryAdvanceRecord,
+                "R namespace empty inventory trusted advance archive differs",
+            )
+            advance_record = advance_archive[0]
+            if type(advance_record) is not _Generation6RNamespaceInventoryAdvanceRecord:
+                raise ContractError("R namespace empty inventory trusted advance archive differs")
+            advance_binding = advance_record.binding
+            _require(
+                type(advance_binding) is _Generation6RNamespaceInventoryAdvanceBinding,
+                "R namespace empty inventory trusted advance binding type differs",
+            )
+            trusted_advance = advance_binding.advance
+            advance_attempt_receipt = advance_record.attempt_receipt
+            advance_outcome_receipt = advance_record.outcome_receipt
+            _exact_keys(
+                vars(advance_record),
+                (
+                    "binding",
+                    "binding_identity",
+                    "state",
+                    "advance_attempts",
+                    "raw_entry",
+                    "raw_entry_identity",
+                    "item_record",
+                    "attempt_receipt",
+                    "outcome_receipt",
+                    "terminal_receipt",
+                ),
+                "R namespace empty inventory advance record",
+            )
+            _require(
+                advance_record.binding_identity == id(advance_binding)
+                and type(advance_binding.serial) is int
+                and advance_binding.serial > 0
+                and advance_binding.issuer_identity == self._issuer_identity
+                and type(trusted_advance) is _Generation6RNamespaceInventoryAdvance
+                and advance_binding.advance_identity == id(trusted_advance)
+                and advance_binding.advance_serial == trusted_advance.serial
+                and advance_binding.advance_issuer_identity == trusted_advance.issuer_identity
+                and trusted_advance.issuer_identity == self._issuer_identity
+                and self._inventory_advance_records_by_identity.get(
+                    advance_binding.advance_identity
+                )
+                is advance_record
+                and self._inventory_advance_records_by_serial.get(advance_binding.advance_serial)
+                is advance_record
+                and advance_binding.scan_record is scan_record
+                and advance_binding.scan_record_identity == id(scan_record)
+                and advance_binding.scan_binding is scan_binding
+                and advance_binding.scan_binding_identity == id(scan_binding)
+                and advance_binding.proxy is trusted_proxy
+                and advance_binding.proxy_identity == id(trusted_proxy)
+                and advance_binding.iterator_token is trusted_iterator_token
+                and advance_binding.iterator_token_identity == id(trusted_iterator_token)
+                and advance_binding.descriptor == scan_binding.descriptor
+                and advance_binding.scan_depth == scan_binding.depth
+                and advance_binding.next_depth == scan_binding.depth + 1
+                and advance_record.state is _Generation6RNamespaceInventoryAdvanceState.END_OBSERVED
+                and advance_record.advance_attempts == 1
+                and advance_record.raw_entry is None
+                and advance_record.raw_entry_identity is None
+                and advance_record.item_record is None
+                and type(advance_attempt_receipt) is _Generation6RNamespaceReceipt
+                and advance_attempt_receipt.issuer_identity == self._issuer_identity
+                and advance_attempt_receipt.token_serial == advance_binding.advance_serial
+                and advance_attempt_receipt.authority_serial
+                == scan_binding.cursor_binding.authority_serial
+                and advance_attempt_receipt.event == "INVENTORY_ADVANCE_ATTEMPTING"
+                and type(advance_outcome_receipt) is _Generation6RNamespaceReceipt
+                and advance_outcome_receipt.issuer_identity == self._issuer_identity
+                and advance_outcome_receipt.token_serial == advance_binding.advance_serial
+                and advance_outcome_receipt.authority_serial
+                == scan_binding.cursor_binding.authority_serial
+                and advance_outcome_receipt.event == "INVENTORY_ADVANCE_END_OBSERVED"
+                and advance_record.terminal_receipt is None,
+                "R namespace empty inventory trusted advance evidence differs",
+            )
+            cursor_record = scan_binding.cursor_record
+            cursor_binding = scan_binding.cursor_binding
+            authority = cursor_binding.authority
+            authority_record = cursor_binding.authority_record
+            authority_binding = cursor_binding.authority_binding
+            cleanup_epoch = cursor_binding.cleanup_epoch
+            budget_record = cursor_binding.cleanup_budget_record
+            current_receipt = cursor_record.current_receipt
+            _require(
+                type(cursor_record) is _Generation6RNamespaceInventoryCursorRecord
+                and scan_binding.cursor_record_identity == id(cursor_record)
+                and type(cursor_binding) is _Generation6RNamespaceInventoryCursorBinding
+                and scan_binding.cursor_binding_identity == id(cursor_binding)
+                and cursor_record.binding is cursor_binding
+                and cursor_record.binding_identity == id(cursor_binding)
+                and self._inventory_cursor_bindings_by_identity.get(cursor_binding.cursor_identity)
+                is cursor_binding
+                and self._inventory_cursor_bindings_by_serial.get(cursor_binding.cursor_serial)
+                is cursor_binding
+                and self._inventory_cursor_records_by_identity.get(cursor_binding.cursor_identity)
+                is cursor_record
+                and self._inventory_cursor_records_by_serial.get(cursor_binding.cursor_serial)
+                is cursor_record
+                and self._live_inventory_cursor_record is cursor_record
+                and type(self._archived_inventory_cursor_records) is list
+                and not self._archived_inventory_cursor_records
+                and cursor_record.state is _Generation6RNamespaceInventoryCursorState.CURRENT
+                and type(current_receipt) is _Generation6RNamespaceReceipt
+                and current_receipt.issuer_identity == self._issuer_identity
+                and current_receipt.token_serial == cursor_binding.cursor_serial
+                and current_receipt.authority_serial == cursor_binding.authority_serial
+                and current_receipt.event == "INVENTORY_CURSOR_CURRENT"
+                and cursor_record.terminal_receipt is None
+                and type(authority) is _Generation6RNamespaceDirectoryAuthority
+                and cursor_binding.authority_identity == id(authority)
+                and cursor_binding.authority_serial == authority.serial
+                and type(authority_record) is _Generation6RNamespaceDirectoryRecord
+                and cursor_binding.authority_record_identity == id(authority_record)
+                and type(authority_binding) is _Generation6RNamespaceDirectoryBinding
+                and cursor_binding.authority_binding_identity == id(authority_binding)
+                and authority_record.binding is authority_binding
+                and authority_binding.authority is authority
+                and self._authority_records_by_identity.get(id(authority)) is authority_record
+                and self._authority_records_by_serial.get(authority.serial) is authority_record
+                and self._authority_records_by_owner_identity.get(authority_binding.owner_identity)
+                is authority_record
+                and authority_record.state is _Generation6RNamespaceOwnerState.LIVE
+                and authority_record.close_receipt is None
+                and type(cleanup_epoch) is _Generation6RNamespaceCleanupBudgetEpoch
+                and cursor_binding.cleanup_epoch_identity == id(cleanup_epoch)
+                and cursor_binding.cleanup_epoch_serial == cleanup_epoch.serial
+                and cursor_binding.cleanup_epoch_issuer_identity == cleanup_epoch.issuer_identity
+                and scan_binding.cleanup_epoch is cleanup_epoch
+                and scan_binding.cleanup_epoch_identity == id(cleanup_epoch)
+                and scan_binding.cleanup_epoch_serial == cleanup_epoch.serial
+                and scan_binding.cleanup_epoch_issuer_identity == cleanup_epoch.issuer_identity
+                and advance_binding.cleanup_epoch is cleanup_epoch
+                and advance_binding.cleanup_epoch_identity == id(cleanup_epoch)
+                and type(budget_record) is _Generation6RNamespaceCleanupBudgetRecord
+                and cursor_binding.cleanup_budget_record_identity == id(budget_record)
+                and advance_binding.cleanup_budget_record is budget_record
+                and advance_binding.cleanup_budget_record_identity == id(budget_record)
+                and budget_record.epoch is cleanup_epoch
+                and self._cleanup_budget_records_by_identity.get(id(cleanup_epoch)) is budget_record
+                and self._cleanup_budget_records_by_serial.get(cleanup_epoch.serial)
+                is budget_record
+                and self._live_cleanup_budget_record is budget_record
+                and budget_record.state is _Generation6RNamespaceCleanupBudgetState.ACTIVE
+                and type(budget_record.operation_count) is int
+                and budget_record.operation_count == 1
+                and budget_record.operation_count == advance_binding.operation_count_before
+                and type(budget_record.entry_count) is int
+                and budget_record.entry_count == 0
+                and budget_record.entry_count == advance_binding.entry_count_before
+                and type(budget_record.encoded_name_bytes) is int
+                and budget_record.encoded_name_bytes == 0
+                and budget_record.encoded_name_bytes == advance_binding.encoded_name_bytes_before
+                and type(budget_record.depth_high_water) is int
+                and budget_record.depth_high_water == scan_binding.depth
+                and type(scan_binding.depth) is int
+                and 0 <= scan_binding.depth <= cleanup_epoch.max_depth,
+                "R namespace empty inventory trusted cursor budget graph differs",
+            )
+            _require(
+                type(self._inventory_cursor_issuance_faulted) is bool
+                and not self._inventory_cursor_issuance_faulted
+                and type(self._inventory_cursor_lifecycle_faulted) is bool
+                and not self._inventory_cursor_lifecycle_faulted
+                and type(self._inventory_scan_lifecycle_faulted) is bool
+                and not self._inventory_scan_lifecycle_faulted
+                and type(self._inventory_advance_item_lifecycle_faulted) is bool
+                and not self._inventory_advance_item_lifecycle_faulted
+                and type(self._inventory_item_records_by_identity) is dict
+                and not self._inventory_item_records_by_identity
+                and type(self._inventory_item_records_by_serial) is dict
+                and not self._inventory_item_records_by_serial
+                and self._live_inventory_item_record is None
+                and type(self._archived_inventory_item_records) is list
+                and not self._archived_inventory_item_records
+                and type(self._inventory_raw_entry_quarantine) is list
+                and not self._inventory_raw_entry_quarantine
+                and type(self._inventory_classification_faulted) is bool
+                and not self._inventory_classification_faulted
+                and type(self._inventory_classification_records_by_identity) is dict
+                and not self._inventory_classification_records_by_identity
+                and type(self._inventory_classification_records_by_serial) is dict
+                and not self._inventory_classification_records_by_serial
+                and self._live_inventory_classification_record is None
+                and type(self._archived_inventory_classification_records) is list
+                and not self._archived_inventory_classification_records
+                and type(self._inventory_classification_residue_evidence) is list
+                and not self._inventory_classification_residue_evidence
+                and type(self._inventory_classification_descriptor_quarantine) is list
+                and not self._inventory_classification_descriptor_quarantine
+                and self._pending_publication is None,
+                "R namespace empty inventory pristine absence evidence differs",
+            )
+            empty_inventory = _Generation6RNamespaceEmptyInventory(
+                self._issue_serial(),
+                self._issuer_identity,
+            )
+            empty_inventory_identity = id(empty_inventory)
+            _require(
+                type(empty_inventory_identity) is int and empty_inventory_identity > 0,
+                "R namespace empty inventory token identity differs",
+            )
+            binding = _Generation6RNamespaceEmptyInventoryBinding(
+                self._issue_serial(),
+                self._issuer_identity,
+                empty_inventory,
+                empty_inventory_identity,
+                empty_inventory.serial,
+                empty_inventory.issuer_identity,
+                cursor_record,
+                id(cursor_record),
+                cursor_binding,
+                id(cursor_binding),
+                scan_record,
+                id(scan_record),
+                scan_binding,
+                id(scan_binding),
+                advance_record,
+                id(advance_record),
+                advance_binding,
+                id(advance_binding),
+                cleanup_epoch,
+                id(cleanup_epoch),
+                budget_record,
+                id(budget_record),
+                budget_record.operation_count,
+                budget_record.entry_count,
+                budget_record.encoded_name_bytes,
+                budget_record.depth_high_water,
+            )
+            record = _Generation6RNamespaceEmptyInventoryRecord(
+                binding,
+                id(binding),
+                _Generation6RNamespaceEmptyInventoryState.AUTHENTICATING,
+                None,
+                None,
+            )
+            self._empty_inventory_records_by_identity[empty_inventory_identity] = record
+            self._empty_inventory_records_by_serial[empty_inventory.serial] = record
+            self._live_empty_inventory_record = record
+            attempt_receipt = self._append_receipt(
+                token_serial=empty_inventory.serial,
+                authority_serial=cursor_binding.authority_serial,
+                event="INVENTORY_EMPTY_AUTHENTICATING",
+            )
+            record.attempt_receipt = attempt_receipt
+            current_record = self._require_current_empty_inventory(empty_inventory)
+            _require(
+                current_record is record,
+                "R namespace empty inventory current self-check differs",
+            )
+            self._terminalize_inventory_cursor(
+                cursor_binding.cursor,
+                _Generation6RNamespaceInventoryCursorState.RETIRED,
+            )
+            cursor_terminal_receipt = cursor_record.terminal_receipt
+            _require(
+                cursor_record.state is _Generation6RNamespaceInventoryCursorState.RETIRED
+                and type(cursor_terminal_receipt) is _Generation6RNamespaceReceipt
+                and cursor_terminal_receipt.issuer_identity == self._issuer_identity
+                and cursor_terminal_receipt.token_serial == cursor_binding.cursor_serial
+                and cursor_terminal_receipt.authority_serial == cursor_binding.authority_serial
+                and cursor_terminal_receipt.event == "INVENTORY_CURSOR_RETIRED"
+                and self._live_inventory_cursor_record is None
+                and type(self._archived_inventory_cursor_records) is list
+                and len(self._archived_inventory_cursor_records) == 1
+                and self._archived_inventory_cursor_records[0] is cursor_record
+                and not self._inventory_cursor_lifecycle_faulted
+                and scan_record.binding is scan_binding
+                and scan_record.state is _Generation6RNamespaceInventoryScanState.END_OBSERVED
+                and scan_record.close_attempts == 1
+                and scan_record.acquisition_receipt is scan_acquisition_receipt
+                and scan_record.terminal_receipt is scan_terminal_receipt
+                and self._inventory_scan_records_by_identity.get(scan_binding.scan_identity)
+                is scan_record
+                and self._inventory_scan_records_by_serial.get(scan_binding.scan_serial)
+                is scan_record
+                and self._live_inventory_scan_record is None
+                and len(self._archived_inventory_scan_records) == 1
+                and self._archived_inventory_scan_records[0] is scan_record
+                and trusted_proxy._terminal
+                and trusted_proxy._close_attempts == 1
+                and self._descriptor_ledger._live_scandir_proxies.get(scan_binding.proxy_identity)
+                is None
+                and advance_record.binding is advance_binding
+                and advance_record.state is _Generation6RNamespaceInventoryAdvanceState.END_OBSERVED
+                and advance_record.advance_attempts == 1
+                and advance_record.raw_entry is None
+                and advance_record.raw_entry_identity is None
+                and advance_record.item_record is None
+                and advance_record.attempt_receipt is advance_attempt_receipt
+                and advance_record.outcome_receipt is advance_outcome_receipt
+                and advance_record.terminal_receipt is None
+                and self._inventory_advance_records_by_identity.get(
+                    advance_binding.advance_identity
+                )
+                is advance_record
+                and self._inventory_advance_records_by_serial.get(advance_binding.advance_serial)
+                is advance_record
+                and self._live_inventory_advance_record is None
+                and len(self._archived_inventory_advance_records) == 1
+                and self._archived_inventory_advance_records[0] is advance_record
+                and self._live_cleanup_budget_record is budget_record
+                and budget_record.state is _Generation6RNamespaceCleanupBudgetState.ACTIVE
+                and budget_record.operation_count == binding.operation_count_at_end
+                and budget_record.entry_count == binding.entry_count_at_end
+                and budget_record.encoded_name_bytes == binding.encoded_name_bytes_at_end
+                and budget_record.depth_high_water == binding.depth_high_water_at_end
+                and self._empty_inventory_records_by_identity.get(binding.empty_inventory_identity)
+                is record
+                and self._empty_inventory_records_by_serial.get(binding.empty_inventory_serial)
+                is record
+                and self._live_empty_inventory_record is record
+                and not self._archived_empty_inventory_records
+                and record.state is _Generation6RNamespaceEmptyInventoryState.AUTHENTICATING
+                and record.attempt_receipt is attempt_receipt
+                and record.outcome_receipt is None,
+                "R namespace empty inventory retirement evidence differs",
+            )
+            record.state = _Generation6RNamespaceEmptyInventoryState.AUTHENTICATED
+            self._archived_empty_inventory_records.append(record)
+            outcome_receipt = self._append_receipt(
+                token_serial=binding.empty_inventory_serial,
+                authority_serial=cursor_binding.authority_serial,
+                event="INVENTORY_EMPTY_AUTHENTICATED",
+            )
+            record.outcome_receipt = outcome_receipt
+            self._live_empty_inventory_record = None
+            return empty_inventory
+        except BaseException as primary:
+            self._fail_empty_inventory_uncertain(record, primary)
             raise
 
     def register_borrowed_directory(
@@ -20011,13 +20976,13 @@ def _generation6_r_authority_source_gates(source: str) -> None:
    if type(ok)is not bool or not ok:
     raise ContractError(m)
   alphabet='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~'
-  r(type(e)is str and len(e)==14223 and e.isascii()and(not any((c.isspace()for c in e)))and(set(e)<=set(alphabet)))
-  r(hashlib.sha256(e.encode('ascii')).hexdigest()=='1d0f6a4c3721f023173b23855aebdc1453298ee3ab117f207dcdcca68829fbc4')
+  r(type(e)is str and len(e)==14799 and e.isascii()and(not any((c.isspace()for c in e)))and(set(e)<=set(alphabet)))
+  r(hashlib.sha256(e.encode('ascii')).hexdigest()=='91a0a18e62e654a64013fb3ba069cf5c72222b76f3785db9f17568792907061e')
   b=base64.b85decode(e)
-  r(type(b)is bytes and len(b)==11378 and(hashlib.sha256(b).hexdigest()=='9818746c3fb447f0ee564eb48318d1b0b4859dbaaab2c0f2fc19ffae97527b7c')and(base64.b85encode(b).decode('ascii')==e))
+  r(type(b)is bytes and len(b)==11839 and(hashlib.sha256(b).hexdigest()=='f6cd663aeb664a80cc45aa7515ad397785150bf0a5397ff44139fd9e04c636bc')and(base64.b85encode(b).decode('ascii')==e))
   hf='>8sBBHIB4B'
   h=struct.unpack_from(hf,b)
-  r(struct.calcsize(hf)==21 and h==(b'G6R3A1\x00\x00',1,128,335,2743,9,30,60,230,15))
+  r(struct.calcsize(hf)==21 and h==(b'G6R3A1\x00\x00',1,128,353,2967,9,30,62,241,20))
   p=21
   aa:list[bytes]=[]
   for i in range(128):
@@ -20032,7 +20997,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
   z=p+2*h[3]+h[4]
   ss:list[str]=[]
   largest=0
-  for _ in range(335):
+  for _ in range(353):
    r(p+2<=z)
    n=struct.unpack_from('>H',b,p)[0]
    p+=2
@@ -20044,10 +21009,10 @@ def _generation6_r_authority_source_gates(source: str) -> None:
    largest=max(largest,n)
    ss.append(v.decode('ascii'))
   s=tuple(ss)
-  c=(s[:30],s[30:90],s[90:320],s[320:335])
-  r(p==z==3690 and largest==107 and(max(map(len,s))==306)and(tuple(map(len,c))==(30,60,230,15)))
+  c=(s[:30],s[30:92],s[92:333],s[333:353])
+  r(p==z==3950 and largest==107 and(max(map(len,s))==306)and(tuple(map(len,c))==(30,62,241,20)))
   r(all((all((g[i]<g[i+1]for i in range(len(g)-1)))for g in c)))
-  sc=((1,12,1),(2,23,1),(3,19,1),(4,82,2),(5,35,2),(6,348,2),(7,10,2),(8,9,32),(9,159,40))
+  sc=((1,12,1),(2,23,1),(3,20,1),(4,85,2),(5,37,2),(6,379,2),(7,14,2),(8,9,32),(9,162,40))
   bb:list[bytes]=[]
   oo=[21,277,p]
   for expected in sc:
@@ -20059,9 +21024,9 @@ def _generation6_r_authority_source_gates(source: str) -> None:
    p=end
    oo.append(p)
   blocks=tuple(bb)
-  r(tuple(oo)==(21,277,3690,3706,3733,3756,3924,3998,4698,4722,5014,11378)and p==len(b)and(len(blocks)==9)and(struct.calcsize('>HHI32s')==40))
+  r(tuple(oo)==(21,277,3950,3966,3993,4017,4191,4269,5031,5063,5355,11839)and p==len(b)and(len(blocks)==9)and(struct.calcsize('>HHI32s')==40))
   av,nv,ec,ep,dh,dp,sg,ih,rt=blocks
-  r(all((x<30 for x in av+nv))and all((x<60 for x in ep))and all((x<230 for x in dp))and all((x<15 for x in sg)))
+  r(all((x<30 for x in av+nv))and all((x<62 for x in ep))and all((x<241 for x in dp))and all((x<20 for x in sg)))
   r(all((dh[i+1]in(0,1)for i in range(0,len(dh),2))))
   def pairs(q:bytes,g:tuple[str,...])->tuple[tuple[str,str],...]:
    return tuple(((g[q[i]],g[q[i+1]])for i in range(0,len(q),2)))
@@ -20074,11 +21039,11 @@ def _generation6_r_authority_source_gates(source: str) -> None:
   sigs=pairs(sg,c[3])
   inherited=tuple((ih[i:i+32]for i in range(0,len(ih),32)))
   roots=tuple((struct.unpack_from('>HHI32s',rt,i)for i in range(0,len(rt),40)))
-  r(len(auth)==12 and len(namespace)==23 and(len(counts)==19)and all((type(n)is int and 0<n<=10 for n in counts))and(sum(counts)==len(enums)==82))
-  r(len(headers)==35 and all((type(n)is int and 0<n<=44 and(type(f)is bool)for n,f in headers))and(sum((n for n,_ in headers))==len(fields)==348)and(len(sigs)==10))
+  r(len(auth)==12 and len(namespace)==23 and(len(counts)==20)and all((type(n)is int and 0<n<=10 for n in counts))and(sum(counts)==len(enums)==85))
+  r(len(headers)==37 and all((type(n)is int and 0<n<=44 and(type(f)is bool)for n,f in headers))and(sum((n for n,_ in headers))==len(fields)==379)and(len(sigs)==14))
   r(len(inherited)==len(set(inherited))==9 and all((type(x)is bytes and len(x)==32 for x in inherited)))
-  r(len(roots)==159 and roots[0][0]==10578 and(roots[-1][1]==19969)and(max((x[2]for x in roots))==2701972))
-  r(all((type(lo)is int and type(hi)is int and(type(n)is int)and(type(d)is bytes)and(0<lo<=hi)and(0<n<=2701972)and(len(d)==32)for lo,hi,n,d in roots)))
+  r(len(roots)==162 and roots[0][0]==10578 and(roots[-1][1]==20934)and(max((x[2]for x in roots))==2835000))
+  r(all((type(lo)is int and type(hi)is int and(type(n)is int)and(type(d)is bytes)and(0<lo<=hi)and(0<n<=2835000)and(len(d)==32)for lo,hi,n,d in roots)))
   r(all((left[1]<right[0]for left,right in zip(roots[:-1],roots[1:],strict=True))))  # noqa: RUF007
   eg:list[tuple[tuple[str,str],...]]=[]
   ei=0
@@ -20092,13 +21057,13 @@ def _generation6_r_authority_source_gates(source: str) -> None:
    dg.append((tuple((x[0]for x in group)),tuple((x[1]for x in group)),frozen))
    di+=n
   d=(auth,namespace,tuple(eg),tuple(dg),sigs,tuple((x.hex()for x in inherited)),tuple(((lo,hi,n,digest.hex())for lo,hi,n,digest in roots)))
-  r(ei==82 and di==348 and(tuple(map(len,d))==(12,23,19,35,10,9,159)))
+  r(ei==85 and di==379 and(tuple(map(len,d))==(12,23,20,37,14,9,162)))
   r(all((type(x)is str for group in d[:2]for x in group))and all((type(x)is str and len(x)==64 for x in d[5])))
   r(all((type(frozen)is bool and len(names)==len(annotations)for names,annotations,frozen in d[3])))
   r(all((type(lo)is int and type(hi)is int and(type(n)is int)and(type(digest)is str)and(len(digest)==64)for lo,hi,n,digest in d[6])))
   return d
- D=_g6r3_decode('M>bM3K`{UT0e}Hd000WN2_8J=59RLk>E-h8?(gye1K|bZ<>mA6;Q|KX?Enhj#|*X&4iD1K3kV4i5fTRz6zT5t`2h6a>Gb90<Hf|`?iu6+`2^$}Aodsl0UjeH7x47-;T6duA1LlBDHi1O^Q@rX^2N^X0{1Z%=Nj!SGvDIm<>@BF%){*I7X#(aJm2%~^d}miJ)rzTLAs#QA?5Vx<Mr^*GWGN==|=`j=1oknu;EVQ@9*<3A<xp&K<fbSR`oyi@*POy9pmifTIWU`2Qbu1=wSrO&gt^+^anULHDWu#&fhuT;pFygU*%@>0xLQ#^)GH&^Keje1kclU9O3NY@Okrk=zC@Ed;;lycmM>kPfxG_2(h-ex3{vfwg3dRPfxG_2DVR6Pft$(0=BdO3&!M0uHWAl>Ga><01C$BNv>Q{<=+Db00_q9Nv=01<LCei#^gz^^5yaMWaR(`-%;)G0~i1W-|g>M9smVCec$Hf00lmMJ}2}55<Vy5?B(C&WE=D!-|gY_<LC$g3FhNJ?5^hHKkNVnQm$N5<p2j#uIBRqQ8xevQm*FnC-eXYQm$V0>Er+fQm*gt000J3uJc>uWB>(HuJb4K00&a8_3rEz>i`h*@8j!6uJiBX>qf3OC*$Y<5%cfk>qf5g@8j!6uIB0N0Pg?_^C$GK)8EO)&C~!3^C$GK)8EO{#L3bC3-c%RuG8Pi)6&Jq01N@`<*w}mWdldw?(+a^`xQD}!u8}{Rj$Fq)XCPxL=`$+!u8}{#UifB)6>-)E)_am!u8}{Rj$R@$idaq)Eq<=I$gr`<X*)huEp5M!PV2$94-|)UBdO`URAEu&cnsh)WKs!6*^tQ_2gc~BCgfW!^P6n!DIaZ62Zc0#Lvzg-__1J!PC>p#>pH26T!mMFvG>))X&Q>-@(FZ#Lvzg00zOs)XCPx00_a<)Wyxv)Eoc_!PL~n&Ct|i#{dYy)zrvT$=VzM3&K>=&(|Cc)xpxl00+X=$;`xK#{d>N!PC>p#>pJt%g)c&&fn6-)5*lu#Q+;Q!PC>p#>pJt(#6fs*1^Ke#oxne#L2|L)WrZ5ImKz!(BHz<#K*<d-^JL-!PV2$8~_qI#c9>h-@?_z$Hmm&$<x!-8~_zL#c9>h-@?_z$Hmm&)y~7k($v9Y00KF801Y{J-__2=*vP@v)6^UQ2*c0K(9Ffu#Q+Dx&(71;%^Uy)!`0H#U;qfj$<oEc)Ku933NXaq&%)Ei($*XR31HIM-^gji%*6l@VA9#&$Z5pP#oxigRMcvB01IH!+27K|)Ya0?8~_N#*vP@v)6^UQ1jfn6&j1I=!P3OcW6J;;W7c3)*=oVl)5*rk!@<<a&(7b$!c^31cK{Y+)?ifGYQfXf$;QdU!PLpm&fj3t*#H`2)?ifGYQfXf$;QdU!PLpm&fmys#LUHNcK`*+)6>-)00hj**2Mr1%*ocp-__1J!PC>p#>pH270uPu!PLpm&fnC}%P`-;!fC|M&Kv+0&DGSw)XC4z-_*~`FyF{&#LUHNcK`*?&@f}i01D67&K%#v)zZ^c01?mE&K%#v)zZ^c-@(FE)M|GC4A0lj9N)v$($iFGcK{5~!PLXZ-@(Jw$=1aH4A8;U!^q###naSO8~_T?(#6wY-_*~`FaQzI(#6wY-_*~`FyFz#RMcvB029#C#nWKl)y~Xg%iqJ#&ePS+8~_K>#mCjm!O{Q)(lEiz#Q+M@Fu~2m-_*~`FaQzKFu~2m-_*~`FyFz#RMcvB00z><)XCBu00q*`#L3bC1=GdB%p3p-)5XEe9N%El*#HpJ#lg%R-(b?&-@(FE)M|GC5!1!N%pBif(%Ik0X~fLMYIgtz)6c`p#nb=?)6m7k$-&G32GiNi%wx*{57foM(!|f#&fmeq)XCPx014F6Y178V($X9N2-VKR#nRNlV*mx!&dg)W00_hg<MKEJ(|rI5#0cZ^I0VyuLjVTEWE=D!NdN=J<VgSo#^gyu00<DtZ{hR=)K>rm6~W^L00kAnXv-`B3KhfQ3F7JOJHj;p2^GWP3F7JOJ4FBr6~o~P;_2)=MMD4#6*^tQ_2gc~@bBa300<R2UBdO`UPS;16*^tQ_2gbv00$Mr0~+}BRR9PT#AF-vAHiq<2^GX-8}uK+XhQ%96~ts4^dG`C016evWE=D!#^K}i00$MsWE=D!MF0pD#AF-vA4Nj|11rI800k?-ZNfDG1S`R9MF0dV!EIFl0dxQZbiy?N0(4aX11rOI00k?<b;30O1S`XJMF0dV!*x{v11rfi00k?_G{Q9i1S`ojMF0gW$uvbn00b+^G*titE7My51uN5A!ZiQ{E7My=00b-3TU7uD70l`O<<wUI2^Gys2G9cS>GS{#70pTp&;sr0^ujd&3Kh*t2G9cS>GV|q2o(|K#^K}iLjVR9&hIzNEC2@;&hIzNEJFYX6-mPb8u;`82o*`g0~+}BLjVaCNy7sg`1Hax00b3D%Par~6-m%p@KWUf0~JYC00b3DRYL#=70~hs7}Qq)1QpV5LjVL7)K^si4i(kz>=x_L^5yXI@9*XS1Q1EoR{#YNNz_+E016P(TjXTW^6&Wh014sa@%8ER=>>8C1L5NZ00QA{00-f1YxFcG^8f?kZD#-k;caIn00ZG|B>)EDZ5eR_B>)5AZBqaQ;cZhT00iM}K7RlP;qvX}<Z=K7;q){nasUG1XaED@XlDQf;b><i00ZG@B>)5AXj1?L;b>DO00iM^K7RlP;bQ6f266xb;xzyR;x#1z2;<=i;_2)=X8;J};R)jD>^oBc3gh7k;_2)=-}F}i4&&ho;_2)=-}F}*aRMa(4CCPm;_2)=-}F~Le*gkpPyhp5P$d8cTu>Qt0wn+hTu?rL00&%MHudCQQve8DT{iXPUQ;Ci2wYv?<?!$0=l}^^UEk&K@8jqt01RAR-{tV{<LDW20wn+nTwUMg@bBa3K7RlRTvFw0^fV^(00dl8<#GT8QSI;p7yt$1S@IZi00`q*@)+Os>Er+c<8=T7<8@~M1mksQB>)5CbtM1><8>Kv0wn+g<8@O21mks6B>)8Dbv}Op2{+;7>=xzU?(+ZxHzw!+3^yj|-{|S*=->C@ZvYQBCg|Vj>F4O*_u+4A=5GKIHzw%c=;`O^-}m8fHs$67<p2ic2;=fN1ON==2;=fN1mEWD;pg)J3FHXl@;C(F^j81}<Ol)o25V>l3FHU??groP3*`U?<Ol)o22%h8H}>fV01N<8H{{>$3*|QX^aubC08uyO-|h?LHu>}jYvykN5dcv)<lpWK<u>{B2sY*B1myq*81nhwQCI*881nhwQCMr{ZvYDz^7-FUST^P61myq-81nhw?eAC~00tQH`QPs{00rgn@8jqI0_7qA1m@x6^Z*9t<lpZyB>)WQ;qv6{7VF>V^6y9h0~YT$00I{D00S2ELjVNnabI!(2kCL;<lpY|00ilA0wn+f=`;WX=`?2m1nD$qB>)ELG~YKS=l}!hG$jBA=`<N}0wn+g=`>RS1nD$WB>)8JG(LX-2<dO(^aS7ZR{#m=Z{hR=-}F}{00QeQ01fQn^Yq{C17!n8-|q7O2J9B=-%(fq2kqhb-!~@c01)lr_}>6gH{{>$3*|QX^aub5?cw;}81m@|00`~j_}}mF3iAL1?e8}L1nuuw9smRG3*`U??hEDQK79ZP?&bLO-!~@c00!>wH{a_l00{5!0BiI#Ci4IU@9+R}00-~z0OjO9eE<gU@Cx5iSO5v{@Cx5iSZn5Q01fZ(3g1y!Yvym?@9+Qs4Dav?-%(g==5IbH^Z*O*@Cx5iST^P61myq+1nK7%YiLsd4N|VeWW_)7`P=jK^4$OqQm({g#Xs`-+w=7D-9rEd?@Cea<#GT5?=k=g?=s)x0~+}B0159h-{S)s`1EH01Me~=00i$cK0p8k3Gx_gXaEEW@)&0T3JLNU-{c76@;C$l2nq5S-|g>M9smUi@)$mS00s&4=-=-$00r;@?dkLY3Gf2#>GT<K0wn+k@B;1W^ge$82=Mad@bd5P<^T!s^5yXI@9*X%00r>!@A&xu2JrIl`1vIO1@Kw$Qsn>#^5OU281nf52=d|g-x%`wB>)HV<?P`B_T>Nq^IHG|^IK;C1oK;GB>)EVTi-V(=l}!rTO|Mn^II8l0wn+g^IKB@1oK-{B>)8TTRwjP0`q?W1M__)00{FZ^lS7qCi4IU^C$Fj00Q$s01NXc^!4-K=Ir6;^8f?$^zr}%^YrpV017AaUf<*h<MKEJ00<}YUf=ESSRMccC-PoCeE<b-?G|`)00Q(^00s0{-{%Yf2J}}MaRMa(1oT%ve*g{iNbKd?^YrpAuCA`#00Z^u<NyZw>E-O?asUB600DFW0(3<H1S`ojMF0mC5#`3=<MaRt^X2U3E?iJVbN~zU<?QAz=`=(u$us~G^X2U3F7n~`-{c76@;C%U7W4oL^X2U3F7hEnbVUF!^X2U3F7hEnbVWlh=`>SBE6FrPLoV+!M8@PvLoV?0>Fwe2`9#9u^X0|(2k->|7W3uo<}UIfM07<isxIXsL=`$x<;5ZZ5cB2i<}UIfM07<i^FTy&RRA^f<?QAz^L<3b2;=fN1k-&k?eAC~L>BZe<@oR$8sy*g>EuKf^e*N2@EaQB-|g>M9z+)O04DTE?B&}P#AF-vA4M(@NkuLe^e)5*<MKEJ(|s-$^ez_kE*A9N02K5{?B&}P&hIzNEG~3aF7x#AL)`%Y3;_iQ2L=}y3=b0&5e@<X7XcL$5f%~-90ULX0s|ck3k?bh2pJk15CZ@c0S5#F2Lb~E1qKQP0|NsD1O)>G1OQS32L~}RCMG8*I5-avIywaf0|O8cIyyT$Ffc4E5)vybH#apk7#JBDHZ}$ZBO@Lj4GlUvBO??PBO@|0C@3v08yg}b9v(S40|N~WIyxjIB_$OVG&D0aDJd>4At4+b8X5%!0|O8cIywRZ7Z*A@9Sau<It&pJFE2Ve9v%)36B9Z*1Oyfq6B9Z*A0Ge!Iywmn2nYcIARsC#1Oy2Q2nael1pp%g2>}cN0s#sE0{{sD1pos90|5g80s#>L2LKZR5dj1M2mt~C0s#U60s#U61px^F69EMP6afYR7y$|Z836?V0s$-m9{>gcTmsXJkBg+)$>V&Bii_lnqKl)8(~FObxeuh-n=X8dii_lnqKlo2ql<~!(~FOb(~FObOAng|v;wz_h>O&Vcsqv@QxVrSWjND|kBhVew~Kf?;ES6x#x$@KQ!-Bz*A7++WjND|kBdJB(~FObKL*o_kBdJB(~FOb(~FOb-znmY;fp^8OAk*Ihb^Spz65wYwK2Fhc@TRPdfHP6*EzU0QaDLCWjNkARtZ%I-#6lmKL$$=PZPQkq}jWRy#T%gwJ^3acstvR-2mK+Xp7T}kBh%5!Hd9)RtZ%IS2tOUSc^Xfq}fXkQHxI#!aBo?Q!CdjQaIi?(~FObj*D@No{ON1pNpZ3(~FOb(~FOb(~FOb(~FOb(~FOb(~FOb;*3#@hS`M+*9~)vfQx;LtBahAjX2&o(~FObX&h{eaEon=OAk(qQHxI#P>W0vO^aX)VT)snVvAl3UyD;6REyUiXE@$C(~FOb$|cT=(u>cFZXR!oY8`8f#687}nFX4Qc8hY0U<+Z3V~b*oQzlf4*C=F*J~-Yu(~FObKovxbNQ*^_&?nK0%O=c=#687}nFX4Qc8kr6ri)+;VT)c2UyHAcf{TBPQx;T<*BC*I$Fj(bmLp0yvpC*3(~FObkRX(cn2VK*Mi)nmLKZ`d&?nK0%O=c=$FazZX4!p<U<+Z3UJPH0tc!t*ev4BfREyUn<v89r(~FOb(~FObS{Yl5U5i|cmLivnks*?ckRX(cMi)nmLKZ`d&?nK0%O=c=ZXR!oY8`8fOAk(qPZLm!Oc70s$FazZX4!p<yNi>HU<+Z3UJPH0uZx0<e~WdCQyNr@*BjM~sEefmgamjzwK2FhssV$Hy#c(8XpDD^*o>}>t&D+;evEXCr!R@xhb>At);Os+WjM1q-Z%#U3IYZL1p){S3=RhX3IGTM3jhfK1_1~F2_SYIbALnSi1qR{okbPy!kw`Rr#+MBV7l@mn;XE&IQjj*lFpc2?T`RgZcNN0jq<1*gj)z-(MeKVCEpcZ*`rEGN$cO*&&Mq#K#W8eUl?I;oHo0ypr(a||4Q~2JR75ozU*Tm#y@MBQ6Km^Zz`1hyHJ4*?qzc7r#~S?UL9~(_{hXim8+!HvhK~F`zMf1#c}P#De-M7raBNln=BWGbN#1Y7rgEqu{A$|bQTs4x-Hn*2v#ixp$84xaunc+;_uhR_06}fOn3~h&4ElbNHA3vTVY2=j37|5Gp(Mqo!~GjxMP%MCW>CoStDWo+Vis2o1~dg4$G+K^qEX!<tq_Ou5_?ry^<P@_?YAA94ccDrU7!x2SW2mf^i7|pC~C(DN+Cc0J}vazKN%l<u=VHg4HbqN1Q*}XgN`yK<ll;s%Erz$)G7yDN_Id0M4^8PioPK8i0$D|L<)wE%b{QUHQ80>Z``o#fC15a91f*DO3Oe0K&ig<^C?Y(q&d7JgY60@~OO!=^$GJZA0F>4zpFh(|{>eDOCUf0Kh*Qf>sA+9Kp>qix_4DdcI7)q{P=<0UJ5FMH@$$QwJ$lDOLag0LJf64Y}9>Rsng`KJBz%CF(4>qfM5_ZQxP9ni*ieEqy6hDOUgh0K0l9VIX%>Z><-g<c|;H?J>`o+{pxZfKRdTVPHYZg)=EwDOdmi0Jqo)JqTs;)4-2-+6lFSOU_?gEnV>h=~Onq073Xv(`zYNDOmsj0J%PmtmI$G*tMN$`Ea-RpA6^GZVxGNrHmthhz5af9bhS1DOvyk0J|imjv{5uQBA(yXVQqHUQ~s?o=J=LtfrWMJ<S>la!Dy$DO&&l0KMx!Z54PZhW@6j8BCJ{hNIUiS5b(BQ0Ew(iQ9bK)LSWBDO>;m0K1nfFjBkAPC$S-4+{^|xnn4Huju0!z4jzz)I-Tmm*pv4DO~^n0J+yJ{<IYFiLe@<4tbaV5R<powPkVYRy{1REU{WOos217DP8~o0KvH$8T8oX$w&ni;C~n9`a#7n8qYdLW3KeNreM-sGp8wEDPI5p0KUQ7Xju%nNbOXlWu92rLazuX|Jkb=qHSO*;2}|D)VC>MDPRBq0MH#Oq@EO8@T0>g0}JXUnkO+*6|X~+ceeQA?NZMibUG<vDPaHr0Mv`<dEf_vuKqMuzkotNTgSnl1ZYuCc&I=g25A~k)bJ@{DPjNs0Ls*@b<OMISl$vO2qWV?>noTm`$vu~IB1Rbu&Jda?wl!ODPsTt0LTm*tkw84HH4m*W<oR}-jtD`pN@8JG6zVgGOoIgz7i>9DP#Zu0L$_*)wPx4bDg!`E2B`Hb~f=@E7*Ouxk81kn2>`RBMK>HDP;fv0LZ{_qRoo{XkTbN4m7a%T9f?_XwN5G_r9d%;$`kCs?{lGDP{lw0K>Ke5nI~Zx6Q<Nj0m_?Y?U`q>YD~XQi~NQWs;7zm~ts+DQN%z0T&bL<Di3sR$Rzkbbd9=I`!Ndtlz=oA$zx;C56uCe@iKBDRKY+0_|xV;FD^XQ0^AES@+4b_@K$qy^bz#I^RZVl@*jqVAm;iDR}?@0zG#Xd|;#AXynmG{xkUh)4-?yeC?sX!QkEZXxXpwH6kf}DTV+51h<w00sFD8KyPf{hz+j5bDEo!uNe9(nOIQ71*hO<M64-_DUSdE0|T#NyWEQgy>zP>?&@Gpf6IMnqv8mO18KnYNhSYvL9Qv2DVP8N0^?x_Pcbz)m+3Z9zzX)w9dXXxJeJDmE!RWTm+yzN$n`0lDWm`Z1v#J`P1IDYk$&axaLs&DglUaN{ICe9JuaMbAf@=$K(r~SDXahh0>kWlz^vEN_5GCcTYfWuMjF+Us?l@*Je|6Cx*+BlbH*vJEhGQ}MaO8%bDtVxwrVq{azf-v*=aQ06tSS1{*}e+yM*bQZA2|6Ehhi~0OX)Nx=6cR(6GM=4L~?vb~u)bnyE$JzPJL(_VLzYz4a|BE>r*krz%R0Y^PUHiO@8HLY6$60egq#)%fcDI5&2Bn(Q6O%C;_7E>{2m0OC4$`UrDymXfkvs6*9BmBenw0(rebHhW5?^HS-S4^J*wE^hz;1Jj2qvI%KN73c<*bBK&r_j%$&xPERr`=Tog)y1$n*D)?}E_na|0;k(XrQdci#88jmBu$DnEM?9Ey&<oc36wel^~RMu`5Z2KE`$I80|Avvj7@uE&?C2`UILo;wbcOZTwVp~o_8^aE6nazOwTTcE{p&G0(9q4`EVQ%ES~<}fthBK4=pk#c-oJom379)Fc+wSxZf^~E|mZP0?ywf&(#V4p>hm;#&vNJdoewZnqYy#bP<odoxLsn@X;=pE}Z}X0(4Gr1S3w{#XUaBXxb!H^*U>v-$e<&{ks(IGpdSpJY_DPE~Wqg0?x`fgD<}ei^L*dj#ZNn>jf_rBhh+hi{Ubs{9YAC4C^kaF0KFo0&ZXE){_xahSba_a|f9?AA@IHiV=a-g4!z3AUtJPdQdK}F1G*x0?0~@DeKjPQy^3WZPm(<rU4P%_QO_DcM1a12gbb)fUYjNF2Mi*0<d*Fkx#KHCC@QLG1hx^NP1#+{r=Kb8>ENk0J^Yrr;aYdF3bP`0}4nv3KL0+uX!}2Uk7<O7%J4%^;n;g={>Tt`YpK%az!rAF4h150;(#7EudEqwJI&akhJB1;<%|5qHjsG%5VAaUabODnB*?kF5v(G0|e~|h0-~6+uslM3h-5AQ`E23KOGq@6WhsK`7LG(r@JoWF6#gQ0-@%$?$)7lj%5hg+dzWDhfz+O!l&_kux-on&sC~x*f}ojF7^Nb0{eta?{T&dY1M%>mf-!M8=ckqtvWJf3r9TT^jxwzt$;50F8}}l0<E48U|@?3YT3s5E0OJV?Y^8}lit(}1Jc&QtJp!oDLgL$FAD$w0|zR@H(8l}rX3xW^k@ZcMrmMJu_oBu$nasxW~;en=PEA^FBkv-1r7(nIm*0_?(_LTY*4`Usk}@+kI6UY0j}6^7dpdn;?XY|FBt#;0IdUDO?Vo@+xFWy5hJp=47Nn&`L`vel0!z*(iUXWR|_v1FC_o~1w;nYMbD88yO>CYlIYP)b}A4BHLWEYMxue^;pva2kwh;hFD3v00JFn9M!)p{P+>M|iKKHE1P}~v+CWBO$rgQaFzDMN@S86uFDC#10KiyI3hdp|55C<*%=Ex-jizLeP1Z~<%!ZVd_-%qD70oXwFDL*20OsN#LOvGU#gCm~mVT0c`ID}C6s%&}Da(rbt{8=|93U?#FDn250RmyDt_rY2l35_|L`E|98PXv+oWl|I55QIm7t$eeE4eQ$FFXJM1H%GO^UkiM$Q(bVAjD2<1hpVLbXMizh=27qCy-ArEd(z;FGv6Y1vFCYHg(`Tg=tO~pU*!>QUR>Um<2oH9-cU7Zcc$QqZKbnFIWHo2oD5Mp!&N=$xwj}U99hhy~WvYCgn3C-5JJO$qx+#)e$dSFK++<39O8}kzXotlDm2?3ysCO#(lrnrHbaZ&V8nIi!k-774a`{FMj|42#gya+(hjz)I+p3fWIyYJin=!A^`0uP?A!mXc1fq1l})zFOL8K2zEN)Jdqi(B^ukp39rRg#qS}+j00|=pnFeI+@mp^7mY8FFP{Ja2vx)|L0w(+f`gwZXPCrpZ0vgMD%XXZQ6>LG38kOU>@P2%FQxzh0p%0Z$ebtOeA=IUIhm5??*~#0$e&Ex&3Gnn%IEbfS-&r*FRcIo0_}qaRIuxV>7Aj1P2F#Fh1SzjLICj~tL=wpOkgG-gGMi|FSGyv0__ukylHuOLzalF9x!g?8hbJ3Y5}p8a&L*%*IHu{b<r=iFSP&w0HYjBH2jX7u|0I#9bVp0am-ZYow32ekvyI7%<$NZoO&;|FSY;x0IiIOPi0u(*c)K04D{4b+-xb?Qv%!1E1`zJj~1;XfR`_~FSh^y0I66qw~2FhE?<_SyYk-bqt4_fCJC0N4pQdDQk~uy%qTCoFSq~z0JAmzu4D!HTj_~s|NY`y@TpMl@nDxp>&Kvzk^Qq%uhcKOFS!5!0IZ+T*V|+qZ>4;eblxwo8xX&mTaNh9u$n(uc`yd`kEAcUFS-B#0IM>q>+H?E-OJT3*`zG}6yu{BEE_U=o;y2BNA-1}(3~&3FS`H$0JT*ctYCSc7SqimR6-?OI`zrDWNzd~ZQ04HfEvr`RGBZlFT4N%0KEBpQ|_OP5XDDqInVDq8`vB~qdY|gS+sk9@eGO(#8NN4FTDT&0Hb)S*vk3|={C5|2mPBXI{5!jWPuzJolbR<L9<jtz;G|VFTMZ(0Dx?iY1&qD<1ynaQ~Y)@AJ%X-CyjdR`dRtAW}{tQz@aa}Fa!VqB*HRT1Lg}guwVhTt?&!~=i1~xnclWGNvDOEf%8(H(VH*_FxmhJrsFg{xXbRVePo2jJ61$NbL-jbXGt(gFEOB1bj2E>2*5DsFy{aO0K#}1Gx0)dR3G7Y{ageZmC;@+sqH_TyB@u?O8u)U=xi|PFz5gP0Kx*c2EJv?C5mmh4&XbZboQH>(yv6of$J(^K_H!tPL?p~FzEmQ0K~`Ht}MFA>$Ckg1@bH*UxJ3%On+}SIFjdOD3ik}2&^#bFzNsR0LH2<h2@-Z$ke>o=i}QF1wZv=i^#`gGS->xVG_FO`vEZPFzWyS0LElCIx>DlnT*WZS^Cmv8r$F3?t)fynw-L(^mM>1|CBK7Fzf&T0K~yglwmLrSZ!@7SeodAp-DW_qrxkb1<Zm@zuHZEoHsD-Fzo;U0MTNK7#WaM6U1c%Wb_Z~ju<Wx7JAkE39KZc;$p@$or5s$Fzx^V0G>Qd(lO=sWCt8AcmSV(=DQ_YZ#bPo(0vWR;1j+(w-Ye$Fz)~W0HlG>bm`OkrQu#?xh!SuVZT-qF0d)S22hW=)5ZqEN1-tAFz^5X0I_wa?J~-e!q_f@TtkQ>!dqfCTekzbRcDq0%_kMmTf8vwF!2BY0H<t6Ce!B%__x~sNMe2%Tq=#x@WApXe8l8}77b#E>&!6nF!BHZ0I4!<<bKH~T6p$oSTHMi=xwn!c~5<R4(FZ+ex?x%YVI)eF!KNa0JY?Wj=4mvB*Mg1HlM!Iu!*M_gQkVpOZy%TfMb1=Q7tg^F!TTb0I~Ccj<Xw=ZTBaYJfx|t0wJ-#?oLJ^)VoVNX%>b{xQ;OOF!cZc0LynN?0AIc0NN=c;y9GFvW*%|m<5O{afNst0$IPp9iTAwF!lfd0INDYS6zNP$1j>qN_IPZI}H>V+Y{0w72<goRk%OUwev9dF!ule0IdP|iSa|vy=BlmkaRxGsFUBqHA%U8B_P__VI#KcE`~7pF!%rf0MYP1mW@^Z_DT@)1j;?LQH+FQB&8XB1@6&h2I#?Rn8q;qF!=xg0Ll8{J(;oeo>o05)>Ljr3CLc?{{X-lcF?{Y@?Ul9&WtenF!}%h0LzM<>N7(33Di7P;gdML#wr$V#{q@%sj@dc##8s3ni4SkF#7-i0LzJdE427br7!Uu)=d5=cOwEBTNY*PP6j&(c^I$+NAfWIF#G@j0LrtzyPKaQJ{MHshBR0N_-?aZxW*ME(M4fM4=pJm26r(3F%JL$3}sHXm)_|)L>@?BJ~HEaF4$)eepNv_Yahgm8y$iVdjc^MF&O{=18(3}S1Wnm8o>H0Novg;U9ver$_E*lj(D8fjpvItVhAxDF(Lo}0yR=OW`#O-WhtuWD^(SO*OpK8j^@~d>5-Nofh5&oEZs3BF(?240lB>JYn>#f08~-TN&P141;REmuic?S`6)j+YjdNw6Y?=DF*E=G13|fh*lMJCg;J@p=>WH7;ff=@=vjlt4yL>eL9<E*XnZj@F*^VN0e~SHc%)WvUicy$sq)~}DSQiBF>N4m;*Nv!T(nVp|2{E3F+%_V0l|_6YEsk9uF43Lv(`3AsA*W=Eu5EPbJl%2gvou|<$5tjF-QOa0eCu`6b&iQtp;+EAQHT48$#FB_tGs#0t<y2y*_i*EPpXeF;D;i0^c@>Rs-7iCh8n8Q^33yj#kjomn1XL>#4jB-g)O_eFZU7F<Afr0`HBox{gzS=YBKC0+CX$sku)k!^kd$lvWff#X_A1R&p_1F=hY&1^s2Wfc5eCV11%Z_z5-`?TKU?={uRd?TnXB;VYN#oOv;6F>e3>0zTgF7WL~&Jt)!{9xC(c0sVVL>5Dz>_A9!*b`o`R@w+i{F?Rp}0n_e;=RbtT{vVnCzoYcDK0JaW&AReAYxPx*-DU!#e#J3*F@FF60swhL>$O$tcvM$ZP{RxDtuJbGH`=1)L6d&a?j$y^j^{CgF^m8J14H{Qm|F1syV&FUEzu+^`nGMt$RdMLL0=dx(v*kd(1S6LF_ZuR0n-)4(U*er41<)-3B_DRQf8`DnToVb7c9+QmUFt0v0E{hF`WPa0!syUfXZf4ey|^77&sPO+8{ms^*RDn0iJ;~&rc-L-0d--F{S_j0#XJGvC|1~I#G`5K51OB=l_|lID01TZZZF?G(I8IKgThtF|Yst0~3@{+y8HN?{<zmB$W68DZv&`6Z=foK`k=(TU$Nd2MjT@F}VN$0+C)~&;YY(PmLrO?Q&S!D7V=TQbKtTur|Uee*ccjE}SvEF~0x+0xA#7oj%ffAdeR{qEzjP1cVA90?I;~@9Y(VPf4)bjCe7_G0Xq}1p3Y=RvU3F<|;gC2FR|bJUaXg$AyYFaP%n{&sKvR(Y7(rG28$E1}e{;nVQR*-Q*q8Q=3ZdqYzzAJ^ffaTMI#^Yc~ZOlIt<xG2#FK0o*p2AIU!z>$A}j9=5XlImrUmtp9wB6+W**zfXxAaFQ|RG4KEY1)R^k9vh<APDY$$wQYg%rlumgxzq5q%)I>n;fdcB4iz!<G4}uf0*!Kw{YX1Y1Xo64(<#{~QAR~qfF9UemPp-w;;sHu>$WlbG6Vns1v0=THBO9<&!?FuZio1mK%s0|xW;Ry1w*_4Gd2+qO06;oG7SI#1KaymW<9Jn3&T{CCk1jgbNq<!LPnp8Nvt9F0|b^i<e4%NG86y+0#cIx(QZ%gQH#5~EoA~!#|HNLHL>bUz-~WeB01ZJ`s6YgG8+H@0#fgAZK5qcjpez{FDb&xERJTN8Y-Itla|S=(Z>9^1v4@qG9mx~0#Oti%p|)7gxjqC@R2pmXm3V)VKP<d$WKu~Le-u9iV89&GAIB50oW=<{to8*?JX^bhajP(8$}B^M^4$&$`^EL{NG@Rp(rvdGA{rC0Y&|^p_(Yw!e1n8X7EHtH4KJ;i}=nO1B)`L`Ef(VYwt2MGDH9X3YJpAvO@I~w~T`0ie854mR=>c?UJgHEw-IKJZP!(X2vo|GEV>i1zQHftG+s#pPyYXoryuUAkDMCr2?v7*E=&9*E*!v@a8g8GG+h(3QrB&Df8UuL}YoHi9N^xZ&IODuF$?U*>0&Sfro;Z%E~foGJ6032{{@Ee~7c@@X_H2R4=DPTGL$%bx$kQ(QVvQlv%FU*z_`gGJ^mB16!WTN`h(mec8OWqwxUR8N>CFu`ep1_ci#*G!z!0FN-pVGLHZN1Xhf5mn7}l7za-Kzh?7Vdcb#7VHh943k&mxm0V^BgdsAMGL--T0oieu+US0{hHd7rUtHmmoEG(dnrd%!G`9w{oUx<K+ru)MGMfMZ0oTzBaFSxhm{6Y`YM|QEf2U$%O4}aCX2troVXo?tzmzhcGNAwf0ouHhr14^B8>J6(h(pMcwe+yxhX~yOuN@p?2~zoS5-c*MGN%9l0oS;`Js6Z%KrdV~GEr-;V^hH=8T~brR@wr-w#cy!$U!ozGOYjr0pb4YuH-I15ql)_G6aBk3#ru#lDcMrCOt6HQ~G!%anLfcGP3{x0ocMBAdQD<J&z)T>KFFsr=evNP-`^y;ZNdE-WnJO+5s}RGQ0o)17Sgl4qfwA$+1OcG8)MaM^jj46vfJxw3f(<2z}xXUDq<eGRXh{1#PkcOw(M;{t6Va-g80$WN2XyThnDFk*-|@6O}j8sM0dcGT;CJ3L+nA)K@cF;1LGM6-PEvU<O=&6!DlLShg@uYxy*_QmQiKGU)&S1I48MPJA~y3AD5s-<jm`#2!O`<Q7arn{&j#LeuJRA`dd{GXVeq3O*aJA&C`)&wEF8`#bi2GGffcYxoHLT1NB;)>V01G0QUrGYbF!1TJ2Os$M-rIW%<AP!AefS=E|J>PfB0I%p~&wE{JtqYN_-GbaE53@}5Mr~Dg%&d;sNLe1m4h*Oclm_&&>A|q9msD>eCxnDCYGc^DJ2QD3y8Q&lmqU-TDk*GKs9nk)YR|I&Ghu7q*AH7MII-4^&Gg1Hm4JrquRRW9S2+|5Qx<i({L|6@$dz~~EQ@qKFgDf2?8#6OjGg|-v1HGOu9Qe?T-Ez|OU|+dUbNwL)F5+XCEvf`IU*0xwW41G2Gm8KK7P7a+1xI*1bcp;D$suZ2*K6OH2CZF^cYd*q)z9)8CW<qUGp+yt6b-LMsi^i21BneA+c53r&6W=jv%e&_T#aqPr{Zm#ax62kP5}TZI+TN?ydK67E})w80`su3ld7K_5P(lg-4z%IzZ74botX')
- ROWS=((19975,19979,19983,19987,19994,20000,20002,20008,20015,20019,20023,20027,20035,20040,20041,20044,20049,20057,20064,20069,20072,20073,20084,20084,20087,20090,20096,20107,20109,20112,20117,20119,20122,20125,20129,20132,20136,20139,20141,20144,20157,20160,20172,20197,20198,20200,20220,20223,20236,20239,20242,20251,20258,20261,20265,20269,20277,20282,20285,20289,20295,20298,20301,20303,20308,20313,20316,20320,20361,20538,20549,20591,20607,20610,20619,20635,20636,20641,20647),'0000000000000000000000000000000000001111111111122222222222222233335333345555555','0111011000000000000000200000000000000110001100000000000000000000000000000000000')
+ D=_g6r3_decode('M>bM3K`{UT0e}Hv000Y@2_8Q26y@&p>E-h8?(gye1K|bZ<>mA6;Q|KX?Enhj#|*X&4iD1K3kV4i5fTRz6zT5t`2h6a>Gb90<Hf|`?iu6+`2^$}Aodsl0UjeH7x47-;T6duA1LlBDHi1O^Q@rX^2N^X0{1Z%=Nj!SGvDIm<>@BF%){*I7X#(aJm2%~^d}miJ)rzTLAs#QA?5Vx<Mr^*GWGN==|=`j=1oknu;EVQ@9*<3A<xp&K<fbSR`oyi@*POy9pmifTIWU`2Qbu1=wSrO&gt^+^anULHDWu#&fhuT;pFygU*%@>0xLQ#^)GH&^Keje1kclU9O3NY@Okrk=zC@Ed;;lycmM>kPfxG_2(h-ex3{vfwg3dRPfxG_2DVR6Pft$(0=BdO3&!M0uHWAl>Ga><01C$BNv>Q{<=+Db00_q9Nv=01<LCei#^gz^^5yaMWaR(`-%;)G0~i1W-|g>M9smVCec$Hf00lmMJ}2}55<Vy5?B(C&WE=D!-|gY_<LC$g3FhNJ?5^hHKkNVnQm$N5<p2j#uIBRqQ8xevQm*FnC-eXYQm$V0>Er+fQm*gt000J3uJc>uWB>(HuJb4K00&a8_3rEz>i`h*@8j!6uJiBX>qf3OC*$Y<5%cfk>qf5g@8j!6uIB0N0Pg?_^C$GK)8EO)&C~!3^C$GK)8EO{#L3bC3-c%RuG8Pi)6&Jq01N@`<*w}mWdldw?(+a^`xQD}!u8}{Rj$Fq)XCPxL=`$+!u8}{#UifB)6>-)E)_am!u8}{Rj$R@$idaq)Eq<=I$gr`<X*)huEp5M!PV2$94-|)UBdO`URAEu&cnsh)WKs!6*^tQ_2gc~BCgfW!^P6n!DIaZ62Zc0#Lvzg-__1J!PC>p#>pH26T!mMFvG>))X&Q>-@(FZ#Lvzg00zOs)XCPx00_a<)Wyxv)Eoc_!PL~n&Ct|i#{de!)zrvf$-}|a8~_W!)zrvf$-}|aW5)mp!PV5rRLR;L01LuY($Ci%4b{QY!~h4v)yd4nW5)m%Il<G@$;QbX-^<R=*UsP4#nZ{e)x`iCIl<G@$;QbX-_pg+&(^`h%*EfsX~fCI!PLb76*<Le)zII<)x^ie)ZfL}$idaq)Eod3ImKz!(BHz<#K*<d-^tU{)f@m7ImKz!(BHz<#K*<d-__2;#nRNlV*mm<cK{7Jci+{{#n{Nf)zj1*00_g+&Ctxn)WrY?!_Uss)y*6L1;f?S(qI4x#L3dd!_-vS017a~-_OF+#nRRs0105y+26=%#LUG25Ma{T-^gji%*Efq!c^31cK{1u(%IkA#njc(&Kv*;#n{Nf)zj1*00hR##?Jr;$idRY%wx*{8DrL9RM~35)6>bu$-}|a$<NN;!NOG3YIgt@W7c3)*=oVl)5*rk!@<<a&(7aq(%AqSW7c3)*=oVl)5*rk!@<<a&(7b-X~fLMYIgty$<x!-8~_B&$=1aH56sEd#oyJ=Il<G@$;QbX02R&E)WOur&(7b}&&x31!NO_8&(0hG70uPu!PLpm&fnC}%P`-_X~fLMYIgty&(JVq#{de?*UlW@!`0H$Q~(jr*UlW@!`0H$RNukERMcvB01VI9&K%#v)zZ^cYIgt((81Kh$lt-k)XCPx01VK<)WgW%(#6x%R2%>b(9*@zVBgfw%P;^D(9*@zVBgfw%P`-;!c^31cK{R6(#6wY-__2{W6R&e&(71;%^Uy+(#6Ns%)!zC1=29V&BXu;(lEiz#oyG=%P;^D(lEiz#oyG=%P`-;!c^31cK`;`#nj2t8~_E<&BV#l00q;<!OR>03Dd>F%pBif(%AqI)5XEe9N%El+26s!RMcvB01?y0!OR@rVA9#&$Z5pP#cFo|2Gh^O%f-|H2h-5S!^y$S00z_9&CFxV01wo~!P3Of*UsO;!_>*v#Q+J^(rMGi#nRFo00`C2!^P6n!D9dg)y~Xg%K!+(2;=fN1k-&03B(BF@;C(3eM0~S#AF-vA4vcM#^gx=1jgh^LjVX6$#3EG1k_gm1Qo&K1poyV!D!1Y016eu;R)jD>^s6W00|Yt;R)jD>^nsO3KhfQ3F7JOJ4HhP3>7+E!u8}{#qjUr=l}>6I$gr`<X%Mp2o*YA!u8}{RR9MS!vh-l^i==|6~ts4^dG@!00|YuWE=D!!DvGO2o=O+8}uK-H2?|~#AF-vAI9P1^Z*AH#AF-vA4LEN6~ts4^dCh-00<Su?I!uj?kNBY6~*l)`N{4n!ZiR16~*l)`N{4nRR9Ak!EFEqE5U8TH2?%F!EHqV1S`R9RR95W00VTwH2?y1RR9Ak!*u`!E5midH2?%F!*xXf1S`XJRR9Ak$us~3E6Fs%H2?%F$uva(1uMxkMMD4tE6Frf00S%2TL1+s(_6wd00b-3TSWi_E7Mz500$M!>GtK+R{#kW%}NH)0`2Ma01Fk(N(RsZ?dkNwH2?|~%}NH)0`2MaRR9PT5#`3=<McxS1{KclH_I#l2NllmH_I$T00$LG!vh-l^Z*DINy7sg`1C^n2^C4h0~+}B!ZiQ{6-mo100$LG&{^<O<p2W}NmT#@6-iY?00$M&@(38zR{#VR(r!Zl1Qpa*RR9hZ)$Z&T>(KJ$@bd5P<^Ti`Nz_*W1rSNpS3>{_5Yt=aWYF^O`1t?{;p6f3>GSCYasUJ2;{^Z$;cWm1;caX5G$!)^1L19F00iM}XC(jw;cX=V2H|ZPaRMa(1L18`00iM}QzZZd;cY&D00!am?d9Zh00rUnG$wKY0^w)?1L0_A00iM^XC(jw;b<iQ1L0^>00iM^QzZZd;b=a800!Y=>G}q800QDQ00ZJRB>)KH;R)jD>^o-w2;<=i;_2)=QveF%;R)jD>^tA|R{##<;R)jD>^tA|R~c~vB>)WL;R)jD>^tA|S3Z9L0$fl416)ug00vx88F2z700dl6K7RlQTwONx<X%$%2wYt@_2gbtB>)IqUEk&K@8jqI30z&@<?!$0=p_IQTwUMg@bBa38F2z7018}P-{tV{<LEwr00>-C<!kgbCi4IUTvFw700mL)@B<hC1>;%r7;*pz<5}_;-}UL_00QH600ZN7X8;7_b!R021LJii00!fA8F2z700ZN7Qvd|xbyFn(1mkr+e*g(L;pFTV<=^h}00TEB=l~2iCg|Vj>F4O*_u+2<4>u<0-{|S*=->C@Z)@gn01-DP=-=q+=jh+};csj7-vHzQ5jQ62-{|S*=->C@Z#L!T1myq*<Ot*PI0OI;<Ot*PI0WD3?BVD0014y><MKEJ-}F}i2jmC=?gndU014y>0qzFh?hEAr2IL3<?gmo;1UL5S2LK1<?I!sd?kNBW<?SZ<8SW`101M^qCixleDH(ABB>)NK?I!sd?kPTh01N<8H{{>$3*|QX^aubC08uyO-|h?LHu>}jYvykN5dcv)<lpWK<u>^m^K10q0OSA>08uyO-|h?LHu>}jHs$67<p2g4^7-FUSO5ta^7-FUSZn5Q01FuM`QK4kYxLg$<Nym8^7-FUST^P61myq-81nhw?eAC~00tQH`QPs{00rgn@8jqI0_7qA1m@x6^Z*9t<lpZyB>)WQ;qv6{7VF>V^6y9h0~YT$00I{D00S2ELjVNnabI!(2kCL;<lpY|00ilA0wn+f=`;WX=`?2m1nD$qB>)ELG~YKS=l}!hG$jBA=`<N}0wn+g=`>RS1nD$WB>)8JG(LX-2<dO(^aS7ZR{#m=Z{hR=-}F}{00QeQ01fQn^Yq{C17!n8-|q7O2J9B=-%(fq2kqhb-!~@c01)lr_}>6gH{{>$3*|QX^aub5?cw;}81m@|00`~j_}}mF3iAL1?e8}L1nuuw9smRG3*`U??hEDQK79ZP?&bLO-!~@c00!>wH{a_l00{5!0BiI#Ci4IU@9+R}00-~z0OjO9eE<gU@Cx5iSO5v{@Cx5iSZn5Q01fZ(3g1y!Yvym?@9+Qs4Dav?-%(g==5IbH^Z*O*@Cx5iSZnm(0OSA*@9+xWQCK$R<^<&c2L$Qo7Heoz01Z;E#AL-k^7-5I^zz*R4pOefWW_)7`P=jK^4&uK2JcEy?d5U+0`D>a2=6lA;{zJ_^Z*I(GT-9^8u;{Q00ZwbB>)8PGCn{61qt#PYiIxj3Gx_c016567~kXw<MKEJ00;^47~k#hSRMcc3Gx^|eE<dt^yuI3G5`he0`2Ma015B{?dkLxaRMa(2k-*z>GVE-00{8%<?!<F@8$pr@bcyG^6&5FB>)BR^6&Wh00!{#@A&y800r<_@KWUf2lC<f-x%`w00{Eo_um-u`6U1c^5yK|0ruqp0`pq{1M^#F00i?}XC(jz^IP9HCg=bI^IIhV2J>4PaRMa(1M^!`00i?}QzZZd^IJZD00Q%W00Z-VB>)KXC-iIdG$!)^1oJ2KasUGJKmZH#C-n96-{$P$=kovq^Yron1oQOrLjVdV@?PKM2;=fN1ONyp@?PKV?^qrH1t;=eK79ZMZ|xR%asUGKR{#a{SKsFh00#6|8F2z700i_`K7RlW^hoUG+w=7DF0QVw-2emi>Er+g`RV2C<Z=K3Jpc$5#qB2f$?hot2^GcdCi%(kDMbJQbN~W$MF0dV$uva(2Ne<J#^K}i015Nu?B*_9P(*Y974zln<}T&!CixleDMS^;?I!uj?kNBZ^X2U3F6lHxE6Fqf67%Kk<}UK#_uu3Q<MKEJL>BY_B=hC$<}UIfL>0yDCi%(kDMdpr@bc;H;qv)J!r}Af#rOyC1po^3<?QAz@*zZYMF21J<?QAz@*zZYMMEy>G*d(?$uvbnF7Gl##^gyuF7Wc{?cwtIM8e_o<;D01@C5)C^X2U3F7hEnbVV+zF6AOb6*^Mo#UcO@^X2U3F7hEnbVV-nKtyy^01NZw?B*`>TSP0<TL3ll<?QAz^L<3b2;=fN1k-&k?eAC~L>BZe<@oR$8sy*g>EuKf^e*N2@EaQB-|g>M9z+)O04DTE?B&}P#AF-vA4M(@NkuLe^e)5*<MKEJ(|s-$^ez_kE*A9N02K5{?B&}P&hIzNEG~3aF7x#AL)`%Y3;_iQ2L=}y3=b0&5e@<X7XcL$5f%~-90ULX0s|ck3k?bh2pJk15CZ@d0S5#F2Lb~E1qKQP0|NsD1O)>G0|Wq70tpE-Gbku2DLOh45j;Ex2Ll5V5<EOTJu)&bE)*0kEjc+iHyRon8#p)!2qh&TAP)~bJS8O-79}M#G%6}DFC85uBp@I=I|Bm`4?H|3CMPEs7dAFEH7hGHFe4)#9vmD82Ll5V5<ENt0vQ=RJRc1i3_K1K6EQJ7JRl$t5ET_XJOl(77!?&fJRu<f06aVk3knJW0U{zSECd7#3knK6JO%~@1w1?j03`wm0So~G0SW;F00{vF00RL70RsU70TBTQ022Wb0R#XD0RjO60RjO60RjO60U7}X00jXF022WP02BcR02l!Z02u)V04xC?00sej0^XUf)PR)ltgV%m<nEP~m6es=nZ&N8fRyj7r>&Efl@H`Gm6es1m6he*nU$5^nNFp@!jj*7k(HGX2LhFql|B+y;%E^#JKmYU!hGwc(YuwE1C>6NHa8PiQsP-?H4_dBJKmW>m6ZnGnL?G72Hu%Mm6ZnGnU$5^nd<HALQYbVuE~7B!+n2#m6a@&l?D$JFysV3G&v9y<yPXuRZM8<2s}AEJ3BjBSnBOUPEy6L#>mOQ!F=ZE=W7WFI+X?w6A|Q<00T2MK9vBKmEM`k%*$C=T3lN~u1-`^&CZpTEtQoC2s)LO2ILQw6Frqy;#KJ`FFQNlnV58_s;R4$m6es1m6es=nU$5^nU$5^nU$5^nU$5^nU$5^nU$5^nSp|YgK=_gZrj|}*GWo6Mq^}QV!4Zlc$JkEm6eqtl^~TWl_`}Pl^K-_l?;`Ym6erNSK>{+7L^w}JKmY?RFIXGmX_p?;&zFJwWgQp3k{W(m6eq{JKmXWZ*y=?QB+b>Pf%lIW@TYwm6acrm6Z>bl@pZ_l?#=Xl?;_uSK?~vAeACJJKmYq+1=W4a&2zU(4(Y!bz@{^WtEjEm6eqtl^~Tsl?9cRl?#=Xl~z~cXF=&Hl`EAyJKmW?M@vZC+}796(4(Y!*sx<{VPd+Bh?SKXm6eq$l_`}#l?9cRm6Z#X43(9Yl~z~cMAFlsO}^<Fl^d14mL@wpJKmX^o}!;gN<~K7+}799(`kicWMN{qiiVYyBbAkv8kHH9DwQdfyp`mY3zZC&m6erNSK{#LB$X#SJKmXHUSMCKp_`nVo=HkYM%&!h*Ku-fZcb5BQ%_LR(`kjqonvHSV!Diod6ktMm6eqxl_ZrTl^T^9l`54fl_8ZNl@FB@l@XP^mE@I`l?#;&m6es1l~z~c;Iglde89uBjmXDqd*isbiiUTwlaWo~vuM8Q9hDxHl>r1lG&up50hX4QmX?;5mX<Q*FgrUtJ3BiE01g5P1qTES5)l&$01f~Q1`hxY00{#K0tf;N01yEP00|&=9dmy}<%sq2HJwEj?!uk138y`i=U}?>BAXk)$~gJ`zmm?FUG0znR&GqpBaQN?9E4j4U(rcYTqWNXUfH8cNJ;D8+Rw)=B|wZs7hf1*Z=5!}t)Qlbh5t(S7CalHjK1t+A;v#znNc73I&UhJ{JT(r4en)f>Zd;;L|z?mSNO=pP?f8s)w1r*pZh0}O~rBT#3}J@DW*CQKAS8ThI9R=UKhOX9I-V&fpiuY4!SMa*$7rG1)&EG+Hw@&iQ@0q#r4g%txR|fug!r>G)OR27F%IQMvNd(vNNrow4LBEDY#>lWhRPV%~>O1{@U}h)tjW5P!7we=Jc6NW92ImORjXVVZD+Xjrf@3=^QF!4yFNe%LhX9NP=+*0HP=<QYlgZ006s1Bfg2Jl;t+fCxX>21V@}d+GsgZo<QrZ!>VSqcgdhBQz=sb007RjFi&dHh#G*4k^k>)GA;Cr7hU<f?dq$>)WwD_if~scR4G&d006?j{N?^Gxzc4;BRs1umGY^)kLe&=18qazyAHEezSDpyRVh^f006*08iG~_W*ouIGm98z1A4wpzNEz0T>%?8xkVdCm{SKSRw-5h0074CPYt=)0agKd)IROBU?u7-xuZ>%$8F$IzM2_ezAb$zS1DHj006ssC}ALXQg5vnpyZDa;_WfdnB2((cz{o_@L^y<%7rs2SSeTl006hx2|Wm9^3%YNc-jfIf=kX{TP<Dj1nE>ZzW_n_RMTrISt(fn006l@jjZHf$=J1>Y58!s_@4~t(QXeZaHWhRfQSZxZXIALS}9rp006rrrH&$H%u!9g-e=N?qh3^nzMe^o_N=Cue?83_3UWy)TPa%r006z~KW!CwD2D!~s~Jp_1BRp5Dpyg6giz-gor&9g+|*ksTq#@t006s}D=<>K%T7RmI1dXC)45|PcCYB;7rpi*WYj~+PM75=T`64v006nyEdI0<@rke+pALDK{}7Y6*0p7E>Q+50uq?4!HJywpUMXGx006<c8X5H1<jF_{72tmt=K4X!FB;D}Mq{q@x~5>#Tr;OBUnySz006$h+h|z~xJd0(q-CC1*g~%eC;!>28lr7rD&QeeWYo7QU@2e#007V(Dx{tiTkxa9Cj$%WC7LHOQWdX5lXtfG;_Xt;9CSJ<VJTq%007jB=y~7=g0B8FR=<EkKU>Gap9E-8PI#z59tLR|Pt@=!Vku$(007F=t#!@o;#l4iBnTtpJ?kr&EBi-|EjVb6_OPj?B<`FkV<}?*0077g8?4p%Gc|;smu5mVA>Ndcpr4L*ZZZc*s4}j)j=mBpWGQ3-007JKG1aw|;&Yv~-YcU}oOU+xSu5Cmwz)!uteB9486yfQWhrF<0079qaH7qN0BB!mJPtIl_*#?w4rtFOTlc=C<>F=TDyr2fW+`R>006_b0})%=+qccccZ>+QRBV+uQ0kioKT?YoCuNe3wwQ7$XDMj_009>h>Eob-gH~L~U37jm%sTbl8m!;J;~{&uo+X9O=YLBnY$<X800Ql48{m^_mr(8&xLNnfwD_RO(7lc>Z#v&bX_Xa}N?_M1bt!oO00KRC6?|Z$-e}~}M*cJS|I@&y|9tJCzro<$_h{L#@--qUeJO?j00g%{R7X*BTRXVxHsyk+`ufJ_W>Ik_BU=+A_i1n~WMEM#iYbo(00RTBVY}Rm2EBBv81Cv|PJhdNXrtl?i34fC^hqWEbwREvlPQ=000QH#i6L%x4K+r_ZrD&E_Alp>SORS0n9{*B+#1&Pvs<|-oGGLL00lYJp^?3gZa`J$)p*$HO_@@It*hw+l)oCebbi*B(A}Xas41)f00P6<1<q1DOmf+Ml<x@ip<osJ4Ykr*7m;E+guWj_D=FM5uPr110!7DrSev@=5HBL~OqKIj`enZhPT8_6GYcbn+}oQVh;Z92CoLxc0088mJi17`T+pz;2@OCvUUoQ^ikhiK-oCg3$@cNqV!ib(DlSw20jDYxdOrM=kKlN<#)rBdQdqmIoGmkVkjXA(X-!X6h-qLhS1wlo0081Tc=`x)aF&v?U8qCVNtMKI#sYc0K{k6zrSnqhmJd%ZST1h>00Yy9E3ye`M-}J>mUD=VSND11L%4o!I{Tt43)RK2I@d8SaV~iP00O7mMy20&FvL)g;3Q3oH7sS$1HB=ymkE?Q0`<m~JNX<gdM<<j00RM)N{mf=W6&eFq+SA=_qEjk>|9<2>7I8nhbzqPR!q+>hAxZ%00MO9Q2B5i5G<bl-hr8Bk`FC1CV1M9q?L8X$1oSDfw<o;jV_e{00Pe6BhS?d|DkdWea3Zh5PLB_j+$VB!gLXjyq&!*{qWH)moA+E00MMQa0DYx+r>RT$!OXnRP{P*o!><XzWuut?lY>2bv$J*o-U>U00Pd+ID;?03yZ`eUyfCi59<Xl6(iAlW{cr6mi%57MhxpNs4lJm00M4b=+=`FQ-;*cCvyjxI3I&&T#6Ba)PmY7&>%czS9(w`uP(O$00PKLjVbHZgHs?>18vpHkfs3<-S)#)QFjUg(g()94uGyMxh}x~00OXeJdsbaDJ9P_L^0NTbx3+*cK!a+RU4#-<^Z~|bf=Ck!Y<4J00Rn0ISLa=im!Pzq+bVlI2bC_)b&`Ok?B3MvidE#3UWm*&Mwvf00OEig)N|0549>S!H~4&fa18R6{2rRw90S!?_R9}RG8#0*Dm1z00RW=2!+x)blcw#^$PG+WK-0y)ju5>Efd?xTlp<!3#Yp-<1Xs}00N=rweHrTa*kyP*xNvY!-r8$o5H8@e6VfH@y}JNYuGt1>@M~I00R4jOz&~F4{6nbHJ0H0pc|dl`mH)LWD7?;<MdpzIjw*$_%8qe00OO^4`5)63~JfN`74p_bnU*JUz6U{3<J{E!mHRp!6`g10WS*x00Rdq!#7!(ex@BAl=Nr?ZboTfSg|J9+{o}@%4Vy%W#=j{4KEk~00j;Q!8yvjj_&jMKx|OJ^{Ko}K99*a<^itQa2GnmapKW087~<C006B6Tupcy!rS)SI1wYVxD2*L<@vWIrjkQO)6y1X(pL*F8ZRXP00l$_(nZga47->}g_7veOm->|1vRZD8b+dl<KgL#rjbN1CNCxc006VYJVw9u08n8zYKf$C7X%OtZrVUbVaXPKaWLrHBJi6pCod-e006*PP73VZ(ht7fM9lQSZ;hs8k4@H0F3g6Ml=y9eBo)msC@&}g008FVAVNMC+{KTbVU~W9e)*HGdK9c;+9}J5`mPv-upA&SDK9Gk009DFsICgILy}n_@I*#3_8HP4Ih?~0^$);S3K!BLax1wnEH69&00YAUPxH>Mq{tjUr69ykYXr3*J9Jj%;fR0rHYbozE-eHvJugTA00lHs>o#@ZJB4XZ7oX2RM^XW-$e0B?;vSwjXKqe`F{2ePNiSFc00<8RP@wv|NXbxv4PC77hP}nvZzkn4BHbCrTFDO$1l18QTQ6?_012#&yOCciagw`wE(?vtxyF6J*QJW)w$6Q~bc-<csul4sa4&xV00@j5AKXOkF4RM`Hh{k_2|T~4m?8k}C{U78rDzdc2?X9RfG>{#00?$E;5?BTu_YSY!U?a%R>kij#Eb)Op`d$DQQV_3oEMERkT0JA00>pYFhN~i^n!z*C})_&Zfxv&>?+rVn^7hIL<yyz&+IQRpf9EX00HF_)5x4B;C$Mjd^wqt=I;km49K5M+s$|;Z_4NOD_OrUr!TDl00QlU22`-?gXx{2f=%6TbcNQ_QbGXnAgk?%XG~xwAA?3Ot}nCz00Qk3fV^pWcte(mtR66K<QjW1=4t`4m2z*1)z?~M5p~fowJ)^*005&LOEmnBoUuK0+Z|rsP;tyu<ejm>!I3<j@XYYojGTHewlB5-006Cwh)-o$;Mf~rs|@tiPuy%N*;4}B&nuyZzmFEJBY>ALw=cH<00602GPj9yb}nC*qPz0m?4!=)CngD&rVdi(#ZsN#7|bXyxG%T>006T!{;p&N_*?0TXaD`;Tkxq+?(txkN$ba;lac+iQ?Jx7xi7f@0069?(AV2!9B-w3mUP}PuNx4*np=+e(6E|6Sa~o8^^c@4x-Yr_0065ptLyB|yxq&yF4?3k{S@P)8Y~+!d!9QxOGou}pwOHzyDz%{006aB8?0b?pBB^2BUC~qTsrm1y<~3WM{U{3s(>2H=~S67yf3@}006xCd{ge9j1a{~Y&p;GI~&*>M58=K1zEIvfAI{85X4e1y)V50005(Ss@Tf<3F$Vt&IkRQD?0f9Ph^1{5uHwTl0manL%?t^zAwH2004k&lxf;la^o@MD^vV-F(1}&HYbgG>-t&wyJn+ZUBIC)!7u~>03^Z)xM{sRjHx*S+bAjgYCy~M__|mRgOZWDKLd(%hU<MW2Qb<I2&UtY5x6`-_|LwIb-2H-&Z2>Df%s@O=p=-CoCK#N+gOA!=P>60006>x8#D1jYE&QLcl}%h8kNyrE2-^2o4X#pv`YP}D(Gx5=rHI2006=Qwg$ds%q5C#xDMbuqjdJ0nbNOBz=7*3VL>3BjZT&@=`iU4006|t*{&?Q$?LQIHwE%6Azy-q*i3(KHaL>!Whj%wDG01E>M-g60073SErsQraLClW*XQHg5(Pi?WsAtiV=~s6?O_tS>H7gN>oDs80072hHaaqXM461t+FAP2XBykz*Y1K=bef#Pp7eCUEdP`+>@e&A006|nPLyFV4_Iw&DOj55gP}=0(xbvFlLgFzPQThsdz?2g?J(^C007ZqiWnJ?R1?Hy1Z4CN>y8*M5f*yY{0Xciq2gl3G@XMm?lA5E005pmOwuvs_GAYfEqDN*fabd;T5mX=LePB;zu*(TJGT=s?=bHG005+c&vfb2`=#MtX1Oe7>|wuF5-zYQz6MZ_xzol5!bhPn@G$TI006Odr|mMzlET<7gIq(1Bf?u^He0s?xm9PD0?j8C&|ADP@i6fK005_KM<&zf3i!9$|43qf7+fli(eS|XCw#=@f))*8i0jNS@-XrM005~nZRCE*Ct7&+Xjm{Sc<61hHhE8de-7uK2Y#jz3u^8#^Dy%O006b*g^syItR%w3RW_f#(y)oA7=xyT*h~8!4S-{PlTj@&^f2@Q006P`fR3{pmu>eal{}=WtO6mizwS;(Ak@1{J82e%OSq0O^)U4S007H(DeQQJ<^b9$BH}odw6cvFO_&9UD{+N*9RgXu!X2P6_AvGU0065xJXc+QJI61YO-gn<d^-&k7~2!lBNgI#7FD=E(6#e0_b~SW006B4_=)jD&%I^PJdkug%&3#!!Zk^`dL<y**<mBL>Mn*b_%QeY007bOK9-GD{`N``@&w8~vr&wMVkD&*eFg5(Wd`WMYM90_`7rqa007DQ;XRqL^qy8dDArVNMhVDX#{U4o8FtXV9P(dv>&}cY`Y`$c007I1o$50}_X*TIRN<32yv8aPZN~wH@~N^nJ;qb_o0<|Z`!M?e007I0d@Hp0Or<aJ9M(+!D0d?Q8Cw=*>`n$d33(W>1V{2P{4o3g007FfzPp>BBR&^Y;f6F=1o&>VUAV>-B+*4-NDnP3AO?3Z|1l2$01Ra^Kpq>n=6+^4J#)b=OU}vt%HMC93`l@xty~`UB}eix5-}M700VB|R#z)|-WtIADoJY199^<GLCOainT~jz+KuOnHev`d95EsQ00K2qIc9}Ac4aB5<||bdg4dQ$^p57(gXxi$Ab}*+VJzJ-B{3)f00FtY@N1nUrT|n?%t`$w>jlC#GOyjCLis5_IcsyHw-fR)D={<x00Tj}g4k-Ld4*D`vFQM}W#Nh=z35qk#tx>u3_-I>255XSH!(W^00Dp@8F-{ta9;Q#9I5i))hT=nS}|=PapI1H^IWu1d;dN$J~2Z800F_025M5%&92G_le5+~NvLU9-z}V%VsqAgI)ur6+vR#OMlnbL00DS9oD>Zy&#eY>k{}YiY8yh=)%VgZM*<6l8ofSq)hvH8OEFLY00Q4Oh*ksI_a^EbFjK(17LHcX(U&AM(CewZ4&Hg^WPJrOQ!!Zp00Qrgvbv5_f9HNP#{!X3uc^6DCd0@sg_KqlD#b#b23B%0Trp+<00sSJw}AEW_+WjaP522m810E<8|gclz3q&bPT?z;@0@utX)$jA00KVV?-upzN<Apj86GP0=>h$FMd^z@?e;6Wy>=3Ha`C${axr%R00GnPgy%nm#{M6f{=cL2v_3q7Bh9+<IcxP*j@@PgqkhFPdNF?h00IDcMC-Lx>UdOFR8YeU?X53rb2r+e<Ux~u(C#EQua4(2f-#H$00Tq&Etp#H{JYrW`Yq8UEBdx=!pI_nQ9)lAEz*>S;?RRJk1>=000Gk##L<_6^9+NO%?ZU^MN(#}RGEsjOcyN8UY2vZkg;1amoc3H00K(|c7V!eQhu->V;DFVT-qQ#{q;HmQ~{oWGtW;X(cJAZpfRQZ00L453$fD)a5_<r>ON^)vFHDptvGuo?QSvutTa9$(?7>CsWGqs00R@0QQQA-cJFqMJ0z6&0V%;2PZRr0)<G>Y_gh;%-3JUYvoW~<00NO-V$cAyX-|zL7wvLb+9<c#4pKsS53n}EDSrQs$}XHSyfMK500Hdl8uQLt(-Hg|-g<PY(=Qn(IJTI`S_#kLxgP}{s>QD{#4*PJ00Jrx%bh;bdLWM%HKJ7Qi3EfSAp*)mn(yotf=@}X+l+WI%Q4gd00jC0CMwY^7Y)v!JRc=XLI~)R^FeQ`{2y|U(}Khy(Q`gA*fHb)00t_=Z4MYe!?gD;+q<meAdt{4`_-Rd_6m6B5+Gl{1Er!d=rQU500G<=+6%yWoFwp>pA|}{=8zBXNd<k+-)HQC4n0SWZLDrF?lJfP00o>a!~ltThUTzGuFJ0vg#DFqn&QlG8JxTZ)ejLHNg53?{4xIk00NDYB|FId34^GN>G_EQ9~Gm+H?h#i?A%Nl;P&BL(wWsV12PN%00lBnthZ(mss$es?O9UVgmh%Z3Khu)VC2uTjj`Epia=j75Hb}200Y~UVcUjR0ZtKmv-s+#-N`j$A<5=7I$`Iu;UC>4iNUWj88RFI00L6j4bIXoFGP91Z&{@O1NMFetPno&`!d)%<|L;QdqdkYATlEW00L5DprYR0r$xhr*Il8EPTPTQ#zJcj=F`cw)RbRs>p{peCo(Dk00L1WCeNDVgBO)^gvFcw5wwkr=2S@Pv`)ZN?LiSlg;wD*E;29x00G!?3`aG6JuJ*DxXeq3fRenmr}4%!pQx)19Le1If}C42Gcq>-00Bk)w4s_P)xuvSY-aF8Ml}qEfQ$If8Uu?msrhk3#cS^}J2FfF01B22eAd*x5S?N%M}eJgXp;N^@NPE-88>2Ll6CN5JZ88uP%>8l00mpYS$Y>Hv1%$<!U{%Q5#%YVfOc98d$Chf!fu-ed)?bITQY6{018iK!23uLScmnF{k0K@dJlXth67=V5+Ju2|A%pm&w+L_ax#Me00}vI?E=;6V8M{K2krG*GoMvQmeV4Sjn2+<5r<`D<V*iDhcb%*00Uc+%>Zj4O{~_Mb(jM_&uuoaG#r68Bj|MF_B@67Bmapqk204400dUC!m{Mlp?tY}EELz){4Z<Z$}BA!r9}E;`L-8k82kw`n=+jM00G(dNrOX)(h^n3%Jb9}LZSVussTM_WW7xY7%t1R%%zetp)#WY00Gy-DVP(DUsVSw=(!`7HAbgIoq>|<uK5Kt+p)1B&A;?Ar!uJk00G(_3-2qpL$rH+j14hYf!e8*Rbv)vp<q%h&u?g`YP_*Btun6w00Gy^GCm}FfxkRC?qF+n?OC9_3VpT}%xO^mx_wz{<4U_Svof^+00H5B-VBrctdQ}mbB`W`{tTHj8W?ASZwMT?=$bcObop;GxiY%|00Gztu2*}bK$?+Af#tJgo?eGEa;>bsH@Ce{n`>O6vAC@=zcSeX01eW3lGzex^UJ6<5iD|6@z`!+?4r)0eY77m_!K47-UFU8-7?|;00Y5@uX!iRX)cl}j40hFybmJU#x9(j57qwJ{g)^f;1tC&<}&L500UuSR3zpxK|pKJh?%%P+{yT?R+noNGj-FksQ<?edDT%e?=tuR00nK9RTQIl3CZTVza)c^(<&7j-@>p5_@booc2tsH*}PRU{4);#016^wwpuy-XvTkw<UAKm`%2x6VRM2vYf+czlu!jSza6bJ6Ehe900YGn#+p!p_S;v5#sZ>K6Ub%63iKeTslz9J>$+vf7ju#`95XNg017_KZZjB`(97O1H|}^O`#d}_xFG08S_`cGhN&J3lkUbdG&4E?00b_c;6$~$!_uw^0to=C$i2<nlfa4`3R>`_mTy*w^{Rz4J~LJT01Pmlr`v`{1)r97Z$_r^=~7k_M5htlfu%8K(c_am*_#M6S~Fw-00%C^+mbzU96$Y@bqwbCc~&8OnPXnDi^1;K%GthJSlT)>XfuHT01Ybpep~sidQ*Qn*{1`iz_H1Tdq}?8&x7MasE)eDUrKH>g)@o(00X@|LZz?Pg>8$}Ikx(XXE7>J4um4sKs$@P)Rpk1@i&w+jx)Ld02Z=r2mt~s0FjCe?hxP0>T76XegN?b`t>p=9lpBw@B^GPzBAnb02B>lWZT|1`*&P3Q;MJU&$1P@0CKOkLWF{Uiy<3yP&wi=;8Df^D?&Jn_xyyXP-d0Gg%$cyK!aoVBG7$=o@%a^GD$L3KE7B')
+ ROWS=((21069, 21073, 21077, 21081, 21088, 21094, 21096, 21102, 21109, 21113, 21117, 21121, 21129, 21134, 21135, 21138, 21143, 21151, 21158, 21163, 21166, 21167, 21178, 21179, 21182, 21185, 21191, 21202, 21204, 21207, 21212, 21214, 21217, 21220, 21224, 21227, 21231, 21234, 21236, 21239, 21242, 21245, 21250, 21264, 21265, 21267, 21271, 21274, 21276, 21279, 21282, 21291, 21298, 21301, 21305, 21309, 21317, 21322, 21325, 21329, 21335, 21338, 21348, 21350, 21352, 21356, 21359, 21362, 21364, 21369, 21374, 21377, 21381, 21422, 21439, 21444, 21473, 21489, 21492, 21496, 21505, 21521, 21522, 21527, 21533),'0000000000000000000000000000000000001111111111122222222222222222222333353333455555555','0111011000000000000000200000000000000110001100000000000000000000000000000000000000000')
  def prove(fy:int,fB:bool,fz:str)->None:
   Q(fB,fz)
  prove(0,K(source)is str and '\x00' not in source and(0<L(source.encode('utf-8'))<=1868927)and(2000000-L(source.encode('utf-8'))>=131072),'R authority source input differs')
@@ -20272,20 +21237,20 @@ def _generation6_r_authority_source_gates(source: str) -> None:
   z[m]=ax
  cr=T(((type(a).__name__,a0(r))for a in a3(U)if isinstance(a,(a5,a2,A.AugAssign,a10))for r in(T(a.targets)if isinstance(a,a5)else(a.target,))if isinstance(r,a1)and r.id in aj and(a is not z[r.id])))
  prove(39,not cr,'R namespace static capture rebinding surface differs')
- x:tuple[str,...]=T((d[90]+fD for fD in ['Phase', 'TokenState', 'Action', 'NodeKind', 'AuthorityKind', 'OwnerState', 'OwnerKind', 'OwnerPurpose', 'ContextState', 'CloseEvent', 'MutationPermitState', 'CleanupBudgetState', 'CleanupBudgetEvent', 'InventoryCursorState', 'InventoryScanState', 'InventoryAdvanceState', 'InventoryItemState', 'InventoryClassificationState', 'TerminalEvent', 'DirectoryFact', 'NameFact', 'DirectoryAuthority', 'DirectoryBinding', 'DirectoryRecord', 'OwnerContextBinding', 'OwnerContext', 'PresentToken', 'AbsenceToken', 'RenameToken', 'MutationPermit', 'CapabilityBinding', 'CapabilityRecord', 'UnlinkPreproof', 'MutationPermitBinding', 'MutationPermitRecord', 'CleanupBudgetEpoch', 'InventoryCursor', 'InventoryScan', 'InventoryAdvance', 'InventoryItem', 'InventoryClassification', 'EmptyInventory', 'Receipt', 'CleanupBudgetRecord', 'InventoryCursorBinding', 'InventoryCursorRecord', 'InventoryScanBinding', 'InventoryScanRecord', 'InventoryAdvanceBinding', 'InventoryAdvanceRecord', 'InventoryItemBinding', 'InventoryItemRecord', 'InventoryClassificationBinding', 'InventoryClassificationRecord', 'Journal']))
+ x:tuple[str,...]=T((d[90]+fD for fD in ['Phase', 'TokenState', 'Action', 'NodeKind', 'AuthorityKind', 'OwnerState', 'OwnerKind', 'OwnerPurpose', 'ContextState', 'CloseEvent', 'MutationPermitState', 'CleanupBudgetState', 'CleanupBudgetEvent', 'InventoryCursorState', 'InventoryScanState', 'InventoryAdvanceState', 'InventoryItemState', 'InventoryClassificationState', 'EmptyInventoryState', 'TerminalEvent', 'DirectoryFact', 'NameFact', 'DirectoryAuthority', 'DirectoryBinding', 'DirectoryRecord', 'OwnerContextBinding', 'OwnerContext', 'PresentToken', 'AbsenceToken', 'RenameToken', 'MutationPermit', 'CapabilityBinding', 'CapabilityRecord', 'UnlinkPreproof', 'MutationPermitBinding', 'MutationPermitRecord', 'CleanupBudgetEpoch', 'InventoryCursor', 'InventoryScan', 'InventoryAdvance', 'InventoryItem', 'InventoryClassification', 'EmptyInventory', 'Receipt', 'CleanupBudgetRecord', 'InventoryCursorBinding', 'InventoryCursorRecord', 'InventoryScanBinding', 'InventoryScanRecord', 'InventoryAdvanceBinding', 'InventoryAdvanceRecord', 'InventoryItemBinding', 'InventoryItemRecord', 'InventoryClassificationBinding', 'InventoryClassificationRecord', 'EmptyInventoryBinding', 'EmptyInventoryRecord', 'Journal']))
  cd=T((a.name for a in U.body if isinstance(a,a8)and a.name.startswith(d[90])))
  prove(40,cd==x,'R namespace static class inventory differs')
  i={m:eG(m)for m in x}
  dx=i['_Generation6RNamespacePhase']
- prove(41,OO((ax.lineno<dx.lineno for m,ax in z.items()if m!=d[6]))and z[d[6]].lineno>i[d[48]].lineno and(z[d[6]].lineno<i['_Generation6RNamespaceInventoryCursorState'].lineno<i[d[50]].lineno<i[d[38]].lineno<i[d[49]].lineno<i['_Generation6RNamespaceTerminalEvent'].lineno),'R namespace static capture/class ordering differs')
- bI=dict(zip((*x[:17],x[18],x[17]),D[2],strict=True))
+ prove(41,OO((ax.lineno<dx.lineno for m,ax in z.items()if m!=d[6]))and z[d[6]].lineno>i[d[48]].lineno and(z[d[6]].lineno<i['_Generation6RNamespaceInventoryCursorState'].lineno<i[d[50]].lineno<i[d[38]].lineno<i[d[49]].lineno<i['_Generation6RNamespaceEmptyInventoryState'].lineno<i['_Generation6RNamespaceTerminalEvent'].lineno),'R namespace static capture/class ordering differs')
+ bI=dict(zip((*x[:17],x[19],x[17],x[18]),D[2],strict=True))
  for m,ee in bI.items():
   ao=i[m]
   eo=ee
   prove(42,T((a0(eU)for eU in ao.bases))==('str','Enum')and dX(ao)==eo,f'R namespace static enum differs: {m}')
  def fd(m:str)->tuple[str,...]:
   return T((a.target.id for a in i[m].body if isinstance(a,a2)and isinstance(a.target,a1)))
- bD=x[19:54]
+ bD=x[20:57]
  bn={fA:fC[0]for fA,fC in zip(bD,D[3],strict=True)}
  ca={fA:fC[1]for fA,fC in zip(bD,D[3],strict=True)}
  ai={fA for fA,fC in zip(bD,D[3],strict=True)if fC[2]}
@@ -20301,13 +21266,13 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  cN=T((a for a in U.body if isinstance(a,a5)and N((isinstance(r,a1)and r.id==d[16]for r in a.targets))))
  prove(45,L(cN)==1 and a0(cN[0].value)=='_Generation6RNamespacePresentToken | _Generation6RNamespaceAbsenceToken | _Generation6RNamespaceRenameToken','R namespace static live-token union differs')
  s=i[d[76]]
- R:tuple[str,...]=T(['__init__', '_require_dependencies', '_issue_serial', '_append_receipt', '_read_cleanup_budget_clock', '_issue_cleanup_budget_epoch', '_require_live_cleanup_budget', '_terminalize_cleanup_budget', '_charge_cleanup_budget', '_begin_publication', '_finish_publication', '_fail_publication', '_require_clean_guard', '_require_building', '_copy_directory_fact', '_register_authority', '_require_authority', '_reauthenticate_directory', '_issue_inventory_cursor_provenance', '_require_inventory_cursor_provenance', '_issue_current_inventory_cursor', '_require_current_inventory_cursor', '_terminalize_inventory_cursor', '_acquire_metered_inventory_scan', '_require_current_inventory_scan', '_terminalize_inventory_scan', '_fail_inventory_advance_uncertain', '_terminalize_inventory_scan_end_observed', '_require_current_inventory_item', '_terminalize_inventory_item', '_yield_metered_inventory_item', '_require_pristine_inventory_classification', '_require_current_inventory_classification', '_reauthenticate_inventory_classification_parent', '_derive_inventory_classification', '_close_inventory_classification_owner', '_terminalize_inventory_classification', '_fail_inventory_classification_uncertain', '_classify_metered_inventory_item', 'register_borrowed_directory', '_retain_uncertain_owner', '_reconcile_mount_poison', '_namespace_mount_id', '_close_namespace_owner', '_namespace_owner_close_verified', '_retain_untransferred_raw', '_close_rejected_namespace_raw_once', '_open_namespace_owner', '_require_same_parent_proof', 'open_owned_cursor', 'close_owned_cursor', '_acquire_name_owner', '_validate_node_kind', '_copy_name_fact', '_register_name_fact', 'seal_name', '_register_inventory_classification_name_fact', '_require_name_fact', '_name_fact_matches', 'seal', '_require_teardown_authorization', '_require_name_absent', '_require_live_capability_slot', '_receipt_binding_matches', '_require_receipt_binding', '_publish_capability', '_require_live_capability', '_preauthorize_present_unlink', '_postauthorize_present_unlink', '_issue_a2_mutation_permit', '_preproof_parent_authority_matches', '_postissuer_capability_matches', '_terminal_unlink_capability_matches', '_trusted_live_mutation_permit', '_require_returned_mutation_permit', '_fail_present_unlink_preproof', '_fail_invalid_mutation_permit', '_fail_present_unlink_attempt', '_fail_present_unlink_terminal', '_archive_mutation_permit', 'consume_present', '_archive_capability', 'authorize_present', 'authorize_absence', 'authorize_rename', 'abandon_token'])
+ R:tuple[str,...]=T(['__init__', '_require_dependencies', '_issue_serial', '_append_receipt', '_read_cleanup_budget_clock', '_issue_cleanup_budget_epoch', '_require_live_cleanup_budget', '_terminalize_cleanup_budget', '_charge_cleanup_budget', '_begin_publication', '_finish_publication', '_fail_publication', '_require_clean_guard', '_require_building', '_copy_directory_fact', '_register_authority', '_require_authority', '_reauthenticate_directory', '_issue_inventory_cursor_provenance', '_require_inventory_cursor_provenance', '_issue_current_inventory_cursor', '_require_current_inventory_cursor', '_terminalize_inventory_cursor', '_acquire_metered_inventory_scan', '_require_current_inventory_scan', '_terminalize_inventory_scan', '_fail_inventory_advance_uncertain', '_terminalize_inventory_scan_end_observed', '_require_current_inventory_item', '_terminalize_inventory_item', '_yield_metered_inventory_item', '_require_pristine_inventory_classification', '_require_current_inventory_classification', '_reauthenticate_inventory_classification_parent', '_derive_inventory_classification', '_close_inventory_classification_owner', '_terminalize_inventory_classification', '_fail_inventory_classification_uncertain', '_classify_metered_inventory_item', '_require_current_empty_inventory', '_require_authenticated_empty_inventory', '_fail_empty_inventory_uncertain', '_authenticate_empty_inventory', 'register_borrowed_directory', '_retain_uncertain_owner', '_reconcile_mount_poison', '_namespace_mount_id', '_close_namespace_owner', '_namespace_owner_close_verified', '_retain_untransferred_raw', '_close_rejected_namespace_raw_once', '_open_namespace_owner', '_require_same_parent_proof', 'open_owned_cursor', 'close_owned_cursor', '_acquire_name_owner', '_validate_node_kind', '_copy_name_fact', '_register_name_fact', 'seal_name', '_register_inventory_classification_name_fact', '_require_name_fact', '_name_fact_matches', 'seal', '_require_teardown_authorization', '_require_name_absent', '_require_live_capability_slot', '_receipt_binding_matches', '_require_receipt_binding', '_publish_capability', '_require_live_capability', '_preauthorize_present_unlink', '_postauthorize_present_unlink', '_issue_a2_mutation_permit', '_preproof_parent_authority_matches', '_postissuer_capability_matches', '_terminal_unlink_capability_matches', '_trusted_live_mutation_permit', '_require_returned_mutation_permit', '_fail_present_unlink_preproof', '_fail_invalid_mutation_permit', '_fail_present_unlink_attempt', '_fail_present_unlink_terminal', '_archive_mutation_permit', 'consume_present', '_archive_capability', 'authorize_present', 'authorize_absence', 'authorize_rename', 'abandon_token'])
  cE=T((a.name for a in s.body if isinstance(a,a6)))
  prove(46,cE==R,'R namespace static journal method inventory differs')
  c={m:e(s,m)for m in R}
  bM=(d[14],d[46],d[11],d[31],d[13],d[10],d[5],d[21],d[7],d[1])
  prove(47,L(bM)==10 and OO((m in c for m in bM)),'R namespace A2g helper-role inventory differs')
- dg=dict(zip(T(['_require_pristine_inventory_classification', '_require_current_inventory_classification', '_reauthenticate_inventory_classification_parent', '_derive_inventory_classification', '_close_rejected_namespace_raw_once', '_close_inventory_classification_owner', '_register_inventory_classification_name_fact', '_terminalize_inventory_classification', '_fail_inventory_classification_uncertain', '_classify_metered_inventory_item']),D[4],strict=True))
+ dg=dict(zip(T(['_require_pristine_inventory_classification', '_require_current_inventory_classification', '_reauthenticate_inventory_classification_parent', '_derive_inventory_classification', '_close_rejected_namespace_raw_once', '_close_inventory_classification_owner', '_register_inventory_classification_name_fact', '_terminalize_inventory_classification', '_fail_inventory_classification_uncertain', '_classify_metered_inventory_item', '_require_current_empty_inventory', '_require_authenticated_empty_inventory', '_fail_empty_inventory_uncertain', '_authenticate_empty_inventory']),D[4],strict=True))
  prove(48,OO((a0(c[m].args)==fc and c[m].returns is not None and(a0(cast(ast.AST,c[m].returns))==fj)for m,(fc,fj)in dg.items())),'R namespace A2g helper signatures differ')
  def n(r:str)->tuple[tuple[str,int],...]:
   return T(((m,eM)for m in R if(eM:=b(c[m]).count(f'self.{r}'))))
@@ -20349,7 +21314,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  eA=T((m for m in R if b(c[m]).count(d[0])))
  dT=T((a for a in s.body if isinstance(a,a6)and a.name==d[81]))
  bW=('dispatch','runtime','remote','production','trading','broker','exchange','order','publish')
- prove(56,L(dt)==1 and L(co)==0 and(dk.count(d[2])==0)and(L(dN)==1)and(aR.count(d[0])==1)and(eA==(d[98],))and(C.count(d[0])==0)and(L(dT)==1)and(n(d[81])==((d[87],1),(d[104],1),(d[92],1)))and(aR.count(d[86])==3)and(C.count(d[86])==0)and(aR.count(d[106])==0)and(b(U).count(d[106])==2)and(not N((ll in r.lower()for ll in bW for r in C))),'R namespace A2g scoped inherited surface differs')
+ prove(56,L(dt)==1 and L(co)==1 and co[0]in aT(c['_authenticate_empty_inventory'])and(dk.count(d[2])==0)and(L(dN)==1)and(aR.count(d[0])==1)and(eA==(d[98],))and(C.count(d[0])==0)and(L(dT)==1)and(n(d[81])==((d[87],1),(d[104],1),(d[92],1)))and(aR.count(d[86])==3)and(C.count(d[86])==0)and(aR.count(d[106])==0)and(b(U).count(d[106])==2)and(not N((ll in r.lower()for ll in bW for r in C))),'R namespace A2g scoped inherited surface differs')
  cL=a0(c[d[31]])
  dr=a0(c[d[100]])
  dB=a0(c['seal'])
@@ -20371,28 +21336,49 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  dw=a0(c[d[110]])
  dO=(d[26],d[28],d[15],d[29],d[30],d[23],'self._inventory_classification_faulted')
  prove(61,OO((dw.count(ll)==1 for ll in dO)),'R namespace A2g exact store inventory differs')
+ h0=c['_require_current_empty_inventory']
+ h1=c['_require_authenticated_empty_inventory']
+ h2=c['_fail_empty_inventory_uncertain']
+ h3=c['_authenticate_empty_inventory']
+ h6=a0(h2)
+ h7=a0(h3)
+ h8=T((a for a in h3.body if isinstance(a,a12)))
+ h9=h8[0]
+ ha=T((h7.find(ll)for ll in('scan_archive = self._archived_inventory_scan_records','scan_record = scan_archive[0]','scan_binding = scan_record.binding','trusted_scan = scan_binding.scan','type(scan) is _Generation6RNamespaceInventoryScan','advance_archive = self._archived_inventory_advance_records','advance_record = advance_archive[0]','cursor_record = scan_binding.cursor_record','type(self._inventory_cursor_issuance_faulted) is bool')))
+ prove(62,L(h3.body)==2 and L(h8)==1 and L(h9.body)==61 and L(h9.handlers)==1 and OO((v>=0 for v in ha))and OO((ha[v]<ha[v+1]for v in range(L(ha)-1))),'R namespace A2h trusted-first empty authentication differs')
+ hb=T((h7.find(ll)for ll in('empty_inventory = _Generation6RNamespaceEmptyInventory','binding = _Generation6RNamespaceEmptyInventoryBinding','record = _Generation6RNamespaceEmptyInventoryRecord','self._empty_inventory_records_by_identity[empty_inventory_identity] = record','self._empty_inventory_records_by_serial[empty_inventory.serial] = record','self._live_empty_inventory_record = record','INVENTORY_EMPTY_AUTHENTICATING','self._require_current_empty_inventory(empty_inventory)','self._terminalize_inventory_cursor','record.state = _Generation6RNamespaceEmptyInventoryState.AUTHENTICATED','self._archived_empty_inventory_records.append(record)','INVENTORY_EMPTY_AUTHENTICATED','record.outcome_receipt = outcome_receipt','self._live_empty_inventory_record = None','return empty_inventory')))
+ prove(63,OO((v>=0 for v in hb))and OO((hb[v]<hb[v+1]for v in range(L(hb)-1)))and isinstance(h9.body[-1],A.Return)and b(h9.body[-4])==('self._append_receipt',)and a0(h9.body[-4]).startswith('outcome_receipt = self._append_receipt(')and a0(h9.body[-3])=='record.outcome_receipt = outcome_receipt' and a0(h9.body[-2])=='self._live_empty_inventory_record = None' and(not N((aT(v)for v in h9.body[-3:]))),'R namespace A2h exact success commit differs')
+ hc=T((h6.find(ll)for ll in('self._empty_inventory_lifecycle_faulted = True','self._phase = _Generation6RNamespacePhase.UNCERTAIN','exact_record.state = _Generation6RNamespaceEmptyInventoryState.UNCERTAIN','INVENTORY_EMPTY_UNCERTAIN','self._archived_empty_inventory_records.append(exact_record)','self._live_empty_inventory_record = None')))
+ prove(64,L(h2.body)==8 and a0(h2.body[0])=='self._empty_inventory_lifecycle_faulted = True' and a0(h2.body[1])=='self._phase = _Generation6RNamespacePhase.UNCERTAIN' and(not N((isinstance(a,a16)for a in a3(h2))))and b(h2).count('suppress')==3 and OO((v>=0 for v in hc))and OO((hc[v]<hc[v+1]for v in range(L(hc)-1)))and L(h9.handlers[0].body)==2 and isinstance(h9.handlers[0].body[-1],a16)and h9.handlers[0].body[-1].exc is None,'R namespace A2h fail-first nonretry authority differs')
+ hd=b(h3)
+ he=('_Generation6RNamespaceEmptyInventory','_Generation6RNamespaceEmptyInventoryBinding','_Generation6RNamespaceEmptyInventoryRecord')
+ hf=('self._empty_inventory_records_by_identity','self._empty_inventory_records_by_serial','self._live_empty_inventory_record','self._archived_empty_inventory_records','self._empty_inventory_lifecycle_faulted')
+ prove(65,n('_require_current_empty_inventory')==(('_authenticate_empty_inventory',1),)and n('_require_authenticated_empty_inventory')==()and n('_fail_empty_inventory_uncertain')==(('_authenticate_empty_inventory',1),)and n('_authenticate_empty_inventory')==()and T((hd.count(v)for v in he))==(1,1,1)and h7.count('INVENTORY_EMPTY_AUTHENTICATING')==1 and h7.count('INVENTORY_EMPTY_AUTHENTICATED')==1 and h6.count('INVENTORY_EMPTY_UNCERTAIN')==1 and OO((dw.count(v)==1 for v in hf))and sum((v for _,v in n(d[91])))==4 and n('_terminalize_inventory_cursor')==(('_authenticate_empty_inventory',1),)and n('_terminalize_inventory_scan_end_observed')==((d[43],1),)and n(d[81])==((d[87],1),(d[104],1),(d[92],1)),'R namespace A2h constructor/caller/store inventory differs')
+ hg=T((a0(v.func)for f0 in(h0,h1,h2,h3)for v in aT(f0)))
+ hi=c['_issue_a2_mutation_permit']
+ prove(66,not N((v in hg for v in(d[0],d[106],d[111],d[108],d[81],d[91],d[1],d[43],'self._issue_a2_mutation_permit','self._terminalize_inventory_scan_end_observed','os.rmdir')))and(not N((isinstance(a,(A.Yield,A.YieldFrom))for f0 in(h0,h1,h2,h3)for a in a3(f0))))and hd.count('self._terminalize_inventory_cursor')==1 and L(hi.body)==1 and isinstance(hi.body[0],a16)and isinstance(hi.body[0].exc,a9)and a0(hi.body[0].exc.func)=='ContractError' and('EmptyInventory' not in a0(c['_publish_capability'])),'R namespace A2h nonmutation/nonobservation seal differs')
  q=a0(s)
  bu=T((a for a in U.body if isinstance(a,a2)and isinstance(a.target,a1)and(a.target.id=='_GENERATION6_R_REAL_NEXT')))
- prove(62,L(bu)==1,'R namespace static A2g bundle start differs')
+ prove(67,L(bu)==1,'R namespace static A2g bundle start differs')
  db=bu[0].lineno
- prove(63,K(s.end_lineno)is int,'R namespace static bundle end differs')
+ prove(68,K(s.end_lineno)is int,'R namespace static bundle end differs')
  dP=cast(int,s.end_lineno)
  f=T((a for a in U.body if db<=a.lineno<=dP))
  bo=T((f'capture:{a.target.id}' if isinstance(a,a2)and isinstance(a.target,a1)else f'class:{a.name}' if isinstance(a,a8)else f'function:{a.name}' if isinstance(a,a6)else d[60]if isinstance(a,a5)and N((isinstance(r,a1)and r.id==d[16]for r in a.targets))else f'unexpected:{type(a).__name__}' for a in f))
  dc=('_G6R_PN','_G6R_PK','_G6R_PE','_G6R_IK','_G6R_IE','_G6R_BK','_G6R_BE','_G6R_OK','_G6R_OE','_G6R_LK','_G6R_LE','_G6R_TK','_G6R_TE','_G6R_WK','_G6R_WE','_G6R_VK','_G6R_VE',d[45],'_G6R_SS','_G6R_SK','_G6R_SE','_G6R_AF','_G6R_AI','_G6R_NF','_G6R_NI','_G6R_VC','_G6R_VF','_G6R_VI','_G6R_VB','_G6R_G','_G6R_D')
- prove(64,L(f)==159 and OO((f'capture:{m}' in bo for m in dc))and(not N((fo.startswith('unexpected:')for fo in bo))),'R namespace canonical capture inventory differs')
+ prove(69,L(f)==162 and OO((f'capture:{m}' in bo for m in dc))and(not N((fo.startswith('unexpected:')for fo in bo))),'R namespace canonical capture inventory differs')
  cS='\n'.join(source.splitlines()[db-1:dP])+'\n'
- eC=b'TASK-064\x00GEN6\x00R-A2g\x00source-v1\x00'
+ eC=b'TASK-064\x00GEN6\x00R-A2h\x00source-v1\x00'
  dm=eC+cS.encode('utf-8')
  eB=H.sha256(dm).hexdigest()
- prove(65,db==10578 and dP==19969 and(f[0]is bu[0])and(f[-1]is s)and OO((type(a.end_lineno)is int and a.end_lineno<f[ag+1].lineno for ag,a in enumerate(f[:-1])))and(L(dm)==791648)and(eB=='2682341b75ab6bcef8ca26a846f7ea6ccd43c59be49ea0a08508a3feeb3e0694'),'R namespace A2g reviewed source-bundle digest differs')
+ prove(70,db==10578 and dP==20934 and(f[0]is bu[0])and(f[-1]is s)and OO((type(a.end_lineno)is int and a.end_lineno<f[ag+1].lineno for ag,a in enumerate(f[:-1])))and(L(dm)==845629)and(eB=='85c87fa9dee92d0af70c9de22dddf686d06e0c3bc7a25bb26536db497b5f3810'),'R namespace A2g reviewed source-bundle digest differs')
  bw=b'TASK-064\x00GEN6\x00R-CAP1\x00ast-schema-v1\x00'
  aP=b'TASK-064\x00GEN6\x00R-CAP1\x00semantic-projection-v1\x00'
- prove(66,Y.version_info[:3]==(3,13,14),'R CAP1 Python AST runtime differs')
+ prove(71,Y.version_info[:3]==(3,13,14),'R CAP1 Python AST runtime differs')
  cU=T((w for a in f for w in a3(a)))
  bO=T(sorted({(K(a).__name__,T(a._fields))for a in cU}))
  cI={fp:ag for ag,fp in enumerate(bO)}
- prove(67,L(cU)==181988 and L(bO)==63 and(L(cI)==63),'R CAP1 AST inventory differs')
+ prove(72,L(cU)==187911 and L(bO)==65 and(L(cI)==65),'R CAP1 AST inventory differs')
  def cl(k:object)->bytes:
   return J.dumps(k,ensure_ascii=True,allow_nan=False,separators=(',',':'),sort_keys=False).encode('ascii')
  def fk(k:object)->list[object]:
@@ -20433,7 +21419,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  av=cl(cm)
  ba=H.sha256(bw)
  ba.update(av)
- prove(68,L(bw)==35 and L(av)==1773 and(H.sha256(av).hexdigest()=='486a9f82f88f635adf07611fab7ccc6446cd8acc5e82606f606866e299dc15b3')and(L(bw)+L(av)==1808)and(ba.hexdigest()=='86297c6227cac657ba4f56a8101e59231bc7f4ff3855a6f23f45fde178279d04'),'R CAP1 AST schema projection differs')
+ prove(73,L(bw)==35 and L(av)==1860 and(H.sha256(av).hexdigest()=='c061a40c4ca4569d1e49b0635656de0337f35d5fa9aee113b43aaf4dd42f5083')and(L(bw)+L(av)==1895)and(ba.hexdigest()=='fcae3b5fa6c185eb1fb9c0f1ba1abc1b65152529497b3a19f5e094a0ce149852'),'R CAP1 AST schema projection differs')
  def eT(a:ast.stmt)->str:
   if isinstance(a,a2)and isinstance(a.target,a1):
    return f'capture:{a.target.id}'
@@ -20448,17 +21434,17 @@ def _generation6_r_authority_source_gates(source: str) -> None:
   if type(a.end_lineno)is not int:
    raise E('R CAP1 bundle root end line differs')
   return a.end_lineno
- aa:tuple[tuple[str,int,int,int,str],...]=T(((fw,*fx)for fw,fx in zip(T((fD.replace('@','capture:_GENERATION6_R_NAMESPACE_').replace('#','capture:_GENERATION6_R_').replace('!','capture:_G6R_').replace('%','class:_Generation6RNamespace').replace('&','class:_Generation6R').replace('?','function:_generation6_r_').replace('~','alias:_Generation6RNamespace')for fD in ['#REAL_NEXT', '#REAL_STOP_ITERATION', '#REAL_DIRENTRY_TYPE', '#REAL_LIST_APPEND', '#REAL_LIST_GETITEM', '#REAL_TYPE', '#REAL_ID', '#REAL_INT', '#REAL_BOOL', '#REAL_TUPLE', '#REAL_DICT', '#REAL_LEN', '#REAL_GETATTR', '#REAL_DICT_ITEMS', '#REAL_TYPE_GETATTRIBUTE', '#REAL_OBJECT_GETATTRIBUTE', '#REAL_OBJECT_SETATTR', '#REAL_TUPLE_GETITEM', '#PY_TPFLAGS_IMMUTABLETYPE', '#TPFLAGS_IMMUTABLETYPE', '#TPFLAGS_HEAPTYPE', '#TYPE_SECURITY_FLAGS_MASK', '&Phase', '&DescriptorState', '&OwnerToken', '&OwnerRecord', '&AuthorityEvent', '&IteratorToken', '&ScandirCapability', '&AuthorityLedger', '#CAPTURED_APPEND_EVENT', '&ScandirProxy', '#CAPTURED_SCANDIR_PROXY_NEXT', '!PN', '!PK', '!PE', '!IK', '!IE', '!BK', '!BE', '!OK', '!OE', '!LK', '!LE', '!TK', '!TE', '!WK', '!WE', '!VK', '!VE', '#CAPTURED_APPEND_EVENT_INTEGRITY', '#CAPTURED_APPEND_EVENT_CLOSURE_BINDINGS', '#CAPTURED_SCANDIR_PROXY_NEXT_INTEGRITY', '#CAPTURED_SCANDIR_PROXY_NEXT_CLOSURE_BINDINGS', '#CAPTURED_AUTHORITY_EVENT_CLASS', '#CAPTURED_AUTHORITY_EVENT_INIT', '#CAPTURED_AUTHORITY_EVENT_INIT_CLOSURE', '#CAPTURED_AUTHORITY_EVENT_INIT_CLOSURE_BINDINGS', '#CAPTURED_AUTHORITY_EVENT_INIT_INTEGRITY', '#AUTHORITY_EVENT_CLASS_SEAL', '#SCANDIR_PROXY_CLASS_SEAL', '#AUTHORITY_LEDGER_CLASS_SEAL', '#ITERATOR_TOKEN_CLASS_SEAL', '#OWNER_TOKEN_CLASS_SEAL', '!SS', '!SK', '!SE', '!AF', '!AI', '!NF', '!NI', '!VC', '!VF', '!VI', '!VB', '!G', '!D', '?socket_detach_handoff', '&AuthorityScope', '@REAL_OS_STAT', '@REAL_OS_OPEN', '@REAL_OS_FSTAT', '@REAL_OS_UNLINK', '@REAL_OS_GETUID', '@REAL_FCNTL', '@REAL_MONOTONIC_NS', '@CLEANUP_MAX_DEPTH', '@CLEANUP_MAX_ENTRIES', '@CLEANUP_MAX_ENCODED_NAME_BYTES', '@CLEANUP_MAX_OPERATIONS', '@CLEANUP_DEADLINE_NS', '@CAPTURED_SNAPSHOT_STAT', '@CAPTURED_SNAPSHOT_FD', '@CAPTURED_STABLE_DIRECTORY_MATCHES', '@CAPTURED_MOUNT_ID', '@CAPTURED_COMPONENT', '@CAPTURED_FD_REQUIRE', '@CAPTURED_S_IFMT', '@CAPTURED_S_ISDIR', '@CAPTURED_S_ISREG', '@REAL_OS_FSENCODE', '?namespace_filesystem_component', '%Phase', '%TokenState', '%Action', '%NodeKind', '%AuthorityKind', '%OwnerState', '%OwnerKind', '%OwnerPurpose', '%ContextState', '%CloseEvent', '%MutationPermitState', '%CleanupBudgetState', '%CleanupBudgetEvent', '@CLEANUP_BUDGET_EVENT_BY_STATE', '%InventoryCursorState', '%InventoryScanState', '%InventoryAdvanceState', '%InventoryItemState', '%InventoryClassificationState', '%TerminalEvent', '%DirectoryFact', '%NameFact', '%DirectoryAuthority', '%DirectoryBinding', '%DirectoryRecord', '%OwnerContextBinding', '%OwnerContext', '%PresentToken', '%AbsenceToken', '%RenameToken', '%MutationPermit', '~LiveToken', '%CapabilityBinding', '%CapabilityRecord', '%UnlinkPreproof', '%MutationPermitBinding', '%MutationPermitRecord', '%CleanupBudgetEpoch', '%InventoryCursor', '%InventoryScan', '%InventoryAdvance', '%InventoryItem', '%InventoryClassification', '%EmptyInventory', '%Receipt', '%CleanupBudgetRecord', '%InventoryCursorBinding', '%InventoryCursorRecord', '%InventoryScanBinding', '%InventoryScanRecord', '%InventoryAdvanceBinding', '%InventoryAdvanceRecord', '%InventoryItemBinding', '%InventoryItemRecord', '%InventoryClassificationBinding', '%InventoryClassificationRecord', '%Journal'])),D[6],strict=True)))
+ aa:tuple[tuple[str,int,int,int,str],...]=T(((fw,*fx)for fw,fx in zip(T((fD.replace('@','capture:_GENERATION6_R_NAMESPACE_').replace('#','capture:_GENERATION6_R_').replace('!','capture:_G6R_').replace('%','class:_Generation6RNamespace').replace('&','class:_Generation6R').replace('?','function:_generation6_r_').replace('~','alias:_Generation6RNamespace')for fD in ['#REAL_NEXT', '#REAL_STOP_ITERATION', '#REAL_DIRENTRY_TYPE', '#REAL_LIST_APPEND', '#REAL_LIST_GETITEM', '#REAL_TYPE', '#REAL_ID', '#REAL_INT', '#REAL_BOOL', '#REAL_TUPLE', '#REAL_DICT', '#REAL_LEN', '#REAL_GETATTR', '#REAL_DICT_ITEMS', '#REAL_TYPE_GETATTRIBUTE', '#REAL_OBJECT_GETATTRIBUTE', '#REAL_OBJECT_SETATTR', '#REAL_TUPLE_GETITEM', '#PY_TPFLAGS_IMMUTABLETYPE', '#TPFLAGS_IMMUTABLETYPE', '#TPFLAGS_HEAPTYPE', '#TYPE_SECURITY_FLAGS_MASK', '&Phase', '&DescriptorState', '&OwnerToken', '&OwnerRecord', '&AuthorityEvent', '&IteratorToken', '&ScandirCapability', '&AuthorityLedger', '#CAPTURED_APPEND_EVENT', '&ScandirProxy', '#CAPTURED_SCANDIR_PROXY_NEXT', '!PN', '!PK', '!PE', '!IK', '!IE', '!BK', '!BE', '!OK', '!OE', '!LK', '!LE', '!TK', '!TE', '!WK', '!WE', '!VK', '!VE', '#CAPTURED_APPEND_EVENT_INTEGRITY', '#CAPTURED_APPEND_EVENT_CLOSURE_BINDINGS', '#CAPTURED_SCANDIR_PROXY_NEXT_INTEGRITY', '#CAPTURED_SCANDIR_PROXY_NEXT_CLOSURE_BINDINGS', '#CAPTURED_AUTHORITY_EVENT_CLASS', '#CAPTURED_AUTHORITY_EVENT_INIT', '#CAPTURED_AUTHORITY_EVENT_INIT_CLOSURE', '#CAPTURED_AUTHORITY_EVENT_INIT_CLOSURE_BINDINGS', '#CAPTURED_AUTHORITY_EVENT_INIT_INTEGRITY', '#AUTHORITY_EVENT_CLASS_SEAL', '#SCANDIR_PROXY_CLASS_SEAL', '#AUTHORITY_LEDGER_CLASS_SEAL', '#ITERATOR_TOKEN_CLASS_SEAL', '#OWNER_TOKEN_CLASS_SEAL', '!SS', '!SK', '!SE', '!AF', '!AI', '!NF', '!NI', '!VC', '!VF', '!VI', '!VB', '!G', '!D', '?socket_detach_handoff', '&AuthorityScope', '@REAL_OS_STAT', '@REAL_OS_OPEN', '@REAL_OS_FSTAT', '@REAL_OS_UNLINK', '@REAL_OS_GETUID', '@REAL_FCNTL', '@REAL_MONOTONIC_NS', '@CLEANUP_MAX_DEPTH', '@CLEANUP_MAX_ENTRIES', '@CLEANUP_MAX_ENCODED_NAME_BYTES', '@CLEANUP_MAX_OPERATIONS', '@CLEANUP_DEADLINE_NS', '@CAPTURED_SNAPSHOT_STAT', '@CAPTURED_SNAPSHOT_FD', '@CAPTURED_STABLE_DIRECTORY_MATCHES', '@CAPTURED_MOUNT_ID', '@CAPTURED_COMPONENT', '@CAPTURED_FD_REQUIRE', '@CAPTURED_S_IFMT', '@CAPTURED_S_ISDIR', '@CAPTURED_S_ISREG', '@REAL_OS_FSENCODE', '?namespace_filesystem_component', '%Phase', '%TokenState', '%Action', '%NodeKind', '%AuthorityKind', '%OwnerState', '%OwnerKind', '%OwnerPurpose', '%ContextState', '%CloseEvent', '%MutationPermitState', '%CleanupBudgetState', '%CleanupBudgetEvent', '@CLEANUP_BUDGET_EVENT_BY_STATE', '%InventoryCursorState', '%InventoryScanState', '%InventoryAdvanceState', '%InventoryItemState', '%InventoryClassificationState', '%EmptyInventoryState', '%TerminalEvent', '%DirectoryFact', '%NameFact', '%DirectoryAuthority', '%DirectoryBinding', '%DirectoryRecord', '%OwnerContextBinding', '%OwnerContext', '%PresentToken', '%AbsenceToken', '%RenameToken', '%MutationPermit', '~LiveToken', '%CapabilityBinding', '%CapabilityRecord', '%UnlinkPreproof', '%MutationPermitBinding', '%MutationPermitRecord', '%CleanupBudgetEpoch', '%InventoryCursor', '%InventoryScan', '%InventoryAdvance', '%InventoryItem', '%InventoryClassification', '%EmptyInventory', '%Receipt', '%CleanupBudgetRecord', '%InventoryCursorBinding', '%InventoryCursorRecord', '%InventoryScanBinding', '%InventoryScanRecord', '%InventoryAdvanceBinding', '%InventoryAdvanceRecord', '%InventoryItemBinding', '%InventoryItemRecord', '%InventoryClassificationBinding', '%InventoryClassificationRecord', '%EmptyInventoryBinding', '%EmptyInventoryRecord', '%Journal'])),D[6],strict=True)))
  aW=T(((eT(a),a.lineno,fg(a),L(dH),H.sha256(dH).hexdigest())for a in f for dH in(cl(aQ(a)),)))
- prove(69,aW==aa,'R CAP1 ordered bundle-root projection inventory differs')
- dd:list[object]=['TASK064-G6-R-CAP1-SEMANTIC-PROJECTION-V1',['contract',6,'ec89a1df740805cc9b43e6f2530e940c0bf9b66e8f25ed878d3207d091c4bcb8'],['python_ast','3.13.14','attributes-excluded','schema-indexed-fields'],['schema',cm],['bundle',10578,19969,L(f),aQ(list(f))]]
+ prove(74,aW==aa,'R CAP1 ordered bundle-root projection inventory differs')
+ dd:list[object]=['TASK064-G6-R-CAP1-SEMANTIC-PROJECTION-V1',['contract',6,'ec89a1df740805cc9b43e6f2530e940c0bf9b66e8f25ed878d3207d091c4bcb8'],['python_ast','3.13.14','attributes-excluded','schema-indexed-fields'],['schema',cm],['bundle',10578,20934,L(f),aQ(list(f))]]
  X=cl(dd)
  aI=H.sha256(aP)
  aI.update(X)
- prove(70,L(aP)==44 and L(X)==3655899 and(H.sha256(X).hexdigest()=='7c7125661417c3e981f3303daeca704680ca398f6df9ec8f2c1a1592c80e0a23')and(L(aP)+L(X)==3655943)and(aI.hexdigest()=='649e858681a618d4e22faee0fe0cec45eee54b5d80be91f2993b58f6e7baf9dc'),'R CAP1 lossless semantic projection differs')
+ prove(75,L(aP)==44 and L(X)==3794008 and(H.sha256(X).hexdigest()=='e1286eb7fa007ec70afb29ccefa7a9af0f7a17097860923a99dbc4c9945d77ea')and(L(aP)+L(X)==3794052)and(aI.hexdigest()=='21eef13d57b9ee7a8182db127ca60b6e0171265131c29683a69d8f672ae2983a'),'R CAP1 lossless semantic projection differs')
  cp=T((es.removeprefix('capture:')for es,fu,fv,fr,fq in aa if es.startswith('capture:')))
  at:tuple[str,...]=(d[67],d[63],d[71],d[70],d[77],d[17],d[36],d[56],d[69],d[51],d[35],d[55],d[43])
- at=(*at,d[14],d[46],d[11],d[31],d[13],d[10],d[5],d[21],d[7],d[1])
+ at=(*at,d[14],d[46],d[11],d[31],d[13],d[10],d[5],d[21],d[7],d[1],'_require_current_empty_inventory','_require_authenticated_empty_inventory','_fail_empty_inventory_uncertain','_authenticate_empty_inventory')
  cx={d[17],d[36],d[56]}
  B=set(x)
  do=T((g for dv in c.values()for g in aT(dv)))
@@ -20467,8 +21453,8 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  ew=lambda fD:(fD.lineno,fD.col_offset)  # noqa: E731
  eh=T(sorted((fD for fD in eb if isinstance(fD,a9)and isinstance(fD.func,a1)and(fD.func.id=='prove')),key=ew))
  cC=T(sorted((fD for fD in eb if isinstance(fD,a11)and isinstance(fD.value,a1)and(fD.value.id=='D')and isinstance(fD.slice,a4)and(type(fD.slice.value)is int)),key=ew))
- if not(T(map(L,ROWS))==(79,79,79)and L(eh)==79 and(T((fD.args[0].value for fD in eh if L(fD.args)==3 and isinstance(fD.args[0],a4)and(type(fD.args[0].value)is int)))==T(range(79)))and(sum((1 for fD in eb if isinstance(fD,a1)and isinstance(fD.ctx,a18)and(fD.id=='D')))==L(cC)==10)and(T((cast(ast.Constant,fD.slice).value for fD in cC))==(0,5,1,2,3,3,3,3,4,6))):
-  raise E('R CAP2-R5 static proof/RHS consumer binding differs')
+ if not(T(map(L,ROWS))==(85,85,85)and L(eh)==85 and(T((fD.args[0].value for fD in eh if L(fD.args)==3 and isinstance(fD.args[0],a4)and(type(fD.args[0].value)is int)))==T(range(85)))and(sum((1 for fD in eb if isinstance(fD,a1)and isinstance(fD.ctx,a18)and(fD.id=='D')))==L(cC)==10)and(T((cast(ast.Constant,fD.slice).value for fD in cC))==(0,5,1,2,3,3,3,3,4,6))):
+  raise E('R CAP2-A2H static proof/RHS consumer binding differs')
  W=T((a for a in U.body if a not in f and a is not cB))
  cu=set(cp)
  bZ=set(at)
@@ -20484,7 +21470,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  aU=T((a0(g.func)for aY in W for g in aT(aY)if a0(g.func)in B))
  bv=T(((type(a.ctx).__name__,a.id)for aY in W for a in a3(aY)if isinstance(a,a1)and isinstance(a.ctx,(a13,a15))and(a.id in bl)))
  bN=((d[58],bz),(d[73],bq),(d[65],aU),(d[52],bv))
- prove(71,L(cp)==91 and L(at)==23 and(L(B)==55)and(L(bl)==58)and(bN==((d[58],()),(d[73],()),(d[65],()),(d[52],()))),'R CAP1 ordered external residuals differ')
+ prove(76,L(cp)==91 and L(at)==27 and(L(B)==58)and(L(bl)==61)and(bN==((d[58],()),(d[73],()),(d[65],()),(d[52],()))),'R CAP1 ordered external residuals differ')
  aS=True
  aF=True
  al=True
@@ -20500,19 +21486,23 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  aL:tuple[str,...]=(d[74],d[95],d[93],d[94],d[64],d[33],d[27],d[42])
  aO=False
  bH=(d[44],)
- prove(72,K(aS)is bool and aS and(K(aF)is bool)and aF and(K(al)is bool)and al and(K(an)is bool)and an and(K(aZ)is bool)and aZ and(K(au)is bool)and au and(K(aG)is bool)and aG and(K(ae)is bool)and ae and(K(F)is bool)and F and(K(ap)is bool)and ap and(K(G)is bool)and G and(K(aE)is bool)and(not aE)and(aL==(d[74],d[95],d[93],d[94],d[64],d[33],d[27],d[42]))and(K(aO)is bool)and(not aO)and(bH==(d[44],))and OO((m in i for m in('_Generation6RNamespaceInventoryCursor',d[66],d[2])))and OO((ll not in q for ll in(d[2],'consume_rmdir')))and OO((ll in q for ll in('_Generation6RNamespaceCleanupBudgetEpoch','_Generation6RNamespaceCleanupBudgetRecord','_issue_cleanup_budget_epoch',d[91],'_Generation6RNamespaceInventoryCursorBinding','_Generation6RNamespaceInventoryCursorRecord',d[67],d[63],d[71],d[70],d[77],d[50],d[66],'_Generation6RNamespaceInventoryScanBinding','_Generation6RNamespaceInventoryScanRecord',d[17],d[36],d[56],d[38],'_Generation6RNamespaceInventoryAdvance','_Generation6RNamespaceInventoryAdvanceBinding','_Generation6RNamespaceInventoryAdvanceRecord',d[49],'_Generation6RNamespaceInventoryItem','_Generation6RNamespaceInventoryItemBinding','_Generation6RNamespaceInventoryItemRecord',d[69],d[51],d[35],d[55],d[43]))),'R namespace A2f budget/RMDIR readiness and current capability differ')
+ prove(77,K(aS)is bool and aS and(K(aF)is bool)and aF and(K(al)is bool)and al and(K(an)is bool)and an and(K(aZ)is bool)and aZ and(K(au)is bool)and au and(K(aG)is bool)and aG and(K(ae)is bool)and ae and(K(F)is bool)and F and(K(ap)is bool)and ap and(K(G)is bool)and G and(K(aE)is bool)and(not aE)and(aL==(d[74],d[95],d[93],d[94],d[64],d[33],d[27],d[42]))and(K(aO)is bool)and(not aO)and(bH==(d[44],))and OO((m in i for m in('_Generation6RNamespaceInventoryCursor',d[66],d[2])))and ('consume_rmdir' not in q)and OO((ll in q for ll in('_Generation6RNamespaceCleanupBudgetEpoch','_Generation6RNamespaceCleanupBudgetRecord','_issue_cleanup_budget_epoch',d[91],'_Generation6RNamespaceInventoryCursorBinding','_Generation6RNamespaceInventoryCursorRecord',d[67],d[63],d[71],d[70],d[77],d[50],d[66],'_Generation6RNamespaceInventoryScanBinding','_Generation6RNamespaceInventoryScanRecord',d[17],d[36],d[56],d[38],'_Generation6RNamespaceInventoryAdvance','_Generation6RNamespaceInventoryAdvanceBinding','_Generation6RNamespaceInventoryAdvanceRecord',d[49],'_Generation6RNamespaceInventoryItem','_Generation6RNamespaceInventoryItemBinding','_Generation6RNamespaceInventoryItemRecord',d[69],d[51],d[35],d[55],d[43]))),'R namespace A2f budget/RMDIR readiness and current capability differ')
  am=True
  aL=(d[64],d[33],d[27],d[42])
- prove(73,K(am)is bool and am and(K(aE)is bool)and(not aE)and(aL==(d[64],d[33],d[27],d[42]))and(K(aO)is bool)and(not aO)and(bH==(d[44],))and OO((ll in q for ll in('_Generation6RNamespaceInventoryClassificationState',d[34],d[22],d[24],d[1]))),'R namespace A2g readiness transition differs')
+ prove(78,K(am)is bool and am and(K(aE)is bool)and(not aE)and(aL==(d[64],d[33],d[27],d[42]))and(K(aO)is bool)and(not aO)and(bH==(d[44],))and OO((ll in q for ll in('_Generation6RNamespaceInventoryClassificationState',d[34],d[22],d[24],d[1]))),'R namespace A2g readiness transition differs')
+ a2H=True
+ a2R=True
+ a2P:tuple[str,...]=()
+ prove(79,K(a2H)is bool and a2H and(K(aE)is bool)and(not aE)and(aL==(d[64],d[33],d[27],d[42]))and(K(a2R)is bool)and a2R and(a2P==())and(K(aO)is bool)and(not aO)and(bH==(d[44],))and OO((ll in q for ll in('_Generation6RNamespaceEmptyInventoryState','_Generation6RNamespaceEmptyInventoryBinding','_Generation6RNamespaceEmptyInventoryRecord','_authenticate_empty_inventory','_require_current_empty_inventory','_require_authenticated_empty_inventory')))and('len(advance_archive) == 1' in h7)and('not self._inventory_item_records_by_identity' in h7)and('one-item-then-end' not in q.lower()),'R namespace A2h authenticated-empty readiness differs')
  S={'self._authority_records_by_serial','self._authority_records_by_identity','self._authority_records_by_owner_identity','self._directory_facts_by_serial','self._name_facts_by_key','self._hardlink_groups','self._capability_records_by_serial','self._capability_records_by_identity','self._archived_capability_records','self._mutation_permit_records_by_serial','self._mutation_permit_records_by_identity','self._archived_mutation_permit_records','self._cleanup_budget_records_by_serial','self._cleanup_budget_records_by_identity','self._inventory_cursor_bindings_by_identity','self._inventory_cursor_bindings_by_serial','self._inventory_cursor_records_by_identity','self._inventory_cursor_records_by_serial','self._archived_inventory_cursor_records','self._inventory_scan_records_by_identity','self._inventory_scan_records_by_serial','self._archived_inventory_scan_records','self._inventory_scan_proxy_quarantine','self._inventory_advance_records_by_identity','self._inventory_advance_records_by_serial','self._archived_inventory_advance_records','self._inventory_item_records_by_identity','self._inventory_item_records_by_serial','self._archived_inventory_item_records','self._inventory_raw_entry_quarantine','self._namespace_owner_tokens','self._namespace_owner_contexts','self._receipts'}
- S=S|{d[26],d[28],d[29],d[30],d[23],'self._untransferred_raw_quarantine'}
+ S=S|{d[26],d[28],d[29],d[30],d[23],'self._untransferred_raw_quarantine','self._empty_inventory_records_by_identity','self._empty_inventory_records_by_serial','self._archived_empty_inventory_records'}
  bF:tuple[str,...]=T((a0(g)for g in do if isinstance(g.func,a7)and a0(g.func.value)in S and(g.func.attr in{'clear','discard','pop','popitem','remove','__delitem__'})))
  cq=T((a0(a)for dv in c.values()for a in a3(dv)if isinstance(a,a11)and isinstance(a.ctx,a15)and(a0(a.value)in S)))
  cn={d[111],d[106],d[113],d[114],d[108],'Path.unlink','pathlib.Path.unlink','shutil.rmtree','ctypes.CDLL','ctypes.PyDLL','syscall'}
  cw=T((a0(g.func)for g in do if a0(g.func)in cn))
  cg=T((a0(a)for dv in c.values()for a in a3(dv)if isinstance(a,(a5,a2,a10))and a.value is not None and(a0(a.value)in{d[0],*cn})))
  dh=T((a.value for dv in c.values()for a in a3(dv)if isinstance(a,a4)and type(a.value)is str))
- prove(74,not bF and(not cq)and(not cw)and(not cg)and(b(s).count(d[0])==1)and(not N(('RMDIR_' in k or 'RMDIR_CONSUMED' in k or 'PRESENT_RMDIR' in k for k in dh)))and('_GENERATION6_R_NAMESPACE_REAL_OS_RMDIR' not in q)and(d[113]not in q)and('os.rename(' not in q)and(d[108]not in q)and('pathlib' not in q.lower())and('shutil' not in q.lower())and('syscall' not in q.lower()),'R namespace A1b destructive/strong-reference surface differs')
+ prove(80,not bF and(not cq)and(not cw)and(not cg)and(b(s).count(d[0])==1)and(not N(('RMDIR_' in k or 'RMDIR_CONSUMED' in k or 'PRESENT_RMDIR' in k for k in dh)))and('_GENERATION6_R_NAMESPACE_REAL_OS_RMDIR' not in q)and(d[113]not in q)and('os.rename(' not in q)and(d[108]not in q)and('pathlib' not in q.lower())and('shutil' not in q.lower())and('syscall' not in q.lower()),'R namespace A1b destructive/strong-reference surface differs')
  bJ={'register_borrowed_directory',d[88],d[103],d[105],'seal',d[87],d[104],d[92],d[98],d[107]}
  t=bf(d[20])
  y=T((a for a in U.body if a not in f and a is not t))
@@ -20528,19 +21518,19 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  dj=T((a0(g)for aY in y for g in aT(aY)if(a0(g.func)in{'delattr','dict.__setitem__','getattr','operator.setitem','setattr','type.__setattr__'}or(isinstance(g.func,a7)and g.func.attr in{'__getitem__','__setitem__','get','pop','setdefault','update'}))and N((eE(cG)for cG in g.args))))
  dM=T((a0(g.func)for aY in y for g in aT(aY)if a0(g.func)in{'eval','exec'}))
  cR=T((g for a in U.body if a not in i.values()and a is not t for g in aT(a)))
- prove(75,not cj and(not ce)and(not ci)and(not cs)and(not dj)and(not dM)and(not N((a0(g.func)in B or(isinstance(g.func,a7)and g.func.attr in bJ)for g in cR))),'R namespace static integration block has an external call site')
- prove(76,K(t.end_lineno)is int,'R namespace A2g gate end differs')
+ prove(81,not cj and(not ce)and(not ci)and(not cs)and(not dj)and(not dM)and(not N((a0(g.func)in B or(isinstance(g.func,a7)and g.func.attr in bJ)for g in cR))),'R namespace static integration block has an external call site')
+ prove(82,K(t.end_lineno)is int,'R namespace A2h gate end differs')
  et=t.lineno
  eJ=cast(int,t.end_lineno)
- bg='c664dd84d0fa6a3482dcf233f572199271e76dc38280cf16f77c44436f9859f1'
+ bg='c360bcc42d88b75d4770e39971d5d3ab397936c79b50b72dadcfae858fa4af15'
  aq='\n'.join(source.splitlines()[et-1:eJ])+'\n'
- prove(77,aq.count(bg)==1,'R namespace A2g gate digest token differs')
+ prove(83,aq.count(bg)==1,'R namespace A2h gate digest token differs')
  aq=aq.replace(bg,'0'*64)
- eO=b'TASK-064\x00GEN6\x00R-CAP2-R6\x00gate-v1\x00'
+ eO=b'TASK-064\x00GEN6\x00R-CAP2-A2H-R1\x00gate-v1\x00'
  dR=eO+aq.encode('utf-8')
  eN=H.sha256(dR).hexdigest()
  dK=U.body.index(t)
- prove(78,et==19973 and eJ==20543 and(U.body[dK+1]is bf(d[79]))and(L(dR)==74013)and(eN==bg),'R namespace A2g reviewed gate digest differs')
+ prove(84,et==20938 and eJ==21533 and(U.body[dK+1]is bf(d[79]))and(L(dR)==80964)and(eN==bg),'R namespace A2h reviewed gate digest differs')
 # fmt: on
 
 
