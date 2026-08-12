@@ -20941,15 +20941,13 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  H=hashlib
  J=json
  M=math
- Y=sys
- Z=isinstance
+ from builtins import isinstance as Z
  T=tuple
  L=len
  OO=all
  N=any
  K=type
  E=ContractError
- Q=_require
  a0=A.unparse
  a1=A.Name
  a2=A.AnnAssign
@@ -20969,156 +20967,200 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  a16=A.Raise
  a17=A.Dict
  a18=A.Load
- d=('_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK','_classify_metered_inventory_item','_Generation6RNamespaceEmptyInventory','self._live_inventory_classification_record = None','_GENERATION6_R_REAL_OS_CLOSE','_register_inventory_classification_name_fact','_GENERATION6_R_NAMESPACE_CLEANUP_BUDGET_EVENT_BY_STATE','_fail_inventory_classification_uncertain','_GENERATION6_R_REAL_LIST_APPEND','_GENERATION6_R_NAMESPACE_REAL_OS_STAT','_close_inventory_classification_owner','_reauthenticate_inventory_classification_parent','_GENERATION6_R_REAL_OS_FSTAT','_close_rejected_namespace_raw_once','_require_pristine_inventory_classification','self._live_inventory_classification_record','_Generation6RNamespaceLiveToken','_acquire_metered_inventory_scan','_GENERATION6_R_REAL_FCNTL','_GENERATION6_R_NAMESPACE_REAL_OS_FSTAT','_generation6_r_authority_source_gates','_terminalize_inventory_classification','_Generation6RNamespaceInventoryClassificationBinding','self._inventory_classification_descriptor_quarantine','_Generation6RNamespaceInventoryClassificationRecord','_GENERATION6_R_NAMESPACE_REAL_FCNTL','self._inventory_classification_records_by_identity','postproof-attempt-metering','self._inventory_classification_records_by_serial','self._archived_inventory_classification_records','self._inventory_classification_residue_evidence','_derive_inventory_classification','dataclass(frozen=True, eq=False)','preproof-attempt-metering','_Generation6RNamespaceInventoryClassification','_require_current_inventory_item','_require_current_inventory_scan','event.phase is _Generation6RPhase.PRODUCTION','_Generation6RNamespaceInventoryAdvanceState','_Generation6RScandirCapability','self._close_inventory_classification_owner','self._terminalize_inventory_classification','unlink-attempt-metering','_yield_metered_inventory_item','authenticated-empty-inventory','_GENERATION6_R_AUTHORITY_EVENT_CLASS_SEAL','_require_current_inventory_classification','_Generation6RAuthorityLedger','_Generation6RNamespaceCleanupBudgetEvent','_Generation6RNamespaceInventoryItemState','_Generation6RNamespaceInventoryScanState','_terminalize_inventory_scan_end_observed','EXTERNAL_PROTECTED_TYPE_WRITE_OR_DELETE','self._live_inventory_item_record = None','_Generation6RAuthorityScope','_terminalize_inventory_item','_terminalize_inventory_scan','self._charge_cleanup_budget','EXTERNAL_FINAL_CAPTURE_WRITE_OR_DELETE','_GENERATION6_R_CAPTURED_FD_CLOSE_ONCE','alias:_Generation6RNamespaceLiveToken','self._open_namespace_owner','_generation6_r_socket_detach_handoff','_require_inventory_cursor_provenance','time-sample-metering','EXTERNAL_NAMESPACE_CONSTRUCTOR_CALL','_Generation6RNamespaceInventoryScan','_issue_inventory_cursor_provenance','self._namespace_mount_id','_fail_inventory_advance_uncertain','_require_current_inventory_cursor','_issue_current_inventory_cursor','self._uncertain_descriptors.add','EXTERNAL_PROTECTED_HELPER_CALL','nofollow-stat-attempt-metering','_open_namespace_owner','_Generation6RNamespaceJournal','_terminalize_inventory_cursor','_Generation6RDescriptorState','_selftest_r_case','_acquire_name_owner','_publish_capability','self._mark_close_uncertain','_GENERATION6_R_NAMESPACE_','_Generation6RScandirProxy','_Generation6ROwnerRecord','self._publish_capability','authorize_present','open_owned_cursor','_Generation6ROwnerToken','_Generation6RNamespace','_charge_cleanup_budget','authorize_rename','fstat-attempt-metering','mount-attempt-metering','open-attempt-metering','self._close_operation','_copy_name_fact','consume_present','owner.detach','_register_name_fact','_validate_node_kind','_Generation6RPhase','close_owned_cursor','authorize_absence','seal_name','os.rmdir','abandon_token','os.replace','HARDLINK','__init__','os.unlink','close_once','os.remove','os.rename')
- def _g6r3_decode(e:str)->tuple[tuple[str,...],tuple[str,...],tuple[tuple[tuple[str,str],...],...],tuple[tuple[tuple[str,...],tuple[str,...],bool],...],tuple[tuple[str,str],...],tuple[str,...],tuple[tuple[int,int,int,str],...]]:
-  m='R CAP3 payload differs'
-  def r(ok:bool)->None:
-   if type(ok)is not bool or not ok:
-    raise ContractError(m)
-  alphabet='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~'
-  r(type(e)is str and len(e)==14799 and e.isascii()and(not any((c.isspace()for c in e)))and(set(e)<=set(alphabet)))
-  r(hashlib.sha256(e.encode('ascii')).hexdigest()=='91a0a18e62e654a64013fb3ba069cf5c72222b76f3785db9f17568792907061e')
+ def _g6r14_decode(e:str)->Any:
+  def r(o:bool)->None:
+   if type(o)is not bool or not o:
+    raise E('R CAP3 payload differs')
+  def u(b:bytes,p:int)->tuple[int,int]:
+   s=p
+   n=z=0
+   while 1:
+    r(p<L(b)and z<35);q=b[p];p+=1;n|=(q&127)<<z # noqa
+    if q<128:
+     v:list[int]=[]
+     w=n
+     while 1:
+      v.append((w&127)|(128 if w>127 else 0))
+      w>>=7
+      if not w:break # noqa
+     r(b[s:p]==bytes(v))
+     return n,p
+    z+=7
+  def R(b:bytes,n:int)->Any:
+   r(L(b)==(n+7)//8 and(not n%8 or not b[-1]&((1<<(8-n%8))-1)))
+   p=[0]
+   def g(w:int)->int:
+    r(p[0]+w<=n)
+    v=0
+    for _ in range(w):v=v<<1|(b[p[0]>>3]>>(7-(p[0]&7))&1);p[0]+=1 # noqa
+    return v
+   return g,p
+  r(type(e)is str and L(e)==18077 and e.isascii()and(not N((c.isspace()for c in e)))and H.sha256(e.encode()).hexdigest()=='2ff6225db8b8b51ee7fa419e2309fa8fae31b5ec03d38404837eac2181babfc8')
   b=base64.b85decode(e)
-  r(type(b)is bytes and len(b)==11839 and(hashlib.sha256(b).hexdigest()=='f6cd663aeb664a80cc45aa7515ad397785150bf0a5397ff44139fd9e04c636bc')and(base64.b85encode(b).decode('ascii')==e))
-  hf='>8sBBHIB4B'
-  h=struct.unpack_from(hf,b)
-  r(struct.calcsize(hf)==21 and h==(b'G6R3A1\x00\x00',1,128,353,2967,9,30,62,241,20))
-  p=21
-  aa:list[bytes]=[]
+  r(L(b)==14461 and H.sha256(b).hexdigest()=='6d1a7276aa0241af6138d11f7c7354d9ef12933dace5a2dedfcf9205b3824626' and base64.b85encode(b).decode()==e)
+  h=struct.unpack_from('>8sBBBBHH9I',b)
+  r(struct.calcsize('>8sBBBBHH9I')==52 and h[:7]==(b'G6C3R14\0',14,0,128,13,596,1416)and h[-1]==0 and h[10]==51120 and h[12]==5570 and h[13]<=800 and h[14]<=180)
+  p=52
+  a=[]
+  v=[b'']*0
   for i in range(128):
-   q=b[p:p+2]
+   q=T(b[p:p+2])
    p+=2
-   r(len(q)==2 and all((x>=128 or x<i for x in q)))
-   v=b''.join((aa[x]if x<128 else bytes((x-128,))for x in q))
-   r(0<len(v)<=45 and all((32<=x<127 for x in v))and(v not in aa))
-   aa.append(v)
-  a=tuple(aa)
-  r(p==277 and len(a)==128 and(max(map(len,a))==45))
-  z=p+2*h[3]+h[4]
-  ss:list[str]=[]
-  largest=0
-  for _ in range(353):
-   r(p+2<=z)
-   n=struct.unpack_from('>H',b,p)[0]
-   p+=2
-   r(type(n)is int and 0<n<=107 and(p+n<=z))
-   q=b[p:p+n]
-   p+=n
-   v=b''.join((a[x]if x<128 else bytes((x-128,))for x in q))
-   r(0<len(v)<=306 and all((32<=x<127 for x in v)))
-   largest=max(largest,n)
-   ss.append(v.decode('ascii'))
-  s=tuple(ss)
-  c=(s[:30],s[30:92],s[92:333],s[333:353])
-  r(p==z==3950 and largest==107 and(max(map(len,s))==306)and(tuple(map(len,c))==(30,62,241,20)))
-  r(all((all((g[i]<g[i+1]for i in range(len(g)-1)))for g in c)))
-  sc=((1,12,1),(2,23,1),(3,20,1),(4,85,2),(5,37,2),(6,379,2),(7,14,2),(8,9,32),(9,162,40))
-  bb:list[bytes]=[]
-  oo=[21,277,p]
-  for expected in sc:
-   r(p+4<=len(b)and struct.unpack_from('>BHB',b,p)==expected)
-   p+=4
-   end=p+expected[1]*expected[2]
-   r(end<=len(b))
-   bb.append(b[p:end])
-   p=end
-   oo.append(p)
-  blocks=tuple(bb)
-  r(tuple(oo)==(21,277,3950,3966,3993,4017,4191,4269,5031,5063,5355,11839)and p==len(b)and(len(blocks)==9)and(struct.calcsize('>HHI32s')==40))
-  av,nv,ec,ep,dh,dp,sg,ih,rt=blocks
-  r(all((x<30 for x in av+nv))and all((x<62 for x in ep))and all((x<241 for x in dp))and all((x<20 for x in sg)))
-  r(all((dh[i+1]in(0,1)for i in range(0,len(dh),2))))
-  def pairs(q:bytes,g:tuple[str,...])->tuple[tuple[str,str],...]:
-   return tuple(((g[q[i]],g[q[i+1]])for i in range(0,len(q),2)))
-  auth=tuple((c[0][x]for x in av))
-  namespace=tuple((c[0][x]for x in nv))
-  counts=tuple(ec)
-  enums=pairs(ep,c[1])
-  headers=tuple(((dh[i],bool(dh[i+1]))for i in range(0,len(dh),2)))
-  fields=pairs(dp,c[2])
-  sigs=pairs(sg,c[3])
-  inherited=tuple((ih[i:i+32]for i in range(0,len(ih),32)))
-  roots=tuple((struct.unpack_from('>HHI32s',rt,i)for i in range(0,len(rt),40)))
-  r(len(auth)==12 and len(namespace)==23 and(len(counts)==20)and all((type(n)is int and 0<n<=10 for n in counts))and(sum(counts)==len(enums)==85))
-  r(len(headers)==37 and all((type(n)is int and 0<n<=44 and(type(f)is bool)for n,f in headers))and(sum((n for n,_ in headers))==len(fields)==379)and(len(sigs)==14))
-  r(len(inherited)==len(set(inherited))==9 and all((type(x)is bytes and len(x)==32 for x in inherited)))
-  r(len(roots)==162 and roots[0][0]==10578 and(roots[-1][1]==20934)and(max((x[2]for x in roots))==2835000))
-  r(all((type(lo)is int and type(hi)is int and(type(n)is int)and(type(d)is bytes)and(0<lo<=hi)and(0<n<=2835000)and(len(d)==32)for lo,hi,n,d in roots)))
-  r(all((left[1]<right[0]for left,right in zip(roots[:-1],roots[1:],strict=True))))  # noqa: RUF007
-  eg:list[tuple[tuple[str,str],...]]=[]
-  ei=0
-  for n in counts:
-   eg.append(enums[ei:ei+n])
-   ei+=n
-  dg:list[tuple[tuple[str,...],tuple[str,...],bool]]=[]
-  di=0
-  for n,frozen in headers:
-   group=fields[di:di+n]
-   dg.append((tuple((x[0]for x in group)),tuple((x[1]for x in group)),frozen))
-   di+=n
-  d=(auth,namespace,tuple(eg),tuple(dg),sigs,tuple((x.hex()for x in inherited)),tuple(((lo,hi,n,digest.hex())for lo,hi,n,digest in roots)))
-  r(ei==85 and di==379 and(tuple(map(len,d))==(12,23,20,37,14,9,162)))
-  r(all((type(x)is str for group in d[:2]for x in group))and all((type(x)is str and len(x)==64 for x in d[5])))
-  r(all((type(frozen)is bool and len(names)==len(annotations)for names,annotations,frozen in d[3])))
-  r(all((type(lo)is int and type(hi)is int and(type(n)is int)and(type(digest)is str)and(len(digest)==64)for lo,hi,n,digest in d[6])))
-  return d
- D=_g6r3_decode('M>bM3K`{UT0e}Hv000Y@2_8Q26y@&p>E-h8?(gye1K|bZ<>mA6;Q|KX?Enhj#|*X&4iD1K3kV4i5fTRz6zT5t`2h6a>Gb90<Hf|`?iu6+`2^$}Aodsl0UjeH7x47-;T6duA1LlBDHi1O^Q@rX^2N^X0{1Z%=Nj!SGvDIm<>@BF%){*I7X#(aJm2%~^d}miJ)rzTLAs#QA?5Vx<Mr^*GWGN==|=`j=1oknu;EVQ@9*<3A<xp&K<fbSR`oyi@*POy9pmifTIWU`2Qbu1=wSrO&gt^+^anULHDWu#&fhuT;pFygU*%@>0xLQ#^)GH&^Keje1kclU9O3NY@Okrk=zC@Ed;;lycmM>kPfxG_2(h-ex3{vfwg3dRPfxG_2DVR6Pft$(0=BdO3&!M0uHWAl>Ga><01C$BNv>Q{<=+Db00_q9Nv=01<LCei#^gz^^5yaMWaR(`-%;)G0~i1W-|g>M9smVCec$Hf00lmMJ}2}55<Vy5?B(C&WE=D!-|gY_<LC$g3FhNJ?5^hHKkNVnQm$N5<p2j#uIBRqQ8xevQm*FnC-eXYQm$V0>Er+fQm*gt000J3uJc>uWB>(HuJb4K00&a8_3rEz>i`h*@8j!6uJiBX>qf3OC*$Y<5%cfk>qf5g@8j!6uIB0N0Pg?_^C$GK)8EO)&C~!3^C$GK)8EO{#L3bC3-c%RuG8Pi)6&Jq01N@`<*w}mWdldw?(+a^`xQD}!u8}{Rj$Fq)XCPxL=`$+!u8}{#UifB)6>-)E)_am!u8}{Rj$R@$idaq)Eq<=I$gr`<X*)huEp5M!PV2$94-|)UBdO`URAEu&cnsh)WKs!6*^tQ_2gc~BCgfW!^P6n!DIaZ62Zc0#Lvzg-__1J!PC>p#>pH26T!mMFvG>))X&Q>-@(FZ#Lvzg00zOs)XCPx00_a<)Wyxv)Eoc_!PL~n&Ct|i#{de!)zrvf$-}|a8~_W!)zrvf$-}|aW5)mp!PV5rRLR;L01LuY($Ci%4b{QY!~h4v)yd4nW5)m%Il<G@$;QbX-^<R=*UsP4#nZ{e)x`iCIl<G@$;QbX-_pg+&(^`h%*EfsX~fCI!PLb76*<Le)zII<)x^ie)ZfL}$idaq)Eod3ImKz!(BHz<#K*<d-^tU{)f@m7ImKz!(BHz<#K*<d-__2;#nRNlV*mm<cK{7Jci+{{#n{Nf)zj1*00_g+&Ctxn)WrY?!_Uss)y*6L1;f?S(qI4x#L3dd!_-vS017a~-_OF+#nRRs0105y+26=%#LUG25Ma{T-^gji%*Efq!c^31cK{1u(%IkA#njc(&Kv*;#n{Nf)zj1*00hR##?Jr;$idRY%wx*{8DrL9RM~35)6>bu$-}|a$<NN;!NOG3YIgt@W7c3)*=oVl)5*rk!@<<a&(7aq(%AqSW7c3)*=oVl)5*rk!@<<a&(7b-X~fLMYIgty$<x!-8~_B&$=1aH56sEd#oyJ=Il<G@$;QbX02R&E)WOur&(7b}&&x31!NO_8&(0hG70uPu!PLpm&fnC}%P`-_X~fLMYIgty&(JVq#{de?*UlW@!`0H$Q~(jr*UlW@!`0H$RNukERMcvB01VI9&K%#v)zZ^cYIgt((81Kh$lt-k)XCPx01VK<)WgW%(#6x%R2%>b(9*@zVBgfw%P;^D(9*@zVBgfw%P`-;!c^31cK{R6(#6wY-__2{W6R&e&(71;%^Uy+(#6Ns%)!zC1=29V&BXu;(lEiz#oyG=%P;^D(lEiz#oyG=%P`-;!c^31cK`;`#nj2t8~_E<&BV#l00q;<!OR>03Dd>F%pBif(%AqI)5XEe9N%El+26s!RMcvB01?y0!OR@rVA9#&$Z5pP#cFo|2Gh^O%f-|H2h-5S!^y$S00z_9&CFxV01wo~!P3Of*UsO;!_>*v#Q+J^(rMGi#nRFo00`C2!^P6n!D9dg)y~Xg%K!+(2;=fN1k-&03B(BF@;C(3eM0~S#AF-vA4vcM#^gx=1jgh^LjVX6$#3EG1k_gm1Qo&K1poyV!D!1Y016eu;R)jD>^s6W00|Yt;R)jD>^nsO3KhfQ3F7JOJ4HhP3>7+E!u8}{#qjUr=l}>6I$gr`<X%Mp2o*YA!u8}{RR9MS!vh-l^i==|6~ts4^dG@!00|YuWE=D!!DvGO2o=O+8}uK-H2?|~#AF-vAI9P1^Z*AH#AF-vA4LEN6~ts4^dCh-00<Su?I!uj?kNBY6~*l)`N{4n!ZiR16~*l)`N{4nRR9Ak!EFEqE5U8TH2?%F!EHqV1S`R9RR95W00VTwH2?y1RR9Ak!*u`!E5midH2?%F!*xXf1S`XJRR9Ak$us~3E6Fs%H2?%F$uva(1uMxkMMD4tE6Frf00S%2TL1+s(_6wd00b-3TSWi_E7Mz500$M!>GtK+R{#kW%}NH)0`2Ma01Fk(N(RsZ?dkNwH2?|~%}NH)0`2MaRR9PT5#`3=<McxS1{KclH_I#l2NllmH_I$T00$LG!vh-l^Z*DINy7sg`1C^n2^C4h0~+}B!ZiQ{6-mo100$LG&{^<O<p2W}NmT#@6-iY?00$M&@(38zR{#VR(r!Zl1Qpa*RR9hZ)$Z&T>(KJ$@bd5P<^Ti`Nz_*W1rSNpS3>{_5Yt=aWYF^O`1t?{;p6f3>GSCYasUJ2;{^Z$;cWm1;caX5G$!)^1L19F00iM}XC(jw;cX=V2H|ZPaRMa(1L18`00iM}QzZZd;cY&D00!am?d9Zh00rUnG$wKY0^w)?1L0_A00iM^XC(jw;b<iQ1L0^>00iM^QzZZd;b=a800!Y=>G}q800QDQ00ZJRB>)KH;R)jD>^o-w2;<=i;_2)=QveF%;R)jD>^tA|R{##<;R)jD>^tA|R~c~vB>)WL;R)jD>^tA|S3Z9L0$fl416)ug00vx88F2z700dl6K7RlQTwONx<X%$%2wYt@_2gbtB>)IqUEk&K@8jqI30z&@<?!$0=p_IQTwUMg@bBa38F2z7018}P-{tV{<LEwr00>-C<!kgbCi4IUTvFw700mL)@B<hC1>;%r7;*pz<5}_;-}UL_00QH600ZN7X8;7_b!R021LJii00!fA8F2z700ZN7Qvd|xbyFn(1mkr+e*g(L;pFTV<=^h}00TEB=l~2iCg|Vj>F4O*_u+2<4>u<0-{|S*=->C@Z)@gn01-DP=-=q+=jh+};csj7-vHzQ5jQ62-{|S*=->C@Z#L!T1myq*<Ot*PI0OI;<Ot*PI0WD3?BVD0014y><MKEJ-}F}i2jmC=?gndU014y>0qzFh?hEAr2IL3<?gmo;1UL5S2LK1<?I!sd?kNBW<?SZ<8SW`101M^qCixleDH(ABB>)NK?I!sd?kPTh01N<8H{{>$3*|QX^aubC08uyO-|h?LHu>}jYvykN5dcv)<lpWK<u>^m^K10q0OSA>08uyO-|h?LHu>}jHs$67<p2g4^7-FUSO5ta^7-FUSZn5Q01FuM`QK4kYxLg$<Nym8^7-FUST^P61myq-81nhw?eAC~00tQH`QPs{00rgn@8jqI0_7qA1m@x6^Z*9t<lpZyB>)WQ;qv6{7VF>V^6y9h0~YT$00I{D00S2ELjVNnabI!(2kCL;<lpY|00ilA0wn+f=`;WX=`?2m1nD$qB>)ELG~YKS=l}!hG$jBA=`<N}0wn+g=`>RS1nD$WB>)8JG(LX-2<dO(^aS7ZR{#m=Z{hR=-}F}{00QeQ01fQn^Yq{C17!n8-|q7O2J9B=-%(fq2kqhb-!~@c01)lr_}>6gH{{>$3*|QX^aub5?cw;}81m@|00`~j_}}mF3iAL1?e8}L1nuuw9smRG3*`U??hEDQK79ZP?&bLO-!~@c00!>wH{a_l00{5!0BiI#Ci4IU@9+R}00-~z0OjO9eE<gU@Cx5iSO5v{@Cx5iSZn5Q01fZ(3g1y!Yvym?@9+Qs4Dav?-%(g==5IbH^Z*O*@Cx5iSZnm(0OSA*@9+xWQCK$R<^<&c2L$Qo7Heoz01Z;E#AL-k^7-5I^zz*R4pOefWW_)7`P=jK^4&uK2JcEy?d5U+0`D>a2=6lA;{zJ_^Z*I(GT-9^8u;{Q00ZwbB>)8PGCn{61qt#PYiIxj3Gx_c016567~kXw<MKEJ00;^47~k#hSRMcc3Gx^|eE<dt^yuI3G5`he0`2Ma015B{?dkLxaRMa(2k-*z>GVE-00{8%<?!<F@8$pr@bcyG^6&5FB>)BR^6&Wh00!{#@A&y800r<_@KWUf2lC<f-x%`w00{Eo_um-u`6U1c^5yK|0ruqp0`pq{1M^#F00i?}XC(jz^IP9HCg=bI^IIhV2J>4PaRMa(1M^!`00i?}QzZZd^IJZD00Q%W00Z-VB>)KXC-iIdG$!)^1oJ2KasUGJKmZH#C-n96-{$P$=kovq^Yron1oQOrLjVdV@?PKM2;=fN1ONyp@?PKV?^qrH1t;=eK79ZMZ|xR%asUGKR{#a{SKsFh00#6|8F2z700i_`K7RlW^hoUG+w=7DF0QVw-2emi>Er+g`RV2C<Z=K3Jpc$5#qB2f$?hot2^GcdCi%(kDMbJQbN~W$MF0dV$uva(2Ne<J#^K}i015Nu?B*_9P(*Y974zln<}T&!CixleDMS^;?I!uj?kNBZ^X2U3F6lHxE6Fqf67%Kk<}UK#_uu3Q<MKEJL>BY_B=hC$<}UIfL>0yDCi%(kDMdpr@bc;H;qv)J!r}Af#rOyC1po^3<?QAz@*zZYMF21J<?QAz@*zZYMMEy>G*d(?$uvbnF7Gl##^gyuF7Wc{?cwtIM8e_o<;D01@C5)C^X2U3F7hEnbVV+zF6AOb6*^Mo#UcO@^X2U3F7hEnbVV-nKtyy^01NZw?B*`>TSP0<TL3ll<?QAz^L<3b2;=fN1k-&k?eAC~L>BZe<@oR$8sy*g>EuKf^e*N2@EaQB-|g>M9z+)O04DTE?B&}P#AF-vA4M(@NkuLe^e)5*<MKEJ(|s-$^ez_kE*A9N02K5{?B&}P&hIzNEG~3aF7x#AL)`%Y3;_iQ2L=}y3=b0&5e@<X7XcL$5f%~-90ULX0s|ck3k?bh2pJk15CZ@d0S5#F2Lb~E1qKQP0|NsD1O)>G0|Wq70tpE-Gbku2DLOh45j;Ex2Ll5V5<EOTJu)&bE)*0kEjc+iHyRon8#p)!2qh&TAP)~bJS8O-79}M#G%6}DFC85uBp@I=I|Bm`4?H|3CMPEs7dAFEH7hGHFe4)#9vmD82Ll5V5<ENt0vQ=RJRc1i3_K1K6EQJ7JRl$t5ET_XJOl(77!?&fJRu<f06aVk3knJW0U{zSECd7#3knK6JO%~@1w1?j03`wm0So~G0SW;F00{vF00RL70RsU70TBTQ022Wb0R#XD0RjO60RjO60RjO60U7}X00jXF022WP02BcR02l!Z02u)V04xC?00sej0^XUf)PR)ltgV%m<nEP~m6es=nZ&N8fRyj7r>&Efl@H`Gm6es1m6he*nU$5^nNFp@!jj*7k(HGX2LhFql|B+y;%E^#JKmYU!hGwc(YuwE1C>6NHa8PiQsP-?H4_dBJKmW>m6ZnGnL?G72Hu%Mm6ZnGnU$5^nd<HALQYbVuE~7B!+n2#m6a@&l?D$JFysV3G&v9y<yPXuRZM8<2s}AEJ3BjBSnBOUPEy6L#>mOQ!F=ZE=W7WFI+X?w6A|Q<00T2MK9vBKmEM`k%*$C=T3lN~u1-`^&CZpTEtQoC2s)LO2ILQw6Frqy;#KJ`FFQNlnV58_s;R4$m6es1m6es=nU$5^nU$5^nU$5^nU$5^nU$5^nU$5^nSp|YgK=_gZrj|}*GWo6Mq^}QV!4Zlc$JkEm6eqtl^~TWl_`}Pl^K-_l?;`Ym6erNSK>{+7L^w}JKmY?RFIXGmX_p?;&zFJwWgQp3k{W(m6eq{JKmXWZ*y=?QB+b>Pf%lIW@TYwm6acrm6Z>bl@pZ_l?#=Xl?;_uSK?~vAeACJJKmYq+1=W4a&2zU(4(Y!bz@{^WtEjEm6eqtl^~Tsl?9cRl?#=Xl~z~cXF=&Hl`EAyJKmW?M@vZC+}796(4(Y!*sx<{VPd+Bh?SKXm6eq$l_`}#l?9cRm6Z#X43(9Yl~z~cMAFlsO}^<Fl^d14mL@wpJKmX^o}!;gN<~K7+}799(`kicWMN{qiiVYyBbAkv8kHH9DwQdfyp`mY3zZC&m6erNSK{#LB$X#SJKmXHUSMCKp_`nVo=HkYM%&!h*Ku-fZcb5BQ%_LR(`kjqonvHSV!Diod6ktMm6eqxl_ZrTl^T^9l`54fl_8ZNl@FB@l@XP^mE@I`l?#;&m6es1l~z~c;Iglde89uBjmXDqd*isbiiUTwlaWo~vuM8Q9hDxHl>r1lG&up50hX4QmX?;5mX<Q*FgrUtJ3BiE01g5P1qTES5)l&$01f~Q1`hxY00{#K0tf;N01yEP00|&=9dmy}<%sq2HJwEj?!uk138y`i=U}?>BAXk)$~gJ`zmm?FUG0znR&GqpBaQN?9E4j4U(rcYTqWNXUfH8cNJ;D8+Rw)=B|wZs7hf1*Z=5!}t)Qlbh5t(S7CalHjK1t+A;v#znNc73I&UhJ{JT(r4en)f>Zd;;L|z?mSNO=pP?f8s)w1r*pZh0}O~rBT#3}J@DW*CQKAS8ThI9R=UKhOX9I-V&fpiuY4!SMa*$7rG1)&EG+Hw@&iQ@0q#r4g%txR|fug!r>G)OR27F%IQMvNd(vNNrow4LBEDY#>lWhRPV%~>O1{@U}h)tjW5P!7we=Jc6NW92ImORjXVVZD+Xjrf@3=^QF!4yFNe%LhX9NP=+*0HP=<QYlgZ006s1Bfg2Jl;t+fCxX>21V@}d+GsgZo<QrZ!>VSqcgdhBQz=sb007RjFi&dHh#G*4k^k>)GA;Cr7hU<f?dq$>)WwD_if~scR4G&d006?j{N?^Gxzc4;BRs1umGY^)kLe&=18qazyAHEezSDpyRVh^f006*08iG~_W*ouIGm98z1A4wpzNEz0T>%?8xkVdCm{SKSRw-5h0074CPYt=)0agKd)IROBU?u7-xuZ>%$8F$IzM2_ezAb$zS1DHj006ssC}ALXQg5vnpyZDa;_WfdnB2((cz{o_@L^y<%7rs2SSeTl006hx2|Wm9^3%YNc-jfIf=kX{TP<Dj1nE>ZzW_n_RMTrISt(fn006l@jjZHf$=J1>Y58!s_@4~t(QXeZaHWhRfQSZxZXIALS}9rp006rrrH&$H%u!9g-e=N?qh3^nzMe^o_N=Cue?83_3UWy)TPa%r006z~KW!CwD2D!~s~Jp_1BRp5Dpyg6giz-gor&9g+|*ksTq#@t006s}D=<>K%T7RmI1dXC)45|PcCYB;7rpi*WYj~+PM75=T`64v006nyEdI0<@rke+pALDK{}7Y6*0p7E>Q+50uq?4!HJywpUMXGx006<c8X5H1<jF_{72tmt=K4X!FB;D}Mq{q@x~5>#Tr;OBUnySz006$h+h|z~xJd0(q-CC1*g~%eC;!>28lr7rD&QeeWYo7QU@2e#007V(Dx{tiTkxa9Cj$%WC7LHOQWdX5lXtfG;_Xt;9CSJ<VJTq%007jB=y~7=g0B8FR=<EkKU>Gap9E-8PI#z59tLR|Pt@=!Vku$(007F=t#!@o;#l4iBnTtpJ?kr&EBi-|EjVb6_OPj?B<`FkV<}?*0077g8?4p%Gc|;smu5mVA>Ndcpr4L*ZZZc*s4}j)j=mBpWGQ3-007JKG1aw|;&Yv~-YcU}oOU+xSu5Cmwz)!uteB9486yfQWhrF<0079qaH7qN0BB!mJPtIl_*#?w4rtFOTlc=C<>F=TDyr2fW+`R>006_b0})%=+qccccZ>+QRBV+uQ0kioKT?YoCuNe3wwQ7$XDMj_009>h>Eob-gH~L~U37jm%sTbl8m!;J;~{&uo+X9O=YLBnY$<X800Ql48{m^_mr(8&xLNnfwD_RO(7lc>Z#v&bX_Xa}N?_M1bt!oO00KRC6?|Z$-e}~}M*cJS|I@&y|9tJCzro<$_h{L#@--qUeJO?j00g%{R7X*BTRXVxHsyk+`ufJ_W>Ik_BU=+A_i1n~WMEM#iYbo(00RTBVY}Rm2EBBv81Cv|PJhdNXrtl?i34fC^hqWEbwREvlPQ=000QH#i6L%x4K+r_ZrD&E_Alp>SORS0n9{*B+#1&Pvs<|-oGGLL00lYJp^?3gZa`J$)p*$HO_@@It*hw+l)oCebbi*B(A}Xas41)f00P6<1<q1DOmf+Ml<x@ip<osJ4Ykr*7m;E+guWj_D=FM5uPr110!7DrSev@=5HBL~OqKIj`enZhPT8_6GYcbn+}oQVh;Z92CoLxc0088mJi17`T+pz;2@OCvUUoQ^ikhiK-oCg3$@cNqV!ib(DlSw20jDYxdOrM=kKlN<#)rBdQdqmIoGmkVkjXA(X-!X6h-qLhS1wlo0081Tc=`x)aF&v?U8qCVNtMKI#sYc0K{k6zrSnqhmJd%ZST1h>00Yy9E3ye`M-}J>mUD=VSND11L%4o!I{Tt43)RK2I@d8SaV~iP00O7mMy20&FvL)g;3Q3oH7sS$1HB=ymkE?Q0`<m~JNX<gdM<<j00RM)N{mf=W6&eFq+SA=_qEjk>|9<2>7I8nhbzqPR!q+>hAxZ%00MO9Q2B5i5G<bl-hr8Bk`FC1CV1M9q?L8X$1oSDfw<o;jV_e{00Pe6BhS?d|DkdWea3Zh5PLB_j+$VB!gLXjyq&!*{qWH)moA+E00MMQa0DYx+r>RT$!OXnRP{P*o!><XzWuut?lY>2bv$J*o-U>U00Pd+ID;?03yZ`eUyfCi59<Xl6(iAlW{cr6mi%57MhxpNs4lJm00M4b=+=`FQ-;*cCvyjxI3I&&T#6Ba)PmY7&>%czS9(w`uP(O$00PKLjVbHZgHs?>18vpHkfs3<-S)#)QFjUg(g()94uGyMxh}x~00OXeJdsbaDJ9P_L^0NTbx3+*cK!a+RU4#-<^Z~|bf=Ck!Y<4J00Rn0ISLa=im!Pzq+bVlI2bC_)b&`Ok?B3MvidE#3UWm*&Mwvf00OEig)N|0549>S!H~4&fa18R6{2rRw90S!?_R9}RG8#0*Dm1z00RW=2!+x)blcw#^$PG+WK-0y)ju5>Efd?xTlp<!3#Yp-<1Xs}00N=rweHrTa*kyP*xNvY!-r8$o5H8@e6VfH@y}JNYuGt1>@M~I00R4jOz&~F4{6nbHJ0H0pc|dl`mH)LWD7?;<MdpzIjw*$_%8qe00OO^4`5)63~JfN`74p_bnU*JUz6U{3<J{E!mHRp!6`g10WS*x00Rdq!#7!(ex@BAl=Nr?ZboTfSg|J9+{o}@%4Vy%W#=j{4KEk~00j;Q!8yvjj_&jMKx|OJ^{Ko}K99*a<^itQa2GnmapKW087~<C006B6Tupcy!rS)SI1wYVxD2*L<@vWIrjkQO)6y1X(pL*F8ZRXP00l$_(nZga47->}g_7veOm->|1vRZD8b+dl<KgL#rjbN1CNCxc006VYJVw9u08n8zYKf$C7X%OtZrVUbVaXPKaWLrHBJi6pCod-e006*PP73VZ(ht7fM9lQSZ;hs8k4@H0F3g6Ml=y9eBo)msC@&}g008FVAVNMC+{KTbVU~W9e)*HGdK9c;+9}J5`mPv-upA&SDK9Gk009DFsICgILy}n_@I*#3_8HP4Ih?~0^$);S3K!BLax1wnEH69&00YAUPxH>Mq{tjUr69ykYXr3*J9Jj%;fR0rHYbozE-eHvJugTA00lHs>o#@ZJB4XZ7oX2RM^XW-$e0B?;vSwjXKqe`F{2ePNiSFc00<8RP@wv|NXbxv4PC77hP}nvZzkn4BHbCrTFDO$1l18QTQ6?_012#&yOCciagw`wE(?vtxyF6J*QJW)w$6Q~bc-<csul4sa4&xV00@j5AKXOkF4RM`Hh{k_2|T~4m?8k}C{U78rDzdc2?X9RfG>{#00?$E;5?BTu_YSY!U?a%R>kij#Eb)Op`d$DQQV_3oEMERkT0JA00>pYFhN~i^n!z*C})_&Zfxv&>?+rVn^7hIL<yyz&+IQRpf9EX00HF_)5x4B;C$Mjd^wqt=I;km49K5M+s$|;Z_4NOD_OrUr!TDl00QlU22`-?gXx{2f=%6TbcNQ_QbGXnAgk?%XG~xwAA?3Ot}nCz00Qk3fV^pWcte(mtR66K<QjW1=4t`4m2z*1)z?~M5p~fowJ)^*005&LOEmnBoUuK0+Z|rsP;tyu<ejm>!I3<j@XYYojGTHewlB5-006Cwh)-o$;Mf~rs|@tiPuy%N*;4}B&nuyZzmFEJBY>ALw=cH<00602GPj9yb}nC*qPz0m?4!=)CngD&rVdi(#ZsN#7|bXyxG%T>006T!{;p&N_*?0TXaD`;Tkxq+?(txkN$ba;lac+iQ?Jx7xi7f@0069?(AV2!9B-w3mUP}PuNx4*np=+e(6E|6Sa~o8^^c@4x-Yr_0065ptLyB|yxq&yF4?3k{S@P)8Y~+!d!9QxOGou}pwOHzyDz%{006aB8?0b?pBB^2BUC~qTsrm1y<~3WM{U{3s(>2H=~S67yf3@}006xCd{ge9j1a{~Y&p;GI~&*>M58=K1zEIvfAI{85X4e1y)V50005(Ss@Tf<3F$Vt&IkRQD?0f9Ph^1{5uHwTl0manL%?t^zAwH2004k&lxf;la^o@MD^vV-F(1}&HYbgG>-t&wyJn+ZUBIC)!7u~>03^Z)xM{sRjHx*S+bAjgYCy~M__|mRgOZWDKLd(%hU<MW2Qb<I2&UtY5x6`-_|LwIb-2H-&Z2>Df%s@O=p=-CoCK#N+gOA!=P>60006>x8#D1jYE&QLcl}%h8kNyrE2-^2o4X#pv`YP}D(Gx5=rHI2006=Qwg$ds%q5C#xDMbuqjdJ0nbNOBz=7*3VL>3BjZT&@=`iU4006|t*{&?Q$?LQIHwE%6Azy-q*i3(KHaL>!Whj%wDG01E>M-g60073SErsQraLClW*XQHg5(Pi?WsAtiV=~s6?O_tS>H7gN>oDs80072hHaaqXM461t+FAP2XBykz*Y1K=bef#Pp7eCUEdP`+>@e&A006|nPLyFV4_Iw&DOj55gP}=0(xbvFlLgFzPQThsdz?2g?J(^C007ZqiWnJ?R1?Hy1Z4CN>y8*M5f*yY{0Xciq2gl3G@XMm?lA5E005pmOwuvs_GAYfEqDN*fabd;T5mX=LePB;zu*(TJGT=s?=bHG005+c&vfb2`=#MtX1Oe7>|wuF5-zYQz6MZ_xzol5!bhPn@G$TI006Odr|mMzlET<7gIq(1Bf?u^He0s?xm9PD0?j8C&|ADP@i6fK005_KM<&zf3i!9$|43qf7+fli(eS|XCw#=@f))*8i0jNS@-XrM005~nZRCE*Ct7&+Xjm{Sc<61hHhE8de-7uK2Y#jz3u^8#^Dy%O006b*g^syItR%w3RW_f#(y)oA7=xyT*h~8!4S-{PlTj@&^f2@Q006P`fR3{pmu>eal{}=WtO6mizwS;(Ak@1{J82e%OSq0O^)U4S007H(DeQQJ<^b9$BH}odw6cvFO_&9UD{+N*9RgXu!X2P6_AvGU0065xJXc+QJI61YO-gn<d^-&k7~2!lBNgI#7FD=E(6#e0_b~SW006B4_=)jD&%I^PJdkug%&3#!!Zk^`dL<y**<mBL>Mn*b_%QeY007bOK9-GD{`N``@&w8~vr&wMVkD&*eFg5(Wd`WMYM90_`7rqa007DQ;XRqL^qy8dDArVNMhVDX#{U4o8FtXV9P(dv>&}cY`Y`$c007I1o$50}_X*TIRN<32yv8aPZN~wH@~N^nJ;qb_o0<|Z`!M?e007I0d@Hp0Or<aJ9M(+!D0d?Q8Cw=*>`n$d33(W>1V{2P{4o3g007FfzPp>BBR&^Y;f6F=1o&>VUAV>-B+*4-NDnP3AO?3Z|1l2$01Ra^Kpq>n=6+^4J#)b=OU}vt%HMC93`l@xty~`UB}eix5-}M700VB|R#z)|-WtIADoJY199^<GLCOainT~jz+KuOnHev`d95EsQ00K2qIc9}Ac4aB5<||bdg4dQ$^p57(gXxi$Ab}*+VJzJ-B{3)f00FtY@N1nUrT|n?%t`$w>jlC#GOyjCLis5_IcsyHw-fR)D={<x00Tj}g4k-Ld4*D`vFQM}W#Nh=z35qk#tx>u3_-I>255XSH!(W^00Dp@8F-{ta9;Q#9I5i))hT=nS}|=PapI1H^IWu1d;dN$J~2Z800F_025M5%&92G_le5+~NvLU9-z}V%VsqAgI)ur6+vR#OMlnbL00DS9oD>Zy&#eY>k{}YiY8yh=)%VgZM*<6l8ofSq)hvH8OEFLY00Q4Oh*ksI_a^EbFjK(17LHcX(U&AM(CewZ4&Hg^WPJrOQ!!Zp00Qrgvbv5_f9HNP#{!X3uc^6DCd0@sg_KqlD#b#b23B%0Trp+<00sSJw}AEW_+WjaP522m810E<8|gclz3q&bPT?z;@0@utX)$jA00KVV?-upzN<Apj86GP0=>h$FMd^z@?e;6Wy>=3Ha`C${axr%R00GnPgy%nm#{M6f{=cL2v_3q7Bh9+<IcxP*j@@PgqkhFPdNF?h00IDcMC-Lx>UdOFR8YeU?X53rb2r+e<Ux~u(C#EQua4(2f-#H$00Tq&Etp#H{JYrW`Yq8UEBdx=!pI_nQ9)lAEz*>S;?RRJk1>=000Gk##L<_6^9+NO%?ZU^MN(#}RGEsjOcyN8UY2vZkg;1amoc3H00K(|c7V!eQhu->V;DFVT-qQ#{q;HmQ~{oWGtW;X(cJAZpfRQZ00L453$fD)a5_<r>ON^)vFHDptvGuo?QSvutTa9$(?7>CsWGqs00R@0QQQA-cJFqMJ0z6&0V%;2PZRr0)<G>Y_gh;%-3JUYvoW~<00NO-V$cAyX-|zL7wvLb+9<c#4pKsS53n}EDSrQs$}XHSyfMK500Hdl8uQLt(-Hg|-g<PY(=Qn(IJTI`S_#kLxgP}{s>QD{#4*PJ00Jrx%bh;bdLWM%HKJ7Qi3EfSAp*)mn(yotf=@}X+l+WI%Q4gd00jC0CMwY^7Y)v!JRc=XLI~)R^FeQ`{2y|U(}Khy(Q`gA*fHb)00t_=Z4MYe!?gD;+q<meAdt{4`_-Rd_6m6B5+Gl{1Er!d=rQU500G<=+6%yWoFwp>pA|}{=8zBXNd<k+-)HQC4n0SWZLDrF?lJfP00o>a!~ltThUTzGuFJ0vg#DFqn&QlG8JxTZ)ejLHNg53?{4xIk00NDYB|FId34^GN>G_EQ9~Gm+H?h#i?A%Nl;P&BL(wWsV12PN%00lBnthZ(mss$es?O9UVgmh%Z3Khu)VC2uTjj`Epia=j75Hb}200Y~UVcUjR0ZtKmv-s+#-N`j$A<5=7I$`Iu;UC>4iNUWj88RFI00L6j4bIXoFGP91Z&{@O1NMFetPno&`!d)%<|L;QdqdkYATlEW00L5DprYR0r$xhr*Il8EPTPTQ#zJcj=F`cw)RbRs>p{peCo(Dk00L1WCeNDVgBO)^gvFcw5wwkr=2S@Pv`)ZN?LiSlg;wD*E;29x00G!?3`aG6JuJ*DxXeq3fRenmr}4%!pQx)19Le1If}C42Gcq>-00Bk)w4s_P)xuvSY-aF8Ml}qEfQ$If8Uu?msrhk3#cS^}J2FfF01B22eAd*x5S?N%M}eJgXp;N^@NPE-88>2Ll6CN5JZ88uP%>8l00mpYS$Y>Hv1%$<!U{%Q5#%YVfOc98d$Chf!fu-ed)?bITQY6{018iK!23uLScmnF{k0K@dJlXth67=V5+Ju2|A%pm&w+L_ax#Me00}vI?E=;6V8M{K2krG*GoMvQmeV4Sjn2+<5r<`D<V*iDhcb%*00Uc+%>Zj4O{~_Mb(jM_&uuoaG#r68Bj|MF_B@67Bmapqk204400dUC!m{Mlp?tY}EELz){4Z<Z$}BA!r9}E;`L-8k82kw`n=+jM00G(dNrOX)(h^n3%Jb9}LZSVussTM_WW7xY7%t1R%%zetp)#WY00Gy-DVP(DUsVSw=(!`7HAbgIoq>|<uK5Kt+p)1B&A;?Ar!uJk00G(_3-2qpL$rH+j14hYf!e8*Rbv)vp<q%h&u?g`YP_*Btun6w00Gy^GCm}FfxkRC?qF+n?OC9_3VpT}%xO^mx_wz{<4U_Svof^+00H5B-VBrctdQ}mbB`W`{tTHj8W?ASZwMT?=$bcObop;GxiY%|00Gztu2*}bK$?+Af#tJgo?eGEa;>bsH@Ce{n`>O6vAC@=zcSeX01eW3lGzex^UJ6<5iD|6@z`!+?4r)0eY77m_!K47-UFU8-7?|;00Y5@uX!iRX)cl}j40hFybmJU#x9(j57qwJ{g)^f;1tC&<}&L500UuSR3zpxK|pKJh?%%P+{yT?R+noNGj-FksQ<?edDT%e?=tuR00nK9RTQIl3CZTVza)c^(<&7j-@>p5_@booc2tsH*}PRU{4);#016^wwpuy-XvTkw<UAKm`%2x6VRM2vYf+czlu!jSza6bJ6Ehe900YGn#+p!p_S;v5#sZ>K6Ub%63iKeTslz9J>$+vf7ju#`95XNg017_KZZjB`(97O1H|}^O`#d}_xFG08S_`cGhN&J3lkUbdG&4E?00b_c;6$~$!_uw^0to=C$i2<nlfa4`3R>`_mTy*w^{Rz4J~LJT01Pmlr`v`{1)r97Z$_r^=~7k_M5htlfu%8K(c_am*_#M6S~Fw-00%C^+mbzU96$Y@bqwbCc~&8OnPXnDi^1;K%GthJSlT)>XfuHT01Ybpep~sidQ*Qn*{1`iz_H1Tdq}?8&x7MasE)eDUrKH>g)@o(00X@|LZz?Pg>8$}Ikx(XXE7>J4um4sKs$@P)Rpk1@i&w+jx)Ld02Z=r2mt~s0FjCe?hxP0>T76XegN?b`t>p=9lpBw@B^GPzBAnb02B>lWZT|1`*&P3Q;MJU&$1P@0CKOkLWF{Uiy<3yP&wi=;8Df^D?&Jn_xyyXP-d0Gg%$cyK!aoVBG7$=o@%a^GD$L3KE7B')
- ROWS=((21069, 21073, 21077, 21081, 21088, 21094, 21096, 21102, 21109, 21113, 21117, 21121, 21129, 21134, 21135, 21138, 21143, 21151, 21158, 21163, 21166, 21167, 21178, 21179, 21182, 21185, 21191, 21202, 21204, 21207, 21212, 21214, 21217, 21220, 21224, 21227, 21231, 21234, 21236, 21239, 21242, 21245, 21250, 21264, 21265, 21267, 21271, 21274, 21276, 21279, 21282, 21291, 21298, 21301, 21305, 21309, 21317, 21322, 21325, 21329, 21335, 21338, 21348, 21350, 21352, 21356, 21359, 21362, 21364, 21369, 21374, 21377, 21381, 21422, 21439, 21444, 21473, 21489, 21492, 21496, 21505, 21521, 21522, 21527, 21533),'0000000000000000000000000000000000001111111111122222222222222222222333353333455555555','0111011000000000000000200000000000000110001100000000000000000000000000000000000000000')
- def prove(fy:int,fB:bool,fz:str)->None:
-  Q(fB,fz)
- prove(0,K(source)is str and '\x00' not in source and(0<L(source.encode('utf-8'))<=1868927)and(2000000-L(source.encode('utf-8'))>=131072),'R authority source input differs')
+   r(L(q)==2 and OO((x<i or 160<=x<=254 for x in q)))
+   w=b''.join((v[x]if x<i else bytes((x-128,))for x in q));r(0<L(w)<=512 and w not in v);a.append(q);v.append(w) # noqa
+  z=p+h[11];g,k=R(b[p:p+160],1280);ll=[g(5)for _ in range(256)];p+=160;nn=[] # noqa
+  for _ in range(596):j,p=u(b,p);r(j>0);nn.append(j) # noqa
+  r(sum(nn)==h[7])
+  g,k=R(b[p:z],h[8])
+  C={}
+  j=o=0
+  for n,s in sorted((n,s)for s,n in enumerate(ll)if n):j<<=n-o;C[j,n]=s;j+=1;o=n # noqa
+  ts=[]
+  for n in nn:
+   t=[]
+   for _ in range(n):
+    j=0
+    s=-1
+    for o in range(1,14):
+     j=j<<1|g(1)
+     if(j,o)in C:s=C[j,o];break # noqa
+    r(s>=0)
+    t.append(s)
+   ts.append(t)
+  r(k[0]==h[8]);p=z;z=p+(h[9]+7)//8;g,k=R(b[p:z],h[9]);rr=[] # noqa
+  for _ in range(1416):
+   q=g(1)
+   rr.append(g(4)if not q else 16+g(7)if not g(1)else 144+g(9))
+  r(k[0]==h[9]and OO((q<596 for q in rr)))
+  p=z
+  ss=[]
+  for t in ts:
+   F=b''.join((v[x]if x<128 else bytes((x-128,))for x in t))
+   r(0<L(F)<=512 and OO((32<=x<127 for x in F)))
+   ss.append(F.decode())
+  refs=[ss[q]for q in rr];F=b[p:p+5570];p+=5570;rm=b[p:p+h[13]];p+=h[13];rw=b[p:p+h[14]];p+=h[14];r(p==L(b)) # noqa
+  gc=list(F[:20]);dh=F[20:57];D5=[F[57+i:89+i].hex()for i in range(0,288,32)];dg=[F[345+i:377+i].hex()for i in range(0,5184,32)];g,k=R(F[-41:],324);ki=[g(2)for _ in range(162)] # noqa
+  rp=pe=0
+  roots=[]
+  P=('capture:','class:','function:','alias:')
+  for i in range(162):
+   j,rp=u(rm,rp);o,rp=u(rm,rp);n,rp=u(rm,rp);lo=j if not i else pe+j;pe=lo+o;roots.append([P[ki[i]]+refs[-162+i],lo,pe,n,dg[i]]) # noqa
+  r(rp==L(rm)and rw[0]==85)
+  lines=[struct.unpack_from('>H',rw,1)[0]]
+  p=3
+  for _ in range(84):j,p=u(rw,p);r(j>0);lines.append(lines[-1]+j) # noqa
+  n=(255+7)//8;g,k=R(rw[p:p+n],255);cats=[g(3)for _ in range(85)];p+=n;n=(170+7)//8;g,k=R(rw[p:p+n],170);muts=[g(2)for _ in range(85)];p+=n;r(p==L(rw)) # noqa
+  o=0;D0=refs[o:o+12];o+=12;D1=refs[o:o+23];o+=23;B=refs[o:o+170];o+=170;D2=[];z=0 # noqa
+  for n in gc:
+   D2.append([[B[z+2*j],B[z+2*j+1]]for j in range(n)])
+   z+=2*n
+  B=refs[o:o+758]
+  o+=758
+  D3=[]
+  z=0
+  for W in dh:
+   r(not W&128 and 1<=W&63<=44);n=W&63;D3.append(([B[z+2*j]for j in range(n)],[B[z+2*j+1]for j in range(n)],bool(W&64)));z+=2*n # noqa
+  B=refs[o:o+28];o+=28;D4=[[B[j],B[j+1]]for j in range(0,28,2)];d=T(refs[o:o+115]);o+=115;x=T(refs[o:o+58]);o+=58;JR=T(refs[o:o+90]);o+=90;o+=162;r(o==1416) # noqa
+  M={'D0':D0,'D1':D1,'D2':D2,'D3':D3,'D4':D4,'D5':D5,'D6':roots,'Journal':JR,'ROWS':[lines,cats,muts],'d':d,'schema':'TASK064-G6-R-CAP3-MANIFEST-R14','x':x}
+  F=J.dumps(M,allow_nan=False,ensure_ascii=True,sort_keys=True,separators=(',',':')).encode()+b'\n'
+  r(L(F)==51120 and H.sha256(F).hexdigest()=='05f831a698d0341f7808c57bbc8a4c2debe9ba634ce3445b888e83e657e951ab')
+  X=[[128+c for c in s.encode()]for s in ss]
+  for i,O0 in enumerate(a):
+   cc=[]
+   for y in sorted({p for t in X for p in zip(t,t[1:])}): # noqa
+    n=0
+    for t in X:
+     j=0
+     while j+1<L(t):
+      if(t[j],t[j+1])==y:n+=1;j+=2 # noqa
+      else:j+=1 # noqa
+    cc.append((n,y))
+   n,y=min(cc,key=lambda z:(-z[0],z[1]))
+   r(n>=3 and y==O0)
+   for j,t in enumerate(X):
+    f=[]
+    n=0
+    while n<L(t):
+     if n+1<L(t)and(t[n],t[n+1])==O0:f.append(i);n+=2 # noqa
+     else:f.append(t[n]);n+=1 # noqa
+    X[j]=f
+  r(ts==X)
+  fr=[0]*256
+  for t in X:
+   for s in t:
+    fr[s]+=1
+  hh=[(w,s,[s])for s,w in enumerate(fr)if w]
+  hl=[0]*256
+  while L(hh)>1:
+   hh.sort(key=lambda z:(z[0],z[1]))
+   A0=hh.pop(0)
+   A1=hh.pop(0)
+   for s in A0[2]+A1[2]:
+    hl[s]+=1
+   hh.append((A0[0]+A1[0],min(A0[1],A1[1]),A0[2]+A1[2]))
+  r(hl==ll and max(hl)<=13 and sum((1<<(13-n)for n in hl if n))==1<<13)
+  fc:dict[str,int]={}
+  for s in refs:
+   fc[s]=fc.get(s,0)+1
+  r(ss==sorted(fc,key=lambda s:(-fc[s],s.encode())))
+  V54=(T(D0),T(D1),T((T((T(y)for y in q))for q in D2)),T((T(y),T(z),f)for y,z,f in D3),T((T(q)for q in D4)),T(D5),T((lo,hi,n,dg)for _,lo,hi,n,dg in roots))
+  return V54,d,x,JR,T((T(q)for q in roots)),(T(lines),''.join(map(str,cats)),''.join(map(str,muts)))
+ D,d,x,R,aa,ROWS=_g6r14_decode('M>az<QZY0D4gi1+0#pTv000>v0066J001y70076Z000<b000%j0007#0001u00000<?iM3;q>qB-^cIr0QBht0te~t<K^Y^w$kw7^5x;}#m)f;01@f*1QHYs-_i>W4;L5;1^E@u8yUgW_6E<+#nK)c6Zsv<BOl-6#l-OR-wq%o1Q02<Dl04&;qKq*-^26e^Yg{Q1?1y2FXZLz<=^S!2_fb5_4N1d1|l{-?BO%aJpsw?Lm~C<3FkQo=?)3xKr-p(N=x6)Oh>Gs#nbcjJm}TZ-{Rry_3|7<FwDu$1PtjX5Y!eyG3;LE!NbALCf~u(&(hyI>Fh~HQUzMyUEkyM?Bz{i&(q)Y<>c}8_3%*8V8v~7b#&kEEp~B8(&Yi|1LZd-Mf7YgInIR~>q*XVAt*wYfF(czk^`kFNDkE)={o=b9O*(3kR3=ml60&GT8;%JD@vNysR&XOgdqq*7KAVeTF`_c2tp8rwFpBH00F2%5QHHJ0000000000000000000000000H~;_u0Bc$RAmBpS2DM875CALy0ghvo=s}i)pvOB-Vx0*=+Mp-|0Z?NY=Q)~lodq)tV;t#0(!?+T0tp8N1P22G4hRPX0tX8Q2LuQQ2nPlO0|f&K3IYiR2m=QP3JVJZ2nZA!1O^ES2nq!S1O^5O1PBWW3<m`U1qKrc2MPuY4GRbe3I+!S2?hxV2@3}Y2?YoT3<(Vf2nPrT2M7iS1_ulS0tpBP2M7lU5)%ap3JV7g2m}ZY3K9tf1PKQg5*QE>69o_p3JD1j5C;Sa5e5YV1`ZGg2L=rZ1r-?w2nPuZ2nh=c2MG)g1q2BP1q=lZ1`P=g3<?qo2@(z%4G{?r4h{<m3knJk3=0bl3=9?x4+;ea1O^BS2?+=e4Gabf2nGca5eo|o3<LrL1PKZR1Pcof1_lQL0}2ZU1qKBT3JU}S1_%ZV0u~b$1|Ss~BMS@)1p@;E0|EjA0|NsC0|NsC0|NsC0|NsC0|NsC0|NsV4jC5~78)TR4;LaJ69Nnm4iFI=3=Itr5El;*3kwMc5*h{u3=Ibe1Ox;P1``hk2nq)d1`!q!7a0Zt4h;+o3<(Yo3JM7Z4G$6$7842#5)}>-2n7rW4-ym+77z;y4+#wh2MP)d4G|9s2nP=i5DpOv3lJ6%5()(h1_}ud2MY@j4*~-R1_=iT1O*8Q7zqRo5)u*%2?z%R1PBKa1`7xV1p*od3<w4U1qTNO1`7rV5C{ki3ke1k3<w4c1`7`k3knnm3J3@X2M7rT2nq)U2m=TQ5eE<m1rP=U2m}ZR0tpZ$LKzqfLJ$xP3KR<t5)2U%5(x_s4HXFy5D5wj2L%ZX3Jneo2MH}43k?W>0dmXD*I6<9<DtJn1H9umAzRxGVzAX*M=Zzhj)wjVWji!p9mTUI!gS&ZVx>{!uYRwL-6yXld-Z&Ku$~*M`!H8$dCnvESuYOa*^^;9aW`ROB9s|AK0%A7aNkTns8fCjKD)w4IpnW?uZ~WRF{#;t>Q0U^*sM2`ql}7BcVQD(_7h3zG@ieO*`pOMEs#-SrBN;|kWpf#QYsto4kf>4gV{PS1z*u??#4AcFkNoK#ybBP>{c7@!tqUvGSz687S0`n>BN5tE-jop3Db!F6ja@$zDsaqwOV%EDdZTsXAdKo+5_j#KmX5;m})4WEd0)dCj1ckKNICp5z`Gt6Xl-!=od`hqh!n#*{DiBSCB_c)_ixF8XYgLWdzwM`TCzcIF|jI4|ica6@NvqyLJ{aso8?*7F#Kdb^M(iW3TsNV;;@+G3?(-(Z)TS?bukyvwVv!l*UCUILM_17F#ItY-6pNQ@NQsFDEYTz{^#qi4>rws`HmGb)>5n@%yZn5`%}L!ccJZVz87K@R&*q_)%p$Nqm;*_K{{P6`1|;(BBtdIkXWQ?sI3#nUT@rJ(jJTjI~-kH%aeD-tg`%nKl!r5MEb@acs%3oj8cH*+++4GN*GWve`$Hz52d6WYu^o{)=C9ofm?y=(YDE%VjZ*PRtir$6un$WigJ$VZJfgtT#oL$~^xC#qGp-F<UAOwOTys_IM|6T|DXbcqeaNNzr-J?C?(Bx<!`CJVN0~WYu_qQ&Xewc{VZD%&FYV$+5aV_mg8z#aOqGCdNgU$~>DH7F#JFzB(K423oBVWwMVbcGh!NcZFrjT0~CF7g%~EPRtirdND|ym@c2fB6eW9e+nyRcptjSCX?NEs^TO|e$5B3;U$X0d_5GgSZ{};6)aX8zl4@64d23w(ITg@wQ&!!(=O=~R<GV)Vnwc__gN*3WwR=GGFZWa*+t3m2MgL<pAc}psJJV~?~aE1C92b1s<?*9H3?p9$_O1W)KNZJ?~Rg;$-)86=(z)AnuM=2@8mQ3glz%y<sNsD@w5lelzHFsLz+%>`M(F>H3MhLlR){BvN?{Kt(idqb@Q7+5xzQaOzDCcj>4anDEZ<zdDLY)Nqm;*_K{{P6`ZN`L!8tlOcqr7A<k+NrU(s_oIHJJ*;DBK0v-|%rJpWrwC2W^oY>L(<DtJTIkBX8cQQJ%v#8^miYLoF@2CxvoIHJJ*&SI~)N##46Xl+F)EQIg<aK3dQO7kDPnLP#P;;7use;GWeK7u^1q2S5YABy9_uVuH^#JDdT!FGpLRXphO#%HtIlUJl&T0~-3m;kZ+1EK7(|!m(yTV5}4U?QaeP`2t2tK>QM>`)`^zR|u;rxbwP^Wng=lVYp=RTc3@yY?s=((Lg@yY?s=(z)A=MNuQ^y&YOP*6f<M@8S68XYgEi<*SPXV1C*VxM#T!~>hrb3W(!hzB>K<PDRYJbh==#53o<pVKJ$=>4ye`*Sj<(MRpf%AZ6Hlbk$#XUP4znN#S8IjBmQEPZFl%{!n&MsSWi*@)5UnUT;xRQXeW2nX^R{X!h`P)1*#d+G>G$moCu&>uc=<DvrU%EvVnK_9noAJl~j!6t;RVGIS;loDuyBk~JxQd!6jX5OZ-OGJK6y-i?5eoehiV4#G|j))qQ4@6;`I_6i1-6yj)DYfw%r1cbvvYshU(qARIEVfbMy^J(;GSz7C>czYlmFG{h!8>~Eb`!)d6qZd`{qfM>c{VZD%&FYWe)#Bbyq!>&k2hUpyq?nGL6)mWgWhw9FE5I0ZP;EZv4&c$BlpKcf5keXFFZ)41vOVVmi?L!Kpfow0TSE_@fz%B>!kz;mgd#OGR88Y7p9?{TR3(Trx4Hj+6wU+>}Q45@s*2to@MwJF_nvW|NrW0>}`D@xjrFm=)$dQYT_LtYJzQ5vk%r~_);c@co91=T?e%$tdYo4CWd*J;q6JQBytr0Z{`c@l`63TID|@|RDzjlQuN-~P|Q`_XPJt_e@*R(ezP%HZVN73Eg-rAtkY}h0>%Zbc2-r2h7#YiLF@8<PCmxa{bpZ<y6zv-R|T$lm-|-`=@V7`HE>$(TtlQySNn!yuH!t*_xpxouH!t+RvW+EGZl9k;dOlfaLiTQXX~W}{^og@tTzRhEtZg7KimbER|U*JS(p0#q*;oEWH4I;JI-+x`9t-Yehlw9#8>4H)@CaW!JX$giu|Ga!s_@L-gAhr${(*?C?L-BoJD?6{d(y^28n@t7;9%>EaEDgXnmzl9bddHDy3w?yhghj;dOjY$SK<cC92SxPjK`}r1uX-DKwtNCX?6jqLWEqmx24Nl4&dQhEB#BIwq38C~Ge5!8DcmLtUl9i4xzlLGB)kTw5Tb#Y(59_QP1IacqK%6)KwTRm4iMZvel$V9Zt<q+07+I7-=z72&MAw+Ujd;4CVdZqi>Rx@uWf(?p7%#?{0=%S^ihQe~?|ik`;R#6HVRyTekGbsR5f!tjA9GS$NNj4uuvl$)tZF4k*Eq?c<osu6VSIjR)bF3XaprPcM-^joXv@UEJ+ZVZ;IOQx-xgC(lcEpn!%a`63SS)dp9Y#EBfa;@{2UK}+kH&Codl&a$GWqV(y3je8CkxK=!Sddkk6^S0&&T5u1V@0=Jz$Wb_@>|=k<6pFkF;J|m+MpIP%a^*+%a^*;Tg*+Xg);CsEobt_cq;yjUv^#v)%PrXW7)pT!0^K5kBoKx>?TW9rG-=eyquhzoS)b8{@>gCf3NlY|M|(u$;rw2@^W%=a&mHVa&mru`#NW-3KN1&30%S$3$L8o2#xX6JxEZT5@<^15Ww_Np!n&Yq$o}aG$nHgVL=1D<2NE#zgNdLFuKR*K-qyWAla9Bqrwn;C!R3|a7q-x3_|N4odafn-tWwa=g>HL*JjL^F0uL0HegPlG-5b;oZ^`~&vtCdg6kih17-y2^F||wm^w3r9|`A-L7WnWFhdly=Ejf!=I8=ib7M$Kv2Oy|)U@Wtkeos#Q1nrt`%Kw-W}l}dT5@_c<$oWWOz~--(Wfw4b2>kd;V=092kFfgoZgK&!qc76r#THYMW&BNnkeavT4U(b>XWC`cArqR`ladhAE(vPr|=e^!=eBiKz#Yfj)+Ws&F9B86hR-h1>R`zvomL0$^ms{K)cNz7G`YgnLsYAtbJ@D1e}Rk9LT`C%^ntJZ0ngoF07!)7`dmOIxsHtM}?Se0rTe`Iv_5rtaDLD1>R`zvkjm=eB;MN1=W-p2aW~aXz;TQpgw%#$3z9ylo<z)A6p1eF7ro)m~8>`=N>vBF07!)Jb3!pLJ2t%vN@4~cbYsb!)OnmIPuW|b!7%Y;|zg|nt9`+0`D|<S(4>r>j*r@3I*P1@Usy()FmH0Cr_K#NAMR|;9cgA3o#RoLQ(U=bosq>e*txmA6p1PCn8oyGB7UlM}?S)#-S+r;W~WYx<7!r#u)<_H1o$s03JU-lQ;)AqURjcQ3QV7u-m)M9uw=iy)(SoTX%V*!pxT|=okNJA3R%kd85M2>6<|Tf%3NQ^GAi4iW#W$%@|9Sw|AO6EW}XFN1kZG5&1Um^GAi4h|QBQK`8m+IC<1Vr^t6d<F|L3JS@aO`F$hXyUiXJVjy}lkDs@9nmjDTK=fyen{OY~g$cnc)hcE{zXW#i{YX%p9VYdJp-vw@-an}d6N9AQu(>*Hr{DGvNuoc;Zy(f!3Bl5DSY=N?@!QAsAwqC;o7NL&f08?Tojz%!^B#BLj^3uQOGf1BvW2&)t@8+U50$s6tP^KkzzM$uJm5LK7dYmkh$HsE3DiJyrOY>(5I?7;fX$OIL!&rQH6+cOG6tlh&KwO%N1QM`V(CT(q@(BMPoe{(I8ZeuoPg#)|38>R@(z3rL*+o!$Q%txmoPOZ9*F*74DpMm2l@U2>l_V9vVXviAIu^72R!*S1}GYnWdDI2FhoQ04txzwY<*!s)Yb`TkI4g35zU+jkNlu&4ut7~fv7qYrVHi}&ltL3Y7UIyK-3)>!uf<hAm^VZfW-h2IMgK{JSR_^*GC-GQ3QV206Eg;8_bAv`lk+z;Xnb-moVOBK>nVZ12#;-4vgVI0nwZwL`PvBIw3A$yvT=1sPuS^(t0l|$A=Q%vqA3cDE;x!-+3$FtK&CG?0)#@Z@iW7)$#7akKY{){A1a^-Gv{%Ivej0Dr$6n@%!VUz64ojiNAG{1YIhM*-*k;_Gmo<E|o=W!>{b{0^8R>PszvF+8+h1{52`L1*~>f{svYp=GW2%jA3i7Y~aGJXcPD9_`;DjLXk8Bg4TF@QfkQ@g(7GJn>dQ575$z7TYBgz6F?SS+kp1gb5t8Mz!Zs~3oh-zduutW3wTysrKA*zpbIYTz<X;sstoTr#0o^v1*~>f{sBqKtW*W8c2@oYPxk&`xD!e4xp7?uHqOGI?fk)gucRqxJGFy+VQZ~y<I{U$89&r3`#b=)_1C8M!iI5d;n+@`Kv80)Q`3858x2*&3gzMY_O2n)Ca70zl}CGDNLMcp*R}M4V;NYtfn~4#71#xff=wlUP}W`BfcDmNR2D7@x3(IXOMcA<p<S|79fIBxX)E%EvhLgmwzHa`w}oZOT0w5RfF_gBuGuP%-;pyows7nxP9c?wl~?5aoPCX<r|;GAzjc#`q7~aEQQP#blF)}-ydbevV%hyQa9V*hp1<4zeoj8d+X2CAJ^tVmN$dU0I~oc5pY9pN6zman-|iWTyMW-ep8s$YQD%v>Nmp<80<yMLFqZwA4`1#DWo)QnE&DVc>((nT_X4uER5Ocb4#ITeKit~5hEB#DKit~5he(>Q_aC~+!_j}Z{hVIifUoTE0^8S5_ciVz+pgdiT&1M{a2ZgGreE9y(pTl+e#sn%wI-~Q$QCp9NaQ$Ig2g7j6v1+QLoJtVg60zQU$l!cP^^U{!vvj`p{MWF@r8EDRCWySIm8cbXEjVEzh;BbuGuP%!JX$giu{x_i)RkPbm9Xm*umHe%Grls+294Yu85cVD#h3Ae(NNO*@Eba*@EaBGr++Uvjx;rCuR$;P3?xUNS&B2wc4wRh^ZLmc`;im47FMjdixLEWRvo7_BPn#;I+r=NS6JY4?&XEXpt@ZG#-N`s?*bZVXRb%Z`q*q87)?t?N!7|{VVvXU;1xsHHww~yH#-#tXsfr&jSfoE#O-^OBHty-DIVT!*sD&Zxt+78~Sf-HHwxi4fWcqh?`<1|3CavT)!rt+-ulV0Z;b+^6@V}@|uKBvzUFXCa0pJYI-UKMQPLzi)N{*=%^JHr%*mEnt>@Y)ipg80;06)2gS2cYz-4lPenketvZ46Y}XA+P1H@=OXRl-U%s0OyJgRS38eKmY`O4lTqv8iT=*Zt;I*H@Yd$Xptp82zhOu}pXX~|B5u!y;V`}0bWu{$&U}&3#?HFDc3)(QeAlMov;d?<`ygyro?Ezybu~Mj~l}{{%suJ=#tVi)qs7uKcr_Gf>;h*NDm=-izSS`5QGr`ARBVTg2wjjEG>m^&;8yierUt#FoUt#FQy1oR|^i;aO^xoKO7V7!@D7RPI?N!A6_#s}{tlNE?OjdJL!tmE8a3-gsrE+%zM2eoq)x<u_OuMd5;BdOG>yx+&x6Z|K@bR{1gO0pLzV6$NjegQB#X_^%r*j~ho{F8NP90yrw6u#_v3@*wEx6k=!N*=BUvXAx#@U_@I`JC&inBm$&jSTnqxV@QS*FInX%=FkSt{Q-h2bjSIfdZ@Qe~-D`OGf}5|b@Jt28R#IfdZ@Qe~)MwkqE_h2aLk(KhPSas<+P{t;M_DOJVV%J#oZ75`ZM@zCEZ5)!Oi!m%Qg4H7D96^Rt$SXDByBg0&_R4Wn}X>g%fk>OkSx+@YFu9~Zri3}wLHCHPVFk2QhgyIn@g^XphDt9x7qi(x^CX?HB++pb3uHY+|hwEE<>22$;P3?xUR^GbTYOW&1!C7*amm6kyIP1h~?pwmL<t-(=D=t#f<803d9e9m>%Xn5?rKJ^YRf~DyrmhQIHtUz;unGJ1e100um9nD=L18E$nx2Y`B?c=ALG<3(YZZi`>$O)B^Aj%tEB;vc$6w{(E>DOi?IrSC^2c({UI&I3EO&yh=(YE5!jIn_4g3X{R=F3o%N|KD1>Eb=`!eu6Fu7yn9e=wDKYVmI@Gh^P!sU;QdpFy#qxZ){e*m$$W6Mr#X#Mff-@sXQYms|gvE-8QUCzB9vo8a~3zj}H*ZZ)rKlOm8mzF!js}}HHT)YnqE?D@-U+%)d!EC22d}FWCWwM!g3?&DaJ~Amm%fMr_i!o5F^2e0zCGuON+C`YCR&XnqhwJ5z<(vgOmQz<?EGnNYcP!v3+_IXx0bIO4Uo3Yl<;Vgql|^jqXPJKf6B%+0s72|hXBN&Kgz3b~kY!@tXPJHljh7(G#k>No^X16TGW-*ElKCye{Rq4kT&b5MJj?g+n8URfE=GBm@8L0rYh9|inQ}ACzXjc@orr2#RW^>Y<OOAH!}Xbd{uW$-tgV=SvoGJmkNxAJzn35@D`p?8F0Y@$kNxAJzn35@k$R?9E#P}nYRMes$lCfsxp;oOxd2s~ZG9kE*>VAE9hH@0p@g^W(0i948Qyb<ugV{+%lx?k?MbU7atXUhe3tA;B5ASOMVP2oVz5-I#E`*Ks}e$S2$e<(l~|G(Dpg`grJ&HbEu<m`%jq5qX$XPn%07MzX$XPn&lffeU~JC=7%iW=$-!-5fTjECu*nyv5EFKi`7PNZ^x_3_@cnF&dT}-TNV63R%PQAXjf;i9ryY2Weax#}Nfqsi&9~XK!zHTFDgM?=Ri~!*!&t2B|4-56uYRwOb`}SUY;D+B4q3pI?IrSCquNE7s8(<svw-EC2Q2=q?Eg>E;ss4kkG}&L>-1S{rUnY}`{SX%`m?kBKTH+yBuJ6^`)fI?#@U_@I`JC&ttzEt-@3{FcZYFo$*`R`h_cy9AIN9*3zj>>xVB{2PMkq`WFCq%A7DH?i)KxP>BL2r%19SqIkXWQ?pW^*;@Oj7I&lT%kS@M+Xd*Y*4-VqllVLh>5oNNHC?I#7X5@0mcy|`en+em1FD!}(9p@RjAMnw)Z6Bk(f3V2C-#GW|;h6jWan2dbyyic5p)>}8&{_}S<X%b1crN$5dmm-&`^Bo&g797dz!(Pr;VdO=wg^#}%mM)&j)+)O3Sg`ifv`2Y-GOi}5yCh>2i)#+Nv06O7Mn~81p$D^BZ3qP1#q}Ppja~oU@QfJ@IB)3eZIh8I8O<{AQ8ymg?_(Z@An&y4#C(r2H-pgf-pt$`FXtE?(vw+0s$S4h*oPf&SoKL4GlBUqR{r+ZVAC66b1upwa25v6k;)QxksbI73%e5vItSQ+-fytvfl4_69Psf5xCrHG$C3o7JE2^KnxLfc<+Iiftf*{!J5IF06+{L2{Cq8DEW99lo|XPtR09Muo;rXKnw%`!3a%qZJhK*bO%=lt^`^qTb&*TYFxA=0KuH@na~kvpS%TfljA8})kl>=RB6puc1uD)3=nmY0|Xsp0Ko@Y05A{(27aMf!S6u_Tp=)(R`C>FncnLb#Wn0lU#4`8+tRmpNwFRrYHfa*l!MFzEek_ckL74~ewEn42V5aAm3TNDU76Gw+TWe-mFh=<l|`a{+#crN?g5toKnxxhhvC8DfmM&?Xm>J|^FVVjLDv^#AvHikRpM#hEC-?*i<E-UkOK!=2SEp82W1Cj2W9~PFc1R)05A{(0RS)%0|5Xqbhv*^2Tlh~1!5&x1zHPN1i}q51iA9?RALn%Q{a^VLeUHaQPEI$Ky?sw@N`ffcM1Wgl`z*rKnxZ#)eF^G)evdNLkCa=XdS>EgdJop2>>v2$^ShEKL<VpAvr)5KtffNL6e|)JP@=)0hR%k!4z~<2ZF+YY6m+DLO={2K2hXB<iX^DScz6aR)W>Ro+X*&8K!HRftNwhfeS=18DJS)2Ye_7l=F~skhCNK!OEw+upGD?v=az4#1iMr!JZ|V<Qb-Gnt_)=<N?}23q&vxM@2!KftZ1q0C*%Q29WZwSUa_ZxubW~!(9tPKnxk0Ntwae0oQ?1h*W`3f>Z%8gG@m#e7qJ6-(dz?WoQtzLje?YR2{?_gc*DXlEQ##Kf((_Knxt#Bh7)%0nNdhB;9-+ZcEnznWUMV6&Qs`6!;}T69_cK66edoScz6aR)W>R2u@H0C0RrnItP=%V9oXrWu{hvok7<@3q&vxM@2!KftZ1q0nvbY6etFtdq8&3c8Ql$y2Y_gdlA>^oxWw%i=C!k5V>%@9KP7S%)Q9Dgt>gZ5WTB-W=j=s5mdwNL)(Kb4RkFIe3N-u9)0)TbKm)BZ<&VY+Bcep`G{_Oi08Qmdysi}Z<~kVtYHuI+kYP6Y;A_{&N0WEgBfH`OG3rFTMTdvjUx0iJTK_HN2Bw;lNxjn6%oie3#&+RU!V1#2PShIE06Hx-cKpXS~Jt(+>w%e_KDXVztv-Whwijgqa6C2YmhO=t<in29Z+&U9^`nt9r}%XEX5wLDrVT8>&5w3tag6c=rNvK@EH3g;;gfj^VfaJz4B>`GnYE=UGEZ8S4W#t=`^X%AfnDD^a)IcPd=VvdDR&(HA<-xyg!MkaOnLyiHK1@luu-l7<}$QiCqPWJ`DtjNo3L~9S0V1ehIvIZv*38pBL|4|G&7e6yF?2iSX=mknzSq$oRJ*WSnb~vJObenG+x5%xR2rHa5l_TZwO->En415a9dUgmNrpj=279%Q(9w<2-$yvF{w<-cyiqzB9x4?mOcgFNE+e8N#_YDC67neQ&+{yz<`i%9&3p<lVWrcCH)Sdy{N!ou#<8p4!^`Q*!Oyy}0&{=-m6K6=CR}DBV+BSBEu(vs~&OL8tV_m(rR~PifsXrgb)@)!MgKYMo`Qb>6zxded6#ZEuBlHm}#4LsDuzMWl3=o70-3RcgIYrL?X$!?<T>;fyu2u)fUM8!Ke&y^pZA4#U_Q`(Nx$i?OzE0mPKm(dN{;O)7JUD6@&a7NAOGGI{j#6V9l~fvQzVmErtNL!m>X^y(%dME+4dl0;$ixdtV479{vI5+Nm%NThTS2LuBL0s{gC1_}fN0|NvE1p@>FNlZdY14#u#LqkGQ2UAf5NJ2tFLPA1X1w{!{1ylxD3RwkgA9fvce?#Sn_3|~HMHTMCov{h0J(K5Py7D5M8^Fpq`Tf6=&X`^8kN{S0Ow1#V@~9kyTL@p#Nm5)T-xXfjqe@6g>)+bX$1Np5j6@e-7-4UmHoL8$riF$7O7<2!8>5WA>|-IuKWmv$ANV?NDwO=YP=O8ZWpe7LKOsb39dK9p$iz^UtEAPk?#-Y3Cy-6WaqYw@@og!lIuJgaEEk4z{ij|RyzU&aH9vuL78VY=E!f!zRxJgg2MyYC6yS;C@7Klk&9|*gcnq)2flM?=FjW>?VMj)cAW*V1t)8@<;4mq;W0YkkieAlGBVqp9^Rm^Oq?u3-%c$n`nM`BlD-lbsbg*H)k{XTpnB(ajDq{|&0dmU+Li0$1aYZA(iKmq1Hq9r3)hz@^oIl!VIZ>WK>#f78X0&(7ptCSfYSD-qfQym;?`<+I^oti=`MT}utH#vDhAxV5SHJw_{w}%FWmY3Rt1XrCsl1QrAX@`%L*Ba%vsJ#+fIk|7RtIJr!Ob&^7-j={zD&NP#MfN`8#%c}8%LN^2k%b}x!3_#0eRFu?X+Me>MXgVO_s-P;8DJs8DPFGeR?QiAa_!4trwu=j}PMQG0&LX$pm<SPqFY}U_r`-GuR0|2xaoqz>j#^3AKVt&R<(CUGW6zR5rf=LHJbDYd(#v<X_3ywVi4CaJTrM4Cm2q4=He^j3a=E27zuJU?ioEB4x}`O}^e|(ukv8RE55tNsIQZrkH;{%^C`FN$Wpt6?iCy{-&!LOp^nKqt_}|QHX?4=NO%d+kD*ATbC;^QoGAeK!7+83lGz|V<>j7=;If?_9SG~L&;8;<<~6!v=s4)uo|BZd6)kXlegBjWpV0OJuI*+v062qjJX;a^w{LdNCg$(e;4NZLB%f`&pJk9uJpR5VA5POr@`B3Sq!*H?Np>?o><sIuLvjq*{d3&ZD1<kAyH)1w;d{^o)lZ~qr)cy3+g4BCoxhLuS1h}w)o=hQqLT8I*aIe;0J=P{xnv<fI>f8$HAWjXi-jhs6ZYDX&O(|@YJn!&FkV=-V!7TBjY{mE0`<$M~*ExXpQ!;sih?DoD3VR)%Y_tgr1jXLNp=Xl#!sHj&^P`2S}(guDXuC67n(CwUy#?oweR8qfnf7Ht|_2*nPISLWQiDkb@Z`3czrp&5HnNUuZlIG_d$ull=~8&nH{=zNF>iW$r4f)wTl>TiV;V&BS+%2)I;il{Zl8n+88pixnqjl8&~Rauey}po4=}T*zH?el^TG_1qe)-@)S{d$*n?h0f=HOKBV6lWLbx?iRRN_sO*Qpvlm^jxKLH-$rSb6_iR~*LM|sV58n><k3d{Gx-10z^DIw?V-QH;NACV*{||7B0y9}QFB{6xa&6Mf~WfW#^+{HaV8^M6C?L&a4lqDQLkaU+=~XibgLNd>R?WP%YA60;s}WYX~6VJCI59nuC9q8Zg&keM#gT~P$Bj&=aN_gY~z^H!86<%*7dVnxzwSNy^d}`Rp!-r*y&A~QiH9l=>wF%8o6|S)|SxSq1Xk^Qans@*?pAn2=t*~75fdf(pndhVmpMsA3`fB+<RD?y6_M$BJxa?^H=(1zY9*;vMVzSBYNE1n;?jA+n_wUNV{Cnu)hfnKsa7@IF^c<sYTwtxB|)c@z!F!^%HtN{FIO2c(uldx*k$kyQ`cnGk1{5E@f#=PgRI%U^;mE2y<|jlCoW>L)A%@#BRm{dA&h4drGDAQt6ftPlqeA328?a=mwT^h>TbFdE!I3er`JZqALs4#jrZpG22F^-*zy>P><jwO^P)vWzGY=A+MJSlsW?S#+5ty9F<CpO?zX|Be$ep0-E==)d1{VUIpo%cQJ=6%<fi9&*xD2a2yaUp8no}nP!p?Eixu}+K;4_b;idq7pQ@_-`^w8)d~NhatwXOb#V}TF+Gl&V1dGP5s$o`y)FIl(N1s#BTn1JJwC~3+9Xu<I%}QZMG3zByA<v-s)}_yWy&~%FTV?m#3EmgRg(|v1uqpN(RyZ!;WC!|UKK_R>tE>BlMz#f)XXPy2bnk@gJ)cd5rNc#+A7c>JY`pUP)dy{>(zr(AXEcw)yj~j0TJEy!&Xsu3Ifsx#=Q=Ju5~<-Pq8T_&oM+X)_ZkGdSZ6{{?b(&q=)7Jy0CPojz~EQ6G@7%c{HS72YEOcD%8~VSf7#UJ+iX;Ex8JEMJk0YpjQvIDlNf~wB>-}xTzJQZ%MSuZ~5<DtpZe-<n0KB(m8b7-w*W)@Kt0})UVY)9T_bX+sRw`EoKX+yXLj-)}eBaWeC{YK!U@EQBIq}r}2ESZOie`RjO;)IfP8_akdX>)qypZ;QgQ*oz?oSIx=JnM?B;7T(UW>fSwOvV2ccD*~a-Rk?nNtzMNl^-qZ{O($>PO*g?T5JSxLCS($#O9UYYPXa#OYX<%5fCfMA_@L|ektGQ+8DhI(i%Dj&5^Z7t*P{8%6yi7ii$v5T!uGnxFI>T||(F0sfcpAdn_S-lSBeJ**wnXLmw<V^MLq^lm7G%;_3kK3f&yftfm`H_^=+R7eDi8%VttA>pqJiV#>5rz7M8iBrzx4o6VK!=sq;nSp5DaeGKt^H77JYFr=-VRjn^;Z??A_82zTHI3^uTY8reu#z)=VzUhLn`}ZGt2f&Eg<JJ{H`?kDXzbev*FqldgIctYX?J%ZmE07=^GLAYrJk3a~?xSs?I4Ml$vp(jhsV!x8llz*Y(u(jjsyxdKn~&aR}$96zNX#7=7jwIDlmR^{P{fAuyekWVfx1XAlZb>KUNX-*fP&p$^}0j$WF1v}y%o;YW2PJuC_6$DVA`nyQUP=O6ytnY@s#o2Er<ufAP8OB=44-Ev>5sbT$Un+5uyLv7Qjm5dfeZSYGisrV?eWrAaF!ibx@f#o9MC~rrL$o%4zb*+pzp0oa0PQGHl2WB;5nKrb-a6nskr}Zi8r#ANuf<ly?;*sD18$+9drwi^qcNNpjl?iPU0w8ogP$m8n8a>u?0W1f*M*x=CI3VTrJv92FB8+qoG0LX+Mj$mnUd!32T}~kpG@1$cqVVk=k+UDzk>!;u<L{AouPtF-EVY-*3(i#0P!HJ?T2SfU?v}fMiYR%X?b`<mWZq#FmB`;doku}0kM^GZ;92{T4ND)(Hu)O{EnQlJ#^b0Ufxh~%v9u^vBANSJe}~&@Ysx;dW?uqWmw?Y8(^yp^wdw>Y$@4O0^83kp@zSY7Of+Imsm2liF0-?UzVb~^4{#D&g3U136`b~Qs%`{o!%JCC^i1BWCi$J>4|6m{o-5jsZj3mV3$ej$Dosu{j*cA)SuAT+hiPXrF@oj-Y>5k5WkvRj`+~9nm<^1Fb4IHq%y1P?9II0%hfK~q%8du<D(iZ8!~&IJ3C89^>v`ooK+jFV0oVw)6FAPLM2=}^~t?tZsbR8*~zMa8q4WanfZKE?w^bh#Yb#8&+j`M*c?QoJVgarw0nQ?42lrMQh2J^%K8cEHn`3Q{hKQ~`2SC2fgBN?PIZz&vs6RCaBP%m+E#MoG2<&!{B|)P)^Ii_je6_)S^2wWqg`FVp$NEXy*rGlIRe`#Dg0_c%k=oVSPz4ek-9$vigbqSeUA~iJVE%+zKV6Yzpl=rfp3BMXf^00gnFC=rzG20gm@b>@j_};AK`cXTm%}G(OxU5?LV8l9=)_m{i`bIYy!3hzGciMify<K;5(yq_M4f~uSCFs>ndSEAf1g)mdDwyEV{|-v;8*(@+=`=f`-^ke{VK8lILY8lfx+ptg0=A<(zQH)V$Z{<J%GiKlNpc$j4(c)|u^L61wU80c18hGJZsvjLh0u`qF0_+uzsjf>v~zoWh>;bigeCl)+AvVK5I^ZEY!7n&^X}Nj%b{!Yh*n%z{q8+D&_$H)4ty8IV*H#AO6z^bhNf7%mYOde!_1tR$i0V#YL`gFH;qG3EAT2OKSU0H1*7yCqt0IGsY!eGR|h6TUmQ6M@fk>C^kA;a+CBEM@Frzg7}1uqnO<P>;FO#s<Pip>?P2GRl&|*e-)yLx>~7TVgg_w*$FVXO;rZCl%0Jylh7%)8`8Kx7z<mVtyE0Dvi<b!15=2#N>h&4PuDv%rb4{e#s|Vc=l*mFe`ZIZLv0aPknz5=bi_CrV$Hj?&O7zxkRia!o*cJpT5$tiKiHYriIu``yLH|V||lRE%Shmvm2Lf_a~J+q^Ya|A+f*iPDUWqyGuK17KTf>j&~{Sc!cHv+9@L9IFz)qjT%ju1&Awgg?JqTS--*^pgKHPU4A>qFPcqCb~}7K4HOvL6Vf9U;&~QTxIfUf^8xsY@k7tOWzam3bUw_eli$KMNx6C@AllhsBev=;hVVX?jaB~kN)Yk{%007DjD%t&r5Sw%?$Koi=)r23#`@tsnX&YqRy`=zRBlEI$X>?(0Kge`(7qh<Uv=xwjEbG=GeY+X)I3z-lQ_J_Di&?W0fq9ZvNt`(Q}>&i5{Y~(wD?S=FYz4KO#Uc$BLW#)7G>;C20ICP7_bCK^0U6Xo1Y^-7gXVfG*|@qZnIsu#uX&dMPWz}Eh!)dcQQa88@J|uW;i`_!7WS9$^FXTZ<!28fM%^+9`z+h^59liD|y};!1^jlYRw#7vN=J@2N{`;c%0ge=ZiLC2vRv_g*tX+DXQixRTYBQmQVDK=GcSjk(MBVB-LRo-MsK?og}6JR8h=H{U+-L!ZtFm-JwGHDL*-DbECHt^0|W8YNUCEQmL`&0Jmk~iX*+~S%bz7ro0S6vq}bNd?6Wlq*icV_#zys^5E4ed<$AJZ6I;tj)U`Dv{8HiK9UA%Qq#?@$_SIQ);39~X;|MaoR?yA)_ppJ$$i`9dODmG4Jps926B=h61-{~Lf6&z(k({<3xyiJK6BM9e>R9#1KRf{>Krgrz`PcYR?yLxBs0+Ksk{!}dFNz(1&y-0j#Gc<ely1cky5Xzxlbm;$S#GHRun45LY)Rya%H!G_3`*%eWFeH2{st*iDVn;JDI)hjF(Q~E0^z_dEW09_3KJKDAE}oD)Z?9{d+~}i#_f3E4saQ5_NL%yY7VNKZM5qADRBYqx7^sJc1+5y7D<|^;M4DW&)#r#d$>QwN>hPR993`!wc=LFKTl)+M?t^lYY?dBsQ;(=ld;~TJZe4*yH*w(IhMSwr#@5B7;#uUl=XYl!xNbgB8TlmxA*QgOtq)#au;FW~x+~inL4@EX`h)bGneRTLpH2%4Sl2upeU>I2K&mAU*x{Is#Myo`EyZPbAUY?FI|6(+O}oQI6_9X<V`A|Cy~gdnWB}G5@SIJ|WXT$COdq|8I8hc8)tFl=uND!4^*w`%KnBEi(68TRq(e3|?Z;0JCXNjU*TCa#-3Zx7iL-LU|9cHo_@>|BlKooa-9%&RWwE{2ShSbg9!X87DZln8;cQ&*8Zr1s<x!uMf+eKGJ$1j~6wfRPBibgbE=7%0im&>=lAfNwC|DcmXCV(JU7Y&Y(OWB}+mG=#uk6Z>#(ta*xx3#39jhKE!Pf7(c_b_buDItm7b%&@KDbpJ4V1c;*ryU%vyTq8Hi=z<Hb`@R^?#N~h+K5AR6@eb3)#?1BzGM~!W)ZY{(BiFt<Rut%=TuMdR%m2sNl%y1c;yav?|5gSPw4U#20$o&a}sEq0Pi2@%Lqr*3`(8uiDOc~(z;ak#~)laOqW)P|c9}?|ZQrd)cWW@><$p&EL&$5lN*>8$KUzB0nhF1Yj5qh)u>ZjewHDe*k<~2HD=d|G;-6e^^uh<RF(k?GVdA@I1r2hl<eg&)$KJoi9*gEDUrxJTZ+hd@j-rc7~!-Usep^Q%3fo{e^YYyhq$+gs!Uv29_$RZ}sn&X2Pm2-r}oBk2Bjg010Nb0msz*Fr(5k!Sn;c^T|HGMrS%q+OfONW4xytSwC#xtL&s|_5<-1&l>Tm7`5nkd!6UnFd1@I*#642FP<_|6&wi!!PCaYMyx?+kp_)V&a$VlhX7oo;B7`~mQ8HwGCuVq%hY@L@b=xWQR^7bdZ4Dp<k_MqCl(DXM^WS`2%!Q&Yljn+AK`+hxG}NDx?u^^X0u5r}#Zd@+UtVTlqTw;2D2ag5J_c6#js)#_lukhTZy^;$EZRY#W7B9D#E&T|omWn|<_|B}rBYamUm)|z#g13u4fHn21tfi@%PbmR6sh4>@?iLt`6<kX>jxqB=W*Vg<mYv9T(EgGdn`eXUF7iJjz3HC{YLy6K7RmjTo)D=RZ{i~`0J!WLRO$Zn+%d^a-lEW#O6OCV02Px>eBbGHrr$n8BlI*Ve1vJ~Su_4XB^d1ZEE4M?mdwq-zF;{`wsgzY?7HXkjQY_DJXsBwuvC1+&Bzl3rJUQ-QYj*8fpu7rwwiV22Q2x4oS!&}-yM5jall-iZ@vC!>9)$i3nKK#~XM%4C9JuJ3H(hl3ZwRhed!s;_kw}5%vt*uLhct4ntiCt5y-%BKT%xhKt$32z5@++vs5TKSa#r!!Zer}B&Y^v@A2j$BCDh&no`|n`C(3Cqk|~TR-6y;cBHG3-oSP5T{@MMPC>G!p#bQ(><}pD)YtV?9xIWy;_^ei!YZEhd)3K=k#|?SaQI=H{qjw3(=DNQmgOSrJ6&l~dum|{}r15rCl3v-oRb#eVIs9nGe~aWi7ft(0-Hc&#f;VeXm*|vG1v0-KtrNzYP=WT_SB1s`qEi#dWyA{fAgHOsCw}X?WycqDlFM#07?#k>-Y_@rcqIEgJTSN*=tf!#to??m9txB0#-89rwYtO7t_cDO0ISHo&D@i~iW~}B@T8V+R*3bgg`KC{hDQaTmUeGOrt#@gRuV*~5!`{LF=o-@lRVj*2*cZwJ#rjB{hoCU=J<J5A$*x*Ua^b8?$^rMzFJt?I{SWG`K@|We>vHw1E;{T$%}hPzS_@&<3gy8y2W2gZahMzuhxZai_|%``io~VDo_rDBGy1Vi@em8@TKuLlxzqA0xJNKiVW@$-^=Q2XkvZ<@e2C&GAA9ry7=$|oMU9$-Z%SqTr*ROpY_kO6}13zueL&jf`5x48+1@P;*0nEgr`tumBWP<`cXiGWA`G^eT1HBu9h-MGF3jlSO5S3000G5Q2+n{0000000000Bme*a001RbRa8|~RaIS8RaI40RZ!AW0J{MJ0L}pc0Kx$Q0KfqO0LB3U0J{MJ0Ji}F0J#AH0J{MJ0KEYL0J{MJ0J#AH0KowP0KNeM0MG#e0Mr2i0LlRY0LTFW0LuXZ0LTFW0K)+R0+#{<2JHm{1ib_V3AYIZ1%n0z1>*$-2)POb1j7Xb^#;d_2?GG+0RyT6s?G)j0OA1w7t;p<2&V-B3V{X!2J{302+jop2J{302+jop2JQp_2*?Ej2(SeK3W^2-2&x4E3WNp%2%!Z53i|~D2(1MH3Wo*)3yul_0IdN53&aWm0J8xB0KfqO0OkP!0)heo5W@!n3$zLW504N76s!{g4~!835B3lN57iI>2IT_*2JHm_2JHm_0HXl`0IdN50I2~10J8xB0IUH40ILB30JQ-D0K5SK0HXl`0Du7lL&8Y|(*fhnA`Jk-0RaHQ0RaHS0RaHU0RaHU0RaHS0RaHf0RaG>0RaG{0RaH90RaG~0RaH10RaHD0RaH90RaHZ0RaH30RaH50RaHf0RaHX0RaHZ0RaHZ0RaHY0Rs@_7y}3H1_K7Q1Oo%P0|N=c1_K0u0|N!Y0|Ns10s{r#1p@}}1p^BG3j+qe1Oo-r0|Nzs1Op1g1_K4t0|N%j1Oo=r1Oo??1_K6>1p@`_0|Nu91Oy5C2?PwP3<Lt)0|W}33j_m=1q2DQ3Iqk)2LuDs1Ox-p1Ox-o1Ox)u0|Nxb0t6A36$A&{3Ir3+6a*2u5(EU>1_TJ!2m}Jz0|Wxs0|Wxv0|Wxs0|Wx$0|Wxt0|Xk<8w3Tx2LuJ-1_TN13Ir3P6a)pu2Lu$p6a)sY2m~0g7z7Hg4g?vh8UzKs2Lvp#Ed(EpC<Ep@xP+|%RZ@2Z1Ox{L0tN>J1Ox~L0RsgH2L%HG3jqTI1`7fM1p)&D1Oo&E0s{gA1r7lM0|NpB0|^HM1Ox~L0|W*G3IYNI0|NpD1p@>r5Ct6&0|W^W0R;vC0000000000000000!bv2N=YP=NhFd<Hr;KxZMNDK6aWAK2mk;86a@eP000000000000')
+ def prove(fy:int,fB:bool)->None:
+  _require(fB,f'R proof {fy} differs')
+ prove(0,K(source)is str and'\x00'not in source and(0<L(source.encode('utf-8'))<=1868927)and(2000000-L(source.encode('utf-8'))>=131072))
  U=A.parse(source,filename='tests/ci_shard_runner.py',mode='exec')
  def bf(m:str)->ast.FunctionDef:
-  aJ=T((a for a in U.body if isinstance(a,a6)and a.name==m))
-  prove(1,L(aJ)==1,f'R static function inventory differs: {m}')
+  aJ=T((a for a in U.body if Z(a,a6)and a.name==m))
+  prove(1,L(aJ)==1)
   return aJ[0]
  def eG(m:str)->ast.ClassDef:
-  aJ=T((a for a in U.body if isinstance(a,a8)and a.name==m))
-  prove(2,L(aJ)==1,f'R static class inventory differs: {m}')
+  aJ=T((a for a in U.body if Z(a,a8)and a.name==m))
+  prove(2,L(aJ)==1)
   return aJ[0]
  def e(ao:ast.ClassDef,m:str)->ast.FunctionDef:
-  aJ=T((a for a in ao.body if isinstance(a,a6)and a.name==m))
-  prove(3,L(aJ)==1,f'R static method inventory differs: {m}')
+  aJ=T((a for a in ao.body if Z(a,a6)and a.name==m))
+  prove(3,L(aJ)==1)
   return aJ[0]
  def aT(a:ast.AST)->tuple[ast.Call,...]:
-  return T((w for w in a3(a)if isinstance(w,a9)))
+  return T((w for w in a3(a)if Z(w,a9)))
  def b(a:ast.AST)->tuple[str,...]:
   return T((a0(w.func)for w in aT(a)))
  def eK(a:ast.FunctionDef)->str:
-  prove(4,type(a.end_lineno)is int,'R static node source end differs')
-  return '\n'.join(source.splitlines()[a.lineno-1:cast(int,a.end_lineno)])+'\n'
- dD=dict(zip(T(('_GENERATION6_R_'+fD for fD in ['CAPTURED_FD_INIT', 'CAPTURED_FD_REQUIRE', 'CAPTURED_FD_DETACH', 'CAPTURED_FD_CLOSE_ONCE', 'CAPTURED_SOCKET_DETACH', 'CAPTURED_SOCKET_FILENO', 'CAPTURED_SNAPSHOT_STAT', 'REAL_OS_CLOSE', 'REAL_OS_OPEN', 'REAL_OS_SCANDIR', 'REAL_OS_FSTAT', 'REAL_FCNTL'])),D[0],strict=True))
+  prove(4,type(a.end_lineno)is int)
+  return'\n'.join(source.splitlines()[a.lineno-1:cast(int,a.end_lineno)])+'\n'
+ dD=dict(zip(T(('_GENERATION6_R_'+fD for fD in['CAPTURED_FD_INIT','CAPTURED_FD_REQUIRE','CAPTURED_FD_DETACH','CAPTURED_FD_CLOSE_ONCE','CAPTURED_SOCKET_DETACH','CAPTURED_SOCKET_FILENO','CAPTURED_SNAPSHOT_STAT','REAL_OS_CLOSE','REAL_OS_OPEN','REAL_OS_SCANDIR','REAL_OS_FSTAT','REAL_FCNTL'])),D[0],strict=True))
  cJ:dict[str,ast.AnnAssign]={}
  for m,cv in dD.items():
-  aJ=T((a for a in U.body if isinstance(a,a2)and isinstance(a.target,a1)and(a.target.id==m)))
-  prove(5,L(aJ)==1,f'R static capture inventory differs: {m}')
+  aJ=T((a for a in U.body if Z(a,a2)and Z(a.target,a1)and(a.target.id==m)))
+  prove(5,L(aJ)==1)
   ax=aJ[0]
-  prove(6,isinstance(ax.annotation,a1)and ax.annotation.id=='Final' and(ax.value is not None)and(a0(ax.value)==cv),f'R static capture binding differs: {m}')
+  prove(6,Z(ax.annotation,a1)and ax.annotation.id=='Final'and(ax.value is not None)and(a0(ax.value)==cv))
   cJ[m]=ax
  eL=(d[102],d[78],d[89],d[85],'_Generation6RAuthorityEvent','_Generation6RIteratorToken',d[39],d[47],d[84],d[54])
  bP={m:eG(m)for m in eL}
  dz=bP[d[102]]
  ej=bP[d[78]]
- prove(7,OO((ax.lineno<dz.lineno for ax in cJ.values()))and T((a0(eU)for eU in dz.bases))==('str','Enum')and(T((a0(eU)for eU in ej.bases))==('str','Enum')),'R static enum or capture ordering differs')
+ prove(7,OO((ax.lineno<dz.lineno for ax in cJ.values()))and T((a0(eU)for eU in dz.bases))==('str','Enum')and(T((a0(eU)for eU in ej.bases))==('str','Enum')))
  def dX(ao:ast.ClassDef)->tuple[tuple[str,object],...]:
   fe:list[tuple[str,object]]=[]
   for a in ao.body:
-   if isinstance(a,a5)and L(a.targets)==1 and isinstance(a.targets[0],a1)and isinstance(a.value,a4):
+   if Z(a,a5)and L(a.targets)==1 and Z(a.targets[0],a1)and Z(a.value,a4):
     fe.append((a.targets[0].id,a.value.value))
   return T(fe)
- prove(8,dX(dz)==T(((k,k)for k in('SETUP','SUBJECT','PRODUCTION','INJECTION','REUSE_TEARDOWN','TERMINAL')))and dX(ej)==T(((k,k)for k in('LIVE','DETACHED','CLOSE_SUCCEEDED','CLOSE_UNCERTAIN'))),'R static enum members differ')
+ prove(8,dX(dz)==T(((k,k)for k in('SETUP','SUBJECT','PRODUCTION','INJECTION','REUSE_TEARDOWN','TERMINAL')))and dX(ej)==T(((k,k)for k in('LIVE','DETACHED','CLOSE_SUCCEEDED','CLOSE_UNCERTAIN'))))
  cO=bP[d[89]]
- eI=T((a.target.id for a in cO.body if isinstance(a,a2)and isinstance(a.target,a1)))
+ eI=T((a.target.id for a in cO.body if Z(a,a2)and Z(a.target,a1)))
  ek=T((a0(k)for k in cO.decorator_list))
- prove(9,eI==('ordinal','generation','owner_identity','descriptor','label','acquired_phase','snapshot','fd_flags','status_flags')and ek==(d[32],)and(T((a0(k)for k in bP[d[39]].decorator_list))==(d[32],))and(T((a0(k)for k in bP[d[85]].decorator_list))==('dataclass',)),'R static token mutability or field inventory differs')
+ prove(9,eI==('ordinal','generation','owner_identity','descriptor','label','acquired_phase','snapshot','fd_flags','status_flags')and ek==(d[32],)and(T((a0(k)for k in bP[d[39]].decorator_list))==(d[32],))and(T((a0(k)for k in bP[d[85]].decorator_list))==('dataclass',)))
  p=bP[d[47]]
  eP=e(p,d[110])
  dV=a0(eP)
- prove(10,OO((ll in dV for ll in('self._generation_by_descriptor: dict[int, int] = {}','self._records_by_owner_identity','self._records_by_ordinal','self._current_by_descriptor','self._scan_capabilities_by_owner_identity','self._scan_capabilities_by_descriptor','self._live_scandir_proxies','self._uncertain_descriptors'))),'R static ledger index inventory differs')
+ prove(10,OO((ll in dV for ll in('self._generation_by_descriptor: dict[int, int] = {}','self._records_by_owner_identity','self._records_by_ordinal','self._current_by_descriptor','self._scan_capabilities_by_owner_identity','self._scan_capabilities_by_descriptor','self._live_scandir_proxies','self._uncertain_descriptors'))))
  ab=e(p,'initialize_owner')
  aV=a0(ab)
  cX=T((a for a in ab.body if Z(a,a12)))
- prove(11,L(cX)==1 and ab.body[-1]is cX[0]and(not N((isinstance(w,a9)and isinstance(w.func,a1)and(w.func.id=='_require')for ck in ab.body[:-1]for w in a3(ck))))and('offered_unclaimed_descriptor' in aV)and('current is None or partial_is_current' in aV)and('partial_record=partial_record' in aV)and('owner_identity not in self._records_by_owner_identity' in aV)and(b(ab).count(d[12])==1)and(b(ab).count(d[18])==2)and(b(ab).count(d[39])==1),'R static total acquisition transaction differs')
+ prove(11,L(cX)==1 and ab.body[-1]is cX[0]and(not N((Z(w,a9)and Z(w.func,a1)and(w.func.id=='_require')for ck in ab.body[:-1]for w in a3(ck))))and('offered_unclaimed_descriptor'in aV)and('current is None or partial_is_current'in aV)and('partial_record=partial_record'in aV)and('owner_identity not in self._records_by_owner_identity'in aV)and(b(ab).count(d[12])==1)and(b(ab).count(d[18])==2)and(b(ab).count(d[39])==1))
  ez=e(p,'_remove_partial_registration')
  aX=a0(ez)
  bh=e(p,'_close_registration_failure')
@@ -21126,45 +21168,45 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  bk=aT(bh)
  bt=T((g.lineno for g in bk if a0(g.func)==d[4]))
  bp=T((g.lineno for g in bk if a0(g.func)==d[72]))
- prove(12,'record is expected' in aX and 'current is expected.token' in aX and('capability.parent is expected.token' in aX)and(b(bh).count('_GENERATION6_R_CAPTURED_FD_DETACH')==1)and(L(bt)==1)and(L(bp)==2)and OO((ft>bt[0]for ft in bp))and('if not initialized or cleanup_error is None' in cz),'R static registration cleanup authority differs')
+ prove(12,'record is expected'in aX and'current is expected.token'in aX and('capability.parent is expected.token'in aX)and(b(bh).count('_GENERATION6_R_CAPTURED_FD_DETACH')==1)and(L(bt)==1)and(L(bp)==2)and OO((ft>bt[0]for ft in bp))and('if not initialized or cleanup_error is None'in cz))
  da=e(p,'_record_for_owner')
  ct=e(p,'_authorize_live')
  aH=a0(ct)
  ep=e(p,'_token_after_immediate_acquisition')
- prove(13,'owner_identity = id(owner)' in a0(da)and 'self._records_by_owner_identity.get(owner_identity)' in a0(da)and('record.token is token' in aH)and('self._records_by_ordinal.get(exact_token.ordinal) is record' in aH)and('self._generation_by_descriptor.get(exact_token.descriptor) == exact_token.generation' in aH)and('owner.label == exact_token.label' in aH)and('self._current_by_descriptor.get(exact_token.descriptor) is exact_token' in aH)and(d[12]not in b(ct))and(d[18]not in b(ct)),'R static exact live authorization differs')
- prove(14,a0(ep).endswith('return self._authorize_live(owner).token'),'R static immediate acquisition authorization differs')
+ prove(13,'owner_identity = id(owner)'in a0(da)and'self._records_by_owner_identity.get(owner_identity)'in a0(da)and('record.token is token'in aH)and('self._records_by_ordinal.get(exact_token.ordinal) is record'in aH)and('self._generation_by_descriptor.get(exact_token.descriptor) == exact_token.generation'in aH)and('owner.label == exact_token.label'in aH)and('self._current_by_descriptor.get(exact_token.descriptor) is exact_token'in aH)and(d[12]not in b(ct))and(d[18]not in b(ct)))
+ prove(14,a0(ep).endswith('return self._authorize_live(owner).token'))
  bY=e(p,'_reauthorize_live')
  dW=a0(bY)
- prove(15,b(bY).count(d[12])==1 and b(bY).count(d[18])==2 and('self.phase is not _Generation6RPhase.PRODUCTION' in dW),'R static post-production reauthentication differs')
+ prove(15,b(bY).count(d[12])==1 and b(bY).count(d[18])==2 and('self.phase is not _Generation6RPhase.PRODUCTION'in dW))
  bT=e(p,'close_owner_once')
  cK=b(bT)
- ec=T((a for a in bT.body if isinstance(a,a14)and isinstance(a.value,a9)and(a0(a.value.func)=='self._append_event')and N((isinstance(cG,a4)and cG.value=='CLOSE_ONCE_BEGIN' for cG in a.value.args))))
+ ec=T((a for a in bT.body if Z(a,a14)and Z(a.value,a9)and(a0(a.value.func)=='self._append_event')and N((Z(cG,a4)and cG.value=='CLOSE_ONCE_BEGIN'for cG in a.value.args))))
  ds=T((a for a in bT.body if Z(a,a12)and N((a0(g.func)==d[99]for g in aT(a)))))
- prove(16,L(ec)==1 and L(ds)==1 and(bT.body.index(ds[0])==bT.body.index(ec[0])+1)and(cK.count(d[99])==1)and(cK.count(d[4])==1)and(cK.count(d[59])==0)and(b(ds[0]).count(d[82])==1),'R static normal close one-call guard differs')
+ prove(16,L(ec)==1 and L(ds)==1 and(bT.body.index(ds[0])==bT.body.index(ec[0])+1)and(cK.count(d[99])==1)and(cK.count(d[4])==1)and(cK.count(d[59])==0)and(b(ds[0]).count(d[82])==1))
  be=e(p,'_inject_close_uncertainty')
  dF=b(be)
  cM=a0(be)
  aw=T((a for a in be.body if Z(a,a12)and N((a0(g.func)==d[99]for g in aT(a)))))
  eu=T((g for g in aT(be)if a0(g.func)=='_GENERATION6_R_REAL_OS_OPEN'))
  dp=T((g for g in aT(be)if a0(g.func)=='FdOwner'))
- bA=T((a for a in a3(be)if isinstance(a,a5)and N((isinstance(r,a1)and r.id=='raw_reuse' for r in a.targets))and isinstance(a.value,a1)and(a.value.id=='_PID_SENTINEL')))
- prove(17,L(aw)==1 and b(aw[0]).count(d[99])==1 and(b(aw[0]).count(d[4])==1)and(b(aw[0]).count(d[82])==1)and(L(eu)==L(dp)==L(bA)==1)and(eu[0].lineno<bA[0].lineno<dp[0].lineno)and('self.phase = _Generation6RPhase.INJECTION' in cM)and('reused_token.generation == token.generation + 1' in cM)and(d[37]in cM)and(d[12]not in dF)and(d[18]not in dF),'R static close-ambiguity adoption differs')
+ bA=T((a for a in a3(be)if Z(a,a5)and N((Z(r,a1)and r.id=='raw_reuse'for r in a.targets))and Z(a.value,a1)and(a.value.id=='_PID_SENTINEL')))
+ prove(17,L(aw)==1 and b(aw[0]).count(d[99])==1 and(b(aw[0]).count(d[4])==1)and(b(aw[0]).count(d[82])==1)and(L(eu)==L(dp)==L(bA)==1)and(eu[0].lineno<bA[0].lineno<dp[0].lineno)and('self.phase = _Generation6RPhase.INJECTION'in cM)and('reused_token.generation == token.generation + 1'in cM)and(d[37]in cM)and(d[12]not in dF)and(d[18]not in dF))
  cy=e(p,'_mark_close_uncertain')
  dS=aT(cy)
- cP=T((a for a in a3(cy)if isinstance(a,a5)and N((a0(r)=='record.state' for r in a.targets))and(a0(a.value)=='_Generation6RDescriptorState.CLOSE_UNCERTAIN')))
+ cP=T((a for a in a3(cy)if Z(a,a5)and N((a0(r)=='record.state'for r in a.targets))and(a0(a.value)=='_Generation6RDescriptorState.CLOSE_UNCERTAIN')))
  cW=T((g for g in dS if a0(g.func)=='self._current_by_descriptor.pop'))
  cZ=T((g for g in dS if a0(g.func)==d[72]))
  dZ=T((g for g in dS if a0(g.func)=='self._revoke_scan_capability'))
- prove(18,L(cP)==L(cW)==L(cZ)==1 and L(dZ)==1 and(max(cP[0].lineno,cW[0].lineno,cZ[0].lineno)<dZ[0].lineno)and('secondary_errors.append(error)' in a0(cy)),'R static fail-closed uncertainty ordering differs')
+ prove(18,L(cP)==L(cW)==L(cZ)==1 and L(dZ)==1 and(max(cP[0].lineno,cW[0].lineno,cZ[0].lineno)<dZ[0].lineno)and('secondary_errors.append(error)'in a0(cy)))
  bB=e(p,'scandir')
  af=a0(bB)
  bs=b(bB)
- bK=T((ck for ck in bB.body if isinstance(ck,a2)and ck.value is not None and(a0(ck.value)=='_GENERATION6_R_REAL_OS_SCANDIR(authorized_descriptor)')))
- prove(19,L(bK)==1,'R static scandir raw acquisition statement differs')
+ bK=T((ck for ck in bB.body if Z(ck,a2)and ck.value is not None and(a0(ck.value)=='_GENERATION6_R_REAL_OS_SCANDIR(authorized_descriptor)')))
+ prove(19,L(bK)==1)
  dA=bK[0]
  ay=bB.body.index(dA)
- prove(20,ay+2<L(bB.body)and Z(bB.body[ay+1],a2)and(a0(bB.body[ay+1])=='proxy: _Generation6RScandirProxy | None = None')and(not aT(bB.body[ay+1]))and Z(bB.body[ay+2],a12),'R static scandir immediate adoption boundary differs')
- prove(21,'self._scan_capabilities_by_descriptor.get(descriptor)' in af and 'self._current_by_descriptor.get(descriptor) is capability.parent' in af and('self._records_by_owner_identity.get(exact_capability.owner_identity)' in af)and('candidate_record.token is exact_capability.parent' in af)and('self._authorize_live(record.owner, exact_capability.parent)' in af)and(bs.count('_GENERATION6_R_CAPTURED_FD_REQUIRE')==1)and(bs.count('_GENERATION6_R_REAL_OS_SCANDIR')==1)and(d[12]not in bs)and(d[18]not in bs)and('self._live_scandir_proxies[proxy_identity] = proxy' in af)and('SCANDIR_AUTHORIZED' in af)and('SCANDIR_ACQUIRE' in af),'R static scandir selector authority differs')
+ prove(20,ay+2<L(bB.body)and Z(bB.body[ay+1],a2)and(a0(bB.body[ay+1])=='proxy: _Generation6RScandirProxy | None = None')and(not aT(bB.body[ay+1]))and Z(bB.body[ay+2],a12))
+ prove(21,'self._scan_capabilities_by_descriptor.get(descriptor)'in af and'self._current_by_descriptor.get(descriptor) is capability.parent'in af and('self._records_by_owner_identity.get(exact_capability.owner_identity)'in af)and('candidate_record.token is exact_capability.parent'in af)and('self._authorize_live(record.owner, exact_capability.parent)'in af)and(bs.count('_GENERATION6_R_CAPTURED_FD_REQUIRE')==1)and(bs.count('_GENERATION6_R_REAL_OS_SCANDIR')==1)and(d[12]not in bs)and(d[18]not in bs)and('self._live_scandir_proxies[proxy_identity] = proxy'in af)and('SCANDIR_AUTHORIZED'in af)and('SCANDIR_ACQUIRE'in af))
  dU=e(p,'_release_scandir_proxy')
  br=bP[d[84]]
  eY=e(br,d[110])
@@ -21173,22 +21215,22 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  aK=e(br,'close')
  eS=e(br,'__enter__')
  eX=e(br,'__exit__')
- bj=T((a.lineno for a in a3(aK)if isinstance(a,a5)and N((a0(r)=='self._terminal' for r in a.targets))and(a0(a.value)=='True')))
+ bj=T((a.lineno for a in a3(aK)if Z(a,a5)and N((a0(r)=='self._terminal'for r in a.targets))and(a0(a.value)=='True')))
  bX=T((g.lineno for g in aT(aK)if a0(g.func)==d[96]))
- prove(22,"_require(not self._terminal, 'R scandir proxy close repeated')" in a0(aK),'R scandir proxy close repeated')
- prove(23,'self._live_scandir_proxies.pop(proxy_identity, None)' in a0(dU)and b(aK).count(d[96])==1 and(b(aK).count('self._ledger._release_scandir_proxy')==1)and('self._terminal = True' in a0(aK))and('self._close_attempts == 1' in a0(aK))and(L(bj)==L(bX)==1)and(bj[0]<bX[0]),'R static opaque iterator one-close authority differs')
+ prove(22,"_require(not self._terminal, 'R scandir proxy close repeated')"in a0(aK))
+ prove(23,'self._live_scandir_proxies.pop(proxy_identity, None)'in a0(dU)and b(aK).count(d[96])==1 and(b(aK).count('self._ledger._release_scandir_proxy')==1)and('self._terminal = True'in a0(aK))and('self._close_attempts == 1'in a0(aK))and(L(bj)==L(bX)==1)and(bj[0]<bX[0]))
  df=e(p,'close_reused_after_production')
  bm=a0(df)
- prove(24,b(df).count('self._reauthorize_live')==1 and b(df).count('reused_owner.close_once')==1 and('self.phase is _Generation6RPhase.REUSE_TEARDOWN' in bm)and(d[37]in bm)and('if record is not None' in bm),'R static reused-descriptor teardown claim differs')
+ prove(24,b(df).count('self._reauthorize_live')==1 and b(df).count('reused_owner.close_once')==1 and('self.phase is _Generation6RPhase.REUSE_TEARDOWN'in bm)and(d[37]in bm)and('if record is not None'in bm))
  ey=eG('FdOwner')
  dG=e(ey,d[112])
- prove(25,b(dG).count('self.detach')==1 and b(dG).count('os.close')==1,'R static captured FdOwner close semantics differ')
+ prove(25,b(dG).count('self.detach')==1 and b(dG).count('os.close')==1)
  cF=bP[d[54]]
  ev=e(cF,d[110])
- dy=T((a.name for a in ev.body if isinstance(a,a6)))
- eR=T((g for g in aT(ev)if isinstance(g.func,a1)and g.func.id=='_Generation6SelftestPatch'))
+ dy=T((a.name for a in ev.body if Z(a,a6)))
+ eR=T((g for g in aT(ev)if Z(g.func,a1)and g.func.id=='_Generation6SelftestPatch'))
  eq=T((T((a0(cG)for cG in g.args))for g in eR))
- prove(26,dy==('initialize','detach',d[112],'scandir')and eq==(('FdOwner',"'__init__'",'self._initialize'),('FdOwner',"'detach'",'self._detach'),('FdOwner',"'close_once'",'self._close_once'),('os',"'scandir'",'self._scandir')),'R static exact-four patch inventory differs')
+ prove(26,dy==('initialize','detach',d[112],'scandir')and eq==(('FdOwner',"'__init__'",'self._initialize'),('FdOwner',"'detach'",'self._detach'),('FdOwner',"'close_once'",'self._close_once'),('os',"'scandir'",'self._scandir')))
  ei=e(cF,'_restore_all')
  aD=a0(ei)
  fb=e(cF,'__exit__')
@@ -21196,60 +21238,59 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  aA=e(cF,'_require_original_identities')
  ak=a0(aA)
  v=aA.body[0]
- o=v.value if isinstance(v,a14)and isinstance(v.value,a9)else None
+ o=v.value if Z(v,a14)and Z(v.value,a9)else None
  bG=T((a for a in a3(v)if Z(a,(a13,A.For,A.AsyncFor,A.While,A.DictComp,A.GeneratorExp,A.ListComp,a10,A.SetComp))))
- aB=T((a for a in a3(v)if isinstance(a,A.Compare)and N((isinstance(ff,(A.Eq,A.NotEq))for ff in a.ops))and isinstance(a.left,a11)and a0(a.left).endswith(('[5]','[6]'))))
- prove(27,'for proxy in tuple(self.ledger._live_scandir_proxies.values())' in aD and 'reversed(tuple(zip(self._patches, self._bindings, strict=True)))' in aD and('observed is not original' in aD and 'setattr(target, name, original)' in aD and('getattr(target, name) is original' in aD)and('_GENERATION6_ACTIVE_PATCHES.clear()' in aD))and(b(fb).count('self._restore_all')==1)and OO((k in ak for k in dD))and('FdOwner.require is _GENERATION6_R_CAPTURED_FD_REQUIRE' in ak)and(L(aA.body)==1)and isinstance(v,a14)and isinstance(o,a9)and(a0(o.func)=='_require')and(L(o.args)==2)and(not o.keywords)and isinstance(o.args[0],A.BoolOp)and isinstance(o.args[0].op,A.And)and(A.literal_eval(o.args[1])=='R authority original identity differs')and(not bG)and('all(' not in ak)and(not aB)and OO((fm in ak for fm in cb)),'R static composite restoration differs')
+ aB=T((a for a in a3(v)if Z(a,A.Compare)and N((Z(ff,(A.Eq,A.NotEq))for ff in a.ops))and Z(a.left,a11)and a0(a.left).endswith(('[5]','[6]'))))
+ prove(27,'for proxy in tuple(self.ledger._live_scandir_proxies.values())'in aD and'reversed(tuple(zip(self._patches, self._bindings, strict=True)))'in aD and('observed is not original'in aD and'setattr(target, name, original)'in aD and('getattr(target, name) is original'in aD)and('_GENERATION6_ACTIVE_PATCHES.clear()'in aD))and(b(fb).count('self._restore_all')==1)and OO((k in ak for k in dD))and('FdOwner.require is _GENERATION6_R_CAPTURED_FD_REQUIRE'in ak)and(L(aA.body)==1)and Z(v,a14)and Z(o,a9)and(a0(o.func)=='_require')and(L(o.args)==2)and(not o.keywords)and Z(o.args[0],A.BoolOp)and Z(o.args[0].op,A.And)and(A.literal_eval(o.args[1])=='R authority original identity differs')and(not bG)and('all('not in ak)and(not aB)and OO((fm in ak for fm in cb)))
  ch=dict(zip(('ledger_release','ledger_scandir','proxy_init','proxy_iter','proxy_next','proxy_close','proxy_enter','proxy_exit','scope_restore_all'),zip((dU,bB,eY,eZ,fa,aK,eS,eX,ei),D[5],strict=True),strict=True))
- prove(28,OO((H.sha256(eK(a).encode('utf-8')).hexdigest()==en for a,en in ch.values())),'R static inherited scan source binding differs')
+ prove(28,OO((H.sha256(eK(a).encode('utf-8')).hexdigest()==en for a,en in ch.values())))
  bd=bf(d[62])
  eF=a0(bd)
- prove(29,b(bd).count('_GENERATION6_R_CAPTURED_SOCKET_DETACH')==1 and b(bd).count('_GENERATION6_R_CAPTURED_SOCKET_FILENO')==2 and(b(bd).count('_GENERATION6_R_CAPTURED_SNAPSHOT_STAT')==1)and('owner = FdOwner(detached, exact_label)' in eF),'R static socket handoff differs')
+ prove(29,b(bd).count('_GENERATION6_R_CAPTURED_SOCKET_DETACH')==1 and b(bd).count('_GENERATION6_R_CAPTURED_SOCKET_FILENO')==2 and(b(bd).count('_GENERATION6_R_CAPTURED_SNAPSHOT_STAT')==1)and('owner = FdOwner(detached, exact_label)'in eF))
  dl:tuple[ast.AST,...]=(*cJ.values(),*bP.values(),bd)
  el=T((g for a in dl for g in aT(a)))
  cH=T((a0(g.func)for g in el))
  bi='\n'.join((a0(a)for a in dl))
- prove(30,not N((r in{'os.close','os.open','os.fstat','fcntl.fcntl',d[111],d[106],d[114],d[108],'os.stat','os.dup','os.dup2','os.dup3'}for r in cH))and cH.count(d[59])==0 and('_pending_scandir_permit' not in bi)and('_uncertain_descriptors.discard' not in bi)and('_uncertain_descriptors.remove' not in bi)and('_uncertain_descriptors.clear' not in bi),'R static forbidden syscall or poison mutation differs')
+ prove(30,not N((r in{'os.close','os.open','os.fstat','fcntl.fcntl',d[111],d[106],d[114],d[108],'os.stat','os.dup','os.dup2','os.dup3'}for r in cH))and cH.count(d[59])==0 and('_pending_scandir_permit'not in bi)and('_uncertain_descriptors.discard'not in bi)and('_uncertain_descriptors.remove'not in bi)and('_uncertain_descriptors.clear'not in bi))
  ex=bf(d[79])
- prove(31,L(ex.body)==1 and isinstance(ex.body[0],a16)and isinstance(ex.body[0].exc,a9)and isinstance(ex.body[0].exc.func,a1)and(ex.body[0].exc.func.id=='ContractError')and(L(ex.body[0].exc.args)==1)and isinstance(ex.body[0].exc.args[0],a4)and(ex.body[0].exc.args[0].value=='Generation-6 R authority integration is blocked'),'R static blocked stub differs')
+ prove(31,L(ex.body)==1 and Z(ex.body[0],a16)and Z(ex.body[0].exc,a9)and Z(ex.body[0].exc.func,a1)and(ex.body[0].exc.func.id=='ContractError')and(L(ex.body[0].exc.args)==1)and Z(ex.body[0].exc.args[0],a4)and(ex.body[0].exc.args[0].value=='Generation-6 R authority integration is blocked'))
  eW=T((g for a in U.body for g in aT(a)))
  cc={d[79],d[47],d[54],d[76],d[62],d[20]}
- prove(32,not N((a0(g.func)in cc for g in eW)),'R static integration block has a runtime call site')
+ prove(32,not N((a0(g.func)in cc for g in eW)))
  em=bf('_run_generation6_case_body_for_test')
- by=T((a for a in em.body if isinstance(a,a2)and isinstance(a.target,a1)and(a.target.id=='drivers')and isinstance(a.value,a17)))
- prove(33,L(by)==1 and OO((not(isinstance(key,a4)and key.value=='R')for key in cast(ast.Dict,by[0].value).keys))and(d[79]not in a0(by[0])),'R static runtime driver is unexpectedly wired')
- dq=T((a for a in U.body if isinstance(a,a2)and isinstance(a.target,a1)and(a.target.id=='GENERATION6_PROTOCOL_CASE_GROUPS')))
- dY=T((a for a in U.body if isinstance(a,a2)and isinstance(a.target,a1)and(a.target.id=='_GENERATION6_R_REJECTIONS')and isinstance(a.value,a17)))
- cQ=T((a for a in U.body if isinstance(a,a2)and isinstance(a.target,a1)and(a.target.id=='_GENERATION6_TEMPORARILY_UNWIRED_CASES')))
- prove(34,L(dq)==L(dY)==L(cQ)==1 and "_generation6_case_ids('R', 24)" in a0(dq[0])and(T((key.value for key in cast(ast.Dict,dY[0].value).keys if isinstance(key,a4)and type(key.value)is str))==T((f'R{fi:02d}' for fi in range(1,13))))and("_generation6_case_ids('R'" not in a0(cQ[0])),'R static R13-R24 registry block differs')
+ by=T((a for a in em.body if Z(a,a2)and Z(a.target,a1)and(a.target.id=='drivers')and Z(a.value,a17)))
+ prove(33,L(by)==1 and OO((not(Z(key,a4)and key.value=='R')for key in cast(ast.Dict,by[0].value).keys))and(d[79]not in a0(by[0])))
+ dq=T((a for a in U.body if Z(a,a2)and Z(a.target,a1)and(a.target.id=='GENERATION6_PROTOCOL_CASE_GROUPS')))
+ dY=T((a for a in U.body if Z(a,a2)and Z(a.target,a1)and(a.target.id=='_GENERATION6_R_REJECTIONS')and Z(a.value,a17)))
+ cQ=T((a for a in U.body if Z(a,a2)and Z(a.target,a1)and(a.target.id=='_GENERATION6_TEMPORARILY_UNWIRED_CASES')))
+ prove(34,L(dq)==L(dY)==L(cQ)==1 and"_generation6_case_ids('R', 24)"in a0(dq[0])and(T((key.value for key in cast(ast.Dict,dY[0].value).keys if Z(key,a4)and type(key.value)is str))==T((f'R{fi:02d}'for fi in range(1,13))))and("_generation6_case_ids('R'"not in a0(cQ[0])))
  eD=bf('_generation6_process_state')
  dL=a0(eD)
- prove(35,OO((ll in dL for ll in("('runner.FdOwner.__init__', FdOwner, '__init__')","('runner.FdOwner.require', FdOwner, 'require')","('runner.FdOwner.detach', FdOwner, 'detach')","('runner.FdOwner.close_once', FdOwner, 'close_once')"))),'R static process-reset FdOwner authority differs')
- aj=dict(zip(T((d[83]+fD for fD in ['REAL_OS_STAT', 'REAL_OS_OPEN', 'REAL_OS_FSTAT', 'REAL_OS_UNLINK', 'REAL_OS_GETUID', 'REAL_FCNTL', 'REAL_MONOTONIC_NS', 'CLEANUP_MAX_DEPTH', 'CLEANUP_MAX_ENTRIES', 'CLEANUP_MAX_ENCODED_NAME_BYTES', 'CLEANUP_MAX_OPERATIONS', 'CLEANUP_DEADLINE_NS', 'CLEANUP_BUDGET_EVENT_BY_STATE', 'CAPTURED_SNAPSHOT_STAT', 'CAPTURED_SNAPSHOT_FD', 'CAPTURED_STABLE_DIRECTORY_MATCHES', 'CAPTURED_MOUNT_ID', 'CAPTURED_COMPONENT', 'CAPTURED_FD_REQUIRE', 'CAPTURED_S_IFMT', 'CAPTURED_S_ISDIR', 'CAPTURED_S_ISREG', 'REAL_OS_FSENCODE'])),D[1],strict=True))
+ prove(35,OO((ll in dL for ll in("('runner.FdOwner.__init__', FdOwner, '__init__')","('runner.FdOwner.require', FdOwner, 'require')","('runner.FdOwner.detach', FdOwner, 'detach')","('runner.FdOwner.close_once', FdOwner, 'close_once')"))))
+ aj=dict(zip(T((d[83]+fD for fD in['REAL_OS_STAT','REAL_OS_OPEN','REAL_OS_FSTAT','REAL_OS_UNLINK','REAL_OS_GETUID','REAL_FCNTL','REAL_MONOTONIC_NS','CLEANUP_MAX_DEPTH','CLEANUP_MAX_ENTRIES','CLEANUP_MAX_ENCODED_NAME_BYTES','CLEANUP_MAX_OPERATIONS','CLEANUP_DEADLINE_NS','CLEANUP_BUDGET_EVENT_BY_STATE','CAPTURED_SNAPSHOT_STAT','CAPTURED_SNAPSHOT_FD','CAPTURED_STABLE_DIRECTORY_MATCHES','CAPTURED_MOUNT_ID','CAPTURED_COMPONENT','CAPTURED_FD_REQUIRE','CAPTURED_S_IFMT','CAPTURED_S_ISDIR','CAPTURED_S_ISREG','REAL_OS_FSENCODE'])),D[1],strict=True))
  z:dict[str,ast.AnnAssign]={}
- bL={a.target.id for a in U.body if isinstance(a,a2)and isinstance(a.target,a1)and a.target.id.startswith(d[83])}
- prove(36,bL==set(aj),'R namespace static capture inventory differs')
+ bL={a.target.id for a in U.body if Z(a,a2)and Z(a.target,a1)and a.target.id.startswith(d[83])}
+ prove(36,bL==set(aj))
  for m,cv in aj.items():
-  aJ=T((a for a in U.body if isinstance(a,a2)and isinstance(a.target,a1)and(a.target.id==m)))
-  prove(37,L(aJ)==1,f'R namespace static capture differs: {m}')
+  aJ=T((a for a in U.body if Z(a,a2)and Z(a.target,a1)and(a.target.id==m)))
+  prove(37,L(aJ)==1)
   ax=aJ[0]
-  prove(38,isinstance(ax.annotation,a1)and ax.annotation.id=='Final' and(ax.value is not None)and(a0(ax.value)==cv),f'R namespace static capture binding differs: {m}')
+  prove(38,Z(ax.annotation,a1)and ax.annotation.id=='Final'and(ax.value is not None)and(a0(ax.value)==cv))
   z[m]=ax
- cr=T(((type(a).__name__,a0(r))for a in a3(U)if isinstance(a,(a5,a2,A.AugAssign,a10))for r in(T(a.targets)if isinstance(a,a5)else(a.target,))if isinstance(r,a1)and r.id in aj and(a is not z[r.id])))
- prove(39,not cr,'R namespace static capture rebinding surface differs')
- x:tuple[str,...]=T((d[90]+fD for fD in ['Phase', 'TokenState', 'Action', 'NodeKind', 'AuthorityKind', 'OwnerState', 'OwnerKind', 'OwnerPurpose', 'ContextState', 'CloseEvent', 'MutationPermitState', 'CleanupBudgetState', 'CleanupBudgetEvent', 'InventoryCursorState', 'InventoryScanState', 'InventoryAdvanceState', 'InventoryItemState', 'InventoryClassificationState', 'EmptyInventoryState', 'TerminalEvent', 'DirectoryFact', 'NameFact', 'DirectoryAuthority', 'DirectoryBinding', 'DirectoryRecord', 'OwnerContextBinding', 'OwnerContext', 'PresentToken', 'AbsenceToken', 'RenameToken', 'MutationPermit', 'CapabilityBinding', 'CapabilityRecord', 'UnlinkPreproof', 'MutationPermitBinding', 'MutationPermitRecord', 'CleanupBudgetEpoch', 'InventoryCursor', 'InventoryScan', 'InventoryAdvance', 'InventoryItem', 'InventoryClassification', 'EmptyInventory', 'Receipt', 'CleanupBudgetRecord', 'InventoryCursorBinding', 'InventoryCursorRecord', 'InventoryScanBinding', 'InventoryScanRecord', 'InventoryAdvanceBinding', 'InventoryAdvanceRecord', 'InventoryItemBinding', 'InventoryItemRecord', 'InventoryClassificationBinding', 'InventoryClassificationRecord', 'EmptyInventoryBinding', 'EmptyInventoryRecord', 'Journal']))
- cd=T((a.name for a in U.body if isinstance(a,a8)and a.name.startswith(d[90])))
- prove(40,cd==x,'R namespace static class inventory differs')
+ cr=T(((type(a).__name__,a0(r))for a in a3(U)if Z(a,(a5,a2,A.AugAssign,a10))for r in(T(a.targets)if Z(a,a5)else(a.target,))if Z(r,a1)and r.id in aj and(a is not z[r.id])))
+ prove(39,not cr)
+ cd=T((a.name for a in U.body if Z(a,a8)and a.name.startswith(d[90])))
+ prove(40,cd==x)
  i={m:eG(m)for m in x}
  dx=i['_Generation6RNamespacePhase']
- prove(41,OO((ax.lineno<dx.lineno for m,ax in z.items()if m!=d[6]))and z[d[6]].lineno>i[d[48]].lineno and(z[d[6]].lineno<i['_Generation6RNamespaceInventoryCursorState'].lineno<i[d[50]].lineno<i[d[38]].lineno<i[d[49]].lineno<i['_Generation6RNamespaceEmptyInventoryState'].lineno<i['_Generation6RNamespaceTerminalEvent'].lineno),'R namespace static capture/class ordering differs')
+ prove(41,OO((ax.lineno<dx.lineno for m,ax in z.items()if m!=d[6]))and z[d[6]].lineno>i[d[48]].lineno and(z[d[6]].lineno<i['_Generation6RNamespaceInventoryCursorState'].lineno<i[d[50]].lineno<i[d[38]].lineno<i[d[49]].lineno<i['_Generation6RNamespaceEmptyInventoryState'].lineno<i['_Generation6RNamespaceTerminalEvent'].lineno))
  bI=dict(zip((*x[:17],x[19],x[17],x[18]),D[2],strict=True))
  for m,ee in bI.items():
   ao=i[m]
   eo=ee
-  prove(42,T((a0(eU)for eU in ao.bases))==('str','Enum')and dX(ao)==eo,f'R namespace static enum differs: {m}')
+  prove(42,T((a0(eU)for eU in ao.bases))==('str','Enum')and dX(ao)==eo)
  def fd(m:str)->tuple[str,...]:
-  return T((a.target.id for a in i[m].body if isinstance(a,a2)and isinstance(a.target,a1)))
+  return T((a.target.id for a in i[m].body if Z(a,a2)and Z(a.target,a1)))
  bD=x[20:57]
  bn={fA:fC[0]for fA,fC in zip(bD,D[3],strict=True)}
  ca={fA:fC[1]for fA,fC in zip(bD,D[3],strict=True)}
@@ -21261,25 +21302,24 @@ def _generation6_r_authority_source_gates(source: str) -> None:
   ao=i[m]
   eV=T((a0(k)for k in ao.decorator_list))
   dQ=(d[32],)if m in ai else('dataclass(eq=False)',)
-  prove(43,fd(m)==dn and T((a0(a.annotation)for a in ao.body if isinstance(a,a2)))==ca[m]and(eV==dQ)and(not ao.bases)and(not ao.keywords)and(L(ao.body)==L(dn))and OO((isinstance(a,a2)and isinstance(a.target,a1)and(a.simple==1)and(a.value is None)for a in ao.body)),f'R namespace static identity class differs: {m}')
- prove(44,set(bn)==ai|V,'R namespace static frozen/private record split differs')
- cN=T((a for a in U.body if isinstance(a,a5)and N((isinstance(r,a1)and r.id==d[16]for r in a.targets))))
- prove(45,L(cN)==1 and a0(cN[0].value)=='_Generation6RNamespacePresentToken | _Generation6RNamespaceAbsenceToken | _Generation6RNamespaceRenameToken','R namespace static live-token union differs')
+  prove(43,fd(m)==dn and T((a0(a.annotation)for a in ao.body if Z(a,a2)))==ca[m]and(eV==dQ)and(not ao.bases)and(not ao.keywords)and(L(ao.body)==L(dn))and OO((Z(a,a2)and Z(a.target,a1)and(a.simple==1)and(a.value is None)for a in ao.body)))
+ prove(44,set(bn)==ai|V)
+ cN=T((a for a in U.body if Z(a,a5)and N((Z(r,a1)and r.id==d[16]for r in a.targets))))
+ prove(45,L(cN)==1 and a0(cN[0].value)=='_Generation6RNamespacePresentToken | _Generation6RNamespaceAbsenceToken | _Generation6RNamespaceRenameToken')
  s=i[d[76]]
- R:tuple[str,...]=T(['__init__', '_require_dependencies', '_issue_serial', '_append_receipt', '_read_cleanup_budget_clock', '_issue_cleanup_budget_epoch', '_require_live_cleanup_budget', '_terminalize_cleanup_budget', '_charge_cleanup_budget', '_begin_publication', '_finish_publication', '_fail_publication', '_require_clean_guard', '_require_building', '_copy_directory_fact', '_register_authority', '_require_authority', '_reauthenticate_directory', '_issue_inventory_cursor_provenance', '_require_inventory_cursor_provenance', '_issue_current_inventory_cursor', '_require_current_inventory_cursor', '_terminalize_inventory_cursor', '_acquire_metered_inventory_scan', '_require_current_inventory_scan', '_terminalize_inventory_scan', '_fail_inventory_advance_uncertain', '_terminalize_inventory_scan_end_observed', '_require_current_inventory_item', '_terminalize_inventory_item', '_yield_metered_inventory_item', '_require_pristine_inventory_classification', '_require_current_inventory_classification', '_reauthenticate_inventory_classification_parent', '_derive_inventory_classification', '_close_inventory_classification_owner', '_terminalize_inventory_classification', '_fail_inventory_classification_uncertain', '_classify_metered_inventory_item', '_require_current_empty_inventory', '_require_authenticated_empty_inventory', '_fail_empty_inventory_uncertain', '_authenticate_empty_inventory', 'register_borrowed_directory', '_retain_uncertain_owner', '_reconcile_mount_poison', '_namespace_mount_id', '_close_namespace_owner', '_namespace_owner_close_verified', '_retain_untransferred_raw', '_close_rejected_namespace_raw_once', '_open_namespace_owner', '_require_same_parent_proof', 'open_owned_cursor', 'close_owned_cursor', '_acquire_name_owner', '_validate_node_kind', '_copy_name_fact', '_register_name_fact', 'seal_name', '_register_inventory_classification_name_fact', '_require_name_fact', '_name_fact_matches', 'seal', '_require_teardown_authorization', '_require_name_absent', '_require_live_capability_slot', '_receipt_binding_matches', '_require_receipt_binding', '_publish_capability', '_require_live_capability', '_preauthorize_present_unlink', '_postauthorize_present_unlink', '_issue_a2_mutation_permit', '_preproof_parent_authority_matches', '_postissuer_capability_matches', '_terminal_unlink_capability_matches', '_trusted_live_mutation_permit', '_require_returned_mutation_permit', '_fail_present_unlink_preproof', '_fail_invalid_mutation_permit', '_fail_present_unlink_attempt', '_fail_present_unlink_terminal', '_archive_mutation_permit', 'consume_present', '_archive_capability', 'authorize_present', 'authorize_absence', 'authorize_rename', 'abandon_token'])
- cE=T((a.name for a in s.body if isinstance(a,a6)))
- prove(46,cE==R,'R namespace static journal method inventory differs')
+ cE=T((a.name for a in s.body if Z(a,a6)))
+ prove(46,cE==R)
  c={m:e(s,m)for m in R}
  bM=(d[14],d[46],d[11],d[31],d[13],d[10],d[5],d[21],d[7],d[1])
- prove(47,L(bM)==10 and OO((m in c for m in bM)),'R namespace A2g helper-role inventory differs')
- dg=dict(zip(T(['_require_pristine_inventory_classification', '_require_current_inventory_classification', '_reauthenticate_inventory_classification_parent', '_derive_inventory_classification', '_close_rejected_namespace_raw_once', '_close_inventory_classification_owner', '_register_inventory_classification_name_fact', '_terminalize_inventory_classification', '_fail_inventory_classification_uncertain', '_classify_metered_inventory_item', '_require_current_empty_inventory', '_require_authenticated_empty_inventory', '_fail_empty_inventory_uncertain', '_authenticate_empty_inventory']),D[4],strict=True))
- prove(48,OO((a0(c[m].args)==fc and c[m].returns is not None and(a0(cast(ast.AST,c[m].returns))==fj)for m,(fc,fj)in dg.items())),'R namespace A2g helper signatures differ')
+ prove(47,L(bM)==10 and OO((m in c for m in bM)))
+ dg=dict(zip(T(['_require_pristine_inventory_classification','_require_current_inventory_classification','_reauthenticate_inventory_classification_parent','_derive_inventory_classification','_close_rejected_namespace_raw_once','_close_inventory_classification_owner','_register_inventory_classification_name_fact','_terminalize_inventory_classification','_fail_inventory_classification_uncertain','_classify_metered_inventory_item','_require_current_empty_inventory','_require_authenticated_empty_inventory','_fail_empty_inventory_uncertain','_authenticate_empty_inventory']),D[4],strict=True))
+ prove(48,OO((a0(c[m].args)==fc and c[m].returns is not None and(a0(cast(ast.AST,c[m].returns))==fj)for m,(fc,fj)in dg.items())))
  def n(r:str)->tuple[tuple[str,int],...]:
   return T(((m,eM)for m in R if(eM:=b(c[m]).count(f'self.{r}'))))
- prove(49,n(d[101])==((d[97],1),)and n(d[97])==((d[105],1),(d[5],1))and(n(d[100])==((d[105],1),(d[5],1)))and(n(d[10])==((d[7],1),(d[1],1)))and(n('_close_namespace_owner')==((d[10],1),(d[88],1),(d[103],1),(d[80],1),(d[105],2),('_fail_present_unlink_preproof',1),('_fail_invalid_mutation_permit',1),('_fail_present_unlink_attempt',1),(d[98],1),(d[87],1),(d[92],1),(d[107],1)))and(n(d[91])==((d[17],1),(d[43],1),(d[1],2)))and(n(d[75])==((d[1],1),(d[88],1),(d[80],1)))and(n(d[13])==((d[75],1),))and(n(d[35])==((d[14],1),)),'R namespace A2g exact caller/count inventory differs')
+ prove(49,n(d[101])==((d[97],1),)and n(d[97])==((d[105],1),(d[5],1))and(n(d[100])==((d[105],1),(d[5],1)))and(n(d[10])==((d[7],1),(d[1],1)))and(n('_close_namespace_owner')==((d[10],1),(d[88],1),(d[103],1),(d[80],1),(d[105],2),('_fail_present_unlink_preproof',1),('_fail_invalid_mutation_permit',1),('_fail_present_unlink_attempt',1),(d[98],1),(d[87],1),(d[92],1),(d[107],1)))and(n(d[91])==((d[17],1),(d[43],1),(d[1],2)))and(n(d[75])==((d[1],1),(d[88],1),(d[80],1)))and(n(d[13])==((d[75],1),))and(n(d[35])==((d[14],1),)))
  eH=c[d[101]]
  dE=c[d[97]]
- prove(50,a0(eH.args)=='self, snapshot: DescriptorSnapshot, mount_id: int, kind: _Generation6RNamespaceNodeKind, hardlink_group: str | None' and b(dE).count('self._validate_node_kind')==1 and('self._validate_node_kind(snapshot, mount_id, kind, hardlink_group)' in a0(dE)),'R namespace A2g validate/copy signature propagation differs')
+ prove(50,a0(eH.args)=='self, snapshot: DescriptorSnapshot, mount_id: int, kind: _Generation6RNamespaceNodeKind, hardlink_group: str | None'and b(dE).count('self._validate_node_kind')==1 and('self._validate_node_kind(snapshot, mount_id, kind, hardlink_group)'in a0(dE)))
  cV=c[d[1]]
  di=c[d[11]]
  cA=c[d[13]]
@@ -21288,97 +21328,97 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  bc=b(di)
  ac=b(cA)
  aN=b(az)
- prove(51,j.count(d[57])==2 and j.count(d[9])==1 and(j.count(d[61])==1)and(j.count(d[68])==1)and(j.count('self._reauthenticate_inventory_classification_parent')==1)and(j.count('_GENERATION6_R_NAMESPACE_REAL_OS_GETUID')==1)and(j.count('_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD')==0)and(j.count(d[19])==0)and(j.count(d[25])==0)and(bc.count(d[19])==1)and(bc.count(d[68])==1)and(bc.count(d[25])==2)and(bc.count(d[9])==0)and(bc.count(d[57])==0),'R namespace A2g exact observation inventory differs')
+ prove(51,j.count(d[57])==2 and j.count(d[9])==1 and(j.count(d[61])==1)and(j.count(d[68])==1)and(j.count('self._reauthenticate_inventory_classification_parent')==1)and(j.count('_GENERATION6_R_NAMESPACE_REAL_OS_GETUID')==1)and(j.count('_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD')==0)and(j.count(d[19])==0)and(j.count(d[25])==0)and(bc.count(d[19])==1)and(bc.count(d[68])==1)and(bc.count(d[25])==2)and(bc.count(d[9])==0)and(bc.count(d[57])==0))
  h=a0(cV)
  bQ=aT(cV)
  aM=T((g for g in bQ if a0(g.func)==d[57]))
  bS=T((g for g in bQ if a0(g.func)==d[9]))
  bR=T((g for g in bQ if a0(g.func)==d[61]))
  bx=('binding.raw_entry.name == binding.component','opened_snapshot == named_snapshot','descriptor_token.snapshot == opened_snapshot','named_snapshot.uid == current_uid','named_snapshot.uid == authority_binding.fact.uid','entry_mount_id == parent_mount_id','entry_mount_id == authority_binding.fact.mount_id','parent_snapshot == parent_descriptor_record.token.snapshot','descriptor_flags == fcntl.FD_CLOEXEC','status_flags & os.O_ACCMODE == os.O_RDONLY','status_flags & os.O_PATH == os.O_PATH')
- prove(52,L(aM)==2 and L(bS)==1 and(L(bR)==1)and(aM[0].lineno<bS[0].lineno<aM[1].lineno<bR[0].lineno)and(h.find('classification_record.stat_attempts = 1')<h.find(d[9]))and(h.find('classification_record.open_attempts = 1')<h.find(d[61]))and(h.count('entry_increment=0')==2)and(h.count('encoded_name_bytes_increment=0')==2)and('os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC' in h)and('descriptor_token.snapshot' in h)and('descriptor_token.fd_flags' in h)and('descriptor_token.status_flags' in h)and OO((ll in h for ll in bx))and(not N((r.startswith('binding.raw_entry.')for r in j)))and('budget_record.operation_count == binding.operation_count_before + 2' in h)and('budget_record.entry_count == binding.entry_count_before' in h)and('budget_record.encoded_name_bytes == binding.encoded_name_bytes_before' in h),'R namespace A2g metering/authentication source differs')
+ prove(52,L(aM)==2 and L(bS)==1 and(L(bR)==1)and(aM[0].lineno<bS[0].lineno<aM[1].lineno<bR[0].lineno)and(h.find('classification_record.stat_attempts = 1')<h.find(d[9]))and(h.find('classification_record.open_attempts = 1')<h.find(d[61]))and(h.count('entry_increment=0')==2)and(h.count('encoded_name_bytes_increment=0')==2)and('os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC'in h)and('descriptor_token.snapshot'in h)and('descriptor_token.fd_flags'in h)and('descriptor_token.status_flags'in h)and OO((ll in h for ll in bx))and(not N((r.startswith('binding.raw_entry.')for r in j)))and('budget_record.operation_count == binding.operation_count_before + 2'in h)and('budget_record.entry_count == binding.entry_count_before'in h)and('budget_record.encoded_name_bytes == binding.encoded_name_bytes_before'in h))
  eQ=a0(az)
  cY=T((eQ.find(ll)for ll in('owner = object.__new__(FdOwner)','vars(owner) == {}','raw_result = _GENERATION6_R_NAMESPACE_REAL_OS_OPEN','invalid_evidence = raw_result','raw_result = _PID_SENTINEL',d[8],'low_descriptor = raw_result','self._close_rejected_namespace_raw_once(low_descriptor)','accepted_descriptor = raw_result','initialization_descriptor = accepted_descriptor','initialization_started = True','accepted_descriptor = _PID_SENTINEL','FdOwner.__init__(owner, initialization_descriptor, exact_label)')))
- prove(53,OO((ag>=0 for ag in cY))and OO((cY[ag]<cY[ag+1]for ag in range(L(cY)-1)))and(aN.count('object.__new__')==1)and(aN.count('_GENERATION6_R_NAMESPACE_REAL_OS_OPEN')==1)and(aN.count(d[8])==1)and(aN.count('self._close_rejected_namespace_raw_once')==1)and(aN.count('FdOwner.__init__')==1)and(aN.count(d[4])==0)and(aN.count('self._retain_untransferred_raw')==0)and(not N((a.finalbody for a in a3(az)if isinstance(a,a12)))),'R namespace A2g post-open responsibility partition differs')
+ prove(53,OO((ag>=0 for ag in cY))and OO((cY[ag]<cY[ag+1]for ag in range(L(cY)-1)))and(aN.count('object.__new__')==1)and(aN.count('_GENERATION6_R_NAMESPACE_REAL_OS_OPEN')==1)and(aN.count(d[8])==1)and(aN.count('self._close_rejected_namespace_raw_once')==1)and(aN.count('FdOwner.__init__')==1)and(aN.count(d[4])==0)and(aN.count('self._retain_untransferred_raw')==0)and(not N((a.finalbody for a in a3(az)if Z(a,a12)))))
  er=a0(cA)
  bE=T((er.find(ll)for ll in(d[8],d[4],'self._poisoned_descriptors.add','self._phase = _Generation6RNamespacePhase.UNCERTAIN')))
  aC=T((a for a in cA.body if Z(a,a12)))
- prove(54,ac.count(d[8])==1 and ac.count(d[4])==1 and OO((ag>=0 for ag in bE))and OO((bE[ag]<bE[ag+1]for ag in range(L(bE)-1)))and(L(aC)==2)and(b(aC[0]).count(d[8])==1)and(b(aC[1]).count(d[4])==1)and(ac.count('self._descriptor_ledger.initialize_owner')==0)and(ac.count(d[68])==0)and(ac.count(d[19])==0)and(ac.count(d[25])==0)and(ac.count('self._register_name_fact')==0),'R namespace A2g rejected-descriptor close differs')
+ prove(54,ac.count(d[8])==1 and ac.count(d[4])==1 and OO((ag>=0 for ag in bE))and OO((bE[ag]<bE[ag+1]for ag in range(L(bE)-1)))and(L(aC)==2)and(b(aC[0]).count(d[8])==1)and(b(aC[1]).count(d[4])==1)and(ac.count('self._descriptor_ledger.initialize_owner')==0)and(ac.count(d[68])==0)and(ac.count(d[19])==0)and(ac.count(d[25])==0)and(ac.count('self._register_name_fact')==0))
  cf=(*T((c[m]for m in bM)),az)
  C=T((r for a in cf for r in b(a)))
- dk=T((w.id for a in cf for w in a3(a)if isinstance(w,a1)))
- prove(55,OO((C.count(f'self.{m}')==0 for m in(d[80],'_reauthenticate_directory',d[55],d[105],d[81])))and d[2]not in dk and(C.count(d[0])==0)and(C.count(d[106])==0)and(C.count(d[111])==0)and(n(d[1])==()),'R namespace A2g integration/exclusion graph differs')
+ dk=T((w.id for a in cf for w in a3(a)if Z(w,a1)))
+ prove(55,OO((C.count(f'self.{m}')==0 for m in(d[80],'_reauthenticate_directory',d[55],d[105],d[81])))and d[2]not in dk and(C.count(d[0])==0)and(C.count(d[106])==0)and(C.count(d[111])==0)and(n(d[1])==()))
  aR=b(s)
- dt=T((a for a in U.body if isinstance(a,a8)and a.name==d[2]))
+ dt=T((a for a in U.body if Z(a,a8)and a.name==d[2]))
  co=T((g for g in aT(U)if a0(g.func)==d[2]))
- dN=T((a for a in U.body if isinstance(a,a2)and isinstance(a.target,a1)and(a.target.id==d[0])))
+ dN=T((a for a in U.body if Z(a,a2)and Z(a.target,a1)and(a.target.id==d[0])))
  eA=T((m for m in R if b(c[m]).count(d[0])))
- dT=T((a for a in s.body if isinstance(a,a6)and a.name==d[81]))
+ dT=T((a for a in s.body if Z(a,a6)and a.name==d[81]))
  bW=('dispatch','runtime','remote','production','trading','broker','exchange','order','publish')
- prove(56,L(dt)==1 and L(co)==1 and co[0]in aT(c['_authenticate_empty_inventory'])and(dk.count(d[2])==0)and(L(dN)==1)and(aR.count(d[0])==1)and(eA==(d[98],))and(C.count(d[0])==0)and(L(dT)==1)and(n(d[81])==((d[87],1),(d[104],1),(d[92],1)))and(aR.count(d[86])==3)and(C.count(d[86])==0)and(aR.count(d[106])==0)and(b(U).count(d[106])==2)and(not N((ll in r.lower()for ll in bW for r in C))),'R namespace A2g scoped inherited surface differs')
+ prove(56,L(dt)==1 and L(co)==1 and co[0]in aT(c['_authenticate_empty_inventory'])and(dk.count(d[2])==0)and(L(dN)==1)and(aR.count(d[0])==1)and(eA==(d[98],))and(C.count(d[0])==0)and(L(dT)==1)and(n(d[81])==((d[87],1),(d[104],1),(d[92],1)))and(aR.count(d[86])==3)and(C.count(d[86])==0)and(aR.count(d[106])==0)and(b(U).count(d[106])==2)and(not N((ll in r.lower()for ll in bW for r in C))))
  cL=a0(c[d[31]])
  dr=a0(c[d[100]])
  dB=a0(c['seal'])
  du=((1,'REGULAR'),(2,d[109]),(3,d[109]),(17,d[109]))
- prove(57,du==T(((eM,d[109]if eM>1 else 'REGULAR')for eM in(1,2,3,17)))and 'snapshot.link_count > 1' in cL and('snapshot.link_count == 1' in cL)and('r6-hardlink:{mount_id}:{snapshot.device}:{snapshot.inode}' in cL)and('len(group) < fact.link_count' in dr)and('candidate.link_count == fact.link_count' in dr)and('1 <= len(members) <= members[0].link_count' in dB)and('members[0].link_count > 1' in dB)and('len(members) == 2' not in dB),'R namespace A2g hardlink generalization differs')
+ prove(57,du==T(((eM,d[109]if eM>1 else'REGULAR')for eM in(1,2,3,17)))and'snapshot.link_count > 1'in cL and('snapshot.link_count == 1'in cL)and('r6-hardlink:{mount_id}:{snapshot.device}:{snapshot.inode}'in cL)and('len(group) < fact.link_count'in dr)and('candidate.link_count == fact.link_count'in dr)and('1 <= len(members) <= members[0].link_count'in dB)and('members[0].link_count > 1'in dB)and('len(members) == 2'not in dB))
  dJ=('INVENTORY_CLASSIFICATION_ATTEMPTING','INVENTORY_CLASSIFICATION_NOFOLLOW_STAT_OBSERVED','INVENTORY_CLASSIFICATION_HANDLE_AUTHENTICATED','INVENTORY_CLASSIFICATION_HANDLE_CLOSED','INVENTORY_CLASSIFICATION_ABORT_CLOSED','INVENTORY_CLASSIFICATION_REMOVABLE_CANDIDATE','INVENTORY_CLASSIFICATION_KNOWN_RESIDUE','INVENTORY_ITEM_CLASSIFIED_REMOVABLE_CANDIDATE','INVENTORY_ITEM_CLASSIFIED_KNOWN_RESIDUE','INVENTORY_CLASSIFICATION_UNCERTAIN','INVENTORY_ITEM_CLASSIFICATION_UNCERTAIN','NAME_FACT_SEALED')
- ea=T((w.value for a in cf for w in a3(a)if isinstance(w,a4)and type(w.value)is str))
- prove(58,OO((k in ea or k in T((eg[0]for fh in bI.values()for eg in fh))for k in dJ)),'R namespace A2g receipt vocabulary differs')
+ ea=T((w.value for a in cf for w in a3(a)if Z(w,a4)and type(w.value)is str))
+ prove(58,OO((k in ea or k in T((eg[0]for fh in bI.values()for eg in fh))for k in dJ)))
  u=c[d[21]]
  P=c[d[7]]
- bb=T((a for a in cV.body if isinstance(a,a12)))
- prove(59,L(bb)==1 and isinstance(bb[0].body[-1],A.Return)and isinstance(bb[0].body[-2],a14)and isinstance(bb[0].body[-2].value,a9)and(a0(bb[0].body[-2].value.func)==d[41])and isinstance(u.body[-1],a5)and(a0(u.body[-1].targets[0])==d[15])and isinstance(u.body[-1].value,a4)and(u.body[-1].value.value is None)and isinstance(P.body[-2],a5)and(a0(P.body[-2].targets[0])==d[15])and isinstance(P.body[-2].value,a4)and(P.body[-2].value.value is None)and isinstance(P.body[-1],a16),'R namespace A2g final publication/failure ordering differs')
+ bb=T((a for a in cV.body if Z(a,a12)))
+ prove(59,L(bb)==1 and Z(bb[0].body[-1],A.Return)and Z(bb[0].body[-2],a14)and Z(bb[0].body[-2].value,a9)and(a0(bb[0].body[-2].value.func)==d[41])and Z(u.body[-1],a5)and(a0(u.body[-1].targets[0])==d[15])and Z(u.body[-1].value,a4)and(u.body[-1].value.value is None)and Z(P.body[-2],a5)and(a0(P.body[-2].targets[0])==d[15])and Z(P.body[-2].value,a4)and(P.body[-2].value.value is None)and Z(P.body[-1],a16))
  ah=T((h.find(ll)for ll in('self._derive_inventory_classification',d[40],'self._register_inventory_classification_name_fact',d[41],'return classification')))
  cD=a0(u)
  ad=T((cD.find(ll)for ll in('record.state = state','item_record.state = item_state','outcome_receipt = self._append_receipt','record.outcome_receipt = outcome_receipt','terminal_receipt = self._append_receipt','\n    item_record.terminal_receipt = terminal_receipt','\n    record.terminal_receipt = terminal_receipt','self._archived_inventory_item_records.append(item_record)','self._archived_inventory_classification_records.append(record)','self._inventory_classification_residue_evidence.append(record)',d[53],d[3])))
  ef=a0(P)
  bV=T((ef.find(ll)for ll in('exact_record.state = _Generation6RNamespaceInventoryClassificationState.UNCERTAIN','exact_item_record.state = _Generation6RNamespaceInventoryItemState.UNCERTAIN',d[40],'classification_receipt = self._append_receipt','item_receipt = self._append_receipt','self._archived_inventory_item_records.append(exact_item_record)','self._archived_inventory_classification_records.append(exact_record)','self._inventory_classification_residue_evidence.append(exact_record)',d[53],d[3],'raise primary')))
- prove(60,OO((ag>=0 for ag in ah))and OO((ah[ag]<ah[ag+1]for ag in range(L(ah)-1)))and OO((ag>=0 for ag in ad))and OO((ad[ag]<ad[ag+1]for ag in range(L(ad)-1)))and OO((ag>=0 for ag in bV))and OO((bV[ag]<bV[ag+1]for ag in range(L(bV)-1)))and(cD.count(d[3])==1)and(ef.count(d[3])==1),'R namespace A2g exact success/failure publication sequence differs')
+ prove(60,OO((ag>=0 for ag in ah))and OO((ah[ag]<ah[ag+1]for ag in range(L(ah)-1)))and OO((ag>=0 for ag in ad))and OO((ad[ag]<ad[ag+1]for ag in range(L(ad)-1)))and OO((ag>=0 for ag in bV))and OO((bV[ag]<bV[ag+1]for ag in range(L(bV)-1)))and(cD.count(d[3])==1)and(ef.count(d[3])==1))
  dw=a0(c[d[110]])
  dO=(d[26],d[28],d[15],d[29],d[30],d[23],'self._inventory_classification_faulted')
- prove(61,OO((dw.count(ll)==1 for ll in dO)),'R namespace A2g exact store inventory differs')
+ prove(61,OO((dw.count(ll)==1 for ll in dO)))
  h0=c['_require_current_empty_inventory']
  h1=c['_require_authenticated_empty_inventory']
  h2=c['_fail_empty_inventory_uncertain']
  h3=c['_authenticate_empty_inventory']
  h6=a0(h2)
  h7=a0(h3)
- h8=T((a for a in h3.body if isinstance(a,a12)))
+ h8=T((a for a in h3.body if Z(a,a12)))
  h9=h8[0]
  ha=T((h7.find(ll)for ll in('scan_archive = self._archived_inventory_scan_records','scan_record = scan_archive[0]','scan_binding = scan_record.binding','trusted_scan = scan_binding.scan','type(scan) is _Generation6RNamespaceInventoryScan','advance_archive = self._archived_inventory_advance_records','advance_record = advance_archive[0]','cursor_record = scan_binding.cursor_record','type(self._inventory_cursor_issuance_faulted) is bool')))
- prove(62,L(h3.body)==2 and L(h8)==1 and L(h9.body)==61 and L(h9.handlers)==1 and OO((v>=0 for v in ha))and OO((ha[v]<ha[v+1]for v in range(L(ha)-1))),'R namespace A2h trusted-first empty authentication differs')
+ prove(62,L(h3.body)==2 and L(h8)==1 and L(h9.body)==61 and L(h9.handlers)==1 and OO((v>=0 for v in ha))and OO((ha[v]<ha[v+1]for v in range(L(ha)-1))))
  hb=T((h7.find(ll)for ll in('empty_inventory = _Generation6RNamespaceEmptyInventory','binding = _Generation6RNamespaceEmptyInventoryBinding','record = _Generation6RNamespaceEmptyInventoryRecord','self._empty_inventory_records_by_identity[empty_inventory_identity] = record','self._empty_inventory_records_by_serial[empty_inventory.serial] = record','self._live_empty_inventory_record = record','INVENTORY_EMPTY_AUTHENTICATING','self._require_current_empty_inventory(empty_inventory)','self._terminalize_inventory_cursor','record.state = _Generation6RNamespaceEmptyInventoryState.AUTHENTICATED','self._archived_empty_inventory_records.append(record)','INVENTORY_EMPTY_AUTHENTICATED','record.outcome_receipt = outcome_receipt','self._live_empty_inventory_record = None','return empty_inventory')))
- prove(63,OO((v>=0 for v in hb))and OO((hb[v]<hb[v+1]for v in range(L(hb)-1)))and isinstance(h9.body[-1],A.Return)and b(h9.body[-4])==('self._append_receipt',)and a0(h9.body[-4]).startswith('outcome_receipt = self._append_receipt(')and a0(h9.body[-3])=='record.outcome_receipt = outcome_receipt' and a0(h9.body[-2])=='self._live_empty_inventory_record = None' and(not N((aT(v)for v in h9.body[-3:]))),'R namespace A2h exact success commit differs')
+ prove(63,OO((v>=0 for v in hb))and OO((hb[v]<hb[v+1]for v in range(L(hb)-1)))and Z(h9.body[-1],A.Return)and b(h9.body[-4])==('self._append_receipt',)and a0(h9.body[-4]).startswith('outcome_receipt = self._append_receipt(')and a0(h9.body[-3])=='record.outcome_receipt = outcome_receipt'and a0(h9.body[-2])=='self._live_empty_inventory_record = None'and(not N((aT(v)for v in h9.body[-3:]))))
  hc=T((h6.find(ll)for ll in('self._empty_inventory_lifecycle_faulted = True','self._phase = _Generation6RNamespacePhase.UNCERTAIN','exact_record.state = _Generation6RNamespaceEmptyInventoryState.UNCERTAIN','INVENTORY_EMPTY_UNCERTAIN','self._archived_empty_inventory_records.append(exact_record)','self._live_empty_inventory_record = None')))
- prove(64,L(h2.body)==8 and a0(h2.body[0])=='self._empty_inventory_lifecycle_faulted = True' and a0(h2.body[1])=='self._phase = _Generation6RNamespacePhase.UNCERTAIN' and(not N((isinstance(a,a16)for a in a3(h2))))and b(h2).count('suppress')==3 and OO((v>=0 for v in hc))and OO((hc[v]<hc[v+1]for v in range(L(hc)-1)))and L(h9.handlers[0].body)==2 and isinstance(h9.handlers[0].body[-1],a16)and h9.handlers[0].body[-1].exc is None,'R namespace A2h fail-first nonretry authority differs')
+ prove(64,L(h2.body)==8 and a0(h2.body[0])=='self._empty_inventory_lifecycle_faulted = True'and a0(h2.body[1])=='self._phase = _Generation6RNamespacePhase.UNCERTAIN'and(not N((Z(a,a16)for a in a3(h2))))and b(h2).count('suppress')==3 and OO((v>=0 for v in hc))and OO((hc[v]<hc[v+1]for v in range(L(hc)-1)))and L(h9.handlers[0].body)==2 and Z(h9.handlers[0].body[-1],a16)and h9.handlers[0].body[-1].exc is None)
  hd=b(h3)
  he=('_Generation6RNamespaceEmptyInventory','_Generation6RNamespaceEmptyInventoryBinding','_Generation6RNamespaceEmptyInventoryRecord')
  hf=('self._empty_inventory_records_by_identity','self._empty_inventory_records_by_serial','self._live_empty_inventory_record','self._archived_empty_inventory_records','self._empty_inventory_lifecycle_faulted')
- prove(65,n('_require_current_empty_inventory')==(('_authenticate_empty_inventory',1),)and n('_require_authenticated_empty_inventory')==()and n('_fail_empty_inventory_uncertain')==(('_authenticate_empty_inventory',1),)and n('_authenticate_empty_inventory')==()and T((hd.count(v)for v in he))==(1,1,1)and h7.count('INVENTORY_EMPTY_AUTHENTICATING')==1 and h7.count('INVENTORY_EMPTY_AUTHENTICATED')==1 and h6.count('INVENTORY_EMPTY_UNCERTAIN')==1 and OO((dw.count(v)==1 for v in hf))and sum((v for _,v in n(d[91])))==4 and n('_terminalize_inventory_cursor')==(('_authenticate_empty_inventory',1),)and n('_terminalize_inventory_scan_end_observed')==((d[43],1),)and n(d[81])==((d[87],1),(d[104],1),(d[92],1)),'R namespace A2h constructor/caller/store inventory differs')
+ prove(65,n('_require_current_empty_inventory')==(('_authenticate_empty_inventory',1),)and n('_require_authenticated_empty_inventory')==()and n('_fail_empty_inventory_uncertain')==(('_authenticate_empty_inventory',1),)and n('_authenticate_empty_inventory')==()and T((hd.count(v)for v in he))==(1,1,1)and h7.count('INVENTORY_EMPTY_AUTHENTICATING')==1 and h7.count('INVENTORY_EMPTY_AUTHENTICATED')==1 and h6.count('INVENTORY_EMPTY_UNCERTAIN')==1 and OO((dw.count(v)==1 for v in hf))and sum((v for _,v in n(d[91])))==4 and n('_terminalize_inventory_cursor')==(('_authenticate_empty_inventory',1),)and n('_terminalize_inventory_scan_end_observed')==((d[43],1),)and n(d[81])==((d[87],1),(d[104],1),(d[92],1)))
  hg=T((a0(v.func)for f0 in(h0,h1,h2,h3)for v in aT(f0)))
  hi=c['_issue_a2_mutation_permit']
- prove(66,not N((v in hg for v in(d[0],d[106],d[111],d[108],d[81],d[91],d[1],d[43],'self._issue_a2_mutation_permit','self._terminalize_inventory_scan_end_observed','os.rmdir')))and(not N((isinstance(a,(A.Yield,A.YieldFrom))for f0 in(h0,h1,h2,h3)for a in a3(f0))))and hd.count('self._terminalize_inventory_cursor')==1 and L(hi.body)==1 and isinstance(hi.body[0],a16)and isinstance(hi.body[0].exc,a9)and a0(hi.body[0].exc.func)=='ContractError' and('EmptyInventory' not in a0(c['_publish_capability'])),'R namespace A2h nonmutation/nonobservation seal differs')
+ prove(66,not N((v in hg for v in(d[0],d[106],d[111],d[108],d[81],d[91],d[1],d[43],'self._issue_a2_mutation_permit','self._terminalize_inventory_scan_end_observed','os.rmdir')))and(not N((Z(a,(A.Yield,A.YieldFrom))for f0 in(h0,h1,h2,h3)for a in a3(f0))))and hd.count('self._terminalize_inventory_cursor')==1 and L(hi.body)==1 and Z(hi.body[0],a16)and Z(hi.body[0].exc,a9)and a0(hi.body[0].exc.func)=='ContractError'and('EmptyInventory'not in a0(c['_publish_capability'])))
  q=a0(s)
- bu=T((a for a in U.body if isinstance(a,a2)and isinstance(a.target,a1)and(a.target.id=='_GENERATION6_R_REAL_NEXT')))
- prove(67,L(bu)==1,'R namespace static A2g bundle start differs')
+ bu=T((a for a in U.body if Z(a,a2)and Z(a.target,a1)and(a.target.id=='_GENERATION6_R_REAL_NEXT')))
+ prove(67,L(bu)==1)
  db=bu[0].lineno
- prove(68,K(s.end_lineno)is int,'R namespace static bundle end differs')
+ prove(68,K(s.end_lineno)is int)
  dP=cast(int,s.end_lineno)
  f=T((a for a in U.body if db<=a.lineno<=dP))
- bo=T((f'capture:{a.target.id}' if isinstance(a,a2)and isinstance(a.target,a1)else f'class:{a.name}' if isinstance(a,a8)else f'function:{a.name}' if isinstance(a,a6)else d[60]if isinstance(a,a5)and N((isinstance(r,a1)and r.id==d[16]for r in a.targets))else f'unexpected:{type(a).__name__}' for a in f))
+ bo=T((f'capture:{a.target.id}'if Z(a,a2)and Z(a.target,a1)else f'class:{a.name}'if Z(a,a8)else f'function:{a.name}'if Z(a,a6)else d[60]if Z(a,a5)and N((Z(r,a1)and r.id==d[16]for r in a.targets))else f'unexpected:{type(a).__name__}'for a in f))
  dc=('_G6R_PN','_G6R_PK','_G6R_PE','_G6R_IK','_G6R_IE','_G6R_BK','_G6R_BE','_G6R_OK','_G6R_OE','_G6R_LK','_G6R_LE','_G6R_TK','_G6R_TE','_G6R_WK','_G6R_WE','_G6R_VK','_G6R_VE',d[45],'_G6R_SS','_G6R_SK','_G6R_SE','_G6R_AF','_G6R_AI','_G6R_NF','_G6R_NI','_G6R_VC','_G6R_VF','_G6R_VI','_G6R_VB','_G6R_G','_G6R_D')
- prove(69,L(f)==162 and OO((f'capture:{m}' in bo for m in dc))and(not N((fo.startswith('unexpected:')for fo in bo))),'R namespace canonical capture inventory differs')
+ prove(69,L(f)==162 and OO((f'capture:{m}'in bo for m in dc))and(not N((fo.startswith('unexpected:')for fo in bo))))
  cS='\n'.join(source.splitlines()[db-1:dP])+'\n'
  eC=b'TASK-064\x00GEN6\x00R-A2h\x00source-v1\x00'
  dm=eC+cS.encode('utf-8')
  eB=H.sha256(dm).hexdigest()
- prove(70,db==10578 and dP==20934 and(f[0]is bu[0])and(f[-1]is s)and OO((type(a.end_lineno)is int and a.end_lineno<f[ag+1].lineno for ag,a in enumerate(f[:-1])))and(L(dm)==845629)and(eB=='85c87fa9dee92d0af70c9de22dddf686d06e0c3bc7a25bb26536db497b5f3810'),'R namespace A2g reviewed source-bundle digest differs')
+ prove(70,db==10578 and dP==20934 and(f[0]is bu[0])and(f[-1]is s)and OO((type(a.end_lineno)is int and a.end_lineno<f[ag+1].lineno for ag,a in enumerate(f[:-1])))and(L(dm)==845629)and(eB=='85c87fa9dee92d0af70c9de22dddf686d06e0c3bc7a25bb26536db497b5f3810'))
  bw=b'TASK-064\x00GEN6\x00R-CAP1\x00ast-schema-v1\x00'
  aP=b'TASK-064\x00GEN6\x00R-CAP1\x00semantic-projection-v1\x00'
- prove(71,Y.version_info[:3]==(3,13,14),'R CAP1 Python AST runtime differs')
+ prove(71,sys.version_info[:3]==(3,13,14))
  cU=T((w for a in f for w in a3(a)))
  bO=T(sorted({(K(a).__name__,T(a._fields))for a in cU}))
  cI={fp:ag for ag,fp in enumerate(bO)}
- prove(72,L(cU)==187911 and L(bO)==65 and(L(cI)==65),'R CAP1 AST inventory differs')
+ prove(72,L(cU)==187911 and L(bO)==65 and(L(cI)==65))
  def cl(k:object)->bytes:
   return J.dumps(k,ensure_ascii=True,allow_nan=False,separators=(',',':'),sort_keys=False).encode('ascii')
  def fk(k:object)->list[object]:
@@ -21406,42 +21446,41 @@ def _generation6_r_authority_source_gates(source: str) -> None:
    return['c',bU.real.hex(),bU.imag.hex()]
   raise E('R CAP1 unsupported AST scalar')
  def aQ(k:object)->list[object]:
-  if isinstance(k,A.AST):
+  if Z(k,A.AST):
    fp=(type(k).__name__,T(k._fields))
    dI=cI.get(fp)
    if dI is None:
     raise E('R CAP1 unknown AST schema row')
    return['n',dI,[aQ(getattr(k,fn))for fn in k._fields]]
-  if isinstance(k,list):
+  if Z(k,list):
    return['l',[aQ(fs)for fs in k]]
   return fk(k)
  cm=[[m,list(fl)]for m,fl in bO]
  av=cl(cm)
  ba=H.sha256(bw)
  ba.update(av)
- prove(73,L(bw)==35 and L(av)==1860 and(H.sha256(av).hexdigest()=='c061a40c4ca4569d1e49b0635656de0337f35d5fa9aee113b43aaf4dd42f5083')and(L(bw)+L(av)==1895)and(ba.hexdigest()=='fcae3b5fa6c185eb1fb9c0f1ba1abc1b65152529497b3a19f5e094a0ce149852'),'R CAP1 AST schema projection differs')
+ prove(73,L(bw)==35 and L(av)==1860 and(H.sha256(av).hexdigest()=='c061a40c4ca4569d1e49b0635656de0337f35d5fa9aee113b43aaf4dd42f5083')and(L(bw)+L(av)==1895)and(ba.hexdigest()=='fcae3b5fa6c185eb1fb9c0f1ba1abc1b65152529497b3a19f5e094a0ce149852'))
  def eT(a:ast.stmt)->str:
-  if isinstance(a,a2)and isinstance(a.target,a1):
+  if Z(a,a2)and Z(a.target,a1):
    return f'capture:{a.target.id}'
-  if isinstance(a,a8):
+  if Z(a,a8):
    return f'class:{a.name}'
-  if isinstance(a,a6):
+  if Z(a,a6):
    return f'function:{a.name}'
-  if isinstance(a,a5)and N((isinstance(r,a1)and r.id==d[16]for r in a.targets)):
-   return d[60]
+  if Z(a,a5)and N((Z(r,a1)and r.id==d[16]for r in a.targets)):
+   return cast(str,d[60])
   raise E('R CAP1 unsupported bundle root')
  def fg(a:ast.stmt)->int:
   if type(a.end_lineno)is not int:
    raise E('R CAP1 bundle root end line differs')
   return a.end_lineno
- aa:tuple[tuple[str,int,int,int,str],...]=T(((fw,*fx)for fw,fx in zip(T((fD.replace('@','capture:_GENERATION6_R_NAMESPACE_').replace('#','capture:_GENERATION6_R_').replace('!','capture:_G6R_').replace('%','class:_Generation6RNamespace').replace('&','class:_Generation6R').replace('?','function:_generation6_r_').replace('~','alias:_Generation6RNamespace')for fD in ['#REAL_NEXT', '#REAL_STOP_ITERATION', '#REAL_DIRENTRY_TYPE', '#REAL_LIST_APPEND', '#REAL_LIST_GETITEM', '#REAL_TYPE', '#REAL_ID', '#REAL_INT', '#REAL_BOOL', '#REAL_TUPLE', '#REAL_DICT', '#REAL_LEN', '#REAL_GETATTR', '#REAL_DICT_ITEMS', '#REAL_TYPE_GETATTRIBUTE', '#REAL_OBJECT_GETATTRIBUTE', '#REAL_OBJECT_SETATTR', '#REAL_TUPLE_GETITEM', '#PY_TPFLAGS_IMMUTABLETYPE', '#TPFLAGS_IMMUTABLETYPE', '#TPFLAGS_HEAPTYPE', '#TYPE_SECURITY_FLAGS_MASK', '&Phase', '&DescriptorState', '&OwnerToken', '&OwnerRecord', '&AuthorityEvent', '&IteratorToken', '&ScandirCapability', '&AuthorityLedger', '#CAPTURED_APPEND_EVENT', '&ScandirProxy', '#CAPTURED_SCANDIR_PROXY_NEXT', '!PN', '!PK', '!PE', '!IK', '!IE', '!BK', '!BE', '!OK', '!OE', '!LK', '!LE', '!TK', '!TE', '!WK', '!WE', '!VK', '!VE', '#CAPTURED_APPEND_EVENT_INTEGRITY', '#CAPTURED_APPEND_EVENT_CLOSURE_BINDINGS', '#CAPTURED_SCANDIR_PROXY_NEXT_INTEGRITY', '#CAPTURED_SCANDIR_PROXY_NEXT_CLOSURE_BINDINGS', '#CAPTURED_AUTHORITY_EVENT_CLASS', '#CAPTURED_AUTHORITY_EVENT_INIT', '#CAPTURED_AUTHORITY_EVENT_INIT_CLOSURE', '#CAPTURED_AUTHORITY_EVENT_INIT_CLOSURE_BINDINGS', '#CAPTURED_AUTHORITY_EVENT_INIT_INTEGRITY', '#AUTHORITY_EVENT_CLASS_SEAL', '#SCANDIR_PROXY_CLASS_SEAL', '#AUTHORITY_LEDGER_CLASS_SEAL', '#ITERATOR_TOKEN_CLASS_SEAL', '#OWNER_TOKEN_CLASS_SEAL', '!SS', '!SK', '!SE', '!AF', '!AI', '!NF', '!NI', '!VC', '!VF', '!VI', '!VB', '!G', '!D', '?socket_detach_handoff', '&AuthorityScope', '@REAL_OS_STAT', '@REAL_OS_OPEN', '@REAL_OS_FSTAT', '@REAL_OS_UNLINK', '@REAL_OS_GETUID', '@REAL_FCNTL', '@REAL_MONOTONIC_NS', '@CLEANUP_MAX_DEPTH', '@CLEANUP_MAX_ENTRIES', '@CLEANUP_MAX_ENCODED_NAME_BYTES', '@CLEANUP_MAX_OPERATIONS', '@CLEANUP_DEADLINE_NS', '@CAPTURED_SNAPSHOT_STAT', '@CAPTURED_SNAPSHOT_FD', '@CAPTURED_STABLE_DIRECTORY_MATCHES', '@CAPTURED_MOUNT_ID', '@CAPTURED_COMPONENT', '@CAPTURED_FD_REQUIRE', '@CAPTURED_S_IFMT', '@CAPTURED_S_ISDIR', '@CAPTURED_S_ISREG', '@REAL_OS_FSENCODE', '?namespace_filesystem_component', '%Phase', '%TokenState', '%Action', '%NodeKind', '%AuthorityKind', '%OwnerState', '%OwnerKind', '%OwnerPurpose', '%ContextState', '%CloseEvent', '%MutationPermitState', '%CleanupBudgetState', '%CleanupBudgetEvent', '@CLEANUP_BUDGET_EVENT_BY_STATE', '%InventoryCursorState', '%InventoryScanState', '%InventoryAdvanceState', '%InventoryItemState', '%InventoryClassificationState', '%EmptyInventoryState', '%TerminalEvent', '%DirectoryFact', '%NameFact', '%DirectoryAuthority', '%DirectoryBinding', '%DirectoryRecord', '%OwnerContextBinding', '%OwnerContext', '%PresentToken', '%AbsenceToken', '%RenameToken', '%MutationPermit', '~LiveToken', '%CapabilityBinding', '%CapabilityRecord', '%UnlinkPreproof', '%MutationPermitBinding', '%MutationPermitRecord', '%CleanupBudgetEpoch', '%InventoryCursor', '%InventoryScan', '%InventoryAdvance', '%InventoryItem', '%InventoryClassification', '%EmptyInventory', '%Receipt', '%CleanupBudgetRecord', '%InventoryCursorBinding', '%InventoryCursorRecord', '%InventoryScanBinding', '%InventoryScanRecord', '%InventoryAdvanceBinding', '%InventoryAdvanceRecord', '%InventoryItemBinding', '%InventoryItemRecord', '%InventoryClassificationBinding', '%InventoryClassificationRecord', '%EmptyInventoryBinding', '%EmptyInventoryRecord', '%Journal'])),D[6],strict=True)))
  aW=T(((eT(a),a.lineno,fg(a),L(dH),H.sha256(dH).hexdigest())for a in f for dH in(cl(aQ(a)),)))
- prove(74,aW==aa,'R CAP1 ordered bundle-root projection inventory differs')
+ prove(74,aW==aa and T(q[1:]for q in aa)==D[6])
  dd:list[object]=['TASK064-G6-R-CAP1-SEMANTIC-PROJECTION-V1',['contract',6,'ec89a1df740805cc9b43e6f2530e940c0bf9b66e8f25ed878d3207d091c4bcb8'],['python_ast','3.13.14','attributes-excluded','schema-indexed-fields'],['schema',cm],['bundle',10578,20934,L(f),aQ(list(f))]]
  X=cl(dd)
  aI=H.sha256(aP)
  aI.update(X)
- prove(75,L(aP)==44 and L(X)==3794008 and(H.sha256(X).hexdigest()=='e1286eb7fa007ec70afb29ccefa7a9af0f7a17097860923a99dbc4c9945d77ea')and(L(aP)+L(X)==3794052)and(aI.hexdigest()=='21eef13d57b9ee7a8182db127ca60b6e0171265131c29683a69d8f672ae2983a'),'R CAP1 lossless semantic projection differs')
+ prove(75,L(aP)==44 and L(X)==3794008 and(H.sha256(X).hexdigest()=='e1286eb7fa007ec70afb29ccefa7a9af0f7a17097860923a99dbc4c9945d77ea')and(L(aP)+L(X)==3794052)and(aI.hexdigest()=='21eef13d57b9ee7a8182db127ca60b6e0171265131c29683a69d8f672ae2983a'))
  cp=T((es.removeprefix('capture:')for es,fu,fv,fr,fq in aa if es.startswith('capture:')))
  at:tuple[str,...]=(d[67],d[63],d[71],d[70],d[77],d[17],d[36],d[56],d[69],d[51],d[35],d[55],d[43])
  at=(*at,d[14],d[46],d[11],d[31],d[13],d[10],d[5],d[21],d[7],d[1],'_require_current_empty_inventory','_require_authenticated_empty_inventory','_fail_empty_inventory_uncertain','_authenticate_empty_inventory')
@@ -21450,27 +21489,27 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  do=T((g for dv in c.values()for g in aT(dv)))
  cB=bf(d[20])
  eb=T(a3(cB))
- ew=lambda fD:(fD.lineno,fD.col_offset)  # noqa: E731
- eh=T(sorted((fD for fD in eb if isinstance(fD,a9)and isinstance(fD.func,a1)and(fD.func.id=='prove')),key=ew))
- cC=T(sorted((fD for fD in eb if isinstance(fD,a11)and isinstance(fD.value,a1)and(fD.value.id=='D')and isinstance(fD.slice,a4)and(type(fD.slice.value)is int)),key=ew))
- if not(T(map(L,ROWS))==(85,85,85)and L(eh)==85 and(T((fD.args[0].value for fD in eh if L(fD.args)==3 and isinstance(fD.args[0],a4)and(type(fD.args[0].value)is int)))==T(range(85)))and(sum((1 for fD in eb if isinstance(fD,a1)and isinstance(fD.ctx,a18)and(fD.id=='D')))==L(cC)==10)and(T((cast(ast.Constant,fD.slice).value for fD in cC))==(0,5,1,2,3,3,3,3,4,6))):
+ ew=lambda fD:(fD.lineno,fD.col_offset)#noqa:E731
+ eh=T(sorted((fD for fD in eb if Z(fD,a9)and Z(fD.func,a1)and(fD.func.id=='prove')),key=ew))
+ cC=T(sorted((fD for fD in eb if Z(fD,a11)and Z(fD.value,a1)and(fD.value.id=='D')and Z(fD.slice,a4)and(type(fD.slice.value)is int)),key=ew))
+ if not(T(map(L,ROWS))==(85,85,85)and L(eh)==85 and(T((fD.args[0].value for fD in eh if L(fD.args)==2 and Z(fD.args[0],a4)and(type(fD.args[0].value)is int)))==T(range(85)))and(sum((1 for fD in eb if Z(fD,a1)and Z(fD.ctx,a18)and(fD.id=='D')))==L(cC)==10)and(T((cast(ast.Constant,fD.slice).value for fD in cC))==(0,5,1,2,3,3,3,3,4,6))):
   raise E('R CAP2-A2H static proof/RHS consumer binding differs')
  W=T((a for a in U.body if a not in f and a is not cB))
  cu=set(cp)
  bZ=set(at)
  bl=B|{'DirectoryOwner','FdOwner','PrivateRoot'}
  def de(a:ast.expr)->str:
-  if isinstance(a,a1):
+  if Z(a,a1):
    return a.id
-  if isinstance(a,a7):
+  if Z(a,a7):
    return a.attr
-  return ''
- bz=T(((type(a.ctx).__name__,a.id)for aY in W for a in a3(aY)if isinstance(a,a1)and isinstance(a.ctx,(a13,a15))and(a.id in cu)))
+  return''
+ bz=T(((type(a.ctx).__name__,a.id)for aY in W for a in a3(aY)if Z(a,a1)and Z(a.ctx,(a13,a15))and(a.id in cu)))
  bq=T(((de(g.func),a0(g.func))for aY in W for g in aT(aY)if de(g.func)in bZ))
  aU=T((a0(g.func)for aY in W for g in aT(aY)if a0(g.func)in B))
- bv=T(((type(a.ctx).__name__,a.id)for aY in W for a in a3(aY)if isinstance(a,a1)and isinstance(a.ctx,(a13,a15))and(a.id in bl)))
+ bv=T(((type(a.ctx).__name__,a.id)for aY in W for a in a3(aY)if Z(a,a1)and Z(a.ctx,(a13,a15))and(a.id in bl)))
  bN=((d[58],bz),(d[73],bq),(d[65],aU),(d[52],bv))
- prove(76,L(cp)==91 and L(at)==27 and(L(B)==58)and(L(bl)==61)and(bN==((d[58],()),(d[73],()),(d[65],()),(d[52],()))),'R CAP1 ordered external residuals differ')
+ prove(76,L(cp)==91 and L(at)==27 and(L(B)==58)and(L(bl)==61)and(bN==((d[58],()),(d[73],()),(d[65],()),(d[52],()))))
  aS=True
  aF=True
  al=True
@@ -21486,51 +21525,51 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  aL:tuple[str,...]=(d[74],d[95],d[93],d[94],d[64],d[33],d[27],d[42])
  aO=False
  bH=(d[44],)
- prove(77,K(aS)is bool and aS and(K(aF)is bool)and aF and(K(al)is bool)and al and(K(an)is bool)and an and(K(aZ)is bool)and aZ and(K(au)is bool)and au and(K(aG)is bool)and aG and(K(ae)is bool)and ae and(K(F)is bool)and F and(K(ap)is bool)and ap and(K(G)is bool)and G and(K(aE)is bool)and(not aE)and(aL==(d[74],d[95],d[93],d[94],d[64],d[33],d[27],d[42]))and(K(aO)is bool)and(not aO)and(bH==(d[44],))and OO((m in i for m in('_Generation6RNamespaceInventoryCursor',d[66],d[2])))and ('consume_rmdir' not in q)and OO((ll in q for ll in('_Generation6RNamespaceCleanupBudgetEpoch','_Generation6RNamespaceCleanupBudgetRecord','_issue_cleanup_budget_epoch',d[91],'_Generation6RNamespaceInventoryCursorBinding','_Generation6RNamespaceInventoryCursorRecord',d[67],d[63],d[71],d[70],d[77],d[50],d[66],'_Generation6RNamespaceInventoryScanBinding','_Generation6RNamespaceInventoryScanRecord',d[17],d[36],d[56],d[38],'_Generation6RNamespaceInventoryAdvance','_Generation6RNamespaceInventoryAdvanceBinding','_Generation6RNamespaceInventoryAdvanceRecord',d[49],'_Generation6RNamespaceInventoryItem','_Generation6RNamespaceInventoryItemBinding','_Generation6RNamespaceInventoryItemRecord',d[69],d[51],d[35],d[55],d[43]))),'R namespace A2f budget/RMDIR readiness and current capability differ')
+ prove(77,K(aS)is bool and aS and(K(aF)is bool)and aF and(K(al)is bool)and al and(K(an)is bool)and an and(K(aZ)is bool)and aZ and(K(au)is bool)and au and(K(aG)is bool)and aG and(K(ae)is bool)and ae and(K(F)is bool)and F and(K(ap)is bool)and ap and(K(G)is bool)and G and(K(aE)is bool)and(not aE)and(aL==(d[74],d[95],d[93],d[94],d[64],d[33],d[27],d[42]))and(K(aO)is bool)and(not aO)and(bH==(d[44],))and OO((m in i for m in('_Generation6RNamespaceInventoryCursor',d[66],d[2])))and('consume_rmdir'not in q)and OO((ll in q for ll in('_Generation6RNamespaceCleanupBudgetEpoch','_Generation6RNamespaceCleanupBudgetRecord','_issue_cleanup_budget_epoch',d[91],'_Generation6RNamespaceInventoryCursorBinding','_Generation6RNamespaceInventoryCursorRecord',d[67],d[63],d[71],d[70],d[77],d[50],d[66],'_Generation6RNamespaceInventoryScanBinding','_Generation6RNamespaceInventoryScanRecord',d[17],d[36],d[56],d[38],'_Generation6RNamespaceInventoryAdvance','_Generation6RNamespaceInventoryAdvanceBinding','_Generation6RNamespaceInventoryAdvanceRecord',d[49],'_Generation6RNamespaceInventoryItem','_Generation6RNamespaceInventoryItemBinding','_Generation6RNamespaceInventoryItemRecord',d[69],d[51],d[35],d[55],d[43]))))
  am=True
  aL=(d[64],d[33],d[27],d[42])
- prove(78,K(am)is bool and am and(K(aE)is bool)and(not aE)and(aL==(d[64],d[33],d[27],d[42]))and(K(aO)is bool)and(not aO)and(bH==(d[44],))and OO((ll in q for ll in('_Generation6RNamespaceInventoryClassificationState',d[34],d[22],d[24],d[1]))),'R namespace A2g readiness transition differs')
+ prove(78,K(am)is bool and am and(K(aE)is bool)and(not aE)and(aL==(d[64],d[33],d[27],d[42]))and(K(aO)is bool)and(not aO)and(bH==(d[44],))and OO((ll in q for ll in('_Generation6RNamespaceInventoryClassificationState',d[34],d[22],d[24],d[1]))))
  a2H=True
  a2R=True
  a2P:tuple[str,...]=()
- prove(79,K(a2H)is bool and a2H and(K(aE)is bool)and(not aE)and(aL==(d[64],d[33],d[27],d[42]))and(K(a2R)is bool)and a2R and(a2P==())and(K(aO)is bool)and(not aO)and(bH==(d[44],))and OO((ll in q for ll in('_Generation6RNamespaceEmptyInventoryState','_Generation6RNamespaceEmptyInventoryBinding','_Generation6RNamespaceEmptyInventoryRecord','_authenticate_empty_inventory','_require_current_empty_inventory','_require_authenticated_empty_inventory')))and('len(advance_archive) == 1' in h7)and('not self._inventory_item_records_by_identity' in h7)and('one-item-then-end' not in q.lower()),'R namespace A2h authenticated-empty readiness differs')
+ prove(79,K(a2H)is bool and a2H and(K(aE)is bool)and(not aE)and(aL==(d[64],d[33],d[27],d[42]))and(K(a2R)is bool)and a2R and(a2P==())and(K(aO)is bool)and(not aO)and(bH==(d[44],))and OO((ll in q for ll in('_Generation6RNamespaceEmptyInventoryState','_Generation6RNamespaceEmptyInventoryBinding','_Generation6RNamespaceEmptyInventoryRecord','_authenticate_empty_inventory','_require_current_empty_inventory','_require_authenticated_empty_inventory')))and('len(advance_archive) == 1'in h7)and('not self._inventory_item_records_by_identity'in h7)and('one-item-then-end'not in q.lower()))
  S={'self._authority_records_by_serial','self._authority_records_by_identity','self._authority_records_by_owner_identity','self._directory_facts_by_serial','self._name_facts_by_key','self._hardlink_groups','self._capability_records_by_serial','self._capability_records_by_identity','self._archived_capability_records','self._mutation_permit_records_by_serial','self._mutation_permit_records_by_identity','self._archived_mutation_permit_records','self._cleanup_budget_records_by_serial','self._cleanup_budget_records_by_identity','self._inventory_cursor_bindings_by_identity','self._inventory_cursor_bindings_by_serial','self._inventory_cursor_records_by_identity','self._inventory_cursor_records_by_serial','self._archived_inventory_cursor_records','self._inventory_scan_records_by_identity','self._inventory_scan_records_by_serial','self._archived_inventory_scan_records','self._inventory_scan_proxy_quarantine','self._inventory_advance_records_by_identity','self._inventory_advance_records_by_serial','self._archived_inventory_advance_records','self._inventory_item_records_by_identity','self._inventory_item_records_by_serial','self._archived_inventory_item_records','self._inventory_raw_entry_quarantine','self._namespace_owner_tokens','self._namespace_owner_contexts','self._receipts'}
  S=S|{d[26],d[28],d[29],d[30],d[23],'self._untransferred_raw_quarantine','self._empty_inventory_records_by_identity','self._empty_inventory_records_by_serial','self._archived_empty_inventory_records'}
- bF:tuple[str,...]=T((a0(g)for g in do if isinstance(g.func,a7)and a0(g.func.value)in S and(g.func.attr in{'clear','discard','pop','popitem','remove','__delitem__'})))
- cq=T((a0(a)for dv in c.values()for a in a3(dv)if isinstance(a,a11)and isinstance(a.ctx,a15)and(a0(a.value)in S)))
+ bF:tuple[str,...]=T((a0(g)for g in do if Z(g.func,a7)and a0(g.func.value)in S and(g.func.attr in{'clear','discard','pop','popitem','remove','__delitem__'})))
+ cq=T((a0(a)for dv in c.values()for a in a3(dv)if Z(a,a11)and Z(a.ctx,a15)and(a0(a.value)in S)))
  cn={d[111],d[106],d[113],d[114],d[108],'Path.unlink','pathlib.Path.unlink','shutil.rmtree','ctypes.CDLL','ctypes.PyDLL','syscall'}
  cw=T((a0(g.func)for g in do if a0(g.func)in cn))
- cg=T((a0(a)for dv in c.values()for a in a3(dv)if isinstance(a,(a5,a2,a10))and a.value is not None and(a0(a.value)in{d[0],*cn})))
- dh=T((a.value for dv in c.values()for a in a3(dv)if isinstance(a,a4)and type(a.value)is str))
- prove(80,not bF and(not cq)and(not cw)and(not cg)and(b(s).count(d[0])==1)and(not N(('RMDIR_' in k or 'RMDIR_CONSUMED' in k or 'PRESENT_RMDIR' in k for k in dh)))and('_GENERATION6_R_NAMESPACE_REAL_OS_RMDIR' not in q)and(d[113]not in q)and('os.rename(' not in q)and(d[108]not in q)and('pathlib' not in q.lower())and('shutil' not in q.lower())and('syscall' not in q.lower()),'R namespace A1b destructive/strong-reference surface differs')
+ cg=T((a0(a)for dv in c.values()for a in a3(dv)if Z(a,(a5,a2,a10))and a.value is not None and(a0(a.value)in{d[0],*cn})))
+ dh=T((a.value for dv in c.values()for a in a3(dv)if Z(a,a4)and type(a.value)is str))
+ prove(80,not bF and(not cq)and(not cw)and(not cg)and(b(s).count(d[0])==1)and(not N(('RMDIR_'in k or'RMDIR_CONSUMED'in k or'PRESENT_RMDIR'in k for k in dh)))and('_GENERATION6_R_NAMESPACE_REAL_OS_RMDIR'not in q)and(d[113]not in q)and('os.rename('not in q)and(d[108]not in q)and('pathlib'not in q.lower())and('shutil'not in q.lower())and('syscall'not in q.lower()))
  bJ={'register_borrowed_directory',d[88],d[103],d[105],'seal',d[87],d[104],d[92],d[98],d[107]}
  t=bf(d[20])
  y=T((a for a in U.body if a not in f and a is not t))
  ar={*aj,*x,d[16]}
  bC=ar|bJ|cx
- cT={r.id for a in a3(U)if isinstance(a,(a5,a2,a10))and isinstance(a.value,a4)and isinstance(a.value.value,str)and(a.value.value in bC)for r in(T(a.targets)if isinstance(a,a5)else(a.target,))if isinstance(r,a1)}
+ cT={r.id for a in a3(U)if Z(a,(a5,a2,a10))and Z(a.value,a4)and Z(a.value.value,str)and(a.value.value in bC)for r in(T(a.targets)if Z(a,a5)else(a.target,))if Z(r,a1)}
  def eE(a:ast.expr)->bool:
-  return isinstance(a,a4)and isinstance(a.value,str)and(a.value in bC)or(isinstance(a,a1)and a.id in cT)
- cj=T((a.id for aY in y for a in a3(aY)if isinstance(a,a1)and isinstance(a.ctx,a18)and(a.id in ar)))
- ce=T(((type(a.ctx).__name__,a.id)for aY in y for a in a3(aY)if isinstance(a,a1)and isinstance(a.ctx,(a13,a15))and(a.id in ar)))
- ci=T((a0(a)for aY in y for a in a3(aY)if isinstance(a,a7)and a.attr in ar))
- cs=T((a0(a)for aY in y for a in a3(aY)if isinstance(a,a11)and eE(a.slice)))
- dj=T((a0(g)for aY in y for g in aT(aY)if(a0(g.func)in{'delattr','dict.__setitem__','getattr','operator.setitem','setattr','type.__setattr__'}or(isinstance(g.func,a7)and g.func.attr in{'__getitem__','__setitem__','get','pop','setdefault','update'}))and N((eE(cG)for cG in g.args))))
+  return Z(a,a4)and Z(a.value,str)and(a.value in bC)or(Z(a,a1)and a.id in cT)
+ cj=T((a.id for aY in y for a in a3(aY)if Z(a,a1)and Z(a.ctx,a18)and(a.id in ar)))
+ ce=T(((type(a.ctx).__name__,a.id)for aY in y for a in a3(aY)if Z(a,a1)and Z(a.ctx,(a13,a15))and(a.id in ar)))
+ ci=T((a0(a)for aY in y for a in a3(aY)if Z(a,a7)and a.attr in ar))
+ cs=T((a0(a)for aY in y for a in a3(aY)if Z(a,a11)and eE(a.slice)))
+ dj=T((a0(g)for aY in y for g in aT(aY)if(a0(g.func)in{'delattr','dict.__setitem__','getattr','operator.setitem','setattr','type.__setattr__'}or(Z(g.func,a7)and g.func.attr in{'__getitem__','__setitem__','get','pop','setdefault','update'}))and N((eE(cG)for cG in g.args))))
  dM=T((a0(g.func)for aY in y for g in aT(aY)if a0(g.func)in{'eval','exec'}))
  cR=T((g for a in U.body if a not in i.values()and a is not t for g in aT(a)))
- prove(81,not cj and(not ce)and(not ci)and(not cs)and(not dj)and(not dM)and(not N((a0(g.func)in B or(isinstance(g.func,a7)and g.func.attr in bJ)for g in cR))),'R namespace static integration block has an external call site')
- prove(82,K(t.end_lineno)is int,'R namespace A2h gate end differs')
+ prove(81,not cj and(not ce)and(not ci)and(not cs)and(not dj)and(not dM)and(not N((a0(g.func)in B or(Z(g.func,a7)and g.func.attr in bJ)for g in cR))))
+ prove(82,K(t.end_lineno)is int)
  et=t.lineno
  eJ=cast(int,t.end_lineno)
- bg='c360bcc42d88b75d4770e39971d5d3ab397936c79b50b72dadcfae858fa4af15'
+ bg='f6401a053f8c69cda3afecdf0a956dac73a92d1d75c6dd70bdba7e2b452ba7f3'
  aq='\n'.join(source.splitlines()[et-1:eJ])+'\n'
- prove(83,aq.count(bg)==1,'R namespace A2h gate digest token differs')
+ prove(83,aq.count(bg)==1)
  aq=aq.replace(bg,'0'*64)
- eO=b'TASK-064\x00GEN6\x00R-CAP2-A2H-R1\x00gate-v1\x00'
+ eO=b'TASK-064\x00GEN6\x00R-CAP3-A2H-R14\x00gate-v1\x00'
  dR=eO+aq.encode('utf-8')
  eN=H.sha256(dR).hexdigest()
  dK=U.body.index(t)
- prove(84,et==20938 and eJ==21533 and(U.body[dK+1]is bf(d[79]))and(L(dR)==80964)and(eN==bg),'R namespace A2h reviewed gate digest differs')
+ prove(84,et==20938 and eJ==21572 and(U.body[dK+1]is bf(d[79]))and(L(dR)==67237)and(eN==bg))
 # fmt: on
 
 
