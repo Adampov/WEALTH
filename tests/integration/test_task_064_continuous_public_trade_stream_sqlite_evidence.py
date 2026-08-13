@@ -4363,19 +4363,29 @@ def _report_bootstrap_path_evidence(
     )
 
     replaced_token = harness.bootstrap_store(tmp_path)
-    replaced_token._database_path.unlink()
-    replacement_descriptor = os.open(
-        replaced_token._database_path,
-        os.O_CREAT | os.O_EXCL | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
-        0o600,
-    )
-    os.close(replacement_descriptor)
-    checks.append(
-        _capture_rejection(
-            "replaced_database",
-            token=replaced_token,
+    with contextlib.ExitStack() as replacement_descriptors:
+        retained_descriptor = os.open(
+            replaced_token._database_path,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
         )
-    )
+        replacement_descriptors.callback(os.close, retained_descriptor)
+        replaced_token._database_path.unlink()
+        replacement_descriptor = os.open(
+            replaced_token._database_path,
+            os.O_CREAT
+            | os.O_EXCL
+            | os.O_RDWR
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0),
+            0o600,
+        )
+        replacement_descriptors.callback(os.close, replacement_descriptor)
+        checks.append(
+            _capture_rejection(
+                "replaced_database",
+                token=replaced_token,
+            )
+        )
 
     alias_token = harness.bootstrap_store(tmp_path)
     allowed_alias = alias_token._generation_root / "store.sqlite3-shm"
@@ -8044,16 +8054,26 @@ def test_path_token_and_permission_guards_fail_closed(tmp_path: Path) -> None:
     assert absent.value.code is harness.HarnessFailureCode.UNAVAILABLE
 
     replaced = harness.bootstrap_store(tmp_path)
-    replaced._database_path.unlink()
-    replacement_descriptor = os.open(
-        replaced._database_path,
-        os.O_CREAT | os.O_EXCL | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
-        0o600,
-    )
-    os.close(replacement_descriptor)
-    with pytest.raises(harness.HarnessFailure) as swapped:
-        harness.verify_store(replaced)
-    assert swapped.value.code is harness.HarnessFailureCode.UNAVAILABLE
+    with contextlib.ExitStack() as replacement_descriptors:
+        retained_descriptor = os.open(
+            replaced._database_path,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
+        )
+        replacement_descriptors.callback(os.close, retained_descriptor)
+        replaced._database_path.unlink()
+        replacement_descriptor = os.open(
+            replaced._database_path,
+            os.O_CREAT
+            | os.O_EXCL
+            | os.O_RDWR
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0),
+            0o600,
+        )
+        replacement_descriptors.callback(os.close, replacement_descriptor)
+        with pytest.raises(harness.HarnessFailure) as swapped:
+            harness.verify_store(replaced)
+        assert swapped.value.code is harness.HarnessFailureCode.UNAVAILABLE
 
 
 def test_rejection_capture_does_not_accept_caller_callbacks(tmp_path: Path) -> None:
