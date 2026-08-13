@@ -315,20 +315,34 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    assert "- **Contract generation:** 3" in next_action_section
-    assert "`FROZEN`" in next_action_section
+    assert (
+        "- **Contract generation:** 6 | STATUS=FROZEN | "
+        "SHA256=ec89a1df740805cc9b43e6f2530e940c0bf9b66e8f25ed878d3207d091c4bcb8"
+        in next_action_section
+    )
+    assert "Generation 5, normalized SHA-256" in next_action_prose
+    assert "`ba258296d4ffde716dc6ec02bbf606ca3f08cb48258dfca8061ca597f9e649e2`" in (
+        next_action_section
+    )
+    assert "`b079966273ef43d726ecc7aa64693189e7234a94397e965e334fe215eac60aa4`" in (
+        next_action_section
+    )
+    assert "`86e3650608f2f1c96a9aa272b2b9cd597bc3d5ac188a39937afb974536d11ccb`" in (
+        next_action_section
+    )
+    assert "exact candidate `9ff70a8aa34e5bf154679957c913bb21e93a3d5e`" in next_action_prose
     assert (
         "`2ba9d4d70bde04c5225649d1c3e4f70e86b5085c46a370ffcfbe716887bef836`" in next_action_section
     )
     assert (
         "`5c48f313870bc729b3e8fcc66777df086c3bd9cde4e3818703aed285ad3570dc`" in next_action_section
     )
-    assert "`SUPERSEDED` before any writable activation" in next_action_prose
+    assert "was `SUPERSEDED` before writable activation" in next_action_prose
     assert "`SUPERSEDED` during writable activation, before any result commit" in next_action_prose
-    assert "Generation-1 and generation-2 research, implementation, test, and review outputs" in (
+    assert "Generation 6 starts only from that generation-3 candidate" in next_action_prose
+    assert "Earlier outputs are evidence only and cannot count as generation-6 acceptance" in (
         next_action_prose
     )
-    assert "revalidated and rebound to generation 3" in next_action_prose
     assert "`phase2.continuous_public_trade_stream_sqlite_schema_evidence_harness`" in (
         task_064_section
     )
