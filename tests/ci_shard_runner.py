@@ -34861,9 +34861,29 @@ def main(arguments: list[str] | None = None) -> int:
         else:
             _require(parsed.aggregate_static is True, "aggregate mode differs")
             _run_aggregate()
-    except BaseException:
+    except BaseException as error:
         try:
-            os.write(2, b"TASK064 runner failed closed\n")
+            detail = str(error) if type(error) is ContractError else type(error).__name__
+            diagnostic = ""
+            traceback = error.__traceback__
+            while traceback is not None:
+                if traceback.tb_frame.f_code.co_name == "_validate_common_observation":
+                    frame_child = traceback.tb_frame.f_locals.get("child")
+                    if type(frame_child) is ChildResult:
+                        exact_child = cast(ChildResult, frame_child)
+                        diagnostic = (
+                            f"; stdout_tail={exact_child.stdout[-700:]!r}; "
+                            f"stderr_tail={exact_child.stderr[-120:]!r}; "
+                            f"child_exit={exact_child.exit_code}"
+                        )
+                    break
+                traceback = traceback.tb_next
+            os.write(
+                2,
+                f"TASK064 runner failed closed: {detail}{diagnostic}\n".encode(
+                    "ascii", errors="backslashreplace"
+                )[:1_024],
+            )
         except BaseException:
             if _OPAQUE_OWNER_QUARANTINE:
                 _CAPTURED_RUNNER_OS_EXIT(1)
