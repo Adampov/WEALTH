@@ -22164,13 +22164,13 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  ini=a0(c['__init__']);a2i_flow_stores=('_regular_unlink_flow_records_by_identity','_regular_unlink_flow_records_by_serial','_live_regular_unlink_flow_record','_archived_regular_unlink_flow_records','_regular_unlink_flow_faulted') # noqa: E702
  prove(57,OO((ini.count(f'self.{v}:' if v!='_regular_unlink_flow_faulted'else f'self.{v} = False')==1 for v in a2i_flow_stores)))
  fws=a0(fw)
- prove(58,n('_authorize_metered_regular_unlink')==()and a0(fw.args)=='self, authority: _Generation6RNamespaceDirectoryAuthority, classification: _Generation6RNamespaceInventoryClassification'and fw.returns is not None and a0(cast(ast.expr,fw.returns))=='_Generation6RNamespaceRegularUnlinkFlow')
+ prove(58,n('_authorize_metered_regular_unlink')==()and a0(fw.args)=='self, authority: _Generation6RNamespaceDirectoryAuthority, classification: _Generation6RNamespaceInventoryClassification'and fw.returns is not None and a0(fw.returns)=='_Generation6RNamespaceRegularUnlinkFlow')
  fc=b(fw)
  prove(59,fc[:2]==('self._require_teardown_authorization','self._require_archived_regular_unlink_classification')and fc.count('self._require_teardown_authorization')==1 and fc.count('self._require_archived_regular_unlink_classification')==1)
  fo=T((fws.find(v)for v in ('vars(authority)','authority is classification_binding.authority','flow = _Generation6RNamespaceRegularUnlinkFlow','flow_binding = _Generation6RNamespaceRegularUnlinkFlowBinding','record = _Generation6RNamespaceRegularUnlinkFlowRecord','self._begin_publication(record)','self._regular_unlink_flow_records_by_identity[id(flow)] = record','self._regular_unlink_flow_records_by_serial[flow.serial] = record','self._live_regular_unlink_flow_record = record',"event='REGULAR_UNLINK_FLOW_AUTHORIZING'",'record.attempt_receipt = attempt_receipt','self._finish_publication(record)','record.authorization_attempts = 1','self.authorize_present','return flow')))
  prove(60,OO((v>=0 for v in fo))and OO((fo[v]<fo[v+1]for v in range(L(fo)-1))))
  ft=T((a for a in fw.body if Z(a,a12)));fh=ft[0].handlers[0] # noqa: E702
- prove(61,L(ft)==1 and Z(ft[0].body[-2],a14)and b(ft[0].body[-2])==('self.authorize_present',)and Z(ft[0].body[-1],A.Return)and cast(ast.Return,ft[0].body[-1]).value is not None and a0(cast(ast.expr,cast(ast.Return,ft[0].body[-1]).value))=='flow')
+ prove(61,L(ft)==1 and Z(ft[0].body[-2],a14)and b(ft[0].body[-2])==('self.authorize_present',)and Z(ft[0].body[-1],A.Return)and ft[0].body[-1].value is not None and a0(ft[0].body[-1].value)=='flow')
  prove(62,a0(fh.body[0])=='self._regular_unlink_flow_faulted = True'and a0(fh.body[1])=='self._phase = _Generation6RNamespacePhase.UNCERTAIN'and b(fh).count('self._close_namespace_owner')==0 and b(fh).count('self._archive_capability')==0)
  ff=T((a0(fh).find(v)for v in ('record.state = _Generation6RNamespaceRegularUnlinkFlowState.UNCERTAIN','self._pending_publication is record','self._fail_publication(record)',"event='REGULAR_UNLINK_FLOW_UNCERTAIN'",'self._archived_regular_unlink_flow_records.append(record)','flow_archived = any(','flow_archived and self._live_regular_unlink_flow_record is record','self._live_regular_unlink_flow_record = None','raise')))
  prove(63,OO((v>=0 for v in ff))and OO((ff[v]<ff[v+1]for v in range(L(ff)-1)))and b(fh).count('self._fail_publication')==1)
@@ -34830,9 +34830,15 @@ def main(arguments: list[str] | None = None) -> int:
         else:
             _require(parsed.aggregate_static is True, "aggregate mode differs")
             _run_aggregate()
-    except BaseException:
+    except BaseException as error:
         try:
-            os.write(2, b"TASK064 runner failed closed\n")
+            detail = str(error) if type(error) is ContractError else type(error).__name__
+            os.write(
+                2,
+                f"TASK064 runner failed closed: {detail}\n".encode(
+                    "ascii", errors="backslashreplace"
+                )[:1_024],
+            )
         except BaseException:
             if _OPAQUE_OWNER_QUARANTINE:
                 _CAPTURED_RUNNER_OS_EXIT(1)
