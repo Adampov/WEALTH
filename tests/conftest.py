@@ -17,9 +17,11 @@ import threading
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone, tzinfo
-from pathlib import Path
+from pathlib import Path, PurePath
+from types import FunctionType
 from typing import Protocol, cast
 
+import _pytest.pathlib as pytest_pathlib
 import pytest
 
 _CONTRACT_GENERATION = 6
@@ -1119,6 +1121,337 @@ def _validate_raw_task064_options() -> _Task064RawInvocation | None:
     )
 
 
+_TASK064_FORCE_SYMLINK_NAME = "_force_symlink"
+_TASK064_FORCE_SYMLINK_LIMIT = 50_000
+_TASK064_ORIGINAL_FORCE_SYMLINK: object = vars(pytest_pathlib).get(_TASK064_FORCE_SYMLINK_NAME)
+_TASK064_ORIGINAL_FORCE_SYMLINK_CODE: object = getattr(
+    _TASK064_ORIGINAL_FORCE_SYMLINK,
+    "__code__",
+    None,
+)
+_TASK064_MAKE_NUMBERED_DIR: object = vars(pytest_pathlib).get("make_numbered_dir")
+_TASK064_MAKE_NUMBERED_DIR_CODE: object = getattr(
+    _TASK064_MAKE_NUMBERED_DIR,
+    "__code__",
+    None,
+)
+_TASK064_FORCE_SYMLINK_INSTALLED = False
+_TASK064_FORCE_SYMLINK_CALLS = 0
+_TASK064_FORCE_SYMLINK_INVALID = False
+_TASK064_FORCE_SYMLINK_OWNER_PID = -1
+_TASK064_FORCE_SYMLINK_PRIVATE_ROOT: Path | None = None
+_TASK064_FORCE_SYMLINK_PRIVATE_ROOT_IDENTITY: tuple[int, int, int, int] | None = None
+_TASK064_FORCE_SYMLINK_CONFIG: pytest.Config | None = None
+
+
+def _task064_nested_pytest_private_root() -> Path | None:
+    if (
+        _RAW_INVOCATION is not None
+        or os.environ.get("PYTEST_DISABLE_PLUGIN_AUTOLOAD") != "1"
+        or os.environ.get("PYTHONDONTWRITEBYTECODE") != "1"
+    ):
+        return None
+    try:
+        private_root = _private_temp_root()
+    except _ObserverFailure:
+        return None
+    if os.environ.get("HYPOTHESIS_STORAGE_DIRECTORY") != os.fspath(
+        private_root / "hypothesis"
+    ) or os.environ.get("COVERAGE_FILE") != os.fspath(private_root / "coverage" / ".coverage"):
+        return None
+    pycache_raw = os.environ.get("PYTHONPYCACHEPREFIX")
+    if type(pycache_raw) is not str:
+        return None
+    pycache = Path(pycache_raw)
+    try:
+        pycache_relative = pycache.relative_to(private_root)
+    except ValueError:
+        return None
+    if (
+        not pycache.is_absolute()
+        or len(pycache_relative.parts) < 2
+        or not pycache.name.startswith("task064-")
+        or any(part in {"", ".", ".."} for part in pycache_relative.parts)
+    ):
+        return None
+    for directory in (private_root / "hypothesis", private_root / "coverage"):
+        try:
+            details = directory.lstat()
+        except OSError:
+            return None
+        if (
+            not stat.S_ISDIR(details.st_mode)
+            or details.st_uid != _RUNTIME_UID
+            or stat.S_IMODE(details.st_mode) != 0o700
+        ):
+            return None
+    return private_root
+
+
+def _task064_pytest_alias_root_parts(root: Path) -> tuple[str, ...] | None:
+    private_root = _TASK064_FORCE_SYMLINK_PRIVATE_ROOT
+    raw = _RAW_INVOCATION
+    if private_root is None or type(root) is not type(private_root) or not root.is_absolute():
+        return None
+    try:
+        relative = root.relative_to(private_root)
+    except ValueError:
+        return None
+    parts = relative.parts
+    if raw is not None and root == raw.basetemp:
+        return parts
+    if len(parts) == 1:
+        outer = parts[0]
+        if outer.startswith("pytest-of-") and len(outer) > len("pytest-of-"):
+            return parts
+        return None
+    if len(parts) == 2:
+        outer, session = parts
+        suffix = session.removeprefix("pytest-")
+        if (
+            outer.startswith("pytest-of-")
+            and len(outer) > len("pytest-of-")
+            and suffix.isdecimal()
+            and str(int(suffix, 10)) == suffix
+        ):
+            return parts
+    return None
+
+
+def _task064_open_pytest_alias_root(root: Path) -> int:
+    parts = _task064_pytest_alias_root_parts(root)
+    private_root = _TASK064_FORCE_SYMLINK_PRIVATE_ROOT
+    expected_identity = _TASK064_FORCE_SYMLINK_PRIVATE_ROOT_IDENTITY
+    if parts is None or private_root is None or expected_identity is None:
+        raise _ObserverFailure("TASK-064 pytest current-alias root differs")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    descriptor = -1
+    try:
+        descriptor = os.open(private_root, flags)
+        details = os.fstat(descriptor)
+        if (
+            details.st_dev,
+            details.st_ino,
+            details.st_uid,
+            stat.S_IMODE(details.st_mode),
+        ) != expected_identity or not stat.S_ISDIR(details.st_mode):
+            raise _ObserverFailure("TASK-064 pytest private root identity differs")
+        for part in parts:
+            next_descriptor = os.open(part, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = next_descriptor
+        return descriptor
+    except BaseException:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise
+
+
+def _task064_suppress_pytest_current_symlink(
+    root: Path,
+    target: str | PurePath,
+    link_to: str | Path,
+) -> None:
+    global _TASK064_FORCE_SYMLINK_CALLS, _TASK064_FORCE_SYMLINK_INVALID
+    _TASK064_FORCE_SYMLINK_CALLS += 1
+    valid = False
+    root_descriptor = -1
+    if (
+        os.getpid() == _TASK064_FORCE_SYMLINK_OWNER_PID
+        and 0 < _TASK064_FORCE_SYMLINK_CALLS <= _TASK064_FORCE_SYMLINK_LIMIT
+        and type(root) is type(_TASK064_FORCE_SYMLINK_PRIVATE_ROOT)
+        and type(target) is str
+        and target.endswith("current")
+        and target not in {"current", ".", ".."}
+        and target.isascii()
+        and "\x00" not in target
+        and "/" not in target
+        and "\\" not in target
+        and isinstance(link_to, Path)
+        and type(link_to) is type(root)
+        and link_to.parent == root
+    ):
+        prefix = target[: -len("current")]
+        suffix = link_to.name[len(prefix) :] if link_to.name.startswith(prefix) else ""
+        try:
+            root_descriptor = _task064_open_pytest_alias_root(root)
+            try:
+                os.stat(target, dir_fd=root_descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                alias_absent = True
+            except OSError:
+                alias_absent = False
+            else:
+                alias_absent = False
+            target_status = os.stat(
+                link_to.name,
+                dir_fd=root_descriptor,
+                follow_symlinks=False,
+            )
+        except (OSError, _ObserverFailure):
+            valid = False
+        else:
+            valid = (
+                alias_absent
+                and prefix != ""
+                and suffix.isdecimal()
+                and str(int(suffix, 10)) == suffix
+                and stat.S_ISDIR(target_status.st_mode)
+                and target_status.st_uid == _RUNTIME_UID
+                and stat.S_IMODE(target_status.st_mode) == 0o700
+            )
+        finally:
+            if root_descriptor >= 0:
+                try:
+                    os.close(root_descriptor)
+                except OSError:
+                    valid = False
+    if not valid:
+        _TASK064_FORCE_SYMLINK_INVALID = True
+        raise _ObserverFailure("TASK-064 pytest current-alias request differs")
+
+
+_TASK064_FORCE_SYMLINK_CODE = _task064_suppress_pytest_current_symlink.__code__
+
+
+def _task064_validate_pytest_current_symlink_suppression() -> None:
+    current = vars(pytest_pathlib).get(_TASK064_FORCE_SYMLINK_NAME)
+    original = _TASK064_ORIGINAL_FORCE_SYMLINK
+    make_numbered_dir = _TASK064_MAKE_NUMBERED_DIR
+    private_root = _TASK064_FORCE_SYMLINK_PRIVATE_ROOT
+    config = _TASK064_FORCE_SYMLINK_CONFIG
+    runtime = _RUNTIME
+    if (
+        not _TASK064_FORCE_SYMLINK_INSTALLED
+        or _TASK064_FORCE_SYMLINK_INVALID
+        or os.getpid() != _TASK064_FORCE_SYMLINK_OWNER_PID
+        or type(_TASK064_FORCE_SYMLINK_CALLS) is not int
+        or not 0 <= _TASK064_FORCE_SYMLINK_CALLS <= _TASK064_FORCE_SYMLINK_LIMIT
+        or config is None
+        or private_root is None
+        or sys.modules.get("_pytest.pathlib") is not pytest_pathlib
+        or pytest.__version__ != "9.1.1"
+        or type(original) is not FunctionType
+        or original.__code__ is not _TASK064_ORIGINAL_FORCE_SYMLINK_CODE
+        or type(make_numbered_dir) is not FunctionType
+        or make_numbered_dir.__code__ is not _TASK064_MAKE_NUMBERED_DIR_CODE
+        or make_numbered_dir.__globals__.get(_TASK064_FORCE_SYMLINK_NAME) is not current
+        or type(current) is not FunctionType
+        or current is not _task064_suppress_pytest_current_symlink
+        or current.__code__ is not _TASK064_FORCE_SYMLINK_CODE
+        or (_RAW_INVOCATION is not None and (runtime is None or not runtime._is_owner()))
+    ):
+        raise _ObserverFailure("TASK-064 pytest current-alias suppression differs")
+    try:
+        observed_private_root = _private_temp_root()
+    except _ObserverFailure as error:
+        raise _ObserverFailure("TASK-064 pytest private root disappeared") from error
+    if observed_private_root != private_root:
+        raise _ObserverFailure("TASK-064 pytest private root changed")
+
+
+def _task064_install_pytest_current_symlink_suppression(
+    config: pytest.Config,
+    private_root: Path,
+) -> None:
+    global _TASK064_FORCE_SYMLINK_CALLS
+    global _TASK064_FORCE_SYMLINK_CONFIG
+    global _TASK064_FORCE_SYMLINK_INVALID
+    global _TASK064_FORCE_SYMLINK_INSTALLED
+    global _TASK064_FORCE_SYMLINK_OWNER_PID
+    global _TASK064_FORCE_SYMLINK_PRIVATE_ROOT
+    global _TASK064_FORCE_SYMLINK_PRIVATE_ROOT_IDENTITY
+    original = _TASK064_ORIGINAL_FORCE_SYMLINK
+    make_numbered_dir = _TASK064_MAKE_NUMBERED_DIR
+    try:
+        private_details = private_root.lstat()
+    except OSError as error:
+        raise _ObserverFailure("TASK-064 pytest private root is unavailable") from error
+    if (
+        _TASK064_FORCE_SYMLINK_INSTALLED
+        or _TASK064_FORCE_SYMLINK_CALLS != 0
+        or _TASK064_FORCE_SYMLINK_INVALID
+        or _TASK064_FORCE_SYMLINK_CONFIG is not None
+        or _TASK064_FORCE_SYMLINK_PRIVATE_ROOT is not None
+        or sys.modules.get("_pytest.pathlib") is not pytest_pathlib
+        or pytest.__version__ != "9.1.1"
+        or type(original) is not FunctionType
+        or original.__module__ != "_pytest.pathlib"
+        or original.__name__ != "_force_symlink"
+        or original.__qualname__ != "_force_symlink"
+        or original.__code__ is not _TASK064_ORIGINAL_FORCE_SYMLINK_CODE
+        or original.__code__.co_argcount != 3
+        or original.__code__.co_posonlyargcount != 0
+        or original.__code__.co_kwonlyargcount != 0
+        or original.__code__.co_varnames[:3] != ("root", "target", "link_to")
+        or type(make_numbered_dir) is not FunctionType
+        or make_numbered_dir.__code__ is not _TASK064_MAKE_NUMBERED_DIR_CODE
+        or make_numbered_dir.__globals__.get(_TASK064_FORCE_SYMLINK_NAME) is not original
+        or vars(pytest_pathlib).get(_TASK064_FORCE_SYMLINK_NAME) is not original
+        or not stat.S_ISDIR(private_details.st_mode)
+        or private_details.st_uid != _RUNTIME_UID
+        or stat.S_IMODE(private_details.st_mode) != 0o700
+    ):
+        raise _ObserverFailure("TASK-064 pytest current-alias source differs")
+    _TASK064_FORCE_SYMLINK_CONFIG = config
+    _TASK064_FORCE_SYMLINK_OWNER_PID = os.getpid()
+    _TASK064_FORCE_SYMLINK_PRIVATE_ROOT = private_root
+    _TASK064_FORCE_SYMLINK_PRIVATE_ROOT_IDENTITY = (
+        private_details.st_dev,
+        private_details.st_ino,
+        private_details.st_uid,
+        stat.S_IMODE(private_details.st_mode),
+    )
+    try:
+        vars(pytest_pathlib)[_TASK064_FORCE_SYMLINK_NAME] = _task064_suppress_pytest_current_symlink
+        _TASK064_FORCE_SYMLINK_INSTALLED = True
+        _task064_validate_pytest_current_symlink_suppression()
+    except BaseException:
+        vars(pytest_pathlib)[_TASK064_FORCE_SYMLINK_NAME] = original
+        _TASK064_FORCE_SYMLINK_INSTALLED = False
+        _TASK064_FORCE_SYMLINK_CALLS = 0
+        _TASK064_FORCE_SYMLINK_CONFIG = None
+        _TASK064_FORCE_SYMLINK_INVALID = False
+        _TASK064_FORCE_SYMLINK_OWNER_PID = -1
+        _TASK064_FORCE_SYMLINK_PRIVATE_ROOT = None
+        _TASK064_FORCE_SYMLINK_PRIVATE_ROOT_IDENTITY = None
+        raise
+
+
+def _task064_restore_pytest_current_symlink_suppression(config: pytest.Config) -> None:
+    global _TASK064_FORCE_SYMLINK_CALLS
+    global _TASK064_FORCE_SYMLINK_CONFIG
+    global _TASK064_FORCE_SYMLINK_INVALID
+    global _TASK064_FORCE_SYMLINK_INSTALLED
+    global _TASK064_FORCE_SYMLINK_OWNER_PID
+    global _TASK064_FORCE_SYMLINK_PRIVATE_ROOT
+    global _TASK064_FORCE_SYMLINK_PRIVATE_ROOT_IDENTITY
+    if not _TASK064_FORCE_SYMLINK_INSTALLED:
+        return
+    if config is not _TASK064_FORCE_SYMLINK_CONFIG:
+        raise _ObserverFailure("TASK-064 pytest current-alias config differs")
+    primary: BaseException | None = None
+    try:
+        _task064_validate_pytest_current_symlink_suppression()
+    except BaseException as error:
+        primary = error
+    vars(pytest_pathlib)[_TASK064_FORCE_SYMLINK_NAME] = _TASK064_ORIGINAL_FORCE_SYMLINK
+    _TASK064_FORCE_SYMLINK_INSTALLED = False
+    _TASK064_FORCE_SYMLINK_CONFIG = None
+    _TASK064_FORCE_SYMLINK_OWNER_PID = -1
+    _TASK064_FORCE_SYMLINK_PRIVATE_ROOT = None
+    _TASK064_FORCE_SYMLINK_PRIVATE_ROOT_IDENTITY = None
+    _TASK064_FORCE_SYMLINK_CALLS = 0
+    _TASK064_FORCE_SYMLINK_INVALID = False
+    if vars(pytest_pathlib).get(_TASK064_FORCE_SYMLINK_NAME) is not _TASK064_ORIGINAL_FORCE_SYMLINK:
+        restore_error = _ObserverFailure("TASK-064 pytest current-alias restore differs")
+        if primary is not None:
+            restore_error.add_note(f"suppression validation failed: {type(primary).__name__}")
+        raise restore_error
+    if primary is not None:
+        raise primary
+
+
 class _Task064ObserverRuntime:
     def __init__(self, raw: _Task064RawInvocation) -> None:
         self.owner_pid = os.getpid()
@@ -1537,6 +1870,19 @@ def pytest_addoption(parser: pytest.Parser) -> None:
             raise pytest.UsageError("TASK-064 observer initialization failed") from error
 
 
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config: pytest.Config) -> None:
+    if _RAW_INVOCATION is not None:
+        return
+    private_root = _task064_nested_pytest_private_root()
+    if private_root is None:
+        return
+    try:
+        _task064_install_pytest_current_symlink_suppression(config, private_root)
+    except _ObserverFailure as error:
+        raise pytest.UsageError("TASK-064 pytest current-alias suppression failed") from error
+
+
 def _external_plugins(config: pytest.Config) -> list[list[str]]:
     records: set[tuple[str, str, str, str, str]] = set()
     for distribution in importlib.metadata.distributions():
@@ -1677,6 +2023,21 @@ def _observer_from_config(config: pytest.Config) -> _Task064Observer | None:
         or parsed_proof_fd != raw.proof_observation_fd
     ):
         raise pytest.UsageError("parsed TASK-064 options differ from authenticated argv")
+    if not _TASK064_FORCE_SYMLINK_INSTALLED:
+        try:
+            _task064_install_pytest_current_symlink_suppression(
+                config,
+                _private_temp_root(),
+            )
+        except _ObserverFailure as error:
+            raise pytest.UsageError("TASK-064 pytest current-alias suppression failed") from error
+    elif config is not _TASK064_FORCE_SYMLINK_CONFIG:
+        raise pytest.UsageError("TASK-064 pytest current-alias config differs")
+    else:
+        try:
+            _task064_validate_pytest_current_symlink_suppression()
+        except _ObserverFailure as error:
+            raise pytest.UsageError("TASK-064 pytest current-alias suppression differs") from error
     _OBSERVER = _Task064Observer(
         phase=raw.phase,
         nonce=raw.nonce,
@@ -1884,6 +2245,8 @@ def task064_report_proof_recorder(
 @pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitCode) -> None:
     if _RAW_INVOCATION is None:
+        if _TASK064_FORCE_SYMLINK_INSTALLED and session.config is _TASK064_FORCE_SYMLINK_CONFIG:
+            _task064_validate_pytest_current_symlink_suppression()
         return
     runtime = _RUNTIME
     if runtime is None:
@@ -1892,6 +2255,9 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitC
         observer = _observer_from_config(session.config)
         if observer is None:
             raise _ObserverFailure("active TASK-064 observer is absent")
+        _task064_validate_pytest_current_symlink_suppression()
+        if observer.phase == "execute" and _TASK064_FORCE_SYMLINK_CALLS == 0:
+            raise _ObserverFailure("TASK-064 pytest current-alias suppression was unused")
         plugins = _external_plugins(session.config)
         worker_count = _worker_indicator_count(session.config)
         surviving_threads = sum(
@@ -1946,6 +2312,16 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitC
         runtime.finish_ci(packet)
     except BaseException as error:
         runtime._abort_all(error)
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config: pytest.Config) -> None:
+    if not _TASK064_FORCE_SYMLINK_INSTALLED:
+        return
+    try:
+        _task064_restore_pytest_current_symlink_suppression(config)
+    except BaseException as error:
+        raise pytest.UsageError("TASK-064 pytest current-alias restore failed") from error
 
 
 class _NamedFoldZeroTimezone(tzinfo):
