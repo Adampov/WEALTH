@@ -5074,8 +5074,13 @@ def _validate_common_observation(
         _integer(packet["observer_parent_pid"], "observer parent PID", minimum=1) == os.getpid(),
         "observer parent PID differs",
     )
-    _require(_integer(packet["pytest_exitstatus"], "pytest exitstatus") == 0, "pytest exit differs")
-    _require(child.exit_code == 0, "pytest child exit differs")
+    pytest_exitstatus = _integer(packet["pytest_exitstatus"], "pytest exitstatus")
+    if pytest_exitstatus != 0 or child.exit_code != 0:
+        raise ContractError(
+            f"pytest exit differs: stdout_tail={child.stdout[-600:]!r}; "
+            f"stderr_tail={child.stderr[-160:]!r}; "
+            f"exit={pytest_exitstatus}/{child.exit_code}"
+        )
     for name in (
         "collect_failed_count",
         "collect_skipped_count",
