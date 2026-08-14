@@ -34832,7 +34832,14 @@ def main(arguments: list[str] | None = None) -> int:
             _run_aggregate()
     except BaseException as error:
         try:
-            detail = str(error) if type(error) is ContractError else type(error).__name__
+            details = [str(error) if type(error) is ContractError else type(error).__name__]
+            cause = error.__cause__
+            for _ in range(3):
+                if cause is None:
+                    break
+                details.append(str(cause) if type(cause) is ContractError else type(cause).__name__)
+                cause = cause.__cause__
+            detail = " <- ".join(details)
             os.write(
                 2,
                 f"TASK064 runner failed closed: {detail}\n".encode(
