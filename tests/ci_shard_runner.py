@@ -34861,9 +34861,22 @@ def main(arguments: list[str] | None = None) -> int:
         else:
             _require(parsed.aggregate_static is True, "aggregate mode differs")
             _run_aggregate()
-    except BaseException:
+    except BaseException as error:
         try:
-            os.write(2, b"TASK064 runner failed closed\n")
+            details = [str(error) if type(error) is ContractError else type(error).__name__]
+            cause = error.__cause__
+            for _ in range(3):
+                if cause is None:
+                    break
+                details.append(str(cause) if type(cause) is ContractError else type(cause).__name__)
+                cause = cause.__cause__
+            detail = " <- ".join(details)
+            os.write(
+                2,
+                f"TASK064 runner failed closed: {detail}\n".encode(
+                    "ascii", errors="backslashreplace"
+                )[:1_024],
+            )
         except BaseException:
             if _OPAQUE_OWNER_QUARANTINE:
                 _CAPTURED_RUNNER_OS_EXIT(1)
