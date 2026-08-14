@@ -24339,6 +24339,21 @@ def _build_evidence_report_writer(
             raise HarnessFailure(HarnessFailureCode.CORRUPT)
         return fingerprint
 
+    def cached_owner_matches_entry(entry: _ReportValidationEntry) -> bool:
+        owner = cached_owner
+        return bool(
+            type(owner) is tuple
+            and len(owner) == 10
+            and owner[0] is entry.pytest_root
+            and owner[1] is entry.registration
+            and owner[2] is entry.run
+            and owner[3] is entry.ledger
+            and owner[4] is entry.receipt
+            and owner[5] is entry.evidence
+            and owner[6] is entry.report
+            and owner[9] is entry.context_run
+        )
+
     def validate_entry_bindings(entry: _ReportValidationEntry) -> None:
         if type(entry) is not _ReportValidationEntry:
             raise HarnessFailure(HarnessFailureCode.CORRUPT)
@@ -24589,6 +24604,9 @@ def _build_evidence_report_writer(
             entry = entry_at_entry
             if not call_selects_entry_owner(entry, pytest_root, receipt, report):
                 raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            if not cached_owner_matches_entry(entry):
+                clear_cache()
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
             if not call_context_matches_entry(entry):
                 raise HarnessFailure(HarnessFailureCode.CORRUPT)
             try:
@@ -24796,6 +24814,9 @@ def _build_evidence_report_writer(
                     receipt,
                     report,
                 ):
+                    if not cached_owner_matches_entry(entry):
+                        clear_cache()
+                        raise HarnessFailure(HarnessFailureCode.CORRUPT)
                     if not call_context_matches_entry(entry):
                         raise HarnessFailure(HarnessFailureCode.CORRUPT)
                     try:
