@@ -11898,9 +11898,11 @@ def test_pipe_io_is_centralized_eintr_safe_and_uses_one_deadline() -> None:
     RawPipeVisitor().visit(tree)
     assert raw_sites == {
         "read": {
+            "_capture_task064_report_file_snapshot",
             "_read_process_packet",
             "_closed_file_manifest",
             "_publish_evidence_report_bytes_unbound",
+            "snapshot_foreign_final",
         },
         "write": {"_write_process_packet", "_publish_evidence_report_bytes_unbound"},
     }
