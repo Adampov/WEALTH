@@ -34861,64 +34861,9 @@ def main(arguments: list[str] | None = None) -> int:
         else:
             _require(parsed.aggregate_static is True, "aggregate mode differs")
             _run_aggregate()
-    except BaseException as error:
+    except BaseException:
         try:
-            detail = str(error) if type(error) is ContractError else type(error).__name__
-            diagnostic = ""
-            traceback = error.__traceback__
-            for _ in range(64):
-                if traceback is None:
-                    break
-                frame_name = traceback.tb_frame.f_code.co_name
-                frame_locals = traceback.tb_frame.f_locals
-                if frame_name == "_run_shard":
-                    frame_cleanup = frame_locals.get("cleanup")
-                    frame_root = frame_locals.get("private_root")
-                    if type(frame_cleanup) is CleanupResult:
-                        cleanup_state = (
-                            frame_cleanup.status,
-                            frame_cleanup.residue_count,
-                            frame_cleanup.failures,
-                        )
-                        diagnostic += f"; cleanup={cleanup_state!r}"
-                    if type(frame_root) is PrivateRoot:
-                        root_state = (
-                            frame_root._opaque_close_uncertain,
-                            len(frame_root._poisoned_descriptors),
-                            frame_root._process_tree_uncertain,
-                            len(frame_root._protected_paths),
-                        )
-                        diagnostic += f"; root_state={root_state!r}"
-                elif frame_name == "_run_pytest_observed":
-                    frame_child = frame_locals.get("child")
-                    if type(frame_child) is ChildResult:
-                        diagnostic += (
-                            f"; stdout_tail={frame_child.stdout[-480:]!r}; "
-                            f"stderr_tail={frame_child.stderr[-700:]!r}; "
-                            f"child_exit={frame_child.exit_code}"
-                        )
-                elif frame_name == "_read_observation":
-                    frame_owner = frame_locals.get("owner")
-                    frame_before = frame_locals.get("before")
-                    if type(frame_owner) is ObservationOwner:
-                        diagnostic += f"; observation={frame_owner.label!r}"
-                    if type(frame_before) is DescriptorSnapshot:
-                        diagnostic += f"; observation_size={frame_before.size}"
-                elif frame_name == "_validate_common_observation":
-                    frame_child = frame_locals.get("child")
-                    if type(frame_child) is ChildResult:
-                        diagnostic += (
-                            f"; stdout_tail={frame_child.stdout[-700:]!r}; "
-                            f"stderr_tail={frame_child.stderr[-120:]!r}; "
-                            f"child_exit={frame_child.exit_code}"
-                        )
-                traceback = traceback.tb_next
-            os.write(
-                2,
-                f"TASK064 runner failed closed: {detail}{diagnostic}\n".encode(
-                    "ascii", errors="backslashreplace"
-                )[:2_048],
-            )
+            os.write(2, b"TASK064 runner failed closed\n")
         except BaseException:
             if _OPAQUE_OWNER_QUARANTINE:
                 _CAPTURED_RUNNER_OS_EXIT(1)
