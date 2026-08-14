@@ -1773,7 +1773,13 @@ class _Task064ObserverRuntime:
             if type(poison_value) is not int or poison_value != 0:
                 self._captured_exit(191)
             if self.proof is not None and not self.proof_written:
-                raise _ObserverFailure("required proof observation is missing")
+                failure_tail = _TASK064_REPORT_CALL_FAILURE_TAIL
+                if failure_tail is None:
+                    raise _ObserverFailure("required proof observation is missing")
+                raise _ObserverFailure(
+                    "required proof observation is missing; "
+                    f"report_call_failure_tail={failure_tail!r}"
+                )
             raw = _RAW_INVOCATION
             if raw is None:
                 raise _ObserverFailure("raw invocation disappeared before publication")
@@ -1988,6 +1994,7 @@ _COLLECT_SKIPPED_COUNT = 0
 _DESELECTED_NODES: list[str] = []
 _INTERRUPTED_COUNT = 0
 _INTERNAL_ERROR_COUNT = 0
+_TASK064_REPORT_CALL_FAILURE_TAIL: str | None = None
 
 
 def _observer_from_config(config: pytest.Config) -> _Task064Observer | None:
@@ -2074,8 +2081,23 @@ def pytest_runtest_logstart(nodeid: str, location: tuple[str, int | None, str]) 
 
 
 def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    global _TASK064_REPORT_CALL_FAILURE_TAIL
     if _OBSERVER is not None:
         _OBSERVER.log_report(report)
+    raw = _RAW_INVOCATION
+    if (
+        _TASK064_REPORT_CALL_FAILURE_TAIL is None
+        and raw is not None
+        and raw.proof_mode is not None
+        and report.nodeid == _REPORT_NODE
+        and report.when == "call"
+        and report.failed
+    ):
+        try:
+            diagnostic = report.longreprtext.encode("ascii", errors="backslashreplace")
+        except BaseException:
+            diagnostic = b""
+        _TASK064_REPORT_CALL_FAILURE_TAIL = diagnostic[-768:].decode("ascii")
 
 
 def pytest_runtest_logfinish(nodeid: str, location: tuple[str, int | None, str]) -> None:

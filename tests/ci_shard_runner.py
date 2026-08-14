@@ -34894,7 +34894,7 @@ def main(arguments: list[str] | None = None) -> int:
                     if type(frame_child) is ChildResult:
                         diagnostic += (
                             f"; stdout_tail={frame_child.stdout[-480:]!r}; "
-                            f"stderr_tail={frame_child.stderr[-120:]!r}; "
+                            f"stderr_tail={frame_child.stderr[-700:]!r}; "
                             f"child_exit={frame_child.exit_code}"
                         )
                 elif frame_name == "_read_observation":
@@ -34917,7 +34917,7 @@ def main(arguments: list[str] | None = None) -> int:
                 2,
                 f"TASK064 runner failed closed: {detail}{diagnostic}\n".encode(
                     "ascii", errors="backslashreplace"
-                )[:1_024],
+                )[:2_048],
             )
         except BaseException:
             if _OPAQUE_OWNER_QUARANTINE:
