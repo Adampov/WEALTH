@@ -34889,6 +34889,21 @@ def main(arguments: list[str] | None = None) -> int:
                             len(frame_root._protected_paths),
                         )
                         diagnostic += f"; root_state={root_state!r}"
+                elif frame_name == "_run_pytest_observed":
+                    frame_child = frame_locals.get("child")
+                    if type(frame_child) is ChildResult:
+                        diagnostic += (
+                            f"; stdout_tail={frame_child.stdout[-480:]!r}; "
+                            f"stderr_tail={frame_child.stderr[-120:]!r}; "
+                            f"child_exit={frame_child.exit_code}"
+                        )
+                elif frame_name == "_read_observation":
+                    frame_owner = frame_locals.get("owner")
+                    frame_before = frame_locals.get("before")
+                    if type(frame_owner) is ObservationOwner:
+                        diagnostic += f"; observation={frame_owner.label!r}"
+                    if type(frame_before) is DescriptorSnapshot:
+                        diagnostic += f"; observation_size={frame_before.size}"
                 elif frame_name == "_validate_common_observation":
                     frame_child = frame_locals.get("child")
                     if type(frame_child) is ChildResult:
