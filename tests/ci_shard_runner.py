@@ -5074,13 +5074,8 @@ def _validate_common_observation(
         _integer(packet["observer_parent_pid"], "observer parent PID", minimum=1) == os.getpid(),
         "observer parent PID differs",
     )
-    pytest_exitstatus = _integer(packet["pytest_exitstatus"], "pytest exitstatus")
-    if pytest_exitstatus != 0 or child.exit_code != 0:
-        raise ContractError(
-            f"pytest exit differs: stdout_tail={child.stdout[-600:]!r}; "
-            f"stderr_tail={child.stderr[-160:]!r}; "
-            f"exit={pytest_exitstatus}/{child.exit_code}"
-        )
+    _require(_integer(packet["pytest_exitstatus"], "pytest exitstatus") == 0, "pytest exit differs")
+    _require(child.exit_code == 0, "pytest child exit differs")
     for name in (
         "collect_failed_count",
         "collect_skipped_count",
@@ -34866,22 +34861,9 @@ def main(arguments: list[str] | None = None) -> int:
         else:
             _require(parsed.aggregate_static is True, "aggregate mode differs")
             _run_aggregate()
-    except BaseException as error:
+    except BaseException:
         try:
-            details = [str(error) if type(error) is ContractError else type(error).__name__]
-            cause = error.__cause__
-            for _ in range(3):
-                if cause is None:
-                    break
-                details.append(str(cause) if type(cause) is ContractError else type(cause).__name__)
-                cause = cause.__cause__
-            detail = " <- ".join(details)
-            os.write(
-                2,
-                f"TASK064 runner failed closed: {detail}\n".encode(
-                    "ascii", errors="backslashreplace"
-                )[:1_024],
-            )
+            os.write(2, b"TASK064 runner failed closed\n")
         except BaseException:
             if _OPAQUE_OWNER_QUARANTINE:
                 _CAPTURED_RUNNER_OS_EXIT(1)

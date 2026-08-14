@@ -3802,7 +3802,7 @@ def _build_pytest_root_authority() -> tuple[
             "_bind_task064_harness_module",
             "41d05f3670974dedbcdb1b12e85b39bb2f1b306eb13686ba016caa07c2eeeb06",
             34,
-            "9008beec6288470e3b61f54362a9e0a31b874d9e9db347cdf517cc27c5719b28",
+            "6f317f48e0fa6fbae521ae37479a58c82049228b6db2e8398077843e521328fc",
         ),
         (
             "tests/integration/test_task_064_continuous_public_trade_stream_sqlite_evidence.py",
@@ -3815,7 +3815,7 @@ def _build_pytest_root_authority() -> tuple[
             "_bind_task064_harness_module",
             "e4bba9b8f370dc1c66fcf977d36438dc870ade6792cd281e1f4ff5ed0fbfc330",
             34,
-            "5bbd60cc735fe486754802b0558776b4f5437de520e30a373aba33c9bc39955f",
+            "583e018c14936e4787fbc61e46e1077cab32df12b5b3998e61435738d9ebb039",
         ),
     )
     real_getpid = os.getpid
