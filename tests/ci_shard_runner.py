@@ -4,7 +4,7 @@ This module is test infrastructure only.  It deliberately has no production impo
 fails closed whenever an identity, lifecycle, packet, or cleanup fact cannot be proved exactly.
 """
 
-# ruff: noqa: UP034, RUF021
+# ruff: noqa: UP034
 
 from __future__ import annotations
 
@@ -7050,7 +7050,11 @@ _GENERATION6_TERMINAL_CHECKS: Final = (
     "reset:process-local-state",
 )
 _GENERATION6_TEMPORARILY_UNWIRED_CASES: Final[frozenset[str]] = frozenset(
-    (*_generation6_case_ids("C", 14), *_generation6_case_ids("U", 9)[3:])
+    (
+        *_generation6_case_ids("C", 14),
+        *_generation6_case_ids("U", 9)[3:],
+        *_generation6_case_ids("R", 24)[12:],
+    )
 )
 
 
@@ -12737,6 +12741,14 @@ class _Generation6RNamespaceEmptyInventoryState(  # noqa: UP042 - exact contract
     UNCERTAIN = "UNCERTAIN"
 
 
+class _Generation6RNamespaceRegularUnlinkFlowState(  # noqa: UP042 - exact contract
+    str, Enum
+):
+    AUTHORIZING = "AUTHORIZING"
+    AUTHORIZED = "AUTHORIZED"
+    UNCERTAIN = "UNCERTAIN"
+
+
 class _Generation6RNamespaceTerminalEvent(str, Enum):  # noqa: UP042 - exact contract
     ABSENCE_TOKEN_ABANDONED = "ABSENCE_TOKEN_ABANDONED"
     MUTATION_TOKEN_ABANDONED = "MUTATION_TOKEN_ABANDONED"
@@ -12977,6 +12989,12 @@ class _Generation6RNamespaceInventoryItem:
 
 @dataclass(frozen=True, eq=False)
 class _Generation6RNamespaceInventoryClassification:
+    serial: int
+    issuer_identity: int
+
+
+@dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceRegularUnlinkFlow:
     serial: int
     issuer_identity: int
 
@@ -13277,6 +13295,78 @@ class _Generation6RNamespaceInventoryClassificationRecord:
     terminal_receipt: _Generation6RNamespaceReceipt | None
 
 
+@dataclass(frozen=True, eq=False)
+class _Generation6RNamespaceRegularUnlinkFlowBinding:
+    serial: int
+    issuer_identity: int
+    flow: _Generation6RNamespaceRegularUnlinkFlow
+    flow_identity: int
+    flow_serial: int
+    flow_issuer_identity: int
+    classification_record: _Generation6RNamespaceInventoryClassificationRecord
+    classification_record_identity: int
+    classification_binding: _Generation6RNamespaceInventoryClassificationBinding
+    classification_binding_identity: int
+    classification: _Generation6RNamespaceInventoryClassification
+    classification_identity: int
+    item_record_identity: int
+    advance_record_identity: int
+    scan_record_identity: int
+    cursor_record_identity: int
+    authority: _Generation6RNamespaceDirectoryAuthority
+    authority_identity: int
+    authority_record_identity: int
+    authority_binding_identity: int
+    fact: _Generation6RNamespaceNameFact
+    fact_identity: int
+    action: _Generation6RNamespaceAction
+    component: str
+    cleanup_epoch: _Generation6RNamespaceCleanupBudgetEpoch
+    cleanup_epoch_identity: int
+    cleanup_budget_record: _Generation6RNamespaceCleanupBudgetRecord
+    cleanup_budget_record_identity: int
+    item_depth: int
+    operation_count_before: int
+    entry_count_before: int
+    encoded_name_bytes_before: int
+    depth_high_water_before: int
+
+
+@dataclass(eq=False)
+class _Generation6RNamespaceRegularUnlinkFlowRecord:
+    binding: _Generation6RNamespaceRegularUnlinkFlowBinding
+    binding_identity: int
+    state: _Generation6RNamespaceRegularUnlinkFlowState
+    authorization_attempts: int
+    authorization_first_stat_attempts: int
+    authorization_open_attempts: int
+    authorization_second_stat_attempts: int
+    authorization_first_named_snapshot: DescriptorSnapshot | None
+    authorization_opened_snapshot: DescriptorSnapshot | None
+    authorization_second_named_snapshot: DescriptorSnapshot | None
+    operation_count_after_first_stat: int | None
+    operation_count_after_open: int | None
+    operation_count_after_second_stat: int | None
+    entry_count_after_authorization: int | None
+    encoded_name_bytes_after_authorization: int | None
+    depth_high_water_after_authorization: int | None
+    capability: _Generation6RNamespacePresentToken | None
+    capability_identity: int | None
+    capability_record: _Generation6RNamespaceCapabilityRecord | None
+    capability_record_identity: int | None
+    preproof: _Generation6RNamespaceUnlinkPreproof | None
+    permit_record: _Generation6RNamespaceMutationPermitRecord | None
+    preproof_attempts: int
+    unlink_attempts: int
+    postproof_attempts: int
+    operation_count_after_preproof: int | None
+    operation_count_before_unlink: int | None
+    operation_count_after_postproof: int | None
+    attempt_receipt: _Generation6RNamespaceReceipt | None
+    outcome_receipt: _Generation6RNamespaceReceipt | None
+    terminal_receipt: _Generation6RNamespaceReceipt | None
+
+
 class _Generation6RNamespaceJournal:
     """Strong, private A1/A2g journal with no activation or runtime call surface."""
 
@@ -13402,6 +13492,19 @@ class _Generation6RNamespaceJournal:
         ] = []
         self._inventory_classification_descriptor_quarantine: list[FdOwner] = []
         self._inventory_classification_faulted = False
+        self._regular_unlink_flow_records_by_identity: dict[
+            int, _Generation6RNamespaceRegularUnlinkFlowRecord
+        ] = {}
+        self._regular_unlink_flow_records_by_serial: dict[
+            int, _Generation6RNamespaceRegularUnlinkFlowRecord
+        ] = {}
+        self._live_regular_unlink_flow_record: (
+            _Generation6RNamespaceRegularUnlinkFlowRecord | None
+        ) = None
+        self._archived_regular_unlink_flow_records: list[
+            _Generation6RNamespaceRegularUnlinkFlowRecord
+        ] = []
+        self._regular_unlink_flow_faulted = False
         self._empty_inventory_records_by_identity: dict[
             int, _Generation6RNamespaceEmptyInventoryRecord
         ] = {}
@@ -15811,24 +15914,16 @@ class _Generation6RNamespaceJournal:
         )
         return item_record
 
-    def _require_current_inventory_classification(
+    def _require_inventory_classification_lineage(
         self,
-        classification: _Generation6RNamespaceInventoryClassification,
-    ) -> _Generation6RNamespaceInventoryClassificationRecord:
-        live_record = self._live_inventory_classification_record
+        record: _Generation6RNamespaceInventoryClassificationRecord,
+        binding: _Generation6RNamespaceInventoryClassificationBinding,
+    ) -> None:
         _require(
-            type(self._inventory_classification_faulted) is bool
-            and not self._inventory_classification_faulted
-            and type(live_record) is _Generation6RNamespaceInventoryClassificationRecord,
-            "R namespace current inventory classification live slot differs",
-        )
-        if type(live_record) is not _Generation6RNamespaceInventoryClassificationRecord:
-            raise ContractError("R namespace current inventory classification live slot differs")
-        record = live_record
-        binding = record.binding
-        _require(
-            type(binding) is _Generation6RNamespaceInventoryClassificationBinding,
-            "R namespace current inventory classification binding type differs",
+            type(record) is _Generation6RNamespaceInventoryClassificationRecord
+            and type(binding) is _Generation6RNamespaceInventoryClassificationBinding
+            and record.binding is binding,
+            "R namespace inventory classification trusted lineage type differs",
         )
         _exact_keys(
             vars(record),
@@ -15865,7 +15960,7 @@ class _Generation6RNamespaceJournal:
                 "outcome_receipt",
                 "terminal_receipt",
             ),
-            "R namespace current inventory classification record",
+            "R namespace inventory classification record",
         )
         _exact_keys(
             vars(binding),
@@ -15915,8 +16010,9 @@ class _Generation6RNamespaceJournal:
                 "encoded_name_bytes_before",
                 "depth_high_water_before",
             ),
-            "R namespace current inventory classification binding",
+            "R namespace inventory classification binding",
         )
+        classification = binding.classification
         item_record = binding.item_record
         item_binding = binding.item_binding
         advance_record = binding.advance_record
@@ -15925,13 +16021,128 @@ class _Generation6RNamespaceJournal:
         scan_binding = binding.scan_binding
         cursor_record = binding.cursor_record
         cursor_binding = binding.cursor_binding
+        authority = binding.authority
         authority_record = binding.authority_record
         authority_binding = binding.authority_binding
+        cleanup_epoch = binding.cleanup_epoch
         budget_record = binding.cleanup_budget_record
         attempt_receipt = record.attempt_receipt
         _require(
             record.binding_identity == id(binding)
-            and record.state is _Generation6RNamespaceInventoryClassificationState.ATTEMPTING
+            and type(binding.serial) is int
+            and binding.serial > 0
+            and binding.issuer_identity == self._issuer_identity
+            and type(classification) is _Generation6RNamespaceInventoryClassification
+            and binding.classification_identity == id(classification)
+            and binding.classification_serial == classification.serial
+            and binding.classification_issuer_identity == classification.issuer_identity
+            and classification.issuer_identity == self._issuer_identity
+            and self._inventory_classification_records_by_identity.get(
+                binding.classification_identity
+            )
+            is record
+            and self._inventory_classification_records_by_serial.get(binding.classification_serial)
+            is record
+            and type(item_record) is _Generation6RNamespaceInventoryItemRecord
+            and binding.item_record_identity == id(item_record)
+            and item_record.binding is item_binding
+            and type(item_binding) is _Generation6RNamespaceInventoryItemBinding
+            and binding.item_binding_identity == id(item_binding)
+            and binding.item is item_binding.item
+            and binding.item_identity == id(binding.item)
+            and type(advance_record) is _Generation6RNamespaceInventoryAdvanceRecord
+            and binding.advance_record_identity == id(advance_record)
+            and advance_record.binding is advance_binding
+            and advance_record.item_record is item_record
+            and type(advance_binding) is _Generation6RNamespaceInventoryAdvanceBinding
+            and binding.advance_binding_identity == id(advance_binding)
+            and advance_binding.scan_record is scan_record
+            and advance_binding.scan_binding is scan_binding
+            and type(scan_record) is _Generation6RNamespaceInventoryScanRecord
+            and binding.scan_record_identity == id(scan_record)
+            and scan_record.binding is scan_binding
+            and type(scan_binding) is _Generation6RNamespaceInventoryScanBinding
+            and binding.scan_binding_identity == id(scan_binding)
+            and scan_binding.cursor_record is cursor_record
+            and scan_binding.cursor_binding is cursor_binding
+            and type(cursor_record) is _Generation6RNamespaceInventoryCursorRecord
+            and binding.cursor_record_identity == id(cursor_record)
+            and cursor_record.binding is cursor_binding
+            and type(cursor_binding) is _Generation6RNamespaceInventoryCursorBinding
+            and binding.cursor_binding_identity == id(cursor_binding)
+            and type(authority) is _Generation6RNamespaceDirectoryAuthority
+            and binding.authority_identity == id(authority)
+            and binding.authority is cursor_binding.authority
+            and type(authority_record) is _Generation6RNamespaceDirectoryRecord
+            and binding.authority_record_identity == id(authority_record)
+            and authority_record.binding is authority_binding
+            and authority_record is cursor_binding.authority_record
+            and type(authority_binding) is _Generation6RNamespaceDirectoryBinding
+            and binding.authority_binding_identity == id(authority_binding)
+            and authority_binding is cursor_binding.authority_binding
+            and authority_binding.authority is authority
+            and self._authority_records_by_identity.get(id(authority)) is authority_record
+            and self._authority_records_by_serial.get(authority.serial) is authority_record
+            and binding.raw_entry is item_binding.raw_entry
+            and binding.raw_entry_identity == item_binding.raw_entry_identity
+            and binding.raw_entry_identity == id(binding.raw_entry)
+            and binding.component == item_binding.component
+            and type(binding.component) is str
+            and binding.component != ""
+            and binding.encoded_name_bytes == item_binding.encoded_name_bytes
+            and type(binding.encoded_name_bytes) is int
+            and 1 <= binding.encoded_name_bytes <= 255
+            and binding.parent_descriptor == scan_binding.descriptor
+            and binding.item_depth == advance_binding.next_depth
+            and type(cleanup_epoch) is _Generation6RNamespaceCleanupBudgetEpoch
+            and binding.cleanup_epoch is item_binding.cleanup_epoch
+            and binding.cleanup_epoch_identity == id(cleanup_epoch)
+            and type(budget_record) is _Generation6RNamespaceCleanupBudgetRecord
+            and binding.cleanup_budget_record_identity == id(budget_record)
+            and budget_record is item_binding.cleanup_budget_record
+            and budget_record.epoch is cleanup_epoch
+            and self._cleanup_budget_records_by_identity.get(id(cleanup_epoch)) is budget_record
+            and self._cleanup_budget_records_by_serial.get(cleanup_epoch.serial) is budget_record
+            and binding.operation_count_before == item_binding.operation_count_after
+            and binding.entry_count_before == item_binding.entry_count_after
+            and binding.encoded_name_bytes_before == item_binding.encoded_name_bytes_after
+            and type(binding.depth_high_water_before) is int
+            and type(attempt_receipt) is _Generation6RNamespaceReceipt
+            and attempt_receipt.issuer_identity == self._issuer_identity
+            and attempt_receipt.token_serial == binding.classification_serial
+            and attempt_receipt.authority_serial == authority.serial
+            and attempt_receipt.event == "INVENTORY_CLASSIFICATION_ATTEMPTING"
+            and any(candidate is attempt_receipt for candidate in self._receipts),
+            "R namespace inventory classification trusted lineage differs",
+        )
+
+    def _require_current_inventory_classification(
+        self,
+        classification: _Generation6RNamespaceInventoryClassification,
+    ) -> _Generation6RNamespaceInventoryClassificationRecord:
+        live_record = self._live_inventory_classification_record
+        _require(
+            type(self._inventory_classification_faulted) is bool
+            and not self._inventory_classification_faulted
+            and type(live_record) is _Generation6RNamespaceInventoryClassificationRecord,
+            "R namespace current inventory classification live slot differs",
+        )
+        if type(live_record) is not _Generation6RNamespaceInventoryClassificationRecord:
+            raise ContractError("R namespace current inventory classification live slot differs")
+        binding = live_record.binding
+        _require(
+            type(binding) is _Generation6RNamespaceInventoryClassificationBinding,
+            "R namespace current inventory classification binding type differs",
+        )
+        self._require_inventory_classification_lineage(live_record, live_record.binding)
+        record = live_record
+        item_record = binding.item_record
+        scan_record = binding.scan_record
+        cursor_record = binding.cursor_record
+        authority_record = binding.authority_record
+        budget_record = binding.cleanup_budget_record
+        _require(
+            record.state is _Generation6RNamespaceInventoryClassificationState.ATTEMPTING
             and record.stat_attempts == 0
             and record.open_attempts == 0
             and record.named_snapshot is None
@@ -15959,90 +16170,281 @@ class _Generation6RNamespaceJournal:
             and record.close_receipt is None
             and record.outcome_receipt is None
             and record.terminal_receipt is None
-            and type(classification) is _Generation6RNamespaceInventoryClassification
-            and binding.classification is classification
-            and binding.classification_identity == id(classification)
-            and binding.classification_serial == classification.serial
-            and binding.classification_issuer_identity == classification.issuer_identity
-            and classification.issuer_identity == self._issuer_identity
-            and binding.issuer_identity == self._issuer_identity
-            and type(binding.serial) is int
-            and binding.serial > 0
-            and self._inventory_classification_records_by_identity.get(
-                binding.classification_identity
-            )
-            is record
-            and self._inventory_classification_records_by_serial.get(binding.classification_serial)
-            is record
-            and type(item_record) is _Generation6RNamespaceInventoryItemRecord
-            and binding.item_record_identity == id(item_record)
             and item_record is self._live_inventory_item_record
-            and item_record.binding is item_binding
             and item_record.state is _Generation6RNamespaceInventoryItemState.LIVE_UNCLASSIFIED
             and item_record.terminal_receipt is None
-            and type(item_binding) is _Generation6RNamespaceInventoryItemBinding
-            and binding.item_binding_identity == id(item_binding)
-            and binding.item is item_binding.item
-            and binding.item_identity == id(binding.item)
-            and type(advance_record) is _Generation6RNamespaceInventoryAdvanceRecord
-            and binding.advance_record_identity == id(advance_record)
-            and advance_record.binding is advance_binding
-            and advance_record.item_record is item_record
-            and advance_record.state is _Generation6RNamespaceInventoryAdvanceState.ENTRY_RETURNED
-            and type(advance_binding) is _Generation6RNamespaceInventoryAdvanceBinding
-            and binding.advance_binding_identity == id(advance_binding)
-            and type(scan_record) is _Generation6RNamespaceInventoryScanRecord
-            and binding.scan_record_identity == id(scan_record)
-            and scan_record.binding is scan_binding
+            and binding.advance_record.state
+            is _Generation6RNamespaceInventoryAdvanceState.ENTRY_RETURNED
             and scan_record.state is _Generation6RNamespaceInventoryScanState.LIVE
             and self._live_inventory_scan_record is scan_record
-            and type(scan_binding) is _Generation6RNamespaceInventoryScanBinding
-            and binding.scan_binding_identity == id(scan_binding)
-            and type(cursor_record) is _Generation6RNamespaceInventoryCursorRecord
-            and binding.cursor_record_identity == id(cursor_record)
-            and cursor_record.binding is cursor_binding
             and cursor_record.state is _Generation6RNamespaceInventoryCursorState.CURRENT
             and self._live_inventory_cursor_record is cursor_record
-            and type(cursor_binding) is _Generation6RNamespaceInventoryCursorBinding
-            and binding.cursor_binding_identity == id(cursor_binding)
-            and binding.authority is cursor_binding.authority
-            and binding.authority_identity == id(binding.authority)
-            and type(authority_record) is _Generation6RNamespaceDirectoryRecord
-            and binding.authority_record_identity == id(authority_record)
-            and authority_record.binding is authority_binding
             and authority_record.state is _Generation6RNamespaceOwnerState.LIVE
-            and type(authority_binding) is _Generation6RNamespaceDirectoryBinding
-            and binding.authority_binding_identity == id(authority_binding)
-            and authority_binding.authority is binding.authority
-            and binding.raw_entry is item_binding.raw_entry
-            and binding.raw_entry_identity == item_binding.raw_entry_identity
-            and binding.component == item_binding.component
-            and binding.encoded_name_bytes == item_binding.encoded_name_bytes
-            and binding.parent_descriptor == scan_binding.descriptor
-            and binding.item_depth == advance_binding.next_depth
-            and binding.cleanup_epoch is item_binding.cleanup_epoch
-            and binding.cleanup_epoch_identity == id(binding.cleanup_epoch)
-            and type(budget_record) is _Generation6RNamespaceCleanupBudgetRecord
-            and binding.cleanup_budget_record_identity == id(budget_record)
-            and budget_record is item_binding.cleanup_budget_record
             and budget_record is self._live_cleanup_budget_record
             and budget_record.state is _Generation6RNamespaceCleanupBudgetState.ACTIVE
-            and binding.operation_count_before == item_binding.operation_count_after
-            and binding.entry_count_before == item_binding.entry_count_after
-            and binding.encoded_name_bytes_before == item_binding.encoded_name_bytes_after
             and binding.depth_high_water_before == budget_record.depth_high_water
             and budget_record.operation_count == binding.operation_count_before
             and budget_record.entry_count == binding.entry_count_before
-            and budget_record.encoded_name_bytes == binding.encoded_name_bytes_before
-            and type(attempt_receipt) is _Generation6RNamespaceReceipt
-            and attempt_receipt.issuer_identity == self._issuer_identity
-            and attempt_receipt.token_serial == binding.classification_serial
-            and attempt_receipt.authority_serial == binding.authority.serial
-            and attempt_receipt.event == "INVENTORY_CLASSIFICATION_ATTEMPTING"
-            and any(candidate is attempt_receipt for candidate in self._receipts),
+            and budget_record.encoded_name_bytes == binding.encoded_name_bytes_before,
             "R namespace current inventory classification evidence differs",
         )
-        return record
+        _require(
+            type(classification) is _Generation6RNamespaceInventoryClassification,
+            "R namespace current inventory classification caller type differs",
+        )
+        _exact_keys(
+            vars(classification),
+            ("serial", "issuer_identity"),
+            "R namespace current inventory classification caller",
+        )
+        _require(
+            classification.serial == binding.classification_serial
+            and classification.issuer_identity == binding.classification_issuer_identity
+            and classification is binding.classification,
+            "R namespace current inventory classification caller identity differs",
+        )
+        return live_record
+
+    def _require_archived_regular_unlink_classification(
+        self,
+        classification: _Generation6RNamespaceInventoryClassification,
+    ) -> _Generation6RNamespaceInventoryClassificationRecord:
+        archive = self._archived_inventory_classification_records
+        _require(
+            type(self._inventory_classification_faulted) is bool
+            and not self._inventory_classification_faulted
+            and type(self._inventory_classification_records_by_identity) is dict
+            and type(self._inventory_classification_records_by_serial) is dict
+            and self._live_inventory_classification_record is None
+            and type(archive) is list
+            and len(archive) == 1
+            and type(archive[0]) is _Generation6RNamespaceInventoryClassificationRecord,
+            "R namespace archived regular classification trusted archive differs",
+        )
+        archived_record = archive[0]
+        if type(archived_record) is not _Generation6RNamespaceInventoryClassificationRecord:
+            raise ContractError(
+                "R namespace archived regular classification trusted archive differs"
+            )
+        binding = archived_record.binding
+        _require(
+            type(binding) is _Generation6RNamespaceInventoryClassificationBinding
+            and self._inventory_classification_records_by_identity.get(
+                binding.classification_identity
+            )
+            is archived_record
+            and self._inventory_classification_records_by_serial.get(binding.classification_serial)
+            is archived_record,
+            "R namespace archived regular classification permanent maps differ",
+        )
+        self._require_inventory_classification_lineage(
+            archived_record,
+            archived_record.binding,
+        )
+        record = archived_record
+        item_record = binding.item_record
+        advance_record = binding.advance_record
+        scan_record = binding.scan_record
+        cursor_record = binding.cursor_record
+        authority_record = binding.authority_record
+        budget_record = binding.cleanup_budget_record
+        fact = record.fact
+        named_snapshot = record.named_snapshot
+        opened_snapshot = record.opened_snapshot
+        _require(
+            record.state
+            is _Generation6RNamespaceInventoryClassificationState.CLASSIFIED_REMOVABLE_CANDIDATE
+            and record.stat_attempts == 1
+            and record.open_attempts == 1
+            and type(named_snapshot) is DescriptorSnapshot
+            and type(opened_snapshot) is DescriptorSnapshot
+            and named_snapshot == opened_snapshot
+            and type(record.entry_owner) is FdOwner
+            and record.entry_owner.terminal
+            and record.entry_owner.descriptor == -1
+            and type(record.descriptor_token) is _Generation6ROwnerToken
+            and type(record.owner_context) is _Generation6RNamespaceOwnerContext
+            and record.owner_context.state is _Generation6RNamespaceContextState.CLOSED
+            and record.owner_state is _Generation6RNamespaceOwnerState.CLOSED
+            and type(record.entry_mount_id) is int
+            and record.entry_mount_id == binding.authority_binding.fact.mount_id
+            and type(record.parent_snapshot) is DescriptorSnapshot
+            and type(record.parent_mount_id) is int
+            and record.parent_mount_id == record.entry_mount_id
+            and type(record.current_uid) is int
+            and record.current_uid == opened_snapshot.uid
+            and type(record.descriptor_flags) is int
+            and record.descriptor_flags == fcntl.FD_CLOEXEC
+            and type(record.status_flags) is int
+            and record.status_flags & os.O_ACCMODE == os.O_RDONLY
+            and record.status_flags & os.O_PATH == os.O_PATH
+            and record.node_kind is _Generation6RNamespaceNodeKind.REGULAR
+            and record.hardlink_group is None
+            and type(fact) is _Generation6RNamespaceNameFact
+            and fact.parent_authority is binding.authority
+            and fact.name == binding.component
+            and fact.kind is _Generation6RNamespaceNodeKind.REGULAR
+            and fact.device == opened_snapshot.device
+            and fact.inode == opened_snapshot.inode
+            and fact.uid == opened_snapshot.uid
+            and fact.mode == opened_snapshot.mode
+            and fact.link_count == opened_snapshot.link_count == 1
+            and fact.mount_id == record.entry_mount_id
+            and fact.hardlink_group is None
+            and self._name_facts_by_key.get((binding.authority.serial, binding.component)) is fact
+            and type(record.stat_receipt) is _Generation6RNamespaceReceipt
+            and record.stat_receipt.event == "INVENTORY_CLASSIFICATION_NOFOLLOW_STAT_OBSERVED"
+            and type(record.open_receipt) is _Generation6RNamespaceReceipt
+            and record.open_receipt.event == "INVENTORY_CLASSIFICATION_HANDLE_AUTHENTICATED"
+            and type(record.close_receipt) is _Generation6RNamespaceReceipt
+            and record.close_receipt.event == "INVENTORY_CLASSIFICATION_HANDLE_CLOSED"
+            and type(record.outcome_receipt) is _Generation6RNamespaceReceipt
+            and record.outcome_receipt.event == "INVENTORY_CLASSIFICATION_REMOVABLE_CANDIDATE"
+            and type(record.terminal_receipt) is _Generation6RNamespaceReceipt
+            and record.terminal_receipt.event == "INVENTORY_ITEM_CLASSIFIED_REMOVABLE_CANDIDATE",
+            "R namespace archived regular classification terminal evidence differs",
+        )
+        self._require_receipt_binding(
+            record.stat_receipt,
+            token_serial=binding.classification_serial,
+            authority_serial=binding.authority.serial,
+            event="INVENTORY_CLASSIFICATION_NOFOLLOW_STAT_OBSERVED",
+        )
+        self._require_receipt_binding(
+            record.open_receipt,
+            token_serial=binding.classification_serial,
+            authority_serial=binding.authority.serial,
+            event="INVENTORY_CLASSIFICATION_HANDLE_AUTHENTICATED",
+        )
+        self._require_receipt_binding(
+            record.close_receipt,
+            token_serial=None,
+            authority_serial=binding.authority.serial,
+            event="INVENTORY_CLASSIFICATION_HANDLE_CLOSED",
+        )
+        self._require_receipt_binding(
+            record.outcome_receipt,
+            token_serial=binding.classification_serial,
+            authority_serial=binding.authority.serial,
+            event="INVENTORY_CLASSIFICATION_REMOVABLE_CANDIDATE",
+        )
+        self._require_receipt_binding(
+            record.terminal_receipt,
+            token_serial=binding.item.serial,
+            authority_serial=binding.authority.serial,
+            event="INVENTORY_ITEM_CLASSIFIED_REMOVABLE_CANDIDATE",
+        )
+        _require(
+            all(
+                sum(candidate is receipt for candidate in self._receipts) == 1
+                for receipt in (
+                    record.stat_receipt,
+                    record.open_receipt,
+                    record.close_receipt,
+                    record.outcome_receipt,
+                    record.terminal_receipt,
+                )
+            ),
+            "R namespace archived regular classification receipt multiplicity differs",
+        )
+        _require(
+            type(self._archived_inventory_item_records) is list
+            and len(self._archived_inventory_item_records) == 1
+            and self._archived_inventory_item_records[0] is item_record
+            and self._live_inventory_item_record is None
+            and item_record.state
+            is _Generation6RNamespaceInventoryItemState.CLASSIFIED_REMOVABLE_CANDIDATE
+            and item_record.terminal_receipt is record.terminal_receipt
+            and type(self._archived_inventory_advance_records) is list
+            and len(self._archived_inventory_advance_records) == 1
+            and self._archived_inventory_advance_records[0] is advance_record
+            and self._live_inventory_advance_record is None
+            and advance_record.state is _Generation6RNamespaceInventoryAdvanceState.ENTRY_RETURNED
+            and advance_record.advance_attempts == 1
+            and advance_record.item_record is item_record
+            and scan_record.state is _Generation6RNamespaceInventoryScanState.LIVE
+            and self._live_inventory_scan_record is scan_record
+            and cursor_record.state is _Generation6RNamespaceInventoryCursorState.CURRENT
+            and self._live_inventory_cursor_record is cursor_record,
+            "R namespace archived regular classification live inventory differs",
+        )
+        _require(
+            authority_record.state is _Generation6RNamespaceOwnerState.LIVE
+            and budget_record is self._live_cleanup_budget_record
+            and budget_record.state is _Generation6RNamespaceCleanupBudgetState.ACTIVE
+            and type(self._inventory_advance_item_lifecycle_faulted) is bool
+            and not self._inventory_advance_item_lifecycle_faulted
+            and type(self._inventory_cursor_issuance_faulted) is bool
+            and not self._inventory_cursor_issuance_faulted
+            and type(self._inventory_cursor_lifecycle_faulted) is bool
+            and not self._inventory_cursor_lifecycle_faulted
+            and type(self._inventory_scan_lifecycle_faulted) is bool
+            and not self._inventory_scan_lifecycle_faulted
+            and type(self._cleanup_budget_faulted) is bool
+            and not self._cleanup_budget_faulted,
+            "R namespace archived regular classification authority budget differs",
+        )
+        _require(
+            type(self._inventory_scan_proxy_quarantine) is list
+            and not self._inventory_scan_proxy_quarantine
+            and type(self._inventory_raw_entry_quarantine) is list
+            and not self._inventory_raw_entry_quarantine
+            and type(self._inventory_classification_residue_evidence) is list
+            and not self._inventory_classification_residue_evidence
+            and type(self._inventory_classification_descriptor_quarantine) is list
+            and not self._inventory_classification_descriptor_quarantine
+            and type(self._owner_quarantine) is list
+            and not self._owner_quarantine
+            and type(self._untransferred_raw_quarantine) is list
+            and not self._untransferred_raw_quarantine
+            and type(self._poisoned_descriptors) is set
+            and not self._poisoned_descriptors,
+            "R namespace archived regular classification quarantine differs",
+        )
+        _require(
+            type(self._empty_inventory_lifecycle_faulted) is bool
+            and not self._empty_inventory_lifecycle_faulted
+            and type(self._empty_inventory_records_by_identity) is dict
+            and not self._empty_inventory_records_by_identity
+            and type(self._empty_inventory_records_by_serial) is dict
+            and not self._empty_inventory_records_by_serial
+            and self._live_empty_inventory_record is None
+            and type(self._archived_empty_inventory_records) is list
+            and not self._archived_empty_inventory_records,
+            "R namespace archived regular classification empty inventory differs",
+        )
+        _require(
+            type(record.operation_count_after_stat) is int
+            and record.operation_count_after_stat == binding.operation_count_before + 1
+            and type(record.operation_count_after_open) is int
+            and record.operation_count_after_open == binding.operation_count_before + 2
+            and type(record.entry_count_after) is int
+            and record.entry_count_after == binding.entry_count_before
+            and type(record.encoded_name_bytes_after) is int
+            and record.encoded_name_bytes_after == binding.encoded_name_bytes_before
+            and type(record.depth_high_water_after) is int
+            and record.depth_high_water_after == budget_record.depth_high_water
+            and budget_record.operation_count == record.operation_count_after_open
+            and budget_record.entry_count == record.entry_count_after
+            and budget_record.encoded_name_bytes == record.encoded_name_bytes_after,
+            "R namespace archived regular classification counters differ",
+        )
+        _require(
+            type(classification) is _Generation6RNamespaceInventoryClassification,
+            "R namespace archived regular classification caller type differs",
+        )
+        _exact_keys(
+            vars(classification),
+            ("serial", "issuer_identity"),
+            "R namespace archived regular classification caller",
+        )
+        _require(
+            classification.serial == binding.classification_serial
+            and classification.issuer_identity == binding.classification_issuer_identity
+            and classification is binding.classification,
+            "R namespace archived regular classification caller identity differs",
+        )
+        return archived_record
 
     def _reauthenticate_inventory_classification_parent(
         self,
@@ -18453,6 +18855,7 @@ class _Generation6RNamespaceJournal:
         *,
         purpose: _Generation6RNamespaceOwnerPurpose,
         label: str,
+        _regular_unlink_flow_record: (_Generation6RNamespaceRegularUnlinkFlowRecord | None) = None,
     ) -> tuple[
         FdOwner,
         _Generation6ROwnerToken,
@@ -18474,6 +18877,98 @@ class _Generation6RNamespaceJournal:
             name,
             label="R namespace entry name",
         )
+        flow_record = _regular_unlink_flow_record
+        flow_binding: _Generation6RNamespaceRegularUnlinkFlowBinding | None = None
+        flow_budget_record: _Generation6RNamespaceCleanupBudgetRecord | None = None
+        if flow_record is not None:
+            _require(
+                type(flow_record) is _Generation6RNamespaceRegularUnlinkFlowRecord,
+                "R namespace regular unlink acquisition flow type differs",
+            )
+            flow_binding = flow_record.binding
+            _require(
+                type(flow_binding) is _Generation6RNamespaceRegularUnlinkFlowBinding
+                and flow_record.binding_identity == id(flow_binding)
+                and flow_record.state is _Generation6RNamespaceRegularUnlinkFlowState.AUTHORIZING
+                and flow_record.authorization_attempts == 1
+                and flow_record.authorization_first_stat_attempts == 0
+                and flow_record.authorization_open_attempts == 0
+                and flow_record.authorization_second_stat_attempts == 0
+                and flow_record.authorization_first_named_snapshot is None
+                and flow_record.authorization_opened_snapshot is None
+                and flow_record.authorization_second_named_snapshot is None
+                and flow_record.operation_count_after_first_stat is None
+                and flow_record.operation_count_after_open is None
+                and flow_record.operation_count_after_second_stat is None
+                and flow_record.entry_count_after_authorization is None
+                and flow_record.encoded_name_bytes_after_authorization is None
+                and flow_record.depth_high_water_after_authorization is None
+                and flow_record.capability is None
+                and flow_record.capability_identity is None
+                and flow_record.capability_record is None
+                and flow_record.capability_record_identity is None
+                and flow_record.preproof is None
+                and flow_record.permit_record is None
+                and flow_record.preproof_attempts == 0
+                and flow_record.unlink_attempts == 0
+                and flow_record.postproof_attempts == 0
+                and flow_record.operation_count_after_preproof is None
+                and flow_record.operation_count_before_unlink is None
+                and flow_record.operation_count_after_postproof is None
+                and type(flow_record.attempt_receipt) is _Generation6RNamespaceReceipt
+                and flow_record.outcome_receipt is None
+                and flow_record.terminal_receipt is None
+                and self._regular_unlink_flow_records_by_identity.get(flow_binding.flow_identity)
+                is flow_record
+                and self._regular_unlink_flow_records_by_serial.get(flow_binding.flow_serial)
+                is flow_record
+                and self._live_regular_unlink_flow_record is flow_record
+                and type(self._archived_inventory_classification_records) is list
+                and len(self._archived_inventory_classification_records) == 1
+                and self._archived_inventory_classification_records[0]
+                is flow_binding.classification_record
+                and flow_binding.classification_record.binding
+                is flow_binding.classification_binding
+                and flow_binding.classification_binding.classification
+                is flow_binding.classification
+                and flow_binding.authority is authority
+                and flow_binding.authority_record_identity == id(authority_record_before)
+                and flow_binding.authority_binding_identity == id(authority_binding)
+                and flow_binding.component == exact_name
+                and flow_binding.action is _Generation6RNamespaceAction.UNLINK
+                and purpose is _Generation6RNamespaceOwnerPurpose.PRESENT_TOKEN,
+                "R namespace regular unlink acquisition flow binding differs",
+            )
+            flow_budget_record = flow_binding.cleanup_budget_record
+            _require(
+                type(flow_budget_record) is _Generation6RNamespaceCleanupBudgetRecord
+                and flow_budget_record is self._live_cleanup_budget_record
+                and flow_budget_record.epoch is flow_binding.cleanup_epoch
+                and flow_budget_record.state is _Generation6RNamespaceCleanupBudgetState.ACTIVE
+                and flow_budget_record.operation_count == flow_binding.operation_count_before
+                and flow_budget_record.entry_count == flow_binding.entry_count_before
+                and flow_budget_record.encoded_name_bytes == flow_binding.encoded_name_bytes_before
+                and flow_budget_record.depth_high_water == flow_binding.depth_high_water_before,
+                "R namespace regular unlink acquisition budget baseline differs",
+            )
+            self._require_receipt_binding(
+                flow_record.attempt_receipt,
+                token_serial=flow_binding.flow_serial,
+                authority_serial=flow_binding.authority.serial,
+                event="REGULAR_UNLINK_FLOW_AUTHORIZING",
+            )
+            _require(
+                sum(candidate is flow_record.attempt_receipt for candidate in self._receipts) == 1,
+                "R namespace regular unlink acquisition attempt receipt differs",
+            )
+            self._charge_cleanup_budget(
+                flow_binding.cleanup_epoch,
+                next_depth=flow_binding.item_depth,
+                entry_increment=0,
+                encoded_name_bytes_increment=0,
+            )
+            flow_record.operation_count_after_first_stat = flow_budget_record.operation_count
+            flow_record.authorization_first_stat_attempts = 1
         named_before = _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT(
             _GENERATION6_R_NAMESPACE_REAL_OS_STAT(
                 exact_name,
@@ -18481,6 +18976,24 @@ class _Generation6RNamespaceJournal:
                 follow_symlinks=False,
             )
         )
+        if flow_record is not None:
+            flow_record.authorization_first_named_snapshot = named_before
+            exact_flow_binding = cast(
+                _Generation6RNamespaceRegularUnlinkFlowBinding,
+                flow_binding,
+            )
+            exact_flow_budget_record = cast(
+                _Generation6RNamespaceCleanupBudgetRecord,
+                flow_budget_record,
+            )
+            self._charge_cleanup_budget(
+                exact_flow_binding.cleanup_epoch,
+                next_depth=exact_flow_binding.item_depth,
+                entry_increment=0,
+                encoded_name_bytes_increment=0,
+            )
+            flow_record.operation_count_after_open = exact_flow_budget_record.operation_count
+            flow_record.authorization_open_attempts = 1
         owner, descriptor_token, owner_context = self._open_namespace_owner(
             authority,
             authority_record_before,
@@ -18490,9 +19003,30 @@ class _Generation6RNamespaceJournal:
             purpose=purpose,
             label=label,
         )
+        if flow_record is not None:
+            flow_record.authorization_opened_snapshot = descriptor_token.snapshot
         try:
             descriptor = _GENERATION6_R_NAMESPACE_CAPTURED_FD_REQUIRE(owner)
             opened = _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD(descriptor)
+            if flow_record is not None:
+                exact_flow_binding = cast(
+                    _Generation6RNamespaceRegularUnlinkFlowBinding,
+                    flow_binding,
+                )
+                exact_flow_budget_record = cast(
+                    _Generation6RNamespaceCleanupBudgetRecord,
+                    flow_budget_record,
+                )
+                self._charge_cleanup_budget(
+                    exact_flow_binding.cleanup_epoch,
+                    next_depth=exact_flow_binding.item_depth,
+                    entry_increment=0,
+                    encoded_name_bytes_increment=0,
+                )
+                flow_record.operation_count_after_second_stat = (
+                    exact_flow_budget_record.operation_count
+                )
+                flow_record.authorization_second_stat_attempts = 1
             named_after = _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT(
                 _GENERATION6_R_NAMESPACE_REAL_OS_STAT(
                     exact_name,
@@ -18500,6 +19034,8 @@ class _Generation6RNamespaceJournal:
                     follow_symlinks=False,
                 )
             )
+            if flow_record is not None:
+                flow_record.authorization_second_named_snapshot = named_after
             mount_id = self._namespace_mount_id(
                 descriptor,
                 excluded_descriptors=(directory_descriptor,),
@@ -18528,6 +19064,43 @@ class _Generation6RNamespaceJournal:
                 and status_flags & os.O_PATH == os.O_PATH,
                 "R namespace entry handle identity differs",
             )
+            if flow_record is not None:
+                exact_flow_binding = cast(
+                    _Generation6RNamespaceRegularUnlinkFlowBinding,
+                    flow_binding,
+                )
+                exact_flow_budget_record = cast(
+                    _Generation6RNamespaceCleanupBudgetRecord,
+                    flow_budget_record,
+                )
+                expected_depth_high_water = (
+                    exact_flow_binding.item_depth
+                    if exact_flow_binding.item_depth > exact_flow_binding.depth_high_water_before
+                    else exact_flow_binding.depth_high_water_before
+                )
+                _require(
+                    flow_record.operation_count_after_first_stat
+                    == exact_flow_binding.operation_count_before + 1
+                    and flow_record.operation_count_after_open
+                    == exact_flow_binding.operation_count_before + 2
+                    and flow_record.operation_count_after_second_stat
+                    == exact_flow_binding.operation_count_before + 3
+                    and exact_flow_budget_record.operation_count
+                    == exact_flow_binding.operation_count_before + 3
+                    and exact_flow_budget_record.entry_count
+                    == exact_flow_binding.entry_count_before
+                    and exact_flow_budget_record.encoded_name_bytes
+                    == exact_flow_binding.encoded_name_bytes_before
+                    and exact_flow_budget_record.depth_high_water == expected_depth_high_water,
+                    "R namespace regular unlink acquisition metering differs",
+                )
+                flow_record.entry_count_after_authorization = exact_flow_budget_record.entry_count
+                flow_record.encoded_name_bytes_after_authorization = (
+                    exact_flow_budget_record.encoded_name_bytes
+                )
+                flow_record.depth_high_water_after_authorization = (
+                    exact_flow_budget_record.depth_high_water
+                )
             (
                 authority_record_after,
                 descriptor_record_after,
@@ -20544,20 +21117,224 @@ class _Generation6RNamespaceJournal:
         )
         self._archived_capability_records.append(capability_record)
 
+    def _authorize_metered_regular_unlink(
+        self,
+        authority: _Generation6RNamespaceDirectoryAuthority,
+        classification: _Generation6RNamespaceInventoryClassification,
+    ) -> _Generation6RNamespaceRegularUnlinkFlow:
+        self._require_teardown_authorization()
+        record: _Generation6RNamespaceRegularUnlinkFlowRecord | None = None
+        try:
+            classification_record = self._require_archived_regular_unlink_classification(
+                classification
+            )
+            classification_binding = classification_record.binding
+            _require(
+                type(self._regular_unlink_flow_faulted) is bool
+                and not self._regular_unlink_flow_faulted
+                and type(self._regular_unlink_flow_records_by_identity) is dict
+                and not self._regular_unlink_flow_records_by_identity
+                and type(self._regular_unlink_flow_records_by_serial) is dict
+                and not self._regular_unlink_flow_records_by_serial
+                and self._live_regular_unlink_flow_record is None
+                and type(self._archived_regular_unlink_flow_records) is list
+                and not self._archived_regular_unlink_flow_records
+                and self._pending_publication is None,
+                "R namespace regular unlink flow pristine state differs",
+            )
+            fact = classification_record.fact
+            budget_record = classification_binding.cleanup_budget_record
+            _require(
+                type(authority) is _Generation6RNamespaceDirectoryAuthority,
+                "R namespace regular unlink flow caller authority type differs",
+            )
+            _exact_keys(
+                vars(authority),
+                ("serial", "issuer_identity"),
+                "R namespace regular unlink flow caller authority",
+            )
+            _require(
+                authority is classification_binding.authority
+                and authority.serial == classification_binding.authority.serial
+                and authority.issuer_identity == classification_binding.authority.issuer_identity
+                and authority.issuer_identity == self._issuer_identity
+                and type(fact) is _Generation6RNamespaceNameFact
+                and fact is classification_record.fact
+                and fact.kind is _Generation6RNamespaceNodeKind.REGULAR
+                and fact.link_count == 1
+                and fact.hardlink_group is None
+                and type(classification_record.operation_count_after_open) is int
+                and type(classification_record.entry_count_after) is int
+                and type(classification_record.encoded_name_bytes_after) is int
+                and type(classification_record.depth_high_water_after) is int
+                and budget_record.operation_count
+                == classification_record.operation_count_after_open
+                and budget_record.entry_count == classification_record.entry_count_after
+                and budget_record.encoded_name_bytes
+                == classification_record.encoded_name_bytes_after
+                and budget_record.depth_high_water == classification_record.depth_high_water_after,
+                "R namespace regular unlink flow classification checkpoint differs",
+            )
+            exact_fact = cast(_Generation6RNamespaceNameFact, fact)
+            flow = _Generation6RNamespaceRegularUnlinkFlow(
+                self._issue_serial(),
+                self._issuer_identity,
+            )
+            flow_binding = _Generation6RNamespaceRegularUnlinkFlowBinding(
+                self._issue_serial(),
+                self._issuer_identity,
+                flow,
+                id(flow),
+                flow.serial,
+                flow.issuer_identity,
+                classification_record,
+                id(classification_record),
+                classification_binding,
+                id(classification_binding),
+                classification,
+                id(classification),
+                id(classification_binding.item_record),
+                id(classification_binding.advance_record),
+                id(classification_binding.scan_record),
+                id(classification_binding.cursor_record),
+                authority,
+                id(authority),
+                id(classification_binding.authority_record),
+                id(classification_binding.authority_binding),
+                exact_fact,
+                id(exact_fact),
+                _Generation6RNamespaceAction.UNLINK,
+                classification_binding.component,
+                classification_binding.cleanup_epoch,
+                id(classification_binding.cleanup_epoch),
+                budget_record,
+                id(budget_record),
+                classification_binding.item_depth,
+                cast(int, classification_record.operation_count_after_open),
+                cast(int, classification_record.entry_count_after),
+                cast(int, classification_record.encoded_name_bytes_after),
+                cast(int, classification_record.depth_high_water_after),
+            )
+            record = _Generation6RNamespaceRegularUnlinkFlowRecord(
+                flow_binding,
+                id(flow_binding),
+                _Generation6RNamespaceRegularUnlinkFlowState.AUTHORIZING,
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                0,
+                0,
+                0,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            self._begin_publication(record)
+            self._regular_unlink_flow_records_by_identity[id(flow)] = record
+            self._regular_unlink_flow_records_by_serial[flow.serial] = record
+            self._live_regular_unlink_flow_record = record
+            attempt_receipt = self._append_receipt(
+                token_serial=flow.serial,
+                authority_serial=authority.serial,
+                event="REGULAR_UNLINK_FLOW_AUTHORIZING",
+            )
+            record.attempt_receipt = attempt_receipt
+            self._finish_publication(record)
+            record.authorization_attempts = 1
+            self.authorize_present(
+                authority,
+                exact_fact,
+                _Generation6RNamespaceAction.UNLINK,
+                _regular_unlink_flow_record=record,
+            )
+            return flow
+        except BaseException as primary:
+            self._regular_unlink_flow_faulted = True
+            self._phase = _Generation6RNamespacePhase.UNCERTAIN
+            if record is not None:
+                record.state = _Generation6RNamespaceRegularUnlinkFlowState.UNCERTAIN
+                if self._pending_publication is record:
+                    try:
+                        self._fail_publication(record)
+                    except BaseException as publication_error:
+                        primary.add_note(
+                            "R namespace regular unlink flow publication failure: "
+                            f"{publication_error!r}"
+                        )
+                try:
+                    terminal_receipt = self._append_receipt(
+                        token_serial=record.binding.flow_serial,
+                        authority_serial=record.binding.authority.serial,
+                        event="REGULAR_UNLINK_FLOW_UNCERTAIN",
+                    )
+                    record.terminal_receipt = terminal_receipt
+                except BaseException as receipt_error:
+                    primary.add_note(
+                        "R namespace regular unlink flow uncertainty receipt failed: "
+                        f"{receipt_error!r}"
+                    )
+                flow_archived = False
+                try:
+                    if not any(
+                        candidate is record
+                        for candidate in self._archived_regular_unlink_flow_records
+                    ):
+                        self._archived_regular_unlink_flow_records.append(record)
+                    flow_archived = any(
+                        candidate is record
+                        for candidate in self._archived_regular_unlink_flow_records
+                    )
+                except BaseException as archive_error:
+                    primary.add_note(
+                        f"R namespace regular unlink flow archive failed: {archive_error!r}"
+                    )
+                try:
+                    if flow_archived and self._live_regular_unlink_flow_record is record:
+                        self._live_regular_unlink_flow_record = None
+                except BaseException as live_slot_error:
+                    primary.add_note(
+                        "R namespace regular unlink flow live-slot clear failed: "
+                        f"{live_slot_error!r}"
+                    )
+            raise
+
     def authorize_present(
         self,
         authority: _Generation6RNamespaceDirectoryAuthority,
         fact: _Generation6RNamespaceNameFact,
         action: _Generation6RNamespaceAction,
+        *,
+        _regular_unlink_flow_record: (_Generation6RNamespaceRegularUnlinkFlowRecord | None) = None,
     ) -> _Generation6RNamespacePresentToken:
         self._require_teardown_authorization()
         self._require_name_fact(authority, fact)
+        flow_record = _regular_unlink_flow_record
         _require(
             type(action) is _Generation6RNamespaceAction
             and (
                 (
                     action is _Generation6RNamespaceAction.RMDIR
                     and fact.kind is _Generation6RNamespaceNodeKind.DIRECTORY
+                    and flow_record is None
                 )
                 or (
                     action is _Generation6RNamespaceAction.UNLINK
@@ -20566,6 +21343,36 @@ class _Generation6RNamespaceJournal:
             ),
             "R namespace present action differs",
         )
+        if flow_record is not None:
+            _require(
+                type(flow_record) is _Generation6RNamespaceRegularUnlinkFlowRecord,
+                "R namespace present flow record type differs",
+            )
+            flow_binding = flow_record.binding
+            _require(
+                type(flow_binding) is _Generation6RNamespaceRegularUnlinkFlowBinding
+                and flow_record.binding_identity == id(flow_binding)
+                and flow_record.state is _Generation6RNamespaceRegularUnlinkFlowState.AUTHORIZING
+                and self._regular_unlink_flow_records_by_identity.get(flow_binding.flow_identity)
+                is flow_record
+                and self._regular_unlink_flow_records_by_serial.get(flow_binding.flow_serial)
+                is flow_record
+                and self._live_regular_unlink_flow_record is flow_record
+                and flow_binding.authority is authority
+                and flow_binding.fact is fact
+                and flow_binding.action is action
+                and flow_binding.classification_record.fact is fact
+                and flow_binding.component == fact.name
+                and flow_record.authorization_attempts == 1
+                and flow_record.authorization_first_stat_attempts == 0
+                and flow_record.authorization_open_attempts == 0
+                and flow_record.authorization_second_stat_attempts == 0
+                and flow_record.capability is None
+                and flow_record.capability_record is None
+                and flow_record.outcome_receipt is None
+                and flow_record.terminal_receipt is None,
+                "R namespace present flow binding differs",
+            )
         owner: FdOwner | None = None
         descriptor_token: _Generation6ROwnerToken | None = None
         owner_context: _Generation6RNamespaceOwnerContext | None = None
@@ -20585,11 +21392,37 @@ class _Generation6RNamespaceJournal:
                 fact.name,
                 purpose=_Generation6RNamespaceOwnerPurpose.PRESENT_TOKEN,
                 label=f"R namespace present token {fact.name}",
+                _regular_unlink_flow_record=_regular_unlink_flow_record,
             )
             _require(
                 self._name_fact_matches(fact, opened, mount_id),
                 "R namespace present fact changed",
             )
+            if flow_record is not None:
+                flow_binding = flow_record.binding
+                budget_record = flow_binding.cleanup_budget_record
+                _require(
+                    flow_record.authorization_first_stat_attempts == 1
+                    and flow_record.authorization_open_attempts == 1
+                    and flow_record.authorization_second_stat_attempts == 1
+                    and flow_record.authorization_first_named_snapshot == opened
+                    and flow_record.authorization_opened_snapshot == opened
+                    and flow_record.authorization_second_named_snapshot == opened
+                    and flow_record.operation_count_after_first_stat
+                    == flow_binding.operation_count_before + 1
+                    and flow_record.operation_count_after_open
+                    == flow_binding.operation_count_before + 2
+                    and flow_record.operation_count_after_second_stat
+                    == flow_binding.operation_count_before + 3
+                    and budget_record.operation_count == flow_binding.operation_count_before + 3
+                    and flow_record.entry_count_after_authorization
+                    == flow_binding.entry_count_before
+                    and flow_record.encoded_name_bytes_after_authorization
+                    == flow_binding.encoded_name_bytes_before
+                    and flow_record.depth_high_water_after_authorization
+                    == budget_record.depth_high_water,
+                    "R namespace present flow authorization evidence differs",
+                )
             token = _Generation6RNamespacePresentToken(
                 self._issue_serial(),
                 self._issuer_identity,
@@ -20622,10 +21455,18 @@ class _Generation6RNamespaceJournal:
                 None,
                 None,
             )
+            if flow_record is not None:
+                flow_record.capability = token
+                flow_record.capability_identity = id(token)
+                flow_record.capability_record = capability_record
+                flow_record.capability_record_identity = id(capability_record)
             self._publish_capability(
                 capability_record,
                 event="PRESENT_TOKEN_AUTHORIZED",
             )
+            if flow_record is not None:
+                flow_record.outcome_receipt = capability_record.authorization_receipt
+                flow_record.state = _Generation6RNamespaceRegularUnlinkFlowState.AUTHORIZED
             return token
         except BaseException as primary:
             if capability_record is not None:
@@ -20966,11 +21807,10 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  a15=A.Del
  a16=A.Raise
  a17=A.Dict
- a18=A.Load
- def _g6r14_decode(e:str)->Any:
+ def _g6r16_decode(e:str)->Any:
   def r(o:bool)->None:
    if type(o)is not bool or not o:
-    raise E('R CAP3 payload differs')
+    raise E('R A2i payload differs')
   def u(b:bytes,p:int)->tuple[int,int]:
    s=p
    n=z=0
@@ -20995,11 +21835,11 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     for _ in range(w):v=v<<1|(b[p[0]>>3]>>(7-(p[0]&7))&1);p[0]+=1 # noqa
     return v
    return g,p
-  r(type(e)is str and L(e)==18077 and e.isascii()and(not N((c.isspace()for c in e)))and H.sha256(e.encode()).hexdigest()=='2ff6225db8b8b51ee7fa419e2309fa8fae31b5ec03d38404837eac2181babfc8')
+  r(type(e)is str and L(e)==19283 and e.isascii()and(not N((c.isspace()for c in e)))and H.sha256(e.encode()).hexdigest()=='7618e620c69f01f51e1a757769d1b06b0fea927f365ddbe5cf30605d6fdefa30')
   b=base64.b85decode(e)
-  r(L(b)==14461 and H.sha256(b).hexdigest()=='6d1a7276aa0241af6138d11f7c7354d9ef12933dace5a2dedfcf9205b3824626' and base64.b85encode(b).decode()==e)
+  r(L(b)==15426 and H.sha256(b).hexdigest()=='30b00b6d4c9569616145354ddd373ea600158c24431be219442d35987c5fb875' and base64.b85encode(b).decode()==e)
   h=struct.unpack_from('>8sBBBBHH9I',b)
-  r(struct.calcsize('>8sBBBBHH9I')==52 and h[:7]==(b'G6C3R14\0',14,0,128,13,596,1416)and h[-1]==0 and h[10]==51120 and h[12]==5570 and h[13]<=800 and h[14]<=180)
+  r(struct.calcsize('>8sBBBBHH9I')==52 and h[:7]==(b'G6A2R16\x00', 16, 0, 128, 13, 643, 1575)and h[-1]==0 and h[10]==55540 and h[11]==7050 and h[12]==5703 and h[13]==518 and h[14]==141)
   p=52
   a=[]
   v=[b'']*0
@@ -21009,7 +21849,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
    r(L(q)==2 and OO((x<i or 160<=x<=254 for x in q)))
    w=b''.join((v[x]if x<i else bytes((x-128,))for x in q));r(0<L(w)<=512 and w not in v);a.append(q);v.append(w) # noqa
   z=p+h[11];g,k=R(b[p:p+160],1280);ll=[g(5)for _ in range(256)];p+=160;nn=[] # noqa
-  for _ in range(596):j,p=u(b,p);r(j>0);nn.append(j) # noqa
+  for _ in range(643):j,p=u(b,p);r(j>0);nn.append(j) # noqa
   r(sum(nn)==h[7])
   g,k=R(b[p:z],h[8])
   C={}
@@ -21028,42 +21868,42 @@ def _generation6_r_authority_source_gates(source: str) -> None:
     t.append(s)
    ts.append(t)
   r(k[0]==h[8]);p=z;z=p+(h[9]+7)//8;g,k=R(b[p:z],h[9]);rr=[] # noqa
-  for _ in range(1416):
+  for _ in range(1575):
    q=g(1)
    rr.append(g(4)if not q else 16+g(7)if not g(1)else 144+g(9))
-  r(k[0]==h[9]and OO((q<596 for q in rr)))
+  r(k[0]==h[9]and OO((q<643 for q in rr)))
   p=z
   ss=[]
   for t in ts:
    F=b''.join((v[x]if x<128 else bytes((x-128,))for x in t))
    r(0<L(F)<=512 and OO((32<=x<127 for x in F)))
    ss.append(F.decode())
-  refs=[ss[q]for q in rr];F=b[p:p+5570];p+=5570;rm=b[p:p+h[13]];p+=h[13];rw=b[p:p+h[14]];p+=h[14];r(p==L(b)) # noqa
-  gc=list(F[:20]);dh=F[20:57];D5=[F[57+i:89+i].hex()for i in range(0,288,32)];dg=[F[345+i:377+i].hex()for i in range(0,5184,32)];g,k=R(F[-41:],324);ki=[g(2)for _ in range(162)] # noqa
+  refs=[ss[q]for q in rr];F=b[p:p+5703];p+=5703;rm=b[p:p+h[13]];p+=h[13];rw=b[p:p+h[14]];p+=h[14];r(p==L(b)) # noqa
+  gc=list(F[:21]);dh=F[21:61];D5=[F[61+i:93+i].hex()for i in range(0,288,32)];dg=[F[349+i:381+i].hex()for i in range(0,5312,32)];g,k=R(F[-42:],332);ki=[g(2)for _ in range(166)] # noqa
   rp=pe=0
   roots=[]
   P=('capture:','class:','function:','alias:')
-  for i in range(162):
-   j,rp=u(rm,rp);o,rp=u(rm,rp);n,rp=u(rm,rp);lo=j if not i else pe+j;pe=lo+o;roots.append([P[ki[i]]+refs[-162+i],lo,pe,n,dg[i]]) # noqa
+  for i in range(166):
+   j,rp=u(rm,rp);o,rp=u(rm,rp);n,rp=u(rm,rp);lo=j if not i else pe+j;pe=lo+o;roots.append([P[ki[i]]+refs[-166+i],lo,pe,n,dg[i]]) # noqa
   r(rp==L(rm)and rw[0]==85)
   lines=[struct.unpack_from('>H',rw,1)[0]]
   p=3
   for _ in range(84):j,p=u(rw,p);r(j>0);lines.append(lines[-1]+j) # noqa
   n=(255+7)//8;g,k=R(rw[p:p+n],255);cats=[g(3)for _ in range(85)];p+=n;n=(170+7)//8;g,k=R(rw[p:p+n],170);muts=[g(2)for _ in range(85)];p+=n;r(p==L(rw)) # noqa
-  o=0;D0=refs[o:o+12];o+=12;D1=refs[o:o+23];o+=23;B=refs[o:o+170];o+=170;D2=[];z=0 # noqa
+  o=0;D0=refs[o:o+12];o+=12;D1=refs[o:o+23];o+=23;B=refs[o:o+176];o+=176;D2=[];z=0 # noqa
   for n in gc:
    D2.append([[B[z+2*j],B[z+2*j+1]]for j in range(n)])
    z+=2*n
-  B=refs[o:o+758]
-  o+=758
+  B=refs[o:o+890]
+  o+=890
   D3=[]
   z=0
   for W in dh:
    r(not W&128 and 1<=W&63<=44);n=W&63;D3.append(([B[z+2*j]for j in range(n)],[B[z+2*j+1]for j in range(n)],bool(W&64)));z+=2*n # noqa
-  B=refs[o:o+28];o+=28;D4=[[B[j],B[j+1]]for j in range(0,28,2)];d=T(refs[o:o+115]);o+=115;x=T(refs[o:o+58]);o+=58;JR=T(refs[o:o+90]);o+=90;o+=162;r(o==1416) # noqa
-  M={'D0':D0,'D1':D1,'D2':D2,'D3':D3,'D4':D4,'D5':D5,'D6':roots,'Journal':JR,'ROWS':[lines,cats,muts],'d':d,'schema':'TASK064-G6-R-CAP3-MANIFEST-R14','x':x}
+  B=refs[o:o+38];o+=38;D4=[[B[j],B[j+1]]for j in range(0,38,2)];d=T(refs[o:o+115]);o+=115;x=T(refs[o:o+62]);o+=62;JR=T(refs[o:o+93]);o+=93;o+=166;r(o==1575) # noqa
+  M={'D0':D0,'D1':D1,'D2':D2,'D3':D3,'D4':D4,'D5':D5,'D6':roots,'Journal':JR,'ROWS':[lines,''.join(map(str,cats)),''.join(map(str,muts))],'d':d,'schema':'TASK064-G6-R-CAP3-A2I-MANIFEST-R16','x':x}
   F=J.dumps(M,allow_nan=False,ensure_ascii=True,sort_keys=True,separators=(',',':')).encode()+b'\n'
-  r(L(F)==51120 and H.sha256(F).hexdigest()=='05f831a698d0341f7808c57bbc8a4c2debe9ba634ce3445b888e83e657e951ab')
+  r(L(F)==55540 and H.sha256(F).hexdigest()=='24eadc18a8c857a8f767cd92e8b010b1095f6048a248e034c7d407a2141ee0eb')
   X=[[128+c for c in s.encode()]for s in ss]
   for i,O0 in enumerate(a):
    cc=[]
@@ -21105,7 +21945,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
   r(ss==sorted(fc,key=lambda s:(-fc[s],s.encode())))
   V54=(T(D0),T(D1),T((T((T(y)for y in q))for q in D2)),T((T(y),T(z),f)for y,z,f in D3),T((T(q)for q in D4)),T(D5),T((lo,hi,n,dg)for _,lo,hi,n,dg in roots))
   return V54,d,x,JR,T((T(q)for q in roots)),(T(lines),''.join(map(str,cats)),''.join(map(str,muts)))
- D,d,x,R,aa,ROWS=_g6r14_decode('M>az<QZY0D4gi1+0#pTv000>v0066J001y70076Z000<b000%j0007#0001u00000<?iM3;q>qB-^cIr0QBht0te~t<K^Y^w$kw7^5x;}#m)f;01@f*1QHYs-_i>W4;L5;1^E@u8yUgW_6E<+#nK)c6Zsv<BOl-6#l-OR-wq%o1Q02<Dl04&;qKq*-^26e^Yg{Q1?1y2FXZLz<=^S!2_fb5_4N1d1|l{-?BO%aJpsw?Lm~C<3FkQo=?)3xKr-p(N=x6)Oh>Gs#nbcjJm}TZ-{Rry_3|7<FwDu$1PtjX5Y!eyG3;LE!NbALCf~u(&(hyI>Fh~HQUzMyUEkyM?Bz{i&(q)Y<>c}8_3%*8V8v~7b#&kEEp~B8(&Yi|1LZd-Mf7YgInIR~>q*XVAt*wYfF(czk^`kFNDkE)={o=b9O*(3kR3=ml60&GT8;%JD@vNysR&XOgdqq*7KAVeTF`_c2tp8rwFpBH00F2%5QHHJ0000000000000000000000000H~;_u0Bc$RAmBpS2DM875CALy0ghvo=s}i)pvOB-Vx0*=+Mp-|0Z?NY=Q)~lodq)tV;t#0(!?+T0tp8N1P22G4hRPX0tX8Q2LuQQ2nPlO0|f&K3IYiR2m=QP3JVJZ2nZA!1O^ES2nq!S1O^5O1PBWW3<m`U1qKrc2MPuY4GRbe3I+!S2?hxV2@3}Y2?YoT3<(Vf2nPrT2M7iS1_ulS0tpBP2M7lU5)%ap3JV7g2m}ZY3K9tf1PKQg5*QE>69o_p3JD1j5C;Sa5e5YV1`ZGg2L=rZ1r-?w2nPuZ2nh=c2MG)g1q2BP1q=lZ1`P=g3<?qo2@(z%4G{?r4h{<m3knJk3=0bl3=9?x4+;ea1O^BS2?+=e4Gabf2nGca5eo|o3<LrL1PKZR1Pcof1_lQL0}2ZU1qKBT3JU}S1_%ZV0u~b$1|Ss~BMS@)1p@;E0|EjA0|NsC0|NsC0|NsC0|NsC0|NsC0|NsV4jC5~78)TR4;LaJ69Nnm4iFI=3=Itr5El;*3kwMc5*h{u3=Ibe1Ox;P1``hk2nq)d1`!q!7a0Zt4h;+o3<(Yo3JM7Z4G$6$7842#5)}>-2n7rW4-ym+77z;y4+#wh2MP)d4G|9s2nP=i5DpOv3lJ6%5()(h1_}ud2MY@j4*~-R1_=iT1O*8Q7zqRo5)u*%2?z%R1PBKa1`7xV1p*od3<w4U1qTNO1`7rV5C{ki3ke1k3<w4c1`7`k3knnm3J3@X2M7rT2nq)U2m=TQ5eE<m1rP=U2m}ZR0tpZ$LKzqfLJ$xP3KR<t5)2U%5(x_s4HXFy5D5wj2L%ZX3Jneo2MH}43k?W>0dmXD*I6<9<DtJn1H9umAzRxGVzAX*M=Zzhj)wjVWji!p9mTUI!gS&ZVx>{!uYRwL-6yXld-Z&Ku$~*M`!H8$dCnvESuYOa*^^;9aW`ROB9s|AK0%A7aNkTns8fCjKD)w4IpnW?uZ~WRF{#;t>Q0U^*sM2`ql}7BcVQD(_7h3zG@ieO*`pOMEs#-SrBN;|kWpf#QYsto4kf>4gV{PS1z*u??#4AcFkNoK#ybBP>{c7@!tqUvGSz687S0`n>BN5tE-jop3Db!F6ja@$zDsaqwOV%EDdZTsXAdKo+5_j#KmX5;m})4WEd0)dCj1ckKNICp5z`Gt6Xl-!=od`hqh!n#*{DiBSCB_c)_ixF8XYgLWdzwM`TCzcIF|jI4|ica6@NvqyLJ{aso8?*7F#Kdb^M(iW3TsNV;;@+G3?(-(Z)TS?bukyvwVv!l*UCUILM_17F#ItY-6pNQ@NQsFDEYTz{^#qi4>rws`HmGb)>5n@%yZn5`%}L!ccJZVz87K@R&*q_)%p$Nqm;*_K{{P6`1|;(BBtdIkXWQ?sI3#nUT@rJ(jJTjI~-kH%aeD-tg`%nKl!r5MEb@acs%3oj8cH*+++4GN*GWve`$Hz52d6WYu^o{)=C9ofm?y=(YDE%VjZ*PRtir$6un$WigJ$VZJfgtT#oL$~^xC#qGp-F<UAOwOTys_IM|6T|DXbcqeaNNzr-J?C?(Bx<!`CJVN0~WYu_qQ&Xewc{VZD%&FYV$+5aV_mg8z#aOqGCdNgU$~>DH7F#JFzB(K423oBVWwMVbcGh!NcZFrjT0~CF7g%~EPRtirdND|ym@c2fB6eW9e+nyRcptjSCX?NEs^TO|e$5B3;U$X0d_5GgSZ{};6)aX8zl4@64d23w(ITg@wQ&!!(=O=~R<GV)Vnwc__gN*3WwR=GGFZWa*+t3m2MgL<pAc}psJJV~?~aE1C92b1s<?*9H3?p9$_O1W)KNZJ?~Rg;$-)86=(z)AnuM=2@8mQ3glz%y<sNsD@w5lelzHFsLz+%>`M(F>H3MhLlR){BvN?{Kt(idqb@Q7+5xzQaOzDCcj>4anDEZ<zdDLY)Nqm;*_K{{P6`ZN`L!8tlOcqr7A<k+NrU(s_oIHJJ*;DBK0v-|%rJpWrwC2W^oY>L(<DtJTIkBX8cQQJ%v#8^miYLoF@2CxvoIHJJ*&SI~)N##46Xl+F)EQIg<aK3dQO7kDPnLP#P;;7use;GWeK7u^1q2S5YABy9_uVuH^#JDdT!FGpLRXphO#%HtIlUJl&T0~-3m;kZ+1EK7(|!m(yTV5}4U?QaeP`2t2tK>QM>`)`^zR|u;rxbwP^Wng=lVYp=RTc3@yY?s=((Lg@yY?s=(z)A=MNuQ^y&YOP*6f<M@8S68XYgEi<*SPXV1C*VxM#T!~>hrb3W(!hzB>K<PDRYJbh==#53o<pVKJ$=>4ye`*Sj<(MRpf%AZ6Hlbk$#XUP4znN#S8IjBmQEPZFl%{!n&MsSWi*@)5UnUT;xRQXeW2nX^R{X!h`P)1*#d+G>G$moCu&>uc=<DvrU%EvVnK_9noAJl~j!6t;RVGIS;loDuyBk~JxQd!6jX5OZ-OGJK6y-i?5eoehiV4#G|j))qQ4@6;`I_6i1-6yj)DYfw%r1cbvvYshU(qARIEVfbMy^J(;GSz7C>czYlmFG{h!8>~Eb`!)d6qZd`{qfM>c{VZD%&FYWe)#Bbyq!>&k2hUpyq?nGL6)mWgWhw9FE5I0ZP;EZv4&c$BlpKcf5keXFFZ)41vOVVmi?L!Kpfow0TSE_@fz%B>!kz;mgd#OGR88Y7p9?{TR3(Trx4Hj+6wU+>}Q45@s*2to@MwJF_nvW|NrW0>}`D@xjrFm=)$dQYT_LtYJzQ5vk%r~_);c@co91=T?e%$tdYo4CWd*J;q6JQBytr0Z{`c@l`63TID|@|RDzjlQuN-~P|Q`_XPJt_e@*R(ezP%HZVN73Eg-rAtkY}h0>%Zbc2-r2h7#YiLF@8<PCmxa{bpZ<y6zv-R|T$lm-|-`=@V7`HE>$(TtlQySNn!yuH!t*_xpxouH!t+RvW+EGZl9k;dOlfaLiTQXX~W}{^og@tTzRhEtZg7KimbER|U*JS(p0#q*;oEWH4I;JI-+x`9t-Yehlw9#8>4H)@CaW!JX$giu|Ga!s_@L-gAhr${(*?C?L-BoJD?6{d(y^28n@t7;9%>EaEDgXnmzl9bddHDy3w?yhghj;dOjY$SK<cC92SxPjK`}r1uX-DKwtNCX?6jqLWEqmx24Nl4&dQhEB#BIwq38C~Ge5!8DcmLtUl9i4xzlLGB)kTw5Tb#Y(59_QP1IacqK%6)KwTRm4iMZvel$V9Zt<q+07+I7-=z72&MAw+Ujd;4CVdZqi>Rx@uWf(?p7%#?{0=%S^ihQe~?|ik`;R#6HVRyTekGbsR5f!tjA9GS$NNj4uuvl$)tZF4k*Eq?c<osu6VSIjR)bF3XaprPcM-^joXv@UEJ+ZVZ;IOQx-xgC(lcEpn!%a`63SS)dp9Y#EBfa;@{2UK}+kH&Codl&a$GWqV(y3je8CkxK=!Sddkk6^S0&&T5u1V@0=Jz$Wb_@>|=k<6pFkF;J|m+MpIP%a^*+%a^*;Tg*+Xg);CsEobt_cq;yjUv^#v)%PrXW7)pT!0^K5kBoKx>?TW9rG-=eyquhzoS)b8{@>gCf3NlY|M|(u$;rw2@^W%=a&mHVa&mru`#NW-3KN1&30%S$3$L8o2#xX6JxEZT5@<^15Ww_Np!n&Yq$o}aG$nHgVL=1D<2NE#zgNdLFuKR*K-qyWAla9Bqrwn;C!R3|a7q-x3_|N4odafn-tWwa=g>HL*JjL^F0uL0HegPlG-5b;oZ^`~&vtCdg6kih17-y2^F||wm^w3r9|`A-L7WnWFhdly=Ejf!=I8=ib7M$Kv2Oy|)U@Wtkeos#Q1nrt`%Kw-W}l}dT5@_c<$oWWOz~--(Wfw4b2>kd;V=092kFfgoZgK&!qc76r#THYMW&BNnkeavT4U(b>XWC`cArqR`ladhAE(vPr|=e^!=eBiKz#Yfj)+Ws&F9B86hR-h1>R`zvomL0$^ms{K)cNz7G`YgnLsYAtbJ@D1e}Rk9LT`C%^ntJZ0ngoF07!)7`dmOIxsHtM}?Se0rTe`Iv_5rtaDLD1>R`zvkjm=eB;MN1=W-p2aW~aXz;TQpgw%#$3z9ylo<z)A6p1eF7ro)m~8>`=N>vBF07!)Jb3!pLJ2t%vN@4~cbYsb!)OnmIPuW|b!7%Y;|zg|nt9`+0`D|<S(4>r>j*r@3I*P1@Usy()FmH0Cr_K#NAMR|;9cgA3o#RoLQ(U=bosq>e*txmA6p1PCn8oyGB7UlM}?S)#-S+r;W~WYx<7!r#u)<_H1o$s03JU-lQ;)AqURjcQ3QV7u-m)M9uw=iy)(SoTX%V*!pxT|=okNJA3R%kd85M2>6<|Tf%3NQ^GAi4iW#W$%@|9Sw|AO6EW}XFN1kZG5&1Um^GAi4h|QBQK`8m+IC<1Vr^t6d<F|L3JS@aO`F$hXyUiXJVjy}lkDs@9nmjDTK=fyen{OY~g$cnc)hcE{zXW#i{YX%p9VYdJp-vw@-an}d6N9AQu(>*Hr{DGvNuoc;Zy(f!3Bl5DSY=N?@!QAsAwqC;o7NL&f08?Tojz%!^B#BLj^3uQOGf1BvW2&)t@8+U50$s6tP^KkzzM$uJm5LK7dYmkh$HsE3DiJyrOY>(5I?7;fX$OIL!&rQH6+cOG6tlh&KwO%N1QM`V(CT(q@(BMPoe{(I8ZeuoPg#)|38>R@(z3rL*+o!$Q%txmoPOZ9*F*74DpMm2l@U2>l_V9vVXviAIu^72R!*S1}GYnWdDI2FhoQ04txzwY<*!s)Yb`TkI4g35zU+jkNlu&4ut7~fv7qYrVHi}&ltL3Y7UIyK-3)>!uf<hAm^VZfW-h2IMgK{JSR_^*GC-GQ3QV206Eg;8_bAv`lk+z;Xnb-moVOBK>nVZ12#;-4vgVI0nwZwL`PvBIw3A$yvT=1sPuS^(t0l|$A=Q%vqA3cDE;x!-+3$FtK&CG?0)#@Z@iW7)$#7akKY{){A1a^-Gv{%Ivej0Dr$6n@%!VUz64ojiNAG{1YIhM*-*k;_Gmo<E|o=W!>{b{0^8R>PszvF+8+h1{52`L1*~>f{svYp=GW2%jA3i7Y~aGJXcPD9_`;DjLXk8Bg4TF@QfkQ@g(7GJn>dQ575$z7TYBgz6F?SS+kp1gb5t8Mz!Zs~3oh-zduutW3wTysrKA*zpbIYTz<X;sstoTr#0o^v1*~>f{sBqKtW*W8c2@oYPxk&`xD!e4xp7?uHqOGI?fk)gucRqxJGFy+VQZ~y<I{U$89&r3`#b=)_1C8M!iI5d;n+@`Kv80)Q`3858x2*&3gzMY_O2n)Ca70zl}CGDNLMcp*R}M4V;NYtfn~4#71#xff=wlUP}W`BfcDmNR2D7@x3(IXOMcA<p<S|79fIBxX)E%EvhLgmwzHa`w}oZOT0w5RfF_gBuGuP%-;pyows7nxP9c?wl~?5aoPCX<r|;GAzjc#`q7~aEQQP#blF)}-ydbevV%hyQa9V*hp1<4zeoj8d+X2CAJ^tVmN$dU0I~oc5pY9pN6zman-|iWTyMW-ep8s$YQD%v>Nmp<80<yMLFqZwA4`1#DWo)QnE&DVc>((nT_X4uER5Ocb4#ITeKit~5hEB#DKit~5he(>Q_aC~+!_j}Z{hVIifUoTE0^8S5_ciVz+pgdiT&1M{a2ZgGreE9y(pTl+e#sn%wI-~Q$QCp9NaQ$Ig2g7j6v1+QLoJtVg60zQU$l!cP^^U{!vvj`p{MWF@r8EDRCWySIm8cbXEjVEzh;BbuGuP%!JX$giu{x_i)RkPbm9Xm*umHe%Grls+294Yu85cVD#h3Ae(NNO*@Eba*@EaBGr++Uvjx;rCuR$;P3?xUNS&B2wc4wRh^ZLmc`;im47FMjdixLEWRvo7_BPn#;I+r=NS6JY4?&XEXpt@ZG#-N`s?*bZVXRb%Z`q*q87)?t?N!7|{VVvXU;1xsHHww~yH#-#tXsfr&jSfoE#O-^OBHty-DIVT!*sD&Zxt+78~Sf-HHwxi4fWcqh?`<1|3CavT)!rt+-ulV0Z;b+^6@V}@|uKBvzUFXCa0pJYI-UKMQPLzi)N{*=%^JHr%*mEnt>@Y)ipg80;06)2gS2cYz-4lPenketvZ46Y}XA+P1H@=OXRl-U%s0OyJgRS38eKmY`O4lTqv8iT=*Zt;I*H@Yd$Xptp82zhOu}pXX~|B5u!y;V`}0bWu{$&U}&3#?HFDc3)(QeAlMov;d?<`ygyro?Ezybu~Mj~l}{{%suJ=#tVi)qs7uKcr_Gf>;h*NDm=-izSS`5QGr`ARBVTg2wjjEG>m^&;8yierUt#FoUt#FQy1oR|^i;aO^xoKO7V7!@D7RPI?N!A6_#s}{tlNE?OjdJL!tmE8a3-gsrE+%zM2eoq)x<u_OuMd5;BdOG>yx+&x6Z|K@bR{1gO0pLzV6$NjegQB#X_^%r*j~ho{F8NP90yrw6u#_v3@*wEx6k=!N*=BUvXAx#@U_@I`JC&inBm$&jSTnqxV@QS*FInX%=FkSt{Q-h2bjSIfdZ@Qe~-D`OGf}5|b@Jt28R#IfdZ@Qe~)MwkqE_h2aLk(KhPSas<+P{t;M_DOJVV%J#oZ75`ZM@zCEZ5)!Oi!m%Qg4H7D96^Rt$SXDByBg0&_R4Wn}X>g%fk>OkSx+@YFu9~Zri3}wLHCHPVFk2QhgyIn@g^XphDt9x7qi(x^CX?HB++pb3uHY+|hwEE<>22$;P3?xUR^GbTYOW&1!C7*amm6kyIP1h~?pwmL<t-(=D=t#f<803d9e9m>%Xn5?rKJ^YRf~DyrmhQIHtUz;unGJ1e100um9nD=L18E$nx2Y`B?c=ALG<3(YZZi`>$O)B^Aj%tEB;vc$6w{(E>DOi?IrSC^2c({UI&I3EO&yh=(YE5!jIn_4g3X{R=F3o%N|KD1>Eb=`!eu6Fu7yn9e=wDKYVmI@Gh^P!sU;QdpFy#qxZ){e*m$$W6Mr#X#Mff-@sXQYms|gvE-8QUCzB9vo8a~3zj}H*ZZ)rKlOm8mzF!js}}HHT)YnqE?D@-U+%)d!EC22d}FWCWwM!g3?&DaJ~Amm%fMr_i!o5F^2e0zCGuON+C`YCR&XnqhwJ5z<(vgOmQz<?EGnNYcP!v3+_IXx0bIO4Uo3Yl<;Vgql|^jqXPJKf6B%+0s72|hXBN&Kgz3b~kY!@tXPJHljh7(G#k>No^X16TGW-*ElKCye{Rq4kT&b5MJj?g+n8URfE=GBm@8L0rYh9|inQ}ACzXjc@orr2#RW^>Y<OOAH!}Xbd{uW$-tgV=SvoGJmkNxAJzn35@D`p?8F0Y@$kNxAJzn35@k$R?9E#P}nYRMes$lCfsxp;oOxd2s~ZG9kE*>VAE9hH@0p@g^W(0i948Qyb<ugV{+%lx?k?MbU7atXUhe3tA;B5ASOMVP2oVz5-I#E`*Ks}e$S2$e<(l~|G(Dpg`grJ&HbEu<m`%jq5qX$XPn%07MzX$XPn&lffeU~JC=7%iW=$-!-5fTjECu*nyv5EFKi`7PNZ^x_3_@cnF&dT}-TNV63R%PQAXjf;i9ryY2Weax#}Nfqsi&9~XK!zHTFDgM?=Ri~!*!&t2B|4-56uYRwOb`}SUY;D+B4q3pI?IrSCquNE7s8(<svw-EC2Q2=q?Eg>E;ss4kkG}&L>-1S{rUnY}`{SX%`m?kBKTH+yBuJ6^`)fI?#@U_@I`JC&ttzEt-@3{FcZYFo$*`R`h_cy9AIN9*3zj>>xVB{2PMkq`WFCq%A7DH?i)KxP>BL2r%19SqIkXWQ?pW^*;@Oj7I&lT%kS@M+Xd*Y*4-VqllVLh>5oNNHC?I#7X5@0mcy|`en+em1FD!}(9p@RjAMnw)Z6Bk(f3V2C-#GW|;h6jWan2dbyyic5p)>}8&{_}S<X%b1crN$5dmm-&`^Bo&g797dz!(Pr;VdO=wg^#}%mM)&j)+)O3Sg`ifv`2Y-GOi}5yCh>2i)#+Nv06O7Mn~81p$D^BZ3qP1#q}Ppja~oU@QfJ@IB)3eZIh8I8O<{AQ8ymg?_(Z@An&y4#C(r2H-pgf-pt$`FXtE?(vw+0s$S4h*oPf&SoKL4GlBUqR{r+ZVAC66b1upwa25v6k;)QxksbI73%e5vItSQ+-fytvfl4_69Psf5xCrHG$C3o7JE2^KnxLfc<+Iiftf*{!J5IF06+{L2{Cq8DEW99lo|XPtR09Muo;rXKnw%`!3a%qZJhK*bO%=lt^`^qTb&*TYFxA=0KuH@na~kvpS%TfljA8})kl>=RB6puc1uD)3=nmY0|Xsp0Ko@Y05A{(27aMf!S6u_Tp=)(R`C>FncnLb#Wn0lU#4`8+tRmpNwFRrYHfa*l!MFzEek_ckL74~ewEn42V5aAm3TNDU76Gw+TWe-mFh=<l|`a{+#crN?g5toKnxxhhvC8DfmM&?Xm>J|^FVVjLDv^#AvHikRpM#hEC-?*i<E-UkOK!=2SEp82W1Cj2W9~PFc1R)05A{(0RS)%0|5Xqbhv*^2Tlh~1!5&x1zHPN1i}q51iA9?RALn%Q{a^VLeUHaQPEI$Ky?sw@N`ffcM1Wgl`z*rKnxZ#)eF^G)evdNLkCa=XdS>EgdJop2>>v2$^ShEKL<VpAvr)5KtffNL6e|)JP@=)0hR%k!4z~<2ZF+YY6m+DLO={2K2hXB<iX^DScz6aR)W>Ro+X*&8K!HRftNwhfeS=18DJS)2Ye_7l=F~skhCNK!OEw+upGD?v=az4#1iMr!JZ|V<Qb-Gnt_)=<N?}23q&vxM@2!KftZ1q0C*%Q29WZwSUa_ZxubW~!(9tPKnxk0Ntwae0oQ?1h*W`3f>Z%8gG@m#e7qJ6-(dz?WoQtzLje?YR2{?_gc*DXlEQ##Kf((_Knxt#Bh7)%0nNdhB;9-+ZcEnznWUMV6&Qs`6!;}T69_cK66edoScz6aR)W>R2u@H0C0RrnItP=%V9oXrWu{hvok7<@3q&vxM@2!KftZ1q0nvbY6etFtdq8&3c8Ql$y2Y_gdlA>^oxWw%i=C!k5V>%@9KP7S%)Q9Dgt>gZ5WTB-W=j=s5mdwNL)(Kb4RkFIe3N-u9)0)TbKm)BZ<&VY+Bcep`G{_Oi08Qmdysi}Z<~kVtYHuI+kYP6Y;A_{&N0WEgBfH`OG3rFTMTdvjUx0iJTK_HN2Bw;lNxjn6%oie3#&+RU!V1#2PShIE06Hx-cKpXS~Jt(+>w%e_KDXVztv-Whwijgqa6C2YmhO=t<in29Z+&U9^`nt9r}%XEX5wLDrVT8>&5w3tag6c=rNvK@EH3g;;gfj^VfaJz4B>`GnYE=UGEZ8S4W#t=`^X%AfnDD^a)IcPd=VvdDR&(HA<-xyg!MkaOnLyiHK1@luu-l7<}$QiCqPWJ`DtjNo3L~9S0V1ehIvIZv*38pBL|4|G&7e6yF?2iSX=mknzSq$oRJ*WSnb~vJObenG+x5%xR2rHa5l_TZwO->En415a9dUgmNrpj=279%Q(9w<2-$yvF{w<-cyiqzB9x4?mOcgFNE+e8N#_YDC67neQ&+{yz<`i%9&3p<lVWrcCH)Sdy{N!ou#<8p4!^`Q*!Oyy}0&{=-m6K6=CR}DBV+BSBEu(vs~&OL8tV_m(rR~PifsXrgb)@)!MgKYMo`Qb>6zxded6#ZEuBlHm}#4LsDuzMWl3=o70-3RcgIYrL?X$!?<T>;fyu2u)fUM8!Ke&y^pZA4#U_Q`(Nx$i?OzE0mPKm(dN{;O)7JUD6@&a7NAOGGI{j#6V9l~fvQzVmErtNL!m>X^y(%dME+4dl0;$ixdtV479{vI5+Nm%NThTS2LuBL0s{gC1_}fN0|NvE1p@>FNlZdY14#u#LqkGQ2UAf5NJ2tFLPA1X1w{!{1ylxD3RwkgA9fvce?#Sn_3|~HMHTMCov{h0J(K5Py7D5M8^Fpq`Tf6=&X`^8kN{S0Ow1#V@~9kyTL@p#Nm5)T-xXfjqe@6g>)+bX$1Np5j6@e-7-4UmHoL8$riF$7O7<2!8>5WA>|-IuKWmv$ANV?NDwO=YP=O8ZWpe7LKOsb39dK9p$iz^UtEAPk?#-Y3Cy-6WaqYw@@og!lIuJgaEEk4z{ij|RyzU&aH9vuL78VY=E!f!zRxJgg2MyYC6yS;C@7Klk&9|*gcnq)2flM?=FjW>?VMj)cAW*V1t)8@<;4mq;W0YkkieAlGBVqp9^Rm^Oq?u3-%c$n`nM`BlD-lbsbg*H)k{XTpnB(ajDq{|&0dmU+Li0$1aYZA(iKmq1Hq9r3)hz@^oIl!VIZ>WK>#f78X0&(7ptCSfYSD-qfQym;?`<+I^oti=`MT}utH#vDhAxV5SHJw_{w}%FWmY3Rt1XrCsl1QrAX@`%L*Ba%vsJ#+fIk|7RtIJr!Ob&^7-j={zD&NP#MfN`8#%c}8%LN^2k%b}x!3_#0eRFu?X+Me>MXgVO_s-P;8DJs8DPFGeR?QiAa_!4trwu=j}PMQG0&LX$pm<SPqFY}U_r`-GuR0|2xaoqz>j#^3AKVt&R<(CUGW6zR5rf=LHJbDYd(#v<X_3ywVi4CaJTrM4Cm2q4=He^j3a=E27zuJU?ioEB4x}`O}^e|(ukv8RE55tNsIQZrkH;{%^C`FN$Wpt6?iCy{-&!LOp^nKqt_}|QHX?4=NO%d+kD*ATbC;^QoGAeK!7+83lGz|V<>j7=;If?_9SG~L&;8;<<~6!v=s4)uo|BZd6)kXlegBjWpV0OJuI*+v062qjJX;a^w{LdNCg$(e;4NZLB%f`&pJk9uJpR5VA5POr@`B3Sq!*H?Np>?o><sIuLvjq*{d3&ZD1<kAyH)1w;d{^o)lZ~qr)cy3+g4BCoxhLuS1h}w)o=hQqLT8I*aIe;0J=P{xnv<fI>f8$HAWjXi-jhs6ZYDX&O(|@YJn!&FkV=-V!7TBjY{mE0`<$M~*ExXpQ!;sih?DoD3VR)%Y_tgr1jXLNp=Xl#!sHj&^P`2S}(guDXuC67n(CwUy#?oweR8qfnf7Ht|_2*nPISLWQiDkb@Z`3czrp&5HnNUuZlIG_d$ull=~8&nH{=zNF>iW$r4f)wTl>TiV;V&BS+%2)I;il{Zl8n+88pixnqjl8&~Rauey}po4=}T*zH?el^TG_1qe)-@)S{d$*n?h0f=HOKBV6lWLbx?iRRN_sO*Qpvlm^jxKLH-$rSb6_iR~*LM|sV58n><k3d{Gx-10z^DIw?V-QH;NACV*{||7B0y9}QFB{6xa&6Mf~WfW#^+{HaV8^M6C?L&a4lqDQLkaU+=~XibgLNd>R?WP%YA60;s}WYX~6VJCI59nuC9q8Zg&keM#gT~P$Bj&=aN_gY~z^H!86<%*7dVnxzwSNy^d}`Rp!-r*y&A~QiH9l=>wF%8o6|S)|SxSq1Xk^Qans@*?pAn2=t*~75fdf(pndhVmpMsA3`fB+<RD?y6_M$BJxa?^H=(1zY9*;vMVzSBYNE1n;?jA+n_wUNV{Cnu)hfnKsa7@IF^c<sYTwtxB|)c@z!F!^%HtN{FIO2c(uldx*k$kyQ`cnGk1{5E@f#=PgRI%U^;mE2y<|jlCoW>L)A%@#BRm{dA&h4drGDAQt6ftPlqeA328?a=mwT^h>TbFdE!I3er`JZqALs4#jrZpG22F^-*zy>P><jwO^P)vWzGY=A+MJSlsW?S#+5ty9F<CpO?zX|Be$ep0-E==)d1{VUIpo%cQJ=6%<fi9&*xD2a2yaUp8no}nP!p?Eixu}+K;4_b;idq7pQ@_-`^w8)d~NhatwXOb#V}TF+Gl&V1dGP5s$o`y)FIl(N1s#BTn1JJwC~3+9Xu<I%}QZMG3zByA<v-s)}_yWy&~%FTV?m#3EmgRg(|v1uqpN(RyZ!;WC!|UKK_R>tE>BlMz#f)XXPy2bnk@gJ)cd5rNc#+A7c>JY`pUP)dy{>(zr(AXEcw)yj~j0TJEy!&Xsu3Ifsx#=Q=Ju5~<-Pq8T_&oM+X)_ZkGdSZ6{{?b(&q=)7Jy0CPojz~EQ6G@7%c{HS72YEOcD%8~VSf7#UJ+iX;Ex8JEMJk0YpjQvIDlNf~wB>-}xTzJQZ%MSuZ~5<DtpZe-<n0KB(m8b7-w*W)@Kt0})UVY)9T_bX+sRw`EoKX+yXLj-)}eBaWeC{YK!U@EQBIq}r}2ESZOie`RjO;)IfP8_akdX>)qypZ;QgQ*oz?oSIx=JnM?B;7T(UW>fSwOvV2ccD*~a-Rk?nNtzMNl^-qZ{O($>PO*g?T5JSxLCS($#O9UYYPXa#OYX<%5fCfMA_@L|ektGQ+8DhI(i%Dj&5^Z7t*P{8%6yi7ii$v5T!uGnxFI>T||(F0sfcpAdn_S-lSBeJ**wnXLmw<V^MLq^lm7G%;_3kK3f&yftfm`H_^=+R7eDi8%VttA>pqJiV#>5rz7M8iBrzx4o6VK!=sq;nSp5DaeGKt^H77JYFr=-VRjn^;Z??A_82zTHI3^uTY8reu#z)=VzUhLn`}ZGt2f&Eg<JJ{H`?kDXzbev*FqldgIctYX?J%ZmE07=^GLAYrJk3a~?xSs?I4Ml$vp(jhsV!x8llz*Y(u(jjsyxdKn~&aR}$96zNX#7=7jwIDlmR^{P{fAuyekWVfx1XAlZb>KUNX-*fP&p$^}0j$WF1v}y%o;YW2PJuC_6$DVA`nyQUP=O6ytnY@s#o2Er<ufAP8OB=44-Ev>5sbT$Un+5uyLv7Qjm5dfeZSYGisrV?eWrAaF!ibx@f#o9MC~rrL$o%4zb*+pzp0oa0PQGHl2WB;5nKrb-a6nskr}Zi8r#ANuf<ly?;*sD18$+9drwi^qcNNpjl?iPU0w8ogP$m8n8a>u?0W1f*M*x=CI3VTrJv92FB8+qoG0LX+Mj$mnUd!32T}~kpG@1$cqVVk=k+UDzk>!;u<L{AouPtF-EVY-*3(i#0P!HJ?T2SfU?v}fMiYR%X?b`<mWZq#FmB`;doku}0kM^GZ;92{T4ND)(Hu)O{EnQlJ#^b0Ufxh~%v9u^vBANSJe}~&@Ysx;dW?uqWmw?Y8(^yp^wdw>Y$@4O0^83kp@zSY7Of+Imsm2liF0-?UzVb~^4{#D&g3U136`b~Qs%`{o!%JCC^i1BWCi$J>4|6m{o-5jsZj3mV3$ej$Dosu{j*cA)SuAT+hiPXrF@oj-Y>5k5WkvRj`+~9nm<^1Fb4IHq%y1P?9II0%hfK~q%8du<D(iZ8!~&IJ3C89^>v`ooK+jFV0oVw)6FAPLM2=}^~t?tZsbR8*~zMa8q4WanfZKE?w^bh#Yb#8&+j`M*c?QoJVgarw0nQ?42lrMQh2J^%K8cEHn`3Q{hKQ~`2SC2fgBN?PIZz&vs6RCaBP%m+E#MoG2<&!{B|)P)^Ii_je6_)S^2wWqg`FVp$NEXy*rGlIRe`#Dg0_c%k=oVSPz4ek-9$vigbqSeUA~iJVE%+zKV6Yzpl=rfp3BMXf^00gnFC=rzG20gm@b>@j_};AK`cXTm%}G(OxU5?LV8l9=)_m{i`bIYy!3hzGciMify<K;5(yq_M4f~uSCFs>ndSEAf1g)mdDwyEV{|-v;8*(@+=`=f`-^ke{VK8lILY8lfx+ptg0=A<(zQH)V$Z{<J%GiKlNpc$j4(c)|u^L61wU80c18hGJZsvjLh0u`qF0_+uzsjf>v~zoWh>;bigeCl)+AvVK5I^ZEY!7n&^X}Nj%b{!Yh*n%z{q8+D&_$H)4ty8IV*H#AO6z^bhNf7%mYOde!_1tR$i0V#YL`gFH;qG3EAT2OKSU0H1*7yCqt0IGsY!eGR|h6TUmQ6M@fk>C^kA;a+CBEM@Frzg7}1uqnO<P>;FO#s<Pip>?P2GRl&|*e-)yLx>~7TVgg_w*$FVXO;rZCl%0Jylh7%)8`8Kx7z<mVtyE0Dvi<b!15=2#N>h&4PuDv%rb4{e#s|Vc=l*mFe`ZIZLv0aPknz5=bi_CrV$Hj?&O7zxkRia!o*cJpT5$tiKiHYriIu``yLH|V||lRE%Shmvm2Lf_a~J+q^Ya|A+f*iPDUWqyGuK17KTf>j&~{Sc!cHv+9@L9IFz)qjT%ju1&Awgg?JqTS--*^pgKHPU4A>qFPcqCb~}7K4HOvL6Vf9U;&~QTxIfUf^8xsY@k7tOWzam3bUw_eli$KMNx6C@AllhsBev=;hVVX?jaB~kN)Yk{%007DjD%t&r5Sw%?$Koi=)r23#`@tsnX&YqRy`=zRBlEI$X>?(0Kge`(7qh<Uv=xwjEbG=GeY+X)I3z-lQ_J_Di&?W0fq9ZvNt`(Q}>&i5{Y~(wD?S=FYz4KO#Uc$BLW#)7G>;C20ICP7_bCK^0U6Xo1Y^-7gXVfG*|@qZnIsu#uX&dMPWz}Eh!)dcQQa88@J|uW;i`_!7WS9$^FXTZ<!28fM%^+9`z+h^59liD|y};!1^jlYRw#7vN=J@2N{`;c%0ge=ZiLC2vRv_g*tX+DXQixRTYBQmQVDK=GcSjk(MBVB-LRo-MsK?og}6JR8h=H{U+-L!ZtFm-JwGHDL*-DbECHt^0|W8YNUCEQmL`&0Jmk~iX*+~S%bz7ro0S6vq}bNd?6Wlq*icV_#zys^5E4ed<$AJZ6I;tj)U`Dv{8HiK9UA%Qq#?@$_SIQ);39~X;|MaoR?yA)_ppJ$$i`9dODmG4Jps926B=h61-{~Lf6&z(k({<3xyiJK6BM9e>R9#1KRf{>Krgrz`PcYR?yLxBs0+Ksk{!}dFNz(1&y-0j#Gc<ely1cky5Xzxlbm;$S#GHRun45LY)Rya%H!G_3`*%eWFeH2{st*iDVn;JDI)hjF(Q~E0^z_dEW09_3KJKDAE}oD)Z?9{d+~}i#_f3E4saQ5_NL%yY7VNKZM5qADRBYqx7^sJc1+5y7D<|^;M4DW&)#r#d$>QwN>hPR993`!wc=LFKTl)+M?t^lYY?dBsQ;(=ld;~TJZe4*yH*w(IhMSwr#@5B7;#uUl=XYl!xNbgB8TlmxA*QgOtq)#au;FW~x+~inL4@EX`h)bGneRTLpH2%4Sl2upeU>I2K&mAU*x{Is#Myo`EyZPbAUY?FI|6(+O}oQI6_9X<V`A|Cy~gdnWB}G5@SIJ|WXT$COdq|8I8hc8)tFl=uND!4^*w`%KnBEi(68TRq(e3|?Z;0JCXNjU*TCa#-3Zx7iL-LU|9cHo_@>|BlKooa-9%&RWwE{2ShSbg9!X87DZln8;cQ&*8Zr1s<x!uMf+eKGJ$1j~6wfRPBibgbE=7%0im&>=lAfNwC|DcmXCV(JU7Y&Y(OWB}+mG=#uk6Z>#(ta*xx3#39jhKE!Pf7(c_b_buDItm7b%&@KDbpJ4V1c;*ryU%vyTq8Hi=z<Hb`@R^?#N~h+K5AR6@eb3)#?1BzGM~!W)ZY{(BiFt<Rut%=TuMdR%m2sNl%y1c;yav?|5gSPw4U#20$o&a}sEq0Pi2@%Lqr*3`(8uiDOc~(z;ak#~)laOqW)P|c9}?|ZQrd)cWW@><$p&EL&$5lN*>8$KUzB0nhF1Yj5qh)u>ZjewHDe*k<~2HD=d|G;-6e^^uh<RF(k?GVdA@I1r2hl<eg&)$KJoi9*gEDUrxJTZ+hd@j-rc7~!-Usep^Q%3fo{e^YYyhq$+gs!Uv29_$RZ}sn&X2Pm2-r}oBk2Bjg010Nb0msz*Fr(5k!Sn;c^T|HGMrS%q+OfONW4xytSwC#xtL&s|_5<-1&l>Tm7`5nkd!6UnFd1@I*#642FP<_|6&wi!!PCaYMyx?+kp_)V&a$VlhX7oo;B7`~mQ8HwGCuVq%hY@L@b=xWQR^7bdZ4Dp<k_MqCl(DXM^WS`2%!Q&Yljn+AK`+hxG}NDx?u^^X0u5r}#Zd@+UtVTlqTw;2D2ag5J_c6#js)#_lukhTZy^;$EZRY#W7B9D#E&T|omWn|<_|B}rBYamUm)|z#g13u4fHn21tfi@%PbmR6sh4>@?iLt`6<kX>jxqB=W*Vg<mYv9T(EgGdn`eXUF7iJjz3HC{YLy6K7RmjTo)D=RZ{i~`0J!WLRO$Zn+%d^a-lEW#O6OCV02Px>eBbGHrr$n8BlI*Ve1vJ~Su_4XB^d1ZEE4M?mdwq-zF;{`wsgzY?7HXkjQY_DJXsBwuvC1+&Bzl3rJUQ-QYj*8fpu7rwwiV22Q2x4oS!&}-yM5jall-iZ@vC!>9)$i3nKK#~XM%4C9JuJ3H(hl3ZwRhed!s;_kw}5%vt*uLhct4ntiCt5y-%BKT%xhKt$32z5@++vs5TKSa#r!!Zer}B&Y^v@A2j$BCDh&no`|n`C(3Cqk|~TR-6y;cBHG3-oSP5T{@MMPC>G!p#bQ(><}pD)YtV?9xIWy;_^ei!YZEhd)3K=k#|?SaQI=H{qjw3(=DNQmgOSrJ6&l~dum|{}r15rCl3v-oRb#eVIs9nGe~aWi7ft(0-Hc&#f;VeXm*|vG1v0-KtrNzYP=WT_SB1s`qEi#dWyA{fAgHOsCw}X?WycqDlFM#07?#k>-Y_@rcqIEgJTSN*=tf!#to??m9txB0#-89rwYtO7t_cDO0ISHo&D@i~iW~}B@T8V+R*3bgg`KC{hDQaTmUeGOrt#@gRuV*~5!`{LF=o-@lRVj*2*cZwJ#rjB{hoCU=J<J5A$*x*Ua^b8?$^rMzFJt?I{SWG`K@|We>vHw1E;{T$%}hPzS_@&<3gy8y2W2gZahMzuhxZai_|%``io~VDo_rDBGy1Vi@em8@TKuLlxzqA0xJNKiVW@$-^=Q2XkvZ<@e2C&GAA9ry7=$|oMU9$-Z%SqTr*ROpY_kO6}13zueL&jf`5x48+1@P;*0nEgr`tumBWP<`cXiGWA`G^eT1HBu9h-MGF3jlSO5S3000G5Q2+n{0000000000Bme*a001RbRa8|~RaIS8RaI40RZ!AW0J{MJ0L}pc0Kx$Q0KfqO0LB3U0J{MJ0Ji}F0J#AH0J{MJ0KEYL0J{MJ0J#AH0KowP0KNeM0MG#e0Mr2i0LlRY0LTFW0LuXZ0LTFW0K)+R0+#{<2JHm{1ib_V3AYIZ1%n0z1>*$-2)POb1j7Xb^#;d_2?GG+0RyT6s?G)j0OA1w7t;p<2&V-B3V{X!2J{302+jop2J{302+jop2JQp_2*?Ej2(SeK3W^2-2&x4E3WNp%2%!Z53i|~D2(1MH3Wo*)3yul_0IdN53&aWm0J8xB0KfqO0OkP!0)heo5W@!n3$zLW504N76s!{g4~!835B3lN57iI>2IT_*2JHm_2JHm_0HXl`0IdN50I2~10J8xB0IUH40ILB30JQ-D0K5SK0HXl`0Du7lL&8Y|(*fhnA`Jk-0RaHQ0RaHS0RaHU0RaHU0RaHS0RaHf0RaG>0RaG{0RaH90RaG~0RaH10RaHD0RaH90RaHZ0RaH30RaH50RaHf0RaHX0RaHZ0RaHZ0RaHY0Rs@_7y}3H1_K7Q1Oo%P0|N=c1_K0u0|N!Y0|Ns10s{r#1p@}}1p^BG3j+qe1Oo-r0|Nzs1Op1g1_K4t0|N%j1Oo=r1Oo??1_K6>1p@`_0|Nu91Oy5C2?PwP3<Lt)0|W}33j_m=1q2DQ3Iqk)2LuDs1Ox-p1Ox-o1Ox)u0|Nxb0t6A36$A&{3Ir3+6a*2u5(EU>1_TJ!2m}Jz0|Wxs0|Wxv0|Wxs0|Wx$0|Wxt0|Xk<8w3Tx2LuJ-1_TN13Ir3P6a)pu2Lu$p6a)sY2m~0g7z7Hg4g?vh8UzKs2Lvp#Ed(EpC<Ep@xP+|%RZ@2Z1Ox{L0tN>J1Ox~L0RsgH2L%HG3jqTI1`7fM1p)&D1Oo&E0s{gA1r7lM0|NpB0|^HM1Ox~L0|W*G3IYNI0|NpD1p@>r5Ct6&0|W^W0R;vC0000000000000000!bv2N=YP=NhFd<Hr;KxZMNDK6aWAK2mk;86a@eP000000000000')
+ D,d,x,R,aa,_ROWS=_g6r16_decode('M>at+QZY6F5CDJ;0)qx800108006@;001>f007wZ000|`000(8000680001u00000<?iA1<?`?D@ABWr=>q`<>FxmZ<K^Y^w$kD4@Zs|10tWyP1rZVq>GTT@4HXs&#m*DX85iHu1o`#}6#2o_&(0kj#nRso-{bJ~AIT;l-|5A~A}0kHDz+;uEgRwP^X2pN1mxo~-^1+T_4Fv@tf1xX>Ep%0Ht6;4<=+V&H$OTDH8JVt_wGCdLPPWP2q8v6<@7`X=?@6!2;|A`Pa!+Z(&f6K<MiL*-{Klj-_G^&Fzj09#na*JPEE<q)zanUG|cHG>FfjL1q?YQ&Sl^8?C%)V8&N&<QZvEB!OhRo-$)}fDc`}+-|p<??``q*X5VbzplI*#@bdNWIgEp;NIA}MAqYyqlmH4q4z#4{ND_0Ut4bIE0OvwLq$Mgk6qTglI@;Bpr%BF(sX$Vcgdqq*0E8h3LJ))jXj%}4H3&iwgdqq*5QHHJ0000000000000000000000000KmY&$0BcqNB;ZQe2DM878UQE&0ghvo=s}i)pyo49Vx0*}7@#Nw0gz)D=Q)~lnFc#dV;u-d(9|#h0tW{L1O)>E4+sPX0tgER0|NsJ3kL`h1OW&K2m=HM1q2EU2?hrR1_=iX0|f{a8U+Rk2nPxT1_cNN2nP!e3<m}W1_lEO1qK8N2MPuZ4hskf3I+!S2?hxW3JeDc1qcTU5E2Ot2M7iR1O*2M1_uQU5efnc2nGiT1qc!o1qliX3kMGf1PBfa6A1(a2M8Au84wW^1rZDi2?-Jq2LuTc1_c8K4-p0j1`P=X6(0=`4iF0n2nz}e1_=rb1q2TX2m}fR4F(Mf4-5$r2?-Gn7!42z4h{|r3JePi4-5+o4h;<#4G#(h2nq-Z2m%8S4hsng5(Whj2@4Da0tW*F1PKZR0}2Zd1_cKK0}2ZU1_T8K2n-1c1Oo;L1`7ff6BPy^8W|%C3kn4T0|NsB0s{jB0|NsC0|NsC0|NsC0|NsC0|NsC0~QV%7Zw&9A|DVJBOnt95)~8{7a<Z86BQO76%`Q@5DpR=1_lfb2M7cN1Pulg4+seg2Mz`i77-U21_28R2n-4g4+sqp2@?tk1`H1q5fl>&3=tI%69@zh1`ZJv5EKv#3l0bt4F(7d3k?kp5fKUr2oVkt4iO3q5El{?3Iz%V3JDGe3knqy4G|R*1_uZW5Dx?e2Ll8K2nGiP1qlck2?Pxh77_~x2nGWL2nQ7r1r7=a1_c5d1O@{H2nP%Z1_T8M1`7oU5C{hg3ke1j3kL-Y1PBli4-g9p4G0nj3J3@X2M7rT2nq%T2LuTP2oMYp3kL-d1_KBL2nPZcN>dLXG!+sR3Oo)G3kVbn4H63u4-p6o5Dpay5fBLq3I_!V3<(Vm4F?H4D;f(82?&D$Y|F37#$O+P{Q0H%hE_VBn#96jl`&g0$KSsYg!-|a7qtJ1O=PIX6;+X>>QsB*5m4Q_D);GiDn0LuMk4Hzt87<}GTj%n|B6jysK(L2Js0wEkiGg)hVQEy5<5@$fjX-rNgb#BK%G^Qr3=V0bDTSJr;nFV&-b^K<rVVUpVoy|DJ;()e*D8a1^rF<&9}M8KT*`E_r57O*aaon{luJX0^;Bo7e@fRCK}1cz&#iGC_{Iwj??}t`pHp^td7(EEBeV%jjajMXj%1UJCls)O8M*l7zHKR{l<;~ab)9Q7lgxI7e_ATxYnlA!fn{rrqL%Tua?vqTANP0B-lm%v@amV&T#Sh3z$*onJmqIX{P*U{`^BFPZ4tpJo6=)Z~Mj0Z$VOK3goG>jFsdOa}7S+zbW(i?d_!jvQP7LTe>X^KCH)jE`+b1zu}{RQeBVS9?1#d7|qrJjNM7bz%iSx90M7;J(3f^Js0=~qWtzqP1M^Y<)M1$+p_E#Pv*>=XJ3^X-lgaD)NM{)e{Y2JU!<bvF1OCQ33fkmtq6v5UO3A|3qGvJddTP8JaLwe6Ag8tP(t-@S}Q7>#~ExQ{{I<-U*F?GVHf(s`Er#!@!Rs1I#kSlZwZW&Ls6|wqoSd^=KI|jwEv1tWT?g$jnR8g_@vfKjAPj$H$~VopUsomAvaQ^-uR`Vdgw~|>;4jPoe5t(f57%gPXMI5AGp9SDeRD*0eDO`z%L1gr?NtBzslHMc&?@?*qGL)(bqq&#Nt)8b<gXuIF)T=<2vW{*qlnXr?NtBrmT{D-+QBO%dllXn=XyJ=KI|nc6Jq2t{oe8dn6|4+q2mrK0f{TUzHl(rRVk3ZBAZ)Y@BCbl^Wiq=k?TWPF{a$?2wzGtxciqkejLfbsJMU(}iWIAeUqJ7x>5}*!{)+G$a!2e&bmPZtwA-Ar0IlA-mRugg1G_sfvoq)v#`k6Af?ik-}lE{xl?Tm}{)j6_Ux>vV+xKmn{)lES;MuJyqFrew_xXw_dy5yY%QaPM_bw;Cr`zod&6`cJ{%P{%oyw5eQ9mJ3+ej*F&@$uU-^I`1|+STANJbRK+SuQ)PK|=glr*N1kM}Ey|L8v0?$6&1?lpDr~PUzL3o55mU#@pkaPXa;J}%K*Im!H;}30<<v9%@%bd`PB-Ik^iL{usWZ%(D<6=#hM%uKXue#fPds+zo6dB>3`OKl(3E817ClaxPElVisr_hGVv@}0PU#L(rplNt3Ed&eRM}Gm1xeH%QK#GJPU-#P9z@%DW=l3&M%~Lu+rB>i`Dq(>BGYm{KSqY9PEkjmWU~wY092hp<r;myKSqY9PEkjmWU~wY0iipmAEQH4rzoS(GFgTH0Ocxdse;Nh`+0_R2q(=hVMm^1vn~1OkN5!1=C%T)l{QzF-=28?fDGPiVC5=ose;Nh`*TjV$K*HTHs0qT{Xi;Cpz@7A+~17bdz^#yGL1gm?;(7lq%%4McaXkc--ta+bEjfx0L|vMI(8<24Bl&CDo&vCjXvDz*qQ-8Y|MUZpDFYC?dJ=Ue8Q(rw$l{rZ7~4N=C++}rXU%-*1%MqLFF2Kyx|PV*7LdL894vO-2ca4LU&33j=qHMkSb1~@{K;+|HofKcSv%THdMi78hyFum&_raaEmahhxGHz$L1fhbfbPVLr7+H2y=>>e7`j7dGlst^F9KnkC#xv^nkiFGKxI#Kk<Eor-*itvb~dMoDyfs<PgAJ8UZJy4<C?EuypYb(iZfx=8j|R9Xvy{g}iCuEb;jtVCmu=q%Gr51IOfjgQtjgkhhIIC(W6U%=>y_hm1B3ww2*38@ZV@N$`~o+34^m;gsbS^4gxs3A!t(hK>fcHjaxz&#N)sj~{;fqVw(r<8{yLu{f1&bX`rdPFfedef#c>yDq_${%rC0@47mY7Y@HC8E(HSHN8vE>!{kCy#C!6Q<_;OHL0|8GF5GgFCT>4y&nm;V_KU|KK=g*)R4IFo{RL9T(m6uvmJmowE(_HayTm(oSj_cU*99SA7;u5*KcVcy%gT<KjOcvl^D-|>s%F#PEM#=-968^)q4~cyL+E-^Z%*d<m~-Gx*efl;qL`~n<z98y#$F<vJbiJP@slpt@2%u+y}K1SwXN+Lo-$EQ1+rrC^iZ|yYmI}mPVXlN-_x23Qy8ng%3xjvTtygZ>skRhQ5zYXg=q-Of?P_yBa@m91S*ppjzxI*6OIE6rQ1H)tK$#AH~1gL?3h5p=P^xlvIdLtJu3XP-r1~@`{lO*|LK{3)h>G-r+9aRqR)rk>24h-&O7t4PI_XdxX1vP_?>wxgG8j?e%k!e)DoZtK23UhYH<|AGmqB95_^n+7G$xT<)|gu}Nk^ApprLw#8Gr54r46WR+WDsoe+M_X&oe$tt$RQ@RhhEpCC5Rc(r=bRTwdFTs*kZHlLKA9ivt!J<I7Qv~*8hh{2?5eKbgpws)px{1_C6^u?!s9N12)cq>}Wom5@hVK6v2x@m&ym6L<H9Mf8)Wb&zLsPmB3zq0ZQ@RT6ER#hGKCH)g_{haZEF^ZH@d9;LMwg@0SeQudKjH-Htc@(<RK-U=;1>RQFL0P@je`}HgTm#yI7_z*$|RD0dO=A_G=sE)Z_}XFG@PQoTU3+mQNu)5ODAT^4^?(t-%w<h>(_g?eL<3FBi7AH6cOuYr6d<hqiSJAb-0@>l6JRNw?LA9dRDhkt!}lgZndFWl0#5sYHck^A*eF7HjtHBB-PvdI2r=q&n4~?4R|~ccJHV%NN_Y+i4v4tU2Lyk^@zXhvl1voA!a0SG+Bur+Ks8LcD39qHQRztQC}^sn(gzt(5l5HnW{w~TJEi<3d>O8TjyVeZ=HBo7`rw};lM^M<^geV;AYp=ymTde_5Tbw7PnWJ1~YYs0@Lffz%DL}D^qD%M8Cho;qdr;KfmYxKgan0Z}0j4>*4VDd_Eta!{PAwd_Er!hr{9d|Kz!z$+ON0Gv#s!U@w;`Q_mf_b3K!1oDyfs<PgBa&!28w&t%!>1ex-=1Tdd8zc9+jl^*xRZP>m;^GzyXOUEi@&cN~n9~s6BL8uaiFhdZ&L-S24W)7Yq+CsVVo;lOY9;L}sCJW?0G}5L4(~TI59=|B29p<?zWWjug=9*N%I&q^BW7i)^!Viq&1|ZZ4LYN_nT1MT-0BvdkEhBE^BcE^<4ke^*+=QbbjUx{}eZJ{Z_ewK%NVjD3Zp!|jM(KjxGn;l`w`OyHOc{UE1kKY$x^Fh=!reQYbm_aNi*){N)6d-)w@1yp(I<DHz21Rt^h@37Gk2q#cj7JIk2ByZc=>e<A4p8M<nv_|dEkHI`sZMI8v6%ZN&$3eKDpQ)M!vz;(tuqW8AhLwAd`<PACULgI|Inq*gD!!3!^|W#x6<552f|a!16W9o<3be2hsxQ(8?(D-(2huBV4KD<<u~JATEsn$1rcMb_bEJRPpla7(S2}Mu20OJfly@6YHIU<ZG2Ye7c4Yqy^ES80HTs)A9roaphz39{T5Cc^c(UA1<MT=>c?T204Qaaf_01gXw*9usn@<a<Yv)LFFt@u675Ju6bomlw{yKalbB{5qyUF=U{mn=ay92Mot5#8}jMF7sz==pO7Gvk1HRL_t!fE$k#lwrphvK9XQ{YP6)n33~`H+af9i61`o~T)B&5#ZIn^xf&Yu_9Xvy{gb%QE@ea}z&cO05?oH=A%b@!QPY~@PT<i}cUR<x<FaA$5aGzl5;vJ+boq^<Q^P4_sz{yXrbny<-70$r&HP4%{e<`C0a-U%7;vJ+boq^<QpEqFsQ$`1m$omIR5bYsc><=Sc@s%cEf>D!%SoJzXpU7V>BkUbKL$rl+usn@(z{z~$eS@cnc95=i2a&FL7<{8AKEcz(J4jbM1IX7r3_ftVA7JU?9i%L;WZCBguVks1;=w)k4xS;}Ldy0{o^W%O@(DsXe6O%{@ea}!SF&vLgPgCBTNZ4qd>t_ao{{1{!PCS$NLgOVv(653zCocl%tzQdc!y~VE7>-A!OmC64Lki0eS@cnc96HZ{HBk}VR$FL!PCS$NL$9963@0Q*+PATr-*itw~asO5a*dG_70vQ+Cttm@HFdZz;DKHm<De(woyl(2mUXB?vNSM<`u|z8PCr=Wl5MJ^qeQ#(oHsF?de7qH`~&TEMQ>8&U@|YMo!S3(gW!@Pq(F)G;<$+uh1d+2RZiflAmv5jrR1*XWP>ZJbyrjV8zb+{cuI{8|~v{|B)6yphNNwagt|@Pq&Se{zO>7@ejy3&$o>~DAUCIc+<jJ<MKY<JZ78*5B(o+4tdiA`*?HCm@lA1Fk<I@ygrkJ`*?jP3+NF1gPdfU;}hUKvZl&1a2+_`mrhYfo(KLffM-jXS0Ulc>^OZV3GfW*a|+}<4Cm*bGNjB9`c4zzA4$Rk#9l#z=?QZR<UBdbKbyi-H)8R+bt*mYh^TJ(`}f^Sk9*?L<L}?VF`KO(KK=Jx{<{;2R@X<5zkSrzl24oO<L}>ea_(D=YHc|C_uWtHsM?v<oGUFukH3EUtyYOVahH6$G?eU3>K1)jj_;R7lAVxM_1J|{RkgnUE&kFV=GWD}hNpBDV-u3{jc-!n?Wo$F`gB_bTHRGYlid4_pQskQda|`_8@=GJ2}iy01q3fbf*FCEUsOG)lFAK&f*F9@vlT>vUtNe*C0kIShG1~HZXVi=seugUg#<GLh0AdE)NM>E+HkD30HB6oaJg<C+Ks7$B&ypKC?S{?YjsrqK|!*NQVO-Ys(&D(`@b+=`Ww9Eu$%=F9EBg<`GWgDP*BWsUM17jm8)Ri(dn%P5B3Fpb|F-iZG9e^$-UZt#eZ2UF@ZX(BTLcgtp$Qq#RYc$&6_AR5WNLRMw6YNs1@7$Hh!R5?e2ZRb`$?aGD51+5Qe989v3ac+flVJs<cHtHHmtKpH^eARD@|c3bu$tQ@Rfemf`KF+L%?e;aO?{X1janZoyI!q~+oXJ=%Z8e_1Lqp68=Y;vdDo+C&ti-uRw4%fH42NJf*Fh}a{U1zoVJvW!?fqNGA^p}Tpx9{F@>DcO?pjc-!n?Wo$D*snJu-+vbWX&E7#UsdMhd+2W7Zb!eZn3vr1ay#9p;YP9xr1Nq++$GzFZGBgpk-;SDv`L~WIeEDsRqRlx*)%Ao^Kv*;Q?WOwS@mW+dAS@aDcGCTEc&w@=V!9>ayV2|u{XO<_^<0FMl;RG`!-Ne>S4Rh$on=>Xd!y@ay!QvclggYBfMt|uOt=q*o9J6wRyQ8I?4^2?Zbs-s65<`45otVE&T7Hsoi4nlp6=N5?Mj8Eq3vg8wdTDe#HW95(Uuh3^rV{3%x?)JFN<=Qdy9okVHeOq!gpx_<>Rpq~sYTR@kBKsM?#<Ec&w@f}|r!$TCW;u~hC&?$iD&`pHp@46j-yNK{j@3ckA#s!Fz~Be<g$ze~p%XeHSF!U=Xia0D}&!U=XiaR~&wAGq{-YZD0syC1mDB}`mZ5M%#trYYE%)~3+~)ya6{Ef3<~?IS1On_u7VLK>acAVWE<Aq`IJ5TK&*Hf*wUy3ne{C7D7Roz@{iMdAcP0ETl|LK>acA;8cGXElT&soi264Kj1O(5l5HnL-+!)**0>f?GCOIo)VgVv@|E4NmJ2xJJPsh(Hj|YY3rd)tK!REc&w@!bJ-{tjBuLkwVX_G1xM-Hi)5T)tKxVTANQtrm--QLeHx)*fO;?nZ&7zj9dI<V&CIJMlYk&SeQt~)<!P0Bx2_hrYbr207E&fBcE^<4iUm#yT=)5;V{)4CK|#=35LFpO=4jqgu`6oRK-Yy5&xh4=q|T&Pta@DP6B`a{Uzeuf8iw1N~35!Y$Ttal1cgL1tlob4$=upKRqC%r5ZunK{wPHB_#axf|8VJ2WbS~P-L6vYIj(qpPrCXQjH+(Adny$B$Jd^%W4!oR9H#NEv#>$yGhF}tafaZNy{y)b+c>g=GWDQn_pMa>8wmF+WNV~sfy7RlF8Y!gVkM^H`Ey>`Wl_qEfHBPotr2<RoQX`14NszUGCd;>%H5)pvgDT)b6ovy?47{Kr~6Z^}$`gvAXraYqaXDjU@bO_~ccjg~u9<arjQ8g~WrW8!CBYGs{5>*i;e)uHjJ6?V+FB3Wk4gqtjTJR5SZ?iBlGYLOtX&o9|XJKXRU$&)ht5mZzq+PRkazSNPVqSNPDaZoM9w#KN_@&LvD=R6th2W^6v)mMS);_ia=@V3K}%N}=-xh^&@Q&6FOh?73ABm^WQVDxvcZ4+9GA`^aZE-mGGN?z=3U?zAegNoIP}`LYQo=cU%NP-*@BYfxIIe{a4a9`YH@_p2D6yMd>?hI4)D#wYIJXaqBw#{)->GWZ%~=XIe~ic2%W;Cr{h;Cr`yL6Uep4|eaUGDuKSc!3a(4+Gu1>I{+<R*Ay0)Hpm3cJHV%NL94qS!x^}2fKIF86++dut*{i!QgwheL<2!AsikDyI?>xOM}4oZv8q9VEbw|rqxO<uc5ovS&0&qTwQFhU-gK;?Z@A~vl0={xLJu57-)*gCbJSK#;l@CF(T1byAxT73$(ILW+Ylw^*C9H3#yWfti*;9ev*r<#E66~cOfXqBS~wwwhX89X8#(^cK6WT*{<II8qId#uHV^Im2GO0t*@igSeR8wR@YjoD%$4~rY%*XaICctc?{<J)r?QwRcM?mEkFooHHx;JD=kCbLpi?nV-xpPwBcE507E&fRkYz*Y7na7Ra)ZGijfJwYP#LIAe4LG6{SKH>`jDUu#50XKRqT9e+h(N`aLy?gu*ZLiBlHi7Y+gt-QGHt9{0plH*gV)d4OD8I0!>`c<NMp-w{yVz@UZg<Egeu%R=@77r#y8qOX3KAKC-THN8uRwxeocLqE4#@z>=>x2bvkbsJNcpWCCy-@p2QTsR0rcX;Yld*2aI-N5UzPVyq~KeP(CRaUsXbZyz#RaUrx>grCV<VD~-qg&LtduleO6f^sEuN{6=YkHTT*HN`OdHuRPef$5X^}~R=9iWqxSIcX7*_=2QpIzgjE9bBHXz};&z~NC;7q59G3xRyxdH$R@7N1?_0daJA`}g2l-D_T87|qs?AAbA=uJ0wJZQmb${0<crL3;O+P`DS($DirLfob*LU>6rg2ljxUj`7iX_X6?Zz_j}BFbj*L1FIVI0JySou;5yKcbEmm(SZ<z?=TCBdn6}^0fb-PU>=M7I1F{6Rf<b9c`3>(<+VSp3anCDm<sLvmyMZ#pU$dxxgl9ZuNyM~Kb=(XazS0cvhlMxaxa%glAW14uVU*lhav4G7owZpr~Fs-lA{|AL)`m~SFu5Byg3hZ?gN9tha*+&P)W)w<+TmO7k<lR@Z@T}i>$@{cvx~ZUd7g8{=RW4V&TZudlVOPqE(=$*rH7wVaN)Kc0u<&i>-$sDk<3q-1aWFAL+k`ASx-@2iz97THJr8{v3c+1?j!dxDRS1vV&|n8$VDhxAtMk4hEY)P%U?dAS%}CsG}5~p=Z^Y?+!pRO0BU}?t|`o7Y;ysQ6-cc0!~q1Evpg`NhUhbs>LOlgu=+vjUk1Rry4?0kVcaWBTh7i7Dk+D6f+tv5QztYlKICFi3fp)$})69BpwDII9!nk0vXL>ArBm7#3Hi+L)ArwP+p8+Ny;nbwPgk9#szl%#!z02Z0@uwu}NlGQB?ixSykHis~DfTl@(4xwhJ?1_Uy3A)Y=6f+{)D2dObCXgwGb&>n$U0;CM~D8r0fAbZyyo45#yE1g9vkmel^VDzQmsU^Zq0sZsBIS};5&-RQt<&+N|@*Xrt2d*2p}4+*z=FdH)hQ<PWBYJXZ4SfsNs8#4j3FdH-bGsU&~x|*^{^L_9z3yOOrCjuh;ef$5jJX>F^Mc_!0Blh;xZBO1qIllE{6Zd;+Hl_qKn#FY!sFTMTfB$q|)BY(nlA{>*NKQtO%;**4qV}KhNvxF^!tuy3^XJ>ZbY9c`DK(O#81_g`K)zh1Pds+_j*HrV#U`>;V++S1UoKLoo;!FBi`sw1CbCpx9?1#FpESQP%E!EPUeo?5HIkzkUO5xym*yE*|M1gz2TtkFx%YCHpU=LVK4#xfpL6DZ^f|ZmX)PV2^oEiCSxcMqjxEA458nI#gV0@WxLXTgycdHoW*x(~d$@%LgF#@jDG-H+@ctFTxJL-yZ#Y8;Vaz#(u+{qgJf2~^H*~r}p-_lKhC(4ip;x=yDiwwBz74^+O9@~+2ZAs}A`yqM^cD*tkce0(1mLU{e7<3vGlnq64#C(@3E+GWfiNZlz))y377HSg2v-Y)?sg$*?I}CbV$!#Z#uUPW6e1CJyGZ0>6nZ^<zR2Wa76rhz>u`l2kVoV3==6d?ACHJvE0xCLAzbcoXfTCux8Q6IgYbC(Fh?2gKXz&cZw8G9cLsO?05E!_#~Eg)W}s&9XwYYHcwlFMX6s=9Fc1R-1vY8+f703j9poQu5xCUagm_u1Q$Uad27kZk07m0qq!wz2wy62lo?Q`Hs53lQGzkDOKomd>5Csqe1OY?<z(5QdGL>xy>I4B$6vS6H#nHxSJOLZV){I|isrG&K+IQb*wjL;IwWg<+1JJ`X3qv!KW(cN?jN3r~R0S~=`nX(ingkjO^`P(eihrq>M&n<QADZ>~L7Bin3?8<Z>;db6Gm>Tqr%#Oa5On}R6&z#*HQ+>7p(_5=2c{aEmjcj`0|$TyU<Zc>i3f-WiU9yH5CZ`KFc1R)05A{(0RS)%0|#n~_ON!)cEDJp6Hr(o_7F~@5ztN_IR$DhF$H27Sp*FbKt!Dr2b%|S2X6;u0qAfb8i_It+#~?OZ7q1c*`3t}pmrd409e800pUU4!qAWd2V0}{z;)nt&_GjM1$Yq^*Fl!yb+ACu1O{XVV+2XjFdiQQ0jV8mEeQZHdzoLm2fYWp1&T2>1%e-828EbtU}stGb_Qt&VFV2jKxRN@Fdgt98d=r>&jQep0|z~#^YC;KbO27G5ztN_IR=H8Xkceq?sf)g2f7E11Pu^CM4b}_oEA`70C;2w29tB(TD<kFxzBz~gEtF8KnxkePn?0_0pP(}i%daShE_p3h(|#<eB>6a_iF`xmM}ok1O!RZFnLgBz-F)>Q33&_U&Jj505E14Zej;l2UG@gl;=Qr8ApN!aFgdCR-)4oRw0#;PNEUeP9Hf1iZL|>f*)Z71vS7#S6v2Mh1S7p&vvj^*<%KQ25|%p5I{to69t?WP+0+*0C>Cz2BUruc@TKWKXkwmylrU3_L`rQgZDD%C_k(&XD?<i<1d;ndM<1(YcFFjj^Ek3**3+~ApRivAk70e3qn8)9qM1+!QVmO0o7sMSRG0))WMixxriCi6A(v1H3S7Uz*j+A1ln8P0RUBfkTgL75_C)%#1?Q_L1YGK0qT$-8mrMk(ZSLI(!tT7{U#66p#E67=)PpV#J#w^ki9d1^wP}nUrsKB;2ytz`#^sHdmwp&`NH{f%!4-zL!zZW8WW-++9DmI|7XelzZMhm;Xe`+qM^DbOQK}I4ioYszX}uZe_o50`}u#sjN)8-75aO(C1M<hiLoX=$ve9r<sYR=$6J#T@f@cY`Oxe|^Zk#|`CmsM_5WuL$=N@<$+5@G`#--d^h`mMF+BcNEXw+8>SBzmmA+n=*xd{3<V>OY^u(_teQbr3axdD`K0hPUa;7Qf*zY8LU6(M%zhf_FnAZ8nnSZ}{zajH-24?jcFDzqx%a?RNrORHDd5&}US@d3y7*&-{pH!+98V)R`&?oeXWSUh*qE&IF3R;+2<<$7jD#moUq>`^p#i*mo=(2chzAHnL;}=8Y4~Rn|(uqu79aP3toO8-}uL0xSQ<n3rdBM1c59Iutgz_#+$MQB%$hkKvW2~Q*vKCj#*;g#(9#xY$9!bbJ`zho+d&)T{3gDjKnsOd7!T8TL$N3+bXPnE9^2R{PdLJcn{x9#jpDyK`gP3HFSI0Ql6XU#Zob$e8!+2i|;oJ{1a4rj%vhH8YTdQ~OJWaZHmge01gLrNo(YbdP^WA&1c<ue|y?4Gh#WAdFz9+cj6YJ@Q$JP3~R_bj_sI?BP)q0~->rH2`HQu_``vYI>osqD17Q@(^7Z7hvd$P9nver7oPwEX*s<pPb*E-iyYCMUGF(%!_c$aQsEw#0_#@E|BS7>bgqqDYV&DvW}YHhwHj4H~fPpVZ4jRzJ}XcPQHNR~;ZRB9zx8c?OFg|1ysjN+_kOQl65m3n3^MIKj0lfz~4S{#=cx*r&PLKzm6N@DQprZS{}2LuBL0s{gC1_}fN0|NvE1q1^F14&FmN&`s+LqkJCQ3q2|1V}<cLPA19LRtky2~!1B23QJN1#BN-A9fvce?#Sn_3|~HMHTMCov{h0J(K5Py7D5M8^Fpq`Tf6=&X`^8kN{S0Ow1#V@~9kyTL@p#Nm5)T-xXfjqe@6g>)+bX$1Np5j6@e-7-4UmHoL8$riF$7O7<2!8>5WA>|-IuKWmv$ANV?NDwO=YP=O8ZWpe7LKOsb39dK9p$iz^UtEAPk?#-Y3Cy-6WaqYw@@og!lIuJgaEEk4z{ij|RyzU&aH9vuL78VY=E!f!zRxJgg2MyYC6yS;C@7Klk&9|*gcnq)2flM?=FjW>?VMj)cAW*V1t)8@<;4mq;W0YkkieAlGBVqp9^Rm^Oq?u3-%c$n`nM`BlD-lbsbg*H)k{XTpnB(ajDq{|&0dmU+Li0$1aR;YIJwq=oowudHqEGs2)qrPWA*+W7-Xj(PNVdL6>doSTyjwy9uz=)?O4(4yJAjn^)1C}M3pLD_9n1N;_9Y@X8Jabh#r#kBHdeQi!E9Cs_TU6VeTKxV>_SD*eD4#`Rp+US32E9Jio1$<&Pt_^Nf}X&1IN|sQD}biKBOX6hFuzO5bIiktmTtQ7EbpSrA~C{c*Dwpe+MHAzbM^H1zKQV`9%26V15><`2vrPFu!51fi$R2iee@CwX_&lmO|vki-EEqabhiL!Z2D3I?L};9M#2RGo%x`9SP)SDt6SRLVxSSP?+OU8^Lma<&-liA@Q5fJ9imJJ`R#R1qXKr&8?y?SD~LQEmEhl95HfE_Z8Ng-<iBR_G@8uu=x|f%W?cHc+X=@vU<gqwXg=pHT~HoL*NINA;rJV@l*dua_OZY;n~<}k09`_tTXUED%@8mn(Okx$1Zyq{gDW!e(6UXVQgo7+NL@9kOW2-e1Z#jkgL&q`@=jJT}BxE1b8!(U9_zJUYf0llBM^;-N8HOds19+iPOW#RLH0kkY>^PwVJ7w-7B(SIf<T{fBnf)vrw0=QSE(Q|G-4t5PLBQI53U_>hK`stC~Lvs9H>^-<)NeZ-=;NOYnT6sX#zju*Zllte@UY&d;ttF?6>&x-6!?^&z$cM@N7p{4eIsNAX*YEs-RhpLm0rt<O=J!wVFLeQ6W(!p+&453R0A356#7B}@o-YR$bqiom~X&M6tJ$b}_EEDDdecdzf>|52Q8gnto}i>xio(U!??NblEvL8_wBV;HfeAh<j&K^LF)D$o2XZ>G<xB}#yx%|7a4b{JWZeNW(vd(R&}R<=2Bqq^>U+bHg_E(ZrI$gOqxDwp|&Q{7znd52BAwUR`E6J*iC4Ax>*KvF=2=<x4r^Uk!?C@Ok<Fl^PV!)bpu%Fj3mK2Ru(-`(naSe1E>p8U<<GaBZn!1&`9{n(a0QM>lE!t|opkN8AsZ9+LcKSM|G)pp13-8DT+SnP&#p$<yR*X(!?%GbC^k4lU(cWrN$Y1<H8?bX<w)$$sb=&Cr>={mPYlO#eh1qpq>t^6Zflz4M-dg$P5MfqxcH|ko9dUry<ao`?%P*};Di5L41&1Iy|r0g|}XYT=nQ);cVt$Z*H7tpy$!;pgz7pFMwJ0os0?a(2M;#*;>t{tqfDS;?RRcVOz@=7VMU(tgKx&oHxhq1Jp(Mso|>XZSk79M2TUhCK&0s(|=t5(jNf5E;G!70|PwUon!Cvm!}+|elfgd7v70w%I%JkNcP6Bea0j?yZr=2Ps-kj=IS>At4G&CZaX5m&*s5IdYVY(EI8tc7LB7LOwLEV4hqP$i)^sFty^)`=EUMA=FTjv7V#Un$avLGk~f!|RmTSQJ0XB+P-0<vxg18v6UeAYVuO5IX~Qdz6v__BQw?7xKXh4uOnISs9k>WK*HjwZQ98ZeQAq<Ladd2V1|U?g?Em=r`#WkBCU;0I$Z^db&q$dfn}RiPJ5_3t+oj-XE+=CO42=MLLNWm$O#{xA83-%NauaG7>@3!g|2wJ|S)d^f{@3o`HFP`Oa%<$tB-i<NIBs`<h!PgVMkI(+SUdKDYS)OT1|GM*5M|Kajj|3>T(JE><wMQ!IxZ@fn*o5tmoZ?r_CX&=YRJ*xPlcL<x0`dknONU`a4=e|_Z@c&P->J8}Ya@Ew45oG4ySuo=<KtE+J9$F8Drb7#S<MV|9*?JM(LPIt%9;sV&Ehn^{aPj%_q2f<)LyE0=LJJD;cxX!K}uF-}$dn`#bwh=6PQ-t(^4J#vepLrTFE}l@c<J#~A6Mo=mNzQ=Y<B`DAloS^lW$TdIq(Q48F=tgP(!ghp2%VGX-N+5vZqsp-3N&nU1#9(V0_uP*<^T+H2PuioO9zRkaNI?ZyZ5F1*BO3Z8lQz{JB&Ttwv`k!tDQ@Vj=_H1pa3Xu@D(wH4(AZWj>o>*qRLI7MMI}Nx4lzYGVTLV+ZNhy%v`=7a#9z2u@0OLfg7X;at~iug!bT;uuQkFfMR5=@5K8(PF;Z1jH_8$DA^q<xdSdJjkE$Ts9ikw0ORN4#)q|ob6yU^Erut*J-K$MQBp5cL?6^TENj6w!@ihaTyZemwo6nHo=D$7>j1QiE#E?dE_W#&e!=t&yqrs&;SKu)ta~-H6{DIJwEn*e*)e<Hh-`q4!P@`drncyclk4wnu||ULqA{({5YD@+6GA{rc<yO=eqv28FAdC=V@A)E#1Qj<3!VVEt_V{d7ScWFI)m9}OwHpVC|(7BbMPM=NqMkHJ``bk72+5@m^=8+D=B;rL67K*Vb<pLPBXXQOxh&97T!zfWsls40okYmJ4%ReIcDs!9&L!EeT$Ipztyc2Y>AK`6}fD`<A=v@29bgzBqlq;`+}K$nZ8wI1mdKJiy3X2DnEH+TD97lJYq(>@^{5hLkhYnG)Di;r{awTzDMd4NQl=34v5DCNy4LG)8Dd^{5z{JSB63oYNn=QiK*WW{1kfaVvdOfFq~N`18b_E(@;KhQFRpL_t?09VCmCI-hh;;_qO@fZRKodiqrNwoz0vJ=WmcDpCtb`&bg_={xe;u285SL{zW2hmVqC0g+}@=l9A3M`|v&1Y^9Wb%^VcIGQs-g;P@<VtpQntjRa2gaUW4j;DYPkGF})0Q#ri~aQQnayxcTZP7jk!zT9-<gieB1&^z3gS(rZ5hR{U-e}z`#s8#jCMQ3I>8bVzWw73Ux<exL2W(mesJUoqo+F#?Sx<;U36qE9`A)@DJcoi&+C{7+0D>HS_$0dms=k?iju?dX4uFDnU?F!wT<%Gud?-o>q1pR%TxQQLQe+I44fP1G)BT<neXr^*uecVGkOdDaNGB@_`u&ck!ht7>TR=aN~i-y;41BE%zlA_?gD>c6H)WmuT|JMw2w)bX*CfHdT5}wZxN~@v<MgXbBIvE3jbkYSYTo^95d5Z1GDy|lNCZqPNZ{sX|MHNNDg)JsB9tVO<8px}6Q&sdQ-+2)Q#(r*aM>-<Ss;TzW9+1WN7M2*%XBU0INYJ!FU_ZDY?R&WZ`K6~er0<{BE{npU1D0z7{}h<6+YTQ(w<oh0n=q$$1K6j^JQiYJliYVkgn;(DyyInAxK8K-p8*M44l`w(!(<*Z8un2KQ7QIm5y~1ZP@QkIlMCaGdm6edhm3Yv0dD9Kk4>JAL&~1eG5C`hR2Iw&bhr`UT-rT~kY4Nkd*x1qp%fP+XXuO~+c}}8FxLAVxg=j~dnyrRx=-pb@yX4jM5^?tVc}e(br_Jw>#bvn0Wr%T%Qtq3z;#SNIo`(doe4p(K|*8^Mi-bZArGeM*U@7nYEy}xJ&FNPV8lUeC7h>-$@25N-wwp-bE>9h3g(QKfA+*>V;&KWb%C)jM1&fNdS6dV2l;C<Tca-5SBvGTms*0gOf71@*$yxR*Q;7apvWFFNrg;&UxKgPjUojjsa}6=5*%>WYZYZ*ala7VTQ5U`HI?GoK<86Y{E;zr-x9q79XNeP+d)VfN$6QY1{b6&^<?Iy*?JJ&h$KVUR(!f5%&m<Ka`Zg5`*4&b+szkENlxk^^#z^LZ~Hhp3r&OdV}lJpG5&iARCu_+S?&x&Ifh73%p^}pFksV8IefV<h&0v-r2oQ7HHuSaVza%tJM8BUq3giMJT>^D>nf9Sk{P-&(KB?--rF=P>iDO5-pm2V48=b*Ohr^zyNL`JiS(hQUAJ!^<#H8KBgbGG-QJe%vRxfj6`TEvi@L);vROxA;nXLRUGT@vVA%oVYG-NzAhgcPH{c5Pe&kxbwGNbjVSSDdtdpiVWZw49`7UX4J6t9}0<b*h{z{{^HLV5@f5DPkL>s(XqAm9L|3zn=B7VwTe^SoVAkjnPf9pZvuCDWFh+eP3u>t|7@6tXN>+HmzsM?B;?os$-Fq8_<>_)UW*5eL4A;5Hxsv;OhjC;P4yhbLZbBd+<fB`+|31`Tm)^WTOF?|;f4?i24dX<Y)eUk6gmZGRkyy;ep^(Nq{A-pEDAV!e3120Intsnw0AhVYsaLY=UmkF)%|Bk0A`N4B;LoK=7_K^K6S@2b<r)a^!MCG_*=F^r7n*DlkzRg>i30{Yav1Id#vz{3w;X9T{29V~8oeHYfVS2Ju!rxX^j#SiYW}7n&q*FvqX}R!kdtWQ1UVuz*3eIcoYvO%R#2ri%k|P53F;aqV#hZt{S9z;1^>-VgS0ZJ3(1vodEDZNmc9fdnE^j7lq$C*vs8==<t!5IF7Xvq)Fq}ZFo%i+V8X-}X5X{e&OZyW2<t}?`KsN34%I!ad{S3VjPy4g08FWE)n*CfNPB!uG1+O{j_rg<~pUcuxFrmpvuvVJ8&MT@gFd2U;7WMge*@nN=--XOM<iXS-*#}`C@O?nBpOFoCGBjrW=~to_+B$yUT@!T{D#`Gm5tVNGSe8O!p<ij=$Z7;vf=}%vz-DVUQd`MDk&{F+UALsoq~122rHic=py&fX{e37xw9T2zYWN7>qhjXZ>Aw-MH>$#;izX-r_m|3TCceU*-5!c>KuMoS(*Hn%Qc43iR0Gc7<_>J?%dP;;sbCWN#K(0I4!wpMd;}0`d@sYW=Kh{4@>2PMU%szHP$aXZWd1w!)a)i0{*)!Gs|p+xW)VboL@wY+=^79_fz43Z_{^77T+xWe5s9KzPgxNmh;C2!*W+(9F~^H+WwNQA)cp>M6fs6H<u(s#N5LC@cVCVHl>PpJd8Sx3x>4Nj)MX**j&)1mZy@umjZX<!Cm$Au414I78;!v0Se&nD&zAhRd-DH-Te3h?C#9`x?ra@tv<eZH--K~DZTED3=ZKto*T``BNVKegn$7LH`TZg~uQFLIyNk6N2L&A4zJsE7!3D~0Hlxdzt-i&=0El@r)29yyaLx(jOsHROzo*P(m8GGvXA6ZFRlP{i@>lhl0vM~u&JQW(Lpq;!qH5k!o|Hi1>yTr22kGwxzyHbeNOB~_r?1#1=!*f?c3}5tX#5p<t4`@3y))9l6NuGso-wA?a9*jhy%`;x#m^?|J@`w$f>rTopcP`|O(O6it`lfTc}d_~lmy(to`O`8_g9d~G;R>f&(yNMnJpOj*mzZ_{o13oj0l}f$wJEW{G-Gw_!eMl4@vXI*0ieXIZp(3Cr4CRG&K)DaBahCnI8UeQ(RIF?ZKgUFpLSR<2X4NUn&MSxgq4K3O>qm42~%8^7gFTWqU95Wen*(aVvj!y?c$cR4`VUGSd2kiI3m;mK7Y(QB!;4xM!NFkgHh(Qrn_RQ<W9h<@cp)bF4f_jGn{@)kQriPDYSdY%JK&)`As-6Z;pJ3F8AXyp-K?`)4yHI(9(tf)DlJOH=bkA*X>5Es_#4#&keZjk2Cw8{sWWIjoI6XYW^YNj<klQzMgb!|$plgqNv>==|K=ODsszV9ES_O>Za4F;>wb%u&4YJpeuZ7C<q}3seedQ-g&^B#}fo1MT;{V;p$5G;&!v=I`lhUxrP}D5`ws{X%s1Xpg_dcsh#sYdn8!&3PAzK0%pnXM&avO5A`k%v!De%dWSYb8JME7PATA$SCbFCBEz$Fu0_O7YE}mdj}k;^2@m4aV_y9<;Y5Yh7;AOt1tO!>jsbK9Fa}7aAHEa%^lN--^W@Y-ENPoAR=q1FPH#8aBmz&I);{L1;lrS57HvXOdb)QFoZHf71@%%fz3ar_?yxQtQ-kQ<8X%!;!eQBK(vG7ZLSY1iWCkaeVr8-fZg+1dGRZQ5>f~L_Z}P#VeVw9c3(%dDD_B4Z7~Z&SxleJ2E*ZBu418_ugBl2>UrPq^{rrge}(=15LEngU+v7~x-dzXh`e5Y#l5;GI^iX8J((Bf3K!M?bZ^p;)QN|(=f6LzJd=Y{-esqpFK%lL)Tm=u7-+CVAoMa`Eh!1frud$lETsgMhBSvoG5JglB4VU-Rps6OT*KsGE!48;ZyKr+la}k$x&Pv1*QLfHn;uw`1qr^=T>Z=}F|vHEz<)MSNKlYoNXRYaY(HhKfP_9pT$0&)cR$;(VBk|M)KGhr?V_IIlXcITZ&=VdC#aLFE%tc<2K_4m+NFghZTf~g`uEK|$0n|EVp=Z!9He=IT9gSOz}q{IJAk_V^UJylo25N$6hLksvzZN<y}(v|W9<8UcY@o|hOynB!;D__^hKtu#LtcxCMl*i;`rrHJ>PC3rOLEu+N|H@@B<w8!msfuY>2A-%5(m6T3{jE)u8Vmv=gseAYbqO_cJfG_E!WpU|ev{)?>*&RVqANoCEsnQ>9r&spvRNm~Sxmn=y!5F>`^Gm;|Ug4!2y?Y!jgEx?lJZb$E_WPrHPa!o!t}z;MubScjpJS)w1iL8r2BIJ3NZ0RJTbZ|C?(9kyqy(TaWf(7|mZy*SMODbpx%9VHddG4K6}Ud<B_xt^&UFabwPdY&4}^w$12EB_#y>}gUZG%yl#)C`zfZ9Qs@pcy9)_3w2~B)qC_q9bKHy3`DlgUqs3bPvVaW`xN;<jtjaJWeI2c%T3lJrW}r^tAqn*<Eb<bu@L?a{}v;&%l6T2wg93z`w%^NURe-xHDf720p>hbj|7|4Z{{z>^_UZ4R(wvMlVKYg7b~+f)ds2hDxtvPx1!Axf^`RBx$#*Su8(-Qe;7TjFN?w8Yr0lkwZUM#O{NU5PBvt(-LQ-2LVpRGmlUb<A!Ccv-Evh6cJmjpnlUa7ki-D^nvM^wXW&j;W+u!yNxS!WvNBYzia~)F_RQXZ)^j5HG9N!A4<#hQ`0KT?awu+(WjCJQKIzKyxwLAyW5SOJ!}cWJ(G#{i$*%<yoSD&Y#OvEHT%=TxBO0H3@ZT4fk<en56A34Z0sG7qCF@$!S0<zGyeb0q5uE@000G5Q2+n{0000000000Bme*a001RbRa8|~RaIA2RaI40RaH>dQUD1700{vA2>}2J0RRaB00{vA2>}2J0RRaB00{vA2>}2J0RRaB00{vA2>}2J0RRaB00{vA2>}2J0RRaB0t*8M9Rmav1PL_+1tA0l9|Q<H1Oyxd^#<lM0{{sFssh<00{{sD7aal!8UYF&0tOlZ2ps|j8UY9$0tOlZ2ps|l8UYF&0tgxb3LOFn8UYF&0tgxb3LOFqFaZDu0Shnz00#j82LS*H0RjmD5F`N$E&&fp0~A{U4^9COP5}>20R|BP1}OmsDFFZn0RRU900#j82LS*F0RRU900#j82LS*F0RRRAL!ko$(*gGF0Sy2N0RRaB00{vA2>}2J0RRaB00{vA1_1yD0RRR800sd71_1yE0RRU900#j82LS*F0RRaB00{vA2>}2J0RRaD5R3r>2O$Fn6$1ki0|_Am1PucP5d#7Z0|gla1|0(mEdvG>0|gNS1rY-Z9s>mt0|pfX1{DJb83P6t0|gNS1rY-S5d;Z51Pn(60ulrYIs^k41PL_+1tkOn7X$+r1OpcY0uloR4FnN&1P3?-6K4bwT?7Om1PCw$0ulrQ5(EMg1OgHS0ulrQ5(EMg1R9C~1O+7o1t$avIRq1D1O+7o6l??rDg+pS0R#$A1R09~1O+7oEb0LSAMXJKA*}%fAK(E4)j^u>2vt?T1Ox;J1_A~L1Ox;K1pxyE2nPiN0Sf^G0|pBM0|f#D0|WyE0|EmA0|EjC0s{jA1OfsA0s;a80s;a80s#U70s;d91qA~HDG&t-0s;aA0s#dE00000000000000000K!Ql1fP=l1U_zNjBYWxox)E6%+sf00;m802BoP0000000000000')
  def prove(fy:int,fB:bool)->None:
   _require(fB,f'R proof {fy} differs')
  prove(0,K(source)is str and'\x00'not in source and(0<L(source.encode('utf-8'))<=1868927)and(2000000-L(source.encode('utf-8'))>=131072))
@@ -21263,7 +22103,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  dq=T((a for a in U.body if Z(a,a2)and Z(a.target,a1)and(a.target.id=='GENERATION6_PROTOCOL_CASE_GROUPS')))
  dY=T((a for a in U.body if Z(a,a2)and Z(a.target,a1)and(a.target.id=='_GENERATION6_R_REJECTIONS')and Z(a.value,a17)))
  cQ=T((a for a in U.body if Z(a,a2)and Z(a.target,a1)and(a.target.id=='_GENERATION6_TEMPORARILY_UNWIRED_CASES')))
- prove(34,L(dq)==L(dY)==L(cQ)==1 and"_generation6_case_ids('R', 24)"in a0(dq[0])and(T((key.value for key in cast(ast.Dict,dY[0].value).keys if Z(key,a4)and type(key.value)is str))==T((f'R{fi:02d}'for fi in range(1,13))))and("_generation6_case_ids('R'"not in a0(cQ[0])))
+ prove(34,L(dq)==L(dY)==L(cQ)==1 and"_generation6_case_ids('R', 24)"in a0(dq[0])and(T((key.value for key in cast(ast.Dict,dY[0].value).keys if Z(key,a4)and type(key.value)is str))==T((f'R{fi:02d}'for fi in range(1,13))))and("_generation6_case_ids('R', 24)[12:]"in a0(cQ[0])))
  eD=bf('_generation6_process_state')
  dL=a0(eD)
  prove(35,OO((ll in dL for ll in("('runner.FdOwner.__init__', FdOwner, '__init__')","('runner.FdOwner.require', FdOwner, 'require')","('runner.FdOwner.detach', FdOwner, 'detach')","('runner.FdOwner.close_once', FdOwner, 'close_once')"))))
@@ -21283,121 +22123,64 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  prove(40,cd==x)
  i={m:eG(m)for m in x}
  dx=i['_Generation6RNamespacePhase']
- prove(41,OO((ax.lineno<dx.lineno for m,ax in z.items()if m!=d[6]))and z[d[6]].lineno>i[d[48]].lineno and(z[d[6]].lineno<i['_Generation6RNamespaceInventoryCursorState'].lineno<i[d[50]].lineno<i[d[38]].lineno<i[d[49]].lineno<i['_Generation6RNamespaceEmptyInventoryState'].lineno<i['_Generation6RNamespaceTerminalEvent'].lineno))
- bI=dict(zip((*x[:17],x[19],x[17],x[18]),D[2],strict=True))
- for m,ee in bI.items():
-  ao=i[m]
-  eo=ee
-  prove(42,T((a0(eU)for eU in ao.bases))==('str','Enum')and dX(ao)==eo)
+ prove(41,OO((ax.lineno<dx.lineno for m,ax in z.items()if m!=d[6]))and z[d[6]].lineno>i[d[48]].lineno and(z[d[6]].lineno<i['_Generation6RNamespaceInventoryCursorState'].lineno<i[d[50]].lineno<i[d[38]].lineno<i[d[49]].lineno<i['_Generation6RNamespaceEmptyInventoryState'].lineno<i['_Generation6RNamespaceRegularUnlinkFlowState'].lineno<i['_Generation6RNamespaceTerminalEvent'].lineno))
+ enums=T((m for m in x if T((a0(v)for v in i[m].bases))==('str','Enum')))
+ prove(42,L(enums)==L(D[2])==21)
+ for m,expected in zip(enums,D[2],strict=True):
+  prove(43,dX(i[m])==T((T(v)for v in expected)))
  def fd(m:str)->tuple[str,...]:
   return T((a.target.id for a in i[m].body if Z(a,a2)and Z(a.target,a1)))
- bD=x[20:57]
- bn={fA:fC[0]for fA,fC in zip(bD,D[3],strict=True)}
- ca={fA:fC[1]for fA,fC in zip(bD,D[3],strict=True)}
- ai={fA for fA,fC in zip(bD,D[3],strict=True)if fC[2]}
- V={fA for fA,fC in zip(bD,D[3],strict=True)if not fC[2]}
- ai=ai|{d[34],d[22]}
- V=V|{d[24]}
- for m,dn in bn.items():
-  ao=i[m]
-  eV=T((a0(k)for k in ao.decorator_list))
-  dQ=(d[32],)if m in ai else('dataclass(eq=False)',)
-  prove(43,fd(m)==dn and T((a0(a.annotation)for a in ao.body if Z(a,a2)))==ca[m]and(eV==dQ)and(not ao.bases)and(not ao.keywords)and(L(ao.body)==L(dn))and OO((Z(a,a2)and Z(a.target,a1)and(a.simple==1)and(a.value is None)for a in ao.body)))
- prove(44,set(bn)==ai|V)
+ dataclasses=T((m for m in x if N(('dataclass'in a0(v)for v in i[m].decorator_list))))
+ for m,expected in zip(dataclasses,D[3],strict=True):
+  names,annotations,frozen=expected;a2i_dc=i[m];decorator=(d[32],)if frozen else('dataclass(eq=False)',);prove(44,fd(m)==T(names)and T((a0(a.annotation)for a in a2i_dc.body if Z(a,a2)))==T(annotations)and T((a0(v)for v in a2i_dc.decorator_list))==decorator) # noqa: E702
  cN=T((a for a in U.body if Z(a,a5)and N((Z(r,a1)and r.id==d[16]for r in a.targets))))
  prove(45,L(cN)==1 and a0(cN[0].value)=='_Generation6RNamespacePresentToken | _Generation6RNamespaceAbsenceToken | _Generation6RNamespaceRenameToken')
- s=i[d[76]]
+ s=i['_Generation6RNamespaceJournal']
  cE=T((a.name for a in s.body if Z(a,a6)))
  prove(46,cE==R)
  c={m:e(s,m)for m in R}
- bM=(d[14],d[46],d[11],d[31],d[13],d[10],d[5],d[21],d[7],d[1])
- prove(47,L(bM)==10 and OO((m in c for m in bM)))
- dg=dict(zip(T(['_require_pristine_inventory_classification','_require_current_inventory_classification','_reauthenticate_inventory_classification_parent','_derive_inventory_classification','_close_rejected_namespace_raw_once','_close_inventory_classification_owner','_register_inventory_classification_name_fact','_terminalize_inventory_classification','_fail_inventory_classification_uncertain','_classify_metered_inventory_item','_require_current_empty_inventory','_require_authenticated_empty_inventory','_fail_empty_inventory_uncertain','_authenticate_empty_inventory']),D[4],strict=True))
- prove(48,OO((a0(c[m].args)==fc and c[m].returns is not None and(a0(cast(ast.AST,c[m].returns))==fj)for m,(fc,fj)in dg.items())))
+ sm=T((m for m in R if m in {'_require_pristine_inventory_classification','_require_inventory_classification_lineage','_require_current_inventory_classification','_require_archived_regular_unlink_classification','_reauthenticate_inventory_classification_parent','_derive_inventory_classification','_close_rejected_namespace_raw_once','_close_inventory_classification_owner','_register_inventory_classification_name_fact','_terminalize_inventory_classification','_fail_inventory_classification_uncertain','_classify_metered_inventory_item','_require_current_empty_inventory','_require_authenticated_empty_inventory','_fail_empty_inventory_uncertain','_authenticate_empty_inventory','_acquire_name_owner','_authorize_metered_regular_unlink','authorize_present'}))
+ prove(47,L(sm)==19 and OO((c[m].returns is not None for m in sm))and T(((a0(c[m].args),a0(cast(ast.expr,c[m].returns)))for m in sm))==T((T(v)for v in D[4])))
+ sh=c['_require_inventory_classification_lineage'];cu=c['_require_current_inventory_classification'];ca=c['_require_archived_regular_unlink_classification'];a2i_owner=c['_acquire_name_owner'];fw=c['_authorize_metered_regular_unlink'];ap=c['authorize_present'] # noqa: E702
+ prove(48,OO((m in c for m in ('_require_inventory_classification_lineage','_require_archived_regular_unlink_classification','_authorize_metered_regular_unlink','_issue_a2_mutation_permit')))and L(c)==93)
  def n(r:str)->tuple[tuple[str,int],...]:
-  return T(((m,eM)for m in R if(eM:=b(c[m]).count(f'self.{r}'))))
- prove(49,n(d[101])==((d[97],1),)and n(d[97])==((d[105],1),(d[5],1))and(n(d[100])==((d[105],1),(d[5],1)))and(n(d[10])==((d[7],1),(d[1],1)))and(n('_close_namespace_owner')==((d[10],1),(d[88],1),(d[103],1),(d[80],1),(d[105],2),('_fail_present_unlink_preproof',1),('_fail_invalid_mutation_permit',1),('_fail_present_unlink_attempt',1),(d[98],1),(d[87],1),(d[92],1),(d[107],1)))and(n(d[91])==((d[17],1),(d[43],1),(d[1],2)))and(n(d[75])==((d[1],1),(d[88],1),(d[80],1)))and(n(d[13])==((d[75],1),))and(n(d[35])==((d[14],1),)))
- eH=c[d[101]]
- dE=c[d[97]]
- prove(50,a0(eH.args)=='self, snapshot: DescriptorSnapshot, mount_id: int, kind: _Generation6RNamespaceNodeKind, hardlink_group: str | None'and b(dE).count('self._validate_node_kind')==1 and('self._validate_node_kind(snapshot, mount_id, kind, hardlink_group)'in a0(dE)))
- cV=c[d[1]]
- di=c[d[11]]
- cA=c[d[13]]
- az=c[d[75]]
- j=b(cV)
- bc=b(di)
- ac=b(cA)
- aN=b(az)
- prove(51,j.count(d[57])==2 and j.count(d[9])==1 and(j.count(d[61])==1)and(j.count(d[68])==1)and(j.count('self._reauthenticate_inventory_classification_parent')==1)and(j.count('_GENERATION6_R_NAMESPACE_REAL_OS_GETUID')==1)and(j.count('_GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_FD')==0)and(j.count(d[19])==0)and(j.count(d[25])==0)and(bc.count(d[19])==1)and(bc.count(d[68])==1)and(bc.count(d[25])==2)and(bc.count(d[9])==0)and(bc.count(d[57])==0))
- h=a0(cV)
- bQ=aT(cV)
- aM=T((g for g in bQ if a0(g.func)==d[57]))
- bS=T((g for g in bQ if a0(g.func)==d[9]))
- bR=T((g for g in bQ if a0(g.func)==d[61]))
- bx=('binding.raw_entry.name == binding.component','opened_snapshot == named_snapshot','descriptor_token.snapshot == opened_snapshot','named_snapshot.uid == current_uid','named_snapshot.uid == authority_binding.fact.uid','entry_mount_id == parent_mount_id','entry_mount_id == authority_binding.fact.mount_id','parent_snapshot == parent_descriptor_record.token.snapshot','descriptor_flags == fcntl.FD_CLOEXEC','status_flags & os.O_ACCMODE == os.O_RDONLY','status_flags & os.O_PATH == os.O_PATH')
- prove(52,L(aM)==2 and L(bS)==1 and(L(bR)==1)and(aM[0].lineno<bS[0].lineno<aM[1].lineno<bR[0].lineno)and(h.find('classification_record.stat_attempts = 1')<h.find(d[9]))and(h.find('classification_record.open_attempts = 1')<h.find(d[61]))and(h.count('entry_increment=0')==2)and(h.count('encoded_name_bytes_increment=0')==2)and('os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC'in h)and('descriptor_token.snapshot'in h)and('descriptor_token.fd_flags'in h)and('descriptor_token.status_flags'in h)and OO((ll in h for ll in bx))and(not N((r.startswith('binding.raw_entry.')for r in j)))and('budget_record.operation_count == binding.operation_count_before + 2'in h)and('budget_record.entry_count == binding.entry_count_before'in h)and('budget_record.encoded_name_bytes == binding.encoded_name_bytes_before'in h))
- eQ=a0(az)
- cY=T((eQ.find(ll)for ll in('owner = object.__new__(FdOwner)','vars(owner) == {}','raw_result = _GENERATION6_R_NAMESPACE_REAL_OS_OPEN','invalid_evidence = raw_result','raw_result = _PID_SENTINEL',d[8],'low_descriptor = raw_result','self._close_rejected_namespace_raw_once(low_descriptor)','accepted_descriptor = raw_result','initialization_descriptor = accepted_descriptor','initialization_started = True','accepted_descriptor = _PID_SENTINEL','FdOwner.__init__(owner, initialization_descriptor, exact_label)')))
- prove(53,OO((ag>=0 for ag in cY))and OO((cY[ag]<cY[ag+1]for ag in range(L(cY)-1)))and(aN.count('object.__new__')==1)and(aN.count('_GENERATION6_R_NAMESPACE_REAL_OS_OPEN')==1)and(aN.count(d[8])==1)and(aN.count('self._close_rejected_namespace_raw_once')==1)and(aN.count('FdOwner.__init__')==1)and(aN.count(d[4])==0)and(aN.count('self._retain_untransferred_raw')==0)and(not N((a.finalbody for a in a3(az)if Z(a,a12)))))
- er=a0(cA)
- bE=T((er.find(ll)for ll in(d[8],d[4],'self._poisoned_descriptors.add','self._phase = _Generation6RNamespacePhase.UNCERTAIN')))
- aC=T((a for a in cA.body if Z(a,a12)))
- prove(54,ac.count(d[8])==1 and ac.count(d[4])==1 and OO((ag>=0 for ag in bE))and OO((bE[ag]<bE[ag+1]for ag in range(L(bE)-1)))and(L(aC)==2)and(b(aC[0]).count(d[8])==1)and(b(aC[1]).count(d[4])==1)and(ac.count('self._descriptor_ledger.initialize_owner')==0)and(ac.count(d[68])==0)and(ac.count(d[19])==0)and(ac.count(d[25])==0)and(ac.count('self._register_name_fact')==0))
- cf=(*T((c[m]for m in bM)),az)
- C=T((r for a in cf for r in b(a)))
- dk=T((w.id for a in cf for w in a3(a)if Z(w,a1)))
- prove(55,OO((C.count(f'self.{m}')==0 for m in(d[80],'_reauthenticate_directory',d[55],d[105],d[81])))and d[2]not in dk and(C.count(d[0])==0)and(C.count(d[106])==0)and(C.count(d[111])==0)and(n(d[1])==()))
- aR=b(s)
- dt=T((a for a in U.body if Z(a,a8)and a.name==d[2]))
- co=T((g for g in aT(U)if a0(g.func)==d[2]))
- dN=T((a for a in U.body if Z(a,a2)and Z(a.target,a1)and(a.target.id==d[0])))
- eA=T((m for m in R if b(c[m]).count(d[0])))
- dT=T((a for a in s.body if Z(a,a6)and a.name==d[81]))
- bW=('dispatch','runtime','remote','production','trading','broker','exchange','order','publish')
- prove(56,L(dt)==1 and L(co)==1 and co[0]in aT(c['_authenticate_empty_inventory'])and(dk.count(d[2])==0)and(L(dN)==1)and(aR.count(d[0])==1)and(eA==(d[98],))and(C.count(d[0])==0)and(L(dT)==1)and(n(d[81])==((d[87],1),(d[104],1),(d[92],1)))and(aR.count(d[86])==3)and(C.count(d[86])==0)and(aR.count(d[106])==0)and(b(U).count(d[106])==2)and(not N((ll in r.lower()for ll in bW for r in C))))
- cL=a0(c[d[31]])
- dr=a0(c[d[100]])
- dB=a0(c['seal'])
- du=((1,'REGULAR'),(2,d[109]),(3,d[109]),(17,d[109]))
- prove(57,du==T(((eM,d[109]if eM>1 else'REGULAR')for eM in(1,2,3,17)))and'snapshot.link_count > 1'in cL and('snapshot.link_count == 1'in cL)and('r6-hardlink:{mount_id}:{snapshot.device}:{snapshot.inode}'in cL)and('len(group) < fact.link_count'in dr)and('candidate.link_count == fact.link_count'in dr)and('1 <= len(members) <= members[0].link_count'in dB)and('members[0].link_count > 1'in dB)and('len(members) == 2'not in dB))
- dJ=('INVENTORY_CLASSIFICATION_ATTEMPTING','INVENTORY_CLASSIFICATION_NOFOLLOW_STAT_OBSERVED','INVENTORY_CLASSIFICATION_HANDLE_AUTHENTICATED','INVENTORY_CLASSIFICATION_HANDLE_CLOSED','INVENTORY_CLASSIFICATION_ABORT_CLOSED','INVENTORY_CLASSIFICATION_REMOVABLE_CANDIDATE','INVENTORY_CLASSIFICATION_KNOWN_RESIDUE','INVENTORY_ITEM_CLASSIFIED_REMOVABLE_CANDIDATE','INVENTORY_ITEM_CLASSIFIED_KNOWN_RESIDUE','INVENTORY_CLASSIFICATION_UNCERTAIN','INVENTORY_ITEM_CLASSIFICATION_UNCERTAIN','NAME_FACT_SEALED')
- ea=T((w.value for a in cf for w in a3(a)if Z(w,a4)and type(w.value)is str))
- prove(58,OO((k in ea or k in T((eg[0]for fh in bI.values()for eg in fh))for k in dJ)))
- u=c[d[21]]
- P=c[d[7]]
- bb=T((a for a in cV.body if Z(a,a12)))
- prove(59,L(bb)==1 and Z(bb[0].body[-1],A.Return)and Z(bb[0].body[-2],a14)and Z(bb[0].body[-2].value,a9)and(a0(bb[0].body[-2].value.func)==d[41])and Z(u.body[-1],a5)and(a0(u.body[-1].targets[0])==d[15])and Z(u.body[-1].value,a4)and(u.body[-1].value.value is None)and Z(P.body[-2],a5)and(a0(P.body[-2].targets[0])==d[15])and Z(P.body[-2].value,a4)and(P.body[-2].value.value is None)and Z(P.body[-1],a16))
- ah=T((h.find(ll)for ll in('self._derive_inventory_classification',d[40],'self._register_inventory_classification_name_fact',d[41],'return classification')))
- cD=a0(u)
- ad=T((cD.find(ll)for ll in('record.state = state','item_record.state = item_state','outcome_receipt = self._append_receipt','record.outcome_receipt = outcome_receipt','terminal_receipt = self._append_receipt','\n    item_record.terminal_receipt = terminal_receipt','\n    record.terminal_receipt = terminal_receipt','self._archived_inventory_item_records.append(item_record)','self._archived_inventory_classification_records.append(record)','self._inventory_classification_residue_evidence.append(record)',d[53],d[3])))
- ef=a0(P)
- bV=T((ef.find(ll)for ll in('exact_record.state = _Generation6RNamespaceInventoryClassificationState.UNCERTAIN','exact_item_record.state = _Generation6RNamespaceInventoryItemState.UNCERTAIN',d[40],'classification_receipt = self._append_receipt','item_receipt = self._append_receipt','self._archived_inventory_item_records.append(exact_item_record)','self._archived_inventory_classification_records.append(exact_record)','self._inventory_classification_residue_evidence.append(exact_record)',d[53],d[3],'raise primary')))
- prove(60,OO((ag>=0 for ag in ah))and OO((ah[ag]<ah[ag+1]for ag in range(L(ah)-1)))and OO((ag>=0 for ag in ad))and OO((ad[ag]<ad[ag+1]for ag in range(L(ad)-1)))and OO((ag>=0 for ag in bV))and OO((bV[ag]<bV[ag+1]for ag in range(L(bV)-1)))and(cD.count(d[3])==1)and(ef.count(d[3])==1))
- dw=a0(c[d[110]])
- dO=(d[26],d[28],d[15],d[29],d[30],d[23],'self._inventory_classification_faulted')
- prove(61,OO((dw.count(ll)==1 for ll in dO)))
- h0=c['_require_current_empty_inventory']
- h1=c['_require_authenticated_empty_inventory']
- h2=c['_fail_empty_inventory_uncertain']
- h3=c['_authenticate_empty_inventory']
- h6=a0(h2)
- h7=a0(h3)
- h8=T((a for a in h3.body if Z(a,a12)))
- h9=h8[0]
- ha=T((h7.find(ll)for ll in('scan_archive = self._archived_inventory_scan_records','scan_record = scan_archive[0]','scan_binding = scan_record.binding','trusted_scan = scan_binding.scan','type(scan) is _Generation6RNamespaceInventoryScan','advance_archive = self._archived_inventory_advance_records','advance_record = advance_archive[0]','cursor_record = scan_binding.cursor_record','type(self._inventory_cursor_issuance_faulted) is bool')))
- prove(62,L(h3.body)==2 and L(h8)==1 and L(h9.body)==61 and L(h9.handlers)==1 and OO((v>=0 for v in ha))and OO((ha[v]<ha[v+1]for v in range(L(ha)-1))))
- hb=T((h7.find(ll)for ll in('empty_inventory = _Generation6RNamespaceEmptyInventory','binding = _Generation6RNamespaceEmptyInventoryBinding','record = _Generation6RNamespaceEmptyInventoryRecord','self._empty_inventory_records_by_identity[empty_inventory_identity] = record','self._empty_inventory_records_by_serial[empty_inventory.serial] = record','self._live_empty_inventory_record = record','INVENTORY_EMPTY_AUTHENTICATING','self._require_current_empty_inventory(empty_inventory)','self._terminalize_inventory_cursor','record.state = _Generation6RNamespaceEmptyInventoryState.AUTHENTICATED','self._archived_empty_inventory_records.append(record)','INVENTORY_EMPTY_AUTHENTICATED','record.outcome_receipt = outcome_receipt','self._live_empty_inventory_record = None','return empty_inventory')))
- prove(63,OO((v>=0 for v in hb))and OO((hb[v]<hb[v+1]for v in range(L(hb)-1)))and Z(h9.body[-1],A.Return)and b(h9.body[-4])==('self._append_receipt',)and a0(h9.body[-4]).startswith('outcome_receipt = self._append_receipt(')and a0(h9.body[-3])=='record.outcome_receipt = outcome_receipt'and a0(h9.body[-2])=='self._live_empty_inventory_record = None'and(not N((aT(v)for v in h9.body[-3:]))))
- hc=T((h6.find(ll)for ll in('self._empty_inventory_lifecycle_faulted = True','self._phase = _Generation6RNamespacePhase.UNCERTAIN','exact_record.state = _Generation6RNamespaceEmptyInventoryState.UNCERTAIN','INVENTORY_EMPTY_UNCERTAIN','self._archived_empty_inventory_records.append(exact_record)','self._live_empty_inventory_record = None')))
- prove(64,L(h2.body)==8 and a0(h2.body[0])=='self._empty_inventory_lifecycle_faulted = True'and a0(h2.body[1])=='self._phase = _Generation6RNamespacePhase.UNCERTAIN'and(not N((Z(a,a16)for a in a3(h2))))and b(h2).count('suppress')==3 and OO((v>=0 for v in hc))and OO((hc[v]<hc[v+1]for v in range(L(hc)-1)))and L(h9.handlers[0].body)==2 and Z(h9.handlers[0].body[-1],a16)and h9.handlers[0].body[-1].exc is None)
- hd=b(h3)
- he=('_Generation6RNamespaceEmptyInventory','_Generation6RNamespaceEmptyInventoryBinding','_Generation6RNamespaceEmptyInventoryRecord')
- hf=('self._empty_inventory_records_by_identity','self._empty_inventory_records_by_serial','self._live_empty_inventory_record','self._archived_empty_inventory_records','self._empty_inventory_lifecycle_faulted')
- prove(65,n('_require_current_empty_inventory')==(('_authenticate_empty_inventory',1),)and n('_require_authenticated_empty_inventory')==()and n('_fail_empty_inventory_uncertain')==(('_authenticate_empty_inventory',1),)and n('_authenticate_empty_inventory')==()and T((hd.count(v)for v in he))==(1,1,1)and h7.count('INVENTORY_EMPTY_AUTHENTICATING')==1 and h7.count('INVENTORY_EMPTY_AUTHENTICATED')==1 and h6.count('INVENTORY_EMPTY_UNCERTAIN')==1 and OO((dw.count(v)==1 for v in hf))and sum((v for _,v in n(d[91])))==4 and n('_terminalize_inventory_cursor')==(('_authenticate_empty_inventory',1),)and n('_terminalize_inventory_scan_end_observed')==((d[43],1),)and n(d[81])==((d[87],1),(d[104],1),(d[92],1)))
- hg=T((a0(v.func)for f0 in(h0,h1,h2,h3)for v in aT(f0)))
- hi=c['_issue_a2_mutation_permit']
- prove(66,not N((v in hg for v in(d[0],d[106],d[111],d[108],d[81],d[91],d[1],d[43],'self._issue_a2_mutation_permit','self._terminalize_inventory_scan_end_observed','os.rmdir')))and(not N((Z(a,(A.Yield,A.YieldFrom))for f0 in(h0,h1,h2,h3)for a in a3(f0))))and hd.count('self._terminalize_inventory_cursor')==1 and L(hi.body)==1 and Z(hi.body[0],a16)and Z(hi.body[0].exc,a9)and a0(hi.body[0].exc.func)=='ContractError'and('EmptyInventory'not in a0(c['_publish_capability'])))
- q=a0(s)
+  return T(((m,v)for m in R if(v:=b(c[m]).count(f'self.{r}'))))
+ sw=T((a0(tg)for a in a3(sh)if Z(a,(a5,a2,a10))and a.value is not None for tg in(T(a.targets)if Z(a,a5)else(a.target,))if Z(tg,a7)and a0(tg).startswith('self.')))
+ prove(49,n('_require_inventory_classification_lineage')==(('_require_current_inventory_classification',1),('_require_archived_regular_unlink_classification',1))and not sw)
+ cas=a0(ca);co=T((cas.find(v)for v in ('archive = self._archived_inventory_classification_records','archived_record = archive[0]','binding = archived_record.binding','self._inventory_classification_records_by_identity.get','self._inventory_classification_records_by_serial.get','self._require_inventory_classification_lineage(archived_record, archived_record.binding)','self._empty_inventory_records_by_identity','type(classification) is _Generation6RNamespaceInventoryClassification','vars(classification)','classification is binding.classification','return archived_record'))) # noqa: E702
+ prove(50,OO((v>=0 for v in co))and OO((co[v]<co[v+1]for v in range(L(co)-1)))and 'len(self._archived_inventory_advance_records) == 1'in cas and'self._live_inventory_advance_record is None'in cas and'_Generation6RNamespaceInventoryScanState.LIVE'in cas and'_Generation6RNamespaceInventoryCursorState.CURRENT'in cas and a0(ca).count('self._require_receipt_binding')==5)
+ cus=a0(cu);ck=T((cus.find(v)for v in ('live_record = self._live_inventory_classification_record','binding = live_record.binding','self._require_inventory_classification_lineage(live_record, live_record.binding)','record = live_record','type(classification) is _Generation6RNamespaceInventoryClassification','vars(classification)','classification is binding.classification','return live_record'))) # noqa: E702
+ prove(51,OO((v>=0 for v in ck))and OO((ck[v]<ck[v+1]for v in range(L(ck)-1)))and'_Generation6RNamespaceInventoryClassificationState.ATTEMPTING'in cus and'_Generation6RNamespaceInventoryItemState.LIVE_UNCLASSIFIED'in cus)
+ a2i_owner_source=a0(a2i_owner);a2i_kwonly=a2i_owner.args.kwonlyargs;a2i_kwdefaults=a2i_owner.args.kw_defaults # noqa: E702
+ prove(52,a0(a2i_owner.args)=='self, authority: _Generation6RNamespaceDirectoryAuthority, name: str, *, purpose: _Generation6RNamespaceOwnerPurpose, label: str, _regular_unlink_flow_record: _Generation6RNamespaceRegularUnlinkFlowRecord | None=None'and L(a2i_kwonly)==3 and a2i_kwonly[-1].arg=='_regular_unlink_flow_record'and L(a2i_kwdefaults)==3 and Z(a2i_kwdefaults[-1],a4)and a2i_kwdefaults[-1].value is None)
+ ac=T((g for m in R for g in aT(c[m])if a0(g.func)=='self._acquire_name_owner'));az={m:T((g for g in aT(c[m])if a0(g.func)=='self._acquire_name_owner'))for m in ('seal_name','authorize_present','authorize_rename')} # noqa: E702
+ prove(53,L(ac)==3 and OO((L(az[m])==1 for m in az))and not N((k.arg=='_regular_unlink_flow_record'for m in ('seal_name','authorize_rename')for k in az[m][0].keywords))and sum((k.arg=='_regular_unlink_flow_record'for k in az['authorize_present'][0].keywords))==1 and N((k.arg=='_regular_unlink_flow_record'and a0(k.value)=='_regular_unlink_flow_record'for k in az['authorize_present'][0].keywords)))
+ a2i_charge=T((g for g in aT(a2i_owner)if a0(g.func)=='self._charge_cleanup_budget'));a2i_stat=T((g for g in aT(a2i_owner)if a0(g.func)=='_GENERATION6_R_NAMESPACE_REAL_OS_STAT'));a2i_open=T((g for g in aT(a2i_owner)if a0(g.func)=='self._open_namespace_owner'));a2i_receipt=T((g for g in aT(a2i_owner)if a0(g.func)=='self._require_receipt_binding')) # noqa: E702
+ prove(54,L(a2i_charge)==3 and L(a2i_stat)==2 and L(a2i_open)==1 and L(a2i_receipt)==1 and a2i_receipt[0].lineno<a2i_charge[0].lineno<a2i_stat[0].lineno<a2i_charge[1].lineno<a2i_open[0].lineno<a2i_charge[2].lineno<a2i_stat[1].lineno and OO((T((k.arg for k in g.keywords))==('next_depth','entry_increment','encoded_name_bytes_increment')for g in a2i_charge)))
+ ae=T((a2i_owner_source.find(v)for v in ('flow_record.operation_count_after_first_stat = flow_budget_record.operation_count','flow_record.authorization_first_stat_attempts = 1','named_before = _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT','flow_record.authorization_first_named_snapshot = named_before','flow_record.operation_count_after_open = exact_flow_budget_record.operation_count','flow_record.authorization_open_attempts = 1','owner, descriptor_token, owner_context = self._open_namespace_owner','flow_record.authorization_opened_snapshot = descriptor_token.snapshot','flow_record.operation_count_after_second_stat =','flow_record.authorization_second_stat_attempts = 1','named_after = _GENERATION6_R_NAMESPACE_CAPTURED_SNAPSHOT_STAT','flow_record.authorization_second_named_snapshot = named_after')))
+ prove(55,OO((v>=0 for v in ae))and OO((ae[v]<ae[v+1]for v in range(L(ae)-1)))and a2i_owner_source.count('entry_increment=0')==3 and a2i_owner_source.count('encoded_name_bytes_increment=0')==3)
+ a2i_flow_state=i['_Generation6RNamespaceRegularUnlinkFlowState'];a2i_flow_binding=i['_Generation6RNamespaceRegularUnlinkFlowBinding'];a2i_flow_record=i['_Generation6RNamespaceRegularUnlinkFlowRecord'] # noqa: E702
+ prove(56,dX(a2i_flow_state)==(('AUTHORIZING','AUTHORIZING'),('AUTHORIZED','AUTHORIZED'),('UNCERTAIN','UNCERTAIN'))and a2i_flow_binding.name=='_Generation6RNamespaceRegularUnlinkFlowBinding'and a2i_flow_record.name=='_Generation6RNamespaceRegularUnlinkFlowRecord'and L(fd('_Generation6RNamespaceRegularUnlinkFlowBinding'))==33 and L(fd('_Generation6RNamespaceRegularUnlinkFlowRecord'))==31 and fd('_Generation6RNamespaceRegularUnlinkFlow')==('serial','issuer_identity'))
+ ini=a0(c['__init__']);a2i_flow_stores=('_regular_unlink_flow_records_by_identity','_regular_unlink_flow_records_by_serial','_live_regular_unlink_flow_record','_archived_regular_unlink_flow_records','_regular_unlink_flow_faulted') # noqa: E702
+ prove(57,OO((ini.count(f'self.{v}:' if v!='_regular_unlink_flow_faulted'else f'self.{v} = False')==1 for v in a2i_flow_stores)))
+ fws=a0(fw)
+ prove(58,n('_authorize_metered_regular_unlink')==()and a0(fw.args)=='self, authority: _Generation6RNamespaceDirectoryAuthority, classification: _Generation6RNamespaceInventoryClassification'and fw.returns is not None and a0(cast(ast.expr,fw.returns))=='_Generation6RNamespaceRegularUnlinkFlow')
+ fc=b(fw)
+ prove(59,fc[:2]==('self._require_teardown_authorization','self._require_archived_regular_unlink_classification')and fc.count('self._require_teardown_authorization')==1 and fc.count('self._require_archived_regular_unlink_classification')==1)
+ fo=T((fws.find(v)for v in ('vars(authority)','authority is classification_binding.authority','flow = _Generation6RNamespaceRegularUnlinkFlow','flow_binding = _Generation6RNamespaceRegularUnlinkFlowBinding','record = _Generation6RNamespaceRegularUnlinkFlowRecord','self._begin_publication(record)','self._regular_unlink_flow_records_by_identity[id(flow)] = record','self._regular_unlink_flow_records_by_serial[flow.serial] = record','self._live_regular_unlink_flow_record = record',"event='REGULAR_UNLINK_FLOW_AUTHORIZING'",'record.attempt_receipt = attempt_receipt','self._finish_publication(record)','record.authorization_attempts = 1','self.authorize_present','return flow')))
+ prove(60,OO((v>=0 for v in fo))and OO((fo[v]<fo[v+1]for v in range(L(fo)-1))))
+ ft=T((a for a in fw.body if Z(a,a12)));fh=ft[0].handlers[0] # noqa: E702
+ prove(61,L(ft)==1 and Z(ft[0].body[-2],a14)and b(ft[0].body[-2])==('self.authorize_present',)and Z(ft[0].body[-1],A.Return)and cast(ast.Return,ft[0].body[-1]).value is not None and a0(cast(ast.expr,cast(ast.Return,ft[0].body[-1]).value))=='flow')
+ prove(62,a0(fh.body[0])=='self._regular_unlink_flow_faulted = True'and a0(fh.body[1])=='self._phase = _Generation6RNamespacePhase.UNCERTAIN'and b(fh).count('self._close_namespace_owner')==0 and b(fh).count('self._archive_capability')==0)
+ ff=T((a0(fh).find(v)for v in ('record.state = _Generation6RNamespaceRegularUnlinkFlowState.UNCERTAIN','self._pending_publication is record','self._fail_publication(record)',"event='REGULAR_UNLINK_FLOW_UNCERTAIN'",'self._archived_regular_unlink_flow_records.append(record)','flow_archived = any(','flow_archived and self._live_regular_unlink_flow_record is record','self._live_regular_unlink_flow_record = None','raise')))
+ prove(63,OO((v>=0 for v in ff))and OO((ff[v]<ff[v+1]for v in range(L(ff)-1)))and b(fh).count('self._fail_publication')==1)
+ aps=a0(ap);apk=ap.args.kwonlyargs;apv=ap.args.kw_defaults;apac=T((g for g in aT(ap)if a0(g.func)=='self._acquire_name_owner')) # noqa: E702
+ prove(64,L(apk)==1 and apk[0].arg=='_regular_unlink_flow_record'and L(apv)==1 and Z(apv[0],a4)and apv[0].value is None and L(apac)==1 and sum((k.arg=='_regular_unlink_flow_record'for k in apac[0].keywords))==1 and N((k.arg=='_regular_unlink_flow_record'and a0(k.value)=='_regular_unlink_flow_record'for k in apac[0].keywords)))
+ pi=T((aps.find(v)for v in ('flow_record.capability = token','flow_record.capability_identity = id(token)','flow_record.capability_record = capability_record','flow_record.capability_record_identity = id(capability_record)','self._publish_capability(','flow_record.outcome_receipt = capability_record.authorization_receipt','flow_record.state = _Generation6RNamespaceRegularUnlinkFlowState.AUTHORIZED','return token')))
+ prove(65,OO((v>=0 for v in pi))and OO((pi[v]<pi[v+1]for v in range(L(pi)-1)))and b(ap).count('self._publish_capability')==1)
+ allc=T((a0(g.func)for m in R for g in aT(c[m])));phase_values=T((a0(a.value)for m in R for a in a3(c[m])if Z(a,(a5,a2,a10))and a.value is not None and N((a0(target)=='self._phase'for target in(T(a.targets)if Z(a,a5)else(a.target,)))))) # noqa: E702
+ prove(66,allc.count('self._charge_cleanup_budget')==7 and allc.count('self.authorize_present')==1 and allc.count('self.consume_present')==0 and allc.count('_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK')==1 and allc.count('self._issue_a2_mutation_permit')==1 and not N((v=='_Generation6RNamespacePhase.TEARDOWN_ACTIVE'for v in phase_values)))
+ t=bf('_generation6_r_authority_source_gates')
  bu=T((a for a in U.body if Z(a,a2)and Z(a.target,a1)and(a.target.id=='_GENERATION6_R_REAL_NEXT')))
  prove(67,L(bu)==1)
  db=bu[0].lineno
@@ -21406,19 +22189,19 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  f=T((a for a in U.body if db<=a.lineno<=dP))
  bo=T((f'capture:{a.target.id}'if Z(a,a2)and Z(a.target,a1)else f'class:{a.name}'if Z(a,a8)else f'function:{a.name}'if Z(a,a6)else d[60]if Z(a,a5)and N((Z(r,a1)and r.id==d[16]for r in a.targets))else f'unexpected:{type(a).__name__}'for a in f))
  dc=('_G6R_PN','_G6R_PK','_G6R_PE','_G6R_IK','_G6R_IE','_G6R_BK','_G6R_BE','_G6R_OK','_G6R_OE','_G6R_LK','_G6R_LE','_G6R_TK','_G6R_TE','_G6R_WK','_G6R_WE','_G6R_VK','_G6R_VE',d[45],'_G6R_SS','_G6R_SK','_G6R_SE','_G6R_AF','_G6R_AI','_G6R_NF','_G6R_NI','_G6R_VC','_G6R_VF','_G6R_VI','_G6R_VB','_G6R_G','_G6R_D')
- prove(69,L(f)==162 and OO((f'capture:{m}'in bo for m in dc))and(not N((fo.startswith('unexpected:')for fo in bo))))
+ prove(69,L(f)==166 and OO((f'capture:{m}'in bo for m in dc))and(not N((fo.startswith('unexpected:')for fo in bo))))
  cS='\n'.join(source.splitlines()[db-1:dP])+'\n'
- eC=b'TASK-064\x00GEN6\x00R-A2h\x00source-v1\x00'
+ eC=b'TASK-064\x00GEN6\x00R-A2i\x00source-v1\x00'
  dm=eC+cS.encode('utf-8')
  eB=H.sha256(dm).hexdigest()
- prove(70,db==10578 and dP==20934 and(f[0]is bu[0])and(f[-1]is s)and OO((type(a.end_lineno)is int and a.end_lineno<f[ag+1].lineno for ag,a in enumerate(f[:-1])))and(L(dm)==845629)and(eB=='85c87fa9dee92d0af70c9de22dddf686d06e0c3bc7a25bb26536db497b5f3810'))
+ prove(70,db==10582 and dP==21775 and(f[0]is bu[0])and(f[-1]is s)and OO((type(a.end_lineno)is int and a.end_lineno<f[ag+1].lineno for ag,a in enumerate(f[:-1])))and(L(dm)==888861)and(eB=='8247f74859082fe680c99a059a2be81d235a40b0c434ce831fd0bb422e46db8a'))
  bw=b'TASK-064\x00GEN6\x00R-CAP1\x00ast-schema-v1\x00'
  aP=b'TASK-064\x00GEN6\x00R-CAP1\x00semantic-projection-v1\x00'
  prove(71,sys.version_info[:3]==(3,13,14))
  cU=T((w for a in f for w in a3(a)))
  bO=T(sorted({(K(a).__name__,T(a._fields))for a in cU}))
  cI={fp:ag for ag,fp in enumerate(bO)}
- prove(72,L(cU)==187911 and L(bO)==65 and(L(cI)==65))
+ prove(72,L(cU)==192712 and L(bO)==81 and(L(cI)==65))
  def cl(k:object)->bytes:
   return J.dumps(k,ensure_ascii=True,allow_nan=False,separators=(',',':'),sort_keys=False).encode('ascii')
  def fk(k:object)->list[object]:
@@ -21459,7 +22242,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  av=cl(cm)
  ba=H.sha256(bw)
  ba.update(av)
- prove(73,L(bw)==35 and L(av)==1860 and(H.sha256(av).hexdigest()=='c061a40c4ca4569d1e49b0635656de0337f35d5fa9aee113b43aaf4dd42f5083')and(L(bw)+L(av)==1895)and(ba.hexdigest()=='fcae3b5fa6c185eb1fb9c0f1ba1abc1b65152529497b3a19f5e094a0ce149852'))
+ prove(73,L(bw)==35 and L(av)==2228 and(H.sha256(av).hexdigest()=='b192323986722d01062910c32551258a8a1c5aaad42807dbe818a0a3edcb3494')and(L(bw)+L(av)==2263)and(ba.hexdigest()=='dbd43ec56c3d40de6e110dfa4ffa5cecd626c5da0b952dae740521e7240c3e55'))
  def eT(a:ast.stmt)->str:
   if Z(a,a2)and Z(a.target,a1):
    return f'capture:{a.target.id}'
@@ -21476,100 +22259,44 @@ def _generation6_r_authority_source_gates(source: str) -> None:
   return a.end_lineno
  aW=T(((eT(a),a.lineno,fg(a),L(dH),H.sha256(dH).hexdigest())for a in f for dH in(cl(aQ(a)),)))
  prove(74,aW==aa and T(q[1:]for q in aa)==D[6])
- dd:list[object]=['TASK064-G6-R-CAP1-SEMANTIC-PROJECTION-V1',['contract',6,'ec89a1df740805cc9b43e6f2530e940c0bf9b66e8f25ed878d3207d091c4bcb8'],['python_ast','3.13.14','attributes-excluded','schema-indexed-fields'],['schema',cm],['bundle',10578,20934,L(f),aQ(list(f))]]
+ dd:list[object]=['TASK064-G6-R-CAP1-SEMANTIC-PROJECTION-V1',['contract',6,'ec89a1df740805cc9b43e6f2530e940c0bf9b66e8f25ed878d3207d091c4bcb8'],['python_ast','3.13.14','attributes-excluded','schema-indexed-fields'],['schema',cm],['bundle',10582,21775,L(f),aQ(list(f))]]
  X=cl(dd)
  aI=H.sha256(aP)
  aI.update(X)
- prove(75,L(aP)==44 and L(X)==3794008 and(H.sha256(X).hexdigest()=='e1286eb7fa007ec70afb29ccefa7a9af0f7a17097860923a99dbc4c9945d77ea')and(L(aP)+L(X)==3794052)and(aI.hexdigest()=='21eef13d57b9ee7a8182db127ca60b6e0171265131c29683a69d8f672ae2983a'))
+ prove(75,L(aP)==44 and L(X)==3907008 and(H.sha256(X).hexdigest()=='c6293d7d86984a8beebf3292fa96db8209680242c1bca94429e2d2b0f971006b')and(L(aP)+L(X)==3907052)and(aI.hexdigest()=='7619748741ff99aaeb25bdbb2018721b3c7baeb39a0605ceb6a2ab04f0af9d5a'))
  cp=T((es.removeprefix('capture:')for es,fu,fv,fr,fq in aa if es.startswith('capture:')))
- at:tuple[str,...]=(d[67],d[63],d[71],d[70],d[77],d[17],d[36],d[56],d[69],d[51],d[35],d[55],d[43])
- at=(*at,d[14],d[46],d[11],d[31],d[13],d[10],d[5],d[21],d[7],d[1],'_require_current_empty_inventory','_require_authenticated_empty_inventory','_fail_empty_inventory_uncertain','_authenticate_empty_inventory')
- cx={d[17],d[36],d[56]}
- B=set(x)
- do=T((g for dv in c.values()for g in aT(dv)))
- cB=bf(d[20])
- eb=T(a3(cB))
- ew=lambda fD:(fD.lineno,fD.col_offset)#noqa:E731
- eh=T(sorted((fD for fD in eb if Z(fD,a9)and Z(fD.func,a1)and(fD.func.id=='prove')),key=ew))
- cC=T(sorted((fD for fD in eb if Z(fD,a11)and Z(fD.value,a1)and(fD.value.id=='D')and Z(fD.slice,a4)and(type(fD.slice.value)is int)),key=ew))
- if not(T(map(L,ROWS))==(85,85,85)and L(eh)==85 and(T((fD.args[0].value for fD in eh if L(fD.args)==2 and Z(fD.args[0],a4)and(type(fD.args[0].value)is int)))==T(range(85)))and(sum((1 for fD in eb if Z(fD,a1)and Z(fD.ctx,a18)and(fD.id=='D')))==L(cC)==10)and(T((cast(ast.Constant,fD.slice).value for fD in cC))==(0,5,1,2,3,3,3,3,4,6))):
-  raise E('R CAP2-A2H static proof/RHS consumer binding differs')
- W=T((a for a in U.body if a not in f and a is not cB))
- cu=set(cp)
- bZ=set(at)
- bl=B|{'DirectoryOwner','FdOwner','PrivateRoot'}
- def de(a:ast.expr)->str:
-  if Z(a,a1):
-   return a.id
-  if Z(a,a7):
-   return a.attr
-  return''
- bz=T(((type(a.ctx).__name__,a.id)for aY in W for a in a3(aY)if Z(a,a1)and Z(a.ctx,(a13,a15))and(a.id in cu)))
- bq=T(((de(g.func),a0(g.func))for aY in W for g in aT(aY)if de(g.func)in bZ))
- aU=T((a0(g.func)for aY in W for g in aT(aY)if a0(g.func)in B))
- bv=T(((type(a.ctx).__name__,a.id)for aY in W for a in a3(aY)if Z(a,a1)and Z(a.ctx,(a13,a15))and(a.id in bl)))
- bN=((d[58],bz),(d[73],bq),(d[65],aU),(d[52],bv))
- prove(76,L(cp)==91 and L(at)==27 and(L(B)==58)and(L(bl)==61)and(bN==((d[58],()),(d[73],()),(d[65],()),(d[52],()))))
- aS=True
- aF=True
- al=True
- an=True
- aZ=True
- au=True
- aG=True
- ae=True
- F=True
- ap=True
- G=True
- aE=False
- aL:tuple[str,...]=(d[74],d[95],d[93],d[94],d[64],d[33],d[27],d[42])
- aO=False
- bH=(d[44],)
- prove(77,K(aS)is bool and aS and(K(aF)is bool)and aF and(K(al)is bool)and al and(K(an)is bool)and an and(K(aZ)is bool)and aZ and(K(au)is bool)and au and(K(aG)is bool)and aG and(K(ae)is bool)and ae and(K(F)is bool)and F and(K(ap)is bool)and ap and(K(G)is bool)and G and(K(aE)is bool)and(not aE)and(aL==(d[74],d[95],d[93],d[94],d[64],d[33],d[27],d[42]))and(K(aO)is bool)and(not aO)and(bH==(d[44],))and OO((m in i for m in('_Generation6RNamespaceInventoryCursor',d[66],d[2])))and('consume_rmdir'not in q)and OO((ll in q for ll in('_Generation6RNamespaceCleanupBudgetEpoch','_Generation6RNamespaceCleanupBudgetRecord','_issue_cleanup_budget_epoch',d[91],'_Generation6RNamespaceInventoryCursorBinding','_Generation6RNamespaceInventoryCursorRecord',d[67],d[63],d[71],d[70],d[77],d[50],d[66],'_Generation6RNamespaceInventoryScanBinding','_Generation6RNamespaceInventoryScanRecord',d[17],d[36],d[56],d[38],'_Generation6RNamespaceInventoryAdvance','_Generation6RNamespaceInventoryAdvanceBinding','_Generation6RNamespaceInventoryAdvanceRecord',d[49],'_Generation6RNamespaceInventoryItem','_Generation6RNamespaceInventoryItemBinding','_Generation6RNamespaceInventoryItemRecord',d[69],d[51],d[35],d[55],d[43]))))
- am=True
- aL=(d[64],d[33],d[27],d[42])
- prove(78,K(am)is bool and am and(K(aE)is bool)and(not aE)and(aL==(d[64],d[33],d[27],d[42]))and(K(aO)is bool)and(not aO)and(bH==(d[44],))and OO((ll in q for ll in('_Generation6RNamespaceInventoryClassificationState',d[34],d[22],d[24],d[1]))))
- a2H=True
- a2R=True
- a2P:tuple[str,...]=()
- prove(79,K(a2H)is bool and a2H and(K(aE)is bool)and(not aE)and(aL==(d[64],d[33],d[27],d[42]))and(K(a2R)is bool)and a2R and(a2P==())and(K(aO)is bool)and(not aO)and(bH==(d[44],))and OO((ll in q for ll in('_Generation6RNamespaceEmptyInventoryState','_Generation6RNamespaceEmptyInventoryBinding','_Generation6RNamespaceEmptyInventoryRecord','_authenticate_empty_inventory','_require_current_empty_inventory','_require_authenticated_empty_inventory')))and('len(advance_archive) == 1'in h7)and('not self._inventory_item_records_by_identity'in h7)and('one-item-then-end'not in q.lower()))
- S={'self._authority_records_by_serial','self._authority_records_by_identity','self._authority_records_by_owner_identity','self._directory_facts_by_serial','self._name_facts_by_key','self._hardlink_groups','self._capability_records_by_serial','self._capability_records_by_identity','self._archived_capability_records','self._mutation_permit_records_by_serial','self._mutation_permit_records_by_identity','self._archived_mutation_permit_records','self._cleanup_budget_records_by_serial','self._cleanup_budget_records_by_identity','self._inventory_cursor_bindings_by_identity','self._inventory_cursor_bindings_by_serial','self._inventory_cursor_records_by_identity','self._inventory_cursor_records_by_serial','self._archived_inventory_cursor_records','self._inventory_scan_records_by_identity','self._inventory_scan_records_by_serial','self._archived_inventory_scan_records','self._inventory_scan_proxy_quarantine','self._inventory_advance_records_by_identity','self._inventory_advance_records_by_serial','self._archived_inventory_advance_records','self._inventory_item_records_by_identity','self._inventory_item_records_by_serial','self._archived_inventory_item_records','self._inventory_raw_entry_quarantine','self._namespace_owner_tokens','self._namespace_owner_contexts','self._receipts'}
- S=S|{d[26],d[28],d[29],d[30],d[23],'self._untransferred_raw_quarantine','self._empty_inventory_records_by_identity','self._empty_inventory_records_by_serial','self._archived_empty_inventory_records'}
- bF:tuple[str,...]=T((a0(g)for g in do if Z(g.func,a7)and a0(g.func.value)in S and(g.func.attr in{'clear','discard','pop','popitem','remove','__delitem__'})))
- cq=T((a0(a)for dv in c.values()for a in a3(dv)if Z(a,a11)and Z(a.ctx,a15)and(a0(a.value)in S)))
- cn={d[111],d[106],d[113],d[114],d[108],'Path.unlink','pathlib.Path.unlink','shutil.rmtree','ctypes.CDLL','ctypes.PyDLL','syscall'}
- cw=T((a0(g.func)for g in do if a0(g.func)in cn))
- cg=T((a0(a)for dv in c.values()for a in a3(dv)if Z(a,(a5,a2,a10))and a.value is not None and(a0(a.value)in{d[0],*cn})))
- dh=T((a.value for dv in c.values()for a in a3(dv)if Z(a,a4)and type(a.value)is str))
- prove(80,not bF and(not cq)and(not cw)and(not cg)and(b(s).count(d[0])==1)and(not N(('RMDIR_'in k or'RMDIR_CONSUMED'in k or'PRESENT_RMDIR'in k for k in dh)))and('_GENERATION6_R_NAMESPACE_REAL_OS_RMDIR'not in q)and(d[113]not in q)and('os.rename('not in q)and(d[108]not in q)and('pathlib'not in q.lower())and('shutil'not in q.lower())and('syscall'not in q.lower()))
- bJ={'register_borrowed_directory',d[88],d[103],d[105],'seal',d[87],d[104],d[92],d[98],d[107]}
- t=bf(d[20])
- y=T((a for a in U.body if a not in f and a is not t))
- ar={*aj,*x,d[16]}
- bC=ar|bJ|cx
- cT={r.id for a in a3(U)if Z(a,(a5,a2,a10))and Z(a.value,a4)and Z(a.value.value,str)and(a.value.value in bC)for r in(T(a.targets)if Z(a,a5)else(a.target,))if Z(r,a1)}
- def eE(a:ast.expr)->bool:
-  return Z(a,a4)and Z(a.value,str)and(a.value in bC)or(Z(a,a1)and a.id in cT)
- cj=T((a.id for aY in y for a in a3(aY)if Z(a,a1)and Z(a.ctx,a18)and(a.id in ar)))
- ce=T(((type(a.ctx).__name__,a.id)for aY in y for a in a3(aY)if Z(a,a1)and Z(a.ctx,(a13,a15))and(a.id in ar)))
- ci=T((a0(a)for aY in y for a in a3(aY)if Z(a,a7)and a.attr in ar))
- cs=T((a0(a)for aY in y for a in a3(aY)if Z(a,a11)and eE(a.slice)))
- dj=T((a0(g)for aY in y for g in aT(aY)if(a0(g.func)in{'delattr','dict.__setitem__','getattr','operator.setitem','setattr','type.__setattr__'}or(Z(g.func,a7)and g.func.attr in{'__getitem__','__setitem__','get','pop','setdefault','update'}))and N((eE(cG)for cG in g.args))))
- dM=T((a0(g.func)for aY in y for g in aT(aY)if a0(g.func)in{'eval','exec'}))
- cR=T((g for a in U.body if a not in i.values()and a is not t for g in aT(a)))
- prove(81,not cj and(not ce)and(not ci)and(not cs)and(not dj)and(not dM)and(not N((a0(g.func)in B or(Z(g.func,a7)and g.func.attr in bJ)for g in cR))))
+ protected_methods=set(R)
+ protected_classes=set(x)
+ W=T((a for a in U.body if a not in f and a is not t))
+ capture_writes=T(((type(a.ctx).__name__,a.id)for root in W for a in a3(root)if Z(a,a1)and Z(a.ctx,(a13,a15))and a.id in set(cp)))
+ helper_calls=T((a0(g.func)for root in W for g in aT(root)if(a0(g.func).removeprefix('self.')in protected_methods)))
+ constructor_calls=T((a0(g.func)for root in W for g in aT(root)if a0(g.func)in protected_classes))
+ class_writes=T(((type(a.ctx).__name__,a.id)for root in W for a in a3(root)if Z(a,a1)and Z(a.ctx,(a13,a15))and a.id in protected_classes|{'DirectoryOwner','FdOwner','PrivateRoot'}))
+ prove(76,L(cp)==91 and L(protected_methods)==93 and L(protected_classes)==62 and not capture_writes and not helper_calls and not constructor_calls and not class_writes)
+ a2g=True;a2h=True;a2i=True;mutation_authority=False;runtime_dispatch=False;teardown_assignment=False # noqa: E702
+ prove(77,OO((K(v)is bool for v in (a2g,a2h,a2i,mutation_authority,runtime_dispatch,teardown_assignment)))and a2g and a2h and a2i and not mutation_authority and not runtime_dispatch and not teardown_assignment)
+ journal_calls=T((a0(g.func)for m in R for g in aT(c[m])))
+ prove(78,journal_calls.count('self._charge_cleanup_budget')==7 and journal_calls.count('self.authorize_present')==1 and journal_calls.count('self.consume_present')==0 and journal_calls.count('_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK')==1 and journal_calls.count('self._issue_a2_mutation_permit')==1)
+ permit=c['_issue_a2_mutation_permit'];phase_assignments=T((a0(a.value)for m in R for a in a3(c[m])if Z(a,(a5,a2,a10))and a.value is not None and N((a0(target)=='self._phase'for target in(T(a.targets)if Z(a,a5)else(a.target,)))))) # noqa: E702
+ prove(79,L(permit.body)==1 and Z(permit.body[0],a16)and not N((value=='_Generation6RNamespacePhase.TEARDOWN_ACTIVE'for value in phase_assignments)))
+ a2i_destructive_stores={'self._authority_records_by_serial','self._authority_records_by_identity','self._authority_records_by_owner_identity','self._directory_facts_by_serial','self._name_facts_by_key','self._hardlink_groups','self._capability_records_by_serial','self._capability_records_by_identity','self._archived_capability_records','self._mutation_permit_records_by_serial','self._mutation_permit_records_by_identity','self._archived_mutation_permit_records','self._cleanup_budget_records_by_serial','self._cleanup_budget_records_by_identity','self._inventory_cursor_bindings_by_identity','self._inventory_cursor_bindings_by_serial','self._inventory_cursor_records_by_identity','self._inventory_cursor_records_by_serial','self._archived_inventory_cursor_records','self._inventory_scan_records_by_identity','self._inventory_scan_records_by_serial','self._archived_inventory_scan_records','self._inventory_advance_records_by_identity','self._inventory_advance_records_by_serial','self._archived_inventory_advance_records','self._inventory_item_records_by_identity','self._inventory_item_records_by_serial','self._archived_inventory_item_records','self._inventory_classification_records_by_identity','self._inventory_classification_records_by_serial','self._archived_inventory_classification_records','self._regular_unlink_flow_records_by_identity','self._regular_unlink_flow_records_by_serial','self._archived_regular_unlink_flow_records','self._empty_inventory_records_by_identity','self._empty_inventory_records_by_serial','self._archived_empty_inventory_records','self._receipts'}
+ destructive_store_calls=T((a0(g)for m in R for g in aT(c[m])if Z(g.func,a7)and a0(g.func.value)in a2i_destructive_stores and g.func.attr in{'clear','discard','pop','popitem','remove','__delitem__'}))
+ prohibited={'os.rmdir','os.remove','os.rename','os.replace','pathlib.Path.unlink','shutil.rmtree','syscall'}
+ prove(80,not destructive_store_calls and not N((name in prohibited for name in journal_calls))and journal_calls.count('_GENERATION6_R_NAMESPACE_REAL_OS_UNLINK')==1 and not N(('RMDIR_CONSUMED'in value for value in(a.value for m in R for a in a3(c[m])if Z(a,a4)and type(a.value)is str))))
+ outside_calls=T((a0(g.func)for root in W for g in aT(root)))
+ prove(81,not N((name in protected_classes or name.removeprefix('self.')in protected_methods for name in outside_calls))and not N((name in{'eval','exec'}for name in outside_calls)))
  prove(82,K(t.end_lineno)is int)
  et=t.lineno
  eJ=cast(int,t.end_lineno)
- bg='f6401a053f8c69cda3afecdf0a956dac73a92d1d75c6dd70bdba7e2b452ba7f3'
+ bg='2e14c8ce4f204320db4e974e2257939ad5c09a61aca50275ad6a3e9d6234e159'
  aq='\n'.join(source.splitlines()[et-1:eJ])+'\n'
  prove(83,aq.count(bg)==1)
  aq=aq.replace(bg,'0'*64)
- eO=b'TASK-064\x00GEN6\x00R-CAP3-A2H-R14\x00gate-v1\x00'
+ eO=b'TASK-064\x00GEN6\x00R-CAP3-A2I-R16\x00gate-v1\x00'
  dR=eO+aq.encode('utf-8')
  eN=H.sha256(dR).hexdigest()
  dK=U.body.index(t)
- prove(84,et==20938 and eJ==21572 and(U.body[dK+1]is bf(d[79]))and(L(dR)==67237)and(eN==bg))
+ prove(84,et==21779 and eJ==22299 and(U.body[dK+1]is bf(d[79]))and(L(dR)==62050)and(eN==bg))
 # fmt: on
 
 
