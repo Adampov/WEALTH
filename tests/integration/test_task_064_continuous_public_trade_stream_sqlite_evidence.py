@@ -104,6 +104,7 @@ del _bind_task064_harness_module
 
 
 RECORDED_AT = datetime(2026, 7, 29, 0, 0, tzinfo=UTC)
+_TASK064_REPORT_CACHE_SCENARIO_ENVIRONMENT = "WEALTH_TASK064_REPORT_CACHE_SCENARIO"
 _FIXTURE_REQUEST_TYPE = pytest.FixtureRequest
 _TEMP_PATH_FACTORY_TYPE = pytest.TempPathFactory
 _TEMP_PATH_MKTEMP = pytest.TempPathFactory.mktemp
@@ -111,6 +112,40 @@ type _Task064FixtureCallable = Callable[
     [pytest.FixtureRequest, Path, pytest.TempPathFactory],
     Iterator[harness._PytestRootCapability],
 ]
+
+
+def _build_task064_report_cache_marker_writer() -> Callable[[str], tuple[bytes, int]]:
+    raw_write = os.write
+    descriptor = 1
+    marker_prefix = "TASK064_REPORT_CACHE_REENTRANT_OK:"
+    accepted_scenarios = frozenset({"reentrant-validating", "reentrant-publishing"})
+
+    def write_marker(scenario: str) -> tuple[bytes, int]:
+        if type(scenario) is not str or scenario not in accepted_scenarios:
+            raise AssertionError("invalid TASK064 report-cache marker scenario")
+        marker = f"{marker_prefix}{scenario}\n".encode("ascii")
+        if not 1 <= len(marker) <= 96:
+            raise AssertionError("invalid TASK064 report-cache marker length")
+        pending = memoryview(marker)
+        total_written = 0
+        while pending:
+            try:
+                written = raw_write(descriptor, pending)
+            except InterruptedError:
+                continue
+            if type(written) is not int or not 1 <= written <= len(pending):
+                raise AssertionError("invalid TASK064 report-cache marker progress")
+            total_written += written
+            pending = pending[written:]
+        if total_written != len(marker):
+            raise AssertionError("incomplete TASK064 report-cache marker")
+        return marker, total_written
+
+    return write_marker
+
+
+_write_task064_report_cache_marker = _build_task064_report_cache_marker_writer()
+del _build_task064_report_cache_marker_writer
 
 
 def _fresh_subprocess_pycache_environment(
@@ -134,6 +169,7 @@ def _fresh_subprocess_pycache_environment(
         raise AssertionError("TASK064 subprocess pycache prefix already exists")
     environment = os.environ.copy()
     environment.pop(harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT, None)
+    environment.pop(_TASK064_REPORT_CACHE_SCENARIO_ENVIRONMENT, None)
     for reserved_name in harness._TASK064_LEGACY_CHILD_MODE_ENVIRONMENTS:
         environment.pop(reserved_name, None)
     environment["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
@@ -184,6 +220,7 @@ def _run_task064_pytest_child(
     mode: str,
     pycache_label: str,
     timeout_seconds: int,
+    extra_environment: dict[str, str] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], float]:
     environment, pycache_prefix = _fresh_subprocess_pycache_environment(
         pytest_root,
@@ -199,6 +236,10 @@ def _run_task064_pytest_child(
         mode,
     )
     environment[harness._TASK064_CHILD_PROVENANCE_ENVIRONMENT] = provenance.envelope
+    if extra_environment is not None:
+        if set(extra_environment) != {_TASK064_REPORT_CACHE_SCENARIO_ENVIRONMENT}:
+            raise AssertionError("invalid TASK064 report-cache child environment")
+        environment.update(extra_environment)
     started = time.monotonic()
     try:
         completed = subprocess.run(
@@ -209,6 +250,7 @@ def _run_task064_pytest_child(
                 "-q",
                 "-p",
                 "no:cacheprovider",
+                *(("-s",) if extra_environment is not None else ()),
                 target_node_id,
             ),
             cwd=Path(__file__).resolve().parents[2],
@@ -4363,29 +4405,93 @@ def _report_bootstrap_path_evidence(
     )
 
     replaced_token = harness.bootstrap_store(tmp_path)
-    with contextlib.ExitStack() as replacement_descriptors:
-        retained_descriptor = os.open(
-            replaced_token._database_path,
-            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
-        )
-        replacement_descriptors.callback(os.close, retained_descriptor)
-        replaced_token._database_path.unlink()
+    replaced_database_path = replaced_token._database_path
+    retained_database_path = tmp_path / (
+        f".{replaced_token._generation_root.name}-retained-database"
+    )
+    assert retained_database_path.parent == tmp_path
+    assert retained_database_path.parent != replaced_token._generation_root
+    assert not os.path.lexists(retained_database_path)
+    original_database_details = replaced_database_path.lstat()
+    original_database_identity = (
+        original_database_details.st_dev,
+        original_database_details.st_ino,
+    )
+    original_database_snapshot = (
+        *original_database_identity,
+        original_database_details.st_uid,
+        stat.S_IMODE(original_database_details.st_mode),
+        original_database_details.st_nlink,
+    )
+    assert original_database_snapshot == (
+        replaced_token._device,
+        replaced_token._inode,
+        replaced_token._uid,
+        replaced_token._mode,
+        replaced_token._link_count,
+    )
+    generation_inventory = tuple(sorted(os.listdir(replaced_token._generation_root)))
+    replaced_database_path.rename(retained_database_path)
+    retained_database_details = retained_database_path.lstat()
+    assert (
+        retained_database_details.st_dev,
+        retained_database_details.st_ino,
+        retained_database_details.st_uid,
+        stat.S_IMODE(retained_database_details.st_mode),
+        retained_database_details.st_nlink,
+    ) == original_database_snapshot
+    replacement_database_identity: tuple[int, int] | None = None
+    cleanup_database_identity: tuple[int, int] | None = None
+    try:
         replacement_descriptor = os.open(
-            replaced_token._database_path,
-            os.O_CREAT
-            | os.O_EXCL
-            | os.O_RDWR
-            | getattr(os, "O_NOFOLLOW", 0)
-            | getattr(os, "O_CLOEXEC", 0),
+            replaced_database_path,
+            os.O_CREAT | os.O_EXCL | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
             0o600,
         )
-        replacement_descriptors.callback(os.close, replacement_descriptor)
-        checks.append(
-            _capture_rejection(
-                "replaced_database",
-                token=replaced_token,
-            )
+        try:
+            replacement_descriptor_details = os.fstat(replacement_descriptor)
+        finally:
+            os.close(replacement_descriptor)
+        replacement_database_details = replaced_database_path.lstat()
+        replacement_database_identity = (
+            replacement_database_details.st_dev,
+            replacement_database_details.st_ino,
         )
+        assert replacement_database_identity == (
+            replacement_descriptor_details.st_dev,
+            replacement_descriptor_details.st_ino,
+        )
+        assert replacement_database_identity != original_database_identity
+        assert tuple(sorted(os.listdir(replaced_token._generation_root))) == (generation_inventory)
+        replaced_database_rejection = _capture_rejection(
+            "replaced_database",
+            token=replaced_token,
+        )
+    finally:
+        if os.path.lexists(replaced_database_path):
+            cleanup_database_details = replaced_database_path.lstat()
+            cleanup_database_identity = (
+                cleanup_database_details.st_dev,
+                cleanup_database_details.st_ino,
+            )
+        if os.path.lexists(retained_database_path):
+            os.replace(retained_database_path, replaced_database_path)
+    restored_database_details = replaced_database_path.lstat()
+    assert cleanup_database_identity == replacement_database_identity
+    assert (
+        restored_database_details.st_dev,
+        restored_database_details.st_ino,
+        restored_database_details.st_uid,
+        stat.S_IMODE(restored_database_details.st_mode),
+        restored_database_details.st_nlink,
+    ) == original_database_snapshot
+    assert tuple(sorted(os.listdir(replaced_token._generation_root))) == (generation_inventory)
+    assert not os.path.lexists(retained_database_path)
+    assert replaced_database_rejection == (
+        "replaced_database",
+        harness.HarnessFailureCode.UNAVAILABLE,
+    )
+    checks.append(replaced_database_rejection)
 
     alias_token = harness.bootstrap_store(tmp_path)
     allowed_alias = alias_token._generation_root / "store.sqlite3-shm"
@@ -14334,18 +14440,51 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
     request: pytest.FixtureRequest,
     tmp_path: Path,
     _active_task064_pytest_root: harness._PytestRootCapability,
+    task064_report_proof_recorder: Callable[..., None],
 ) -> None:
+    proof_mode = request.config.getoption("task064_report_proof_mode", default=None)
+    if proof_mode is not None:
+        assert proof_mode in {
+            "primed-full",
+            "unprimed-success",
+            "expired-entry",
+            "ready-teardown",
+        }
+        assert request.session.testscollected == 1
+        assert request.node.nodeid == (
+            "tests/integration/"
+            "test_task_064_continuous_public_trade_stream_sqlite_evidence.py::"
+            "test_finite_typical_workload_measurements_and_sanitized_report"
+        )
     isolated_close_probe_modes = (
         "readback_verified_root_close_ambiguity",
         "staging_close_ambiguity",
         "readback_close_ambiguity",
         "reentrant_root_revocation",
     )
-    close_probe_mode, dispatch_modes = _task064_child_dispatch_plan(
-        "report_close",
-        request.node.nodeid,
-        isolated_close_probe_modes,
+    cache_probe_scenario = os.environ.pop(
+        _TASK064_REPORT_CACHE_SCENARIO_ENVIRONMENT,
+        None,
     )
+    if cache_probe_scenario is None:
+        close_probe_mode, dispatch_modes = _task064_child_dispatch_plan(
+            "report_close",
+            request.node.nodeid,
+            isolated_close_probe_modes,
+        )
+    else:
+        assert proof_mode is None
+        assert cache_probe_scenario in {"reentrant-validating", "reentrant-publishing"}
+        cache_probe_mode, cache_probe_dispatch_modes = _task064_child_dispatch_plan(
+            "exec_isolation",
+            request.node.nodeid,
+            (request.node.nodeid,),
+        )
+        assert cache_probe_mode == request.node.nodeid
+        assert cache_probe_dispatch_modes == ()
+        close_probe_mode = None
+        dispatch_modes = ()
+    run_parent_negative_guards = cache_probe_scenario is None and close_probe_mode is None
     if close_probe_mode is not None:
         assert close_probe_mode in isolated_close_probe_modes
         assert dispatch_modes == ()
@@ -14356,7 +14495,8 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
             root_capability=_active_task064_pytest_root,
         )
         return
-    assert dispatch_modes == isolated_close_probe_modes
+    if cache_probe_scenario is None:
+        assert dispatch_modes == isolated_close_probe_modes
 
     assert harness.WORKLOAD_MATRIX == (
         ("minimum", 1, 1, 1),
@@ -14372,12 +14512,14 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
             ContinuousPublicTradeStreamStoredHistoryEntryV1,
         ]
     ] = []
-    for offset in range(3):
+    report_stream_count = 1 if cache_probe_scenario is not None else 3
+    report_transition_count = 0 if cache_probe_scenario is not None else 8
+    for offset in range(report_stream_count):
         policy, creation = _creation(seed=harness.WORKLOAD_SEED + offset)
         created = harness.create_stream(token, creation, policy)
         assert created.classification is harness.StoreClassification.INSERTED
         prior: ContinuousPublicTradeStreamStoredHistoryEntryV1 = creation
-        for _ in range(8):
+        for _ in range(report_transition_count):
             transition = _retain(prior, policy)
             updated = harness.compare_and_swap_stream(
                 token,
@@ -14448,7 +14590,7 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
     def receipt_is_consumed() -> bool:
         return evidence_ledger.consumed
 
-    if close_probe_mode is None:
+    if run_parent_negative_guards:
         harness.__dict__["_ATOMICITY_OPERATION_PRODUCER_SEQUENCE"] = ("bootstrap_store",)
         harness.__dict__["_GATE_OPERATION_PRODUCER_SEQUENCES"] = {
             "atomicity_classification": ("bootstrap_store",)
@@ -14457,10 +14599,10 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
         with harness.atomicity_operation_scope(evidence_run):
             _report_atomicity_evidence(tmp_path, fresh_process)
     finally:
-        if close_probe_mode is None:
+        if run_parent_negative_guards:
             harness.__dict__.pop("_ATOMICITY_OPERATION_PRODUCER_SEQUENCE")
             harness.__dict__.pop("_GATE_OPERATION_PRODUCER_SEQUENCES")
-    if close_probe_mode is None:
+    if run_parent_negative_guards:
         atomicity_ordinal = harness.GENERATED_EVIDENCE_GATES.index("atomicity_classification")
         atomicity_operations = evidence_ledger.operation_runs["atomicity_classification"]
         historical_binding_substitution = list(atomicity_operations)
@@ -14515,7 +14657,7 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
             retained[0][0],
             tmp_path,
         )
-    if close_probe_mode is None:
+    if run_parent_negative_guards:
         bounded_operations = evidence_ledger.operation_runs["bounded_queries"]
         missing_binding = bounded_operations[1].input_binding
         assert isinstance(missing_binding, harness._QueryOperationBinding)
@@ -14593,7 +14735,7 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
         )
         for index in (2, 3)
     ) == ((2, 6, 6), (2, 6, 6))
-    if close_probe_mode is None:
+    if run_parent_negative_guards:
         shallow_queries = list(bounded_queries.queries)
         for index in (2, 3):
             name, classification, query = shallow_queries[index]
@@ -14647,7 +14789,7 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
         recorded_at=report_manifest.evidence_recorded_at_utc,
         evidence=evidence,
     )
-    if close_probe_mode is None:
+    if run_parent_negative_guards:
         harness._arm_evidence_seal_transition_fault()
         with pytest.raises(harness.HarnessFailure) as context_transition_failure:
             harness.seal_generated_evidence_run(
@@ -14698,7 +14840,694 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
         evidence_run,
         evidence=evidence,
     )
+    assert harness._ACTIVE_EVIDENCE_RUN.get() is None
     report_path = tmp_path / "task064-evidence.json"
+
+    def teardown_report_validation() -> None:
+        assert harness._teardown_task064_report_validation_at_fixture_exit(tmp_path)
+
+    def prime_with_generation6_timestamp_evidence() -> None:
+        prime_function = cast(FunctionType, harness.prime_evidence_report_validation)
+        prime_closure = prime_function.__closure__
+        assert prime_closure is not None
+        prime_cells = dict(zip(prime_function.__code__.co_freevars, prime_closure, strict=True))
+        capture_cell = prime_cells["capture_file_snapshot"]
+        real_capture = cast(
+            Callable[[harness.GeneratedEvidenceAggregate], Any],
+            capture_cell.cell_contents,
+        )
+        writer_cell = prime_cells["writer_implementation"]
+        real_writer = cast(Callable[..., Any], writer_cell.cell_contents)
+        captured_snapshots: list[Any] = []
+        captured_prepared_reports: list[Any] = []
+
+        def observe_capture(value: harness.GeneratedEvidenceAggregate) -> Any:
+            snapshot = real_capture(value)
+            captured_snapshots.append(snapshot)
+            return snapshot
+
+        def observe_writer(*args: Any, **kwargs: Any) -> Any:
+            prepared = real_writer(*args, **kwargs)
+            captured_prepared_reports.append(prepared)
+            return prepared
+
+        capture_cell.cell_contents = observe_capture
+        writer_cell.cell_contents = observe_writer
+        try:
+            harness.prime_evidence_report_validation(
+                tmp_path,
+                receipt=evidence_receipt,
+                report=complete_report,
+            )
+        finally:
+            capture_cell.cell_contents = real_capture
+            writer_cell.cell_contents = real_writer
+        assert len(captured_snapshots) == 2
+        assert len(captured_prepared_reports) == 1
+        before, after = captured_snapshots
+        prepared_report = captured_prepared_reports[0]
+        prime_nonlocals = inspect.getclosurevars(prime_function).nonlocals
+        same_bindings = cast(
+            Callable[[Any, Any], bool],
+            prime_nonlocals["same_snapshot_bindings"],
+        )
+        same_boundary = cast(
+            Callable[[Any, Any], bool],
+            prime_nonlocals["same_validation_boundary"],
+        )
+        same_exact = cast(
+            Callable[[Any, Any], bool],
+            inspect.getclosurevars(harness.write_evidence_report).nonlocals["same_file_snapshot"],
+        )
+        assert same_bindings(before, after)
+        assert same_boundary(before, after)
+        assert tuple(item.name for item in before.stores[0].files) == (
+            "store.sqlite3",
+            "store.sqlite3-wal",
+            "store.sqlite3-shm",
+        )
+        changed_shm_timestamps = 0
+        for left_store, right_store in zip(before.stores, after.stores, strict=True):
+            assert left_store.files[:2] == right_store.files[:2]
+            left_shm = left_store.files[2]
+            right_shm = right_store.files[2]
+            assert (
+                left_shm.name,
+                left_shm.present,
+                left_shm.device,
+                left_shm.inode,
+                left_shm.uid,
+                left_shm.mode,
+                left_shm.link_count,
+                left_shm.size,
+                left_shm.sha256,
+            ) == (
+                right_shm.name,
+                right_shm.present,
+                right_shm.device,
+                right_shm.inode,
+                right_shm.uid,
+                right_shm.mode,
+                right_shm.link_count,
+                right_shm.size,
+                right_shm.sha256,
+            )
+            if left_shm.present and (
+                left_shm.mtime_ns != right_shm.mtime_ns or left_shm.ctime_ns != right_shm.ctime_ns
+            ):
+                changed_shm_timestamps += 1
+        assert changed_shm_timestamps >= 1
+
+        def snapshot_with_observation(
+            snapshot: Any,
+            *,
+            store_index: int,
+            file_index: int,
+            changed_file: Any,
+        ) -> Any:
+            store = snapshot.stores[store_index]
+            changed_store = replace(
+                store,
+                files=(
+                    *store.files[:file_index],
+                    changed_file,
+                    *store.files[file_index + 1 :],
+                ),
+            )
+            return replace(
+                snapshot,
+                stores=(
+                    *snapshot.stores[:store_index],
+                    changed_store,
+                    *snapshot.stores[store_index + 1 :],
+                ),
+            )
+
+        def substituted_snapshot(
+            snapshot: Any,
+            *,
+            store_index: int,
+            file_index: int,
+            field_name: str,
+            field_value: object,
+        ) -> Any:
+            changed_file = replace(
+                snapshot.stores[store_index].files[file_index],
+                **{field_name: field_value},
+            )
+            return snapshot_with_observation(
+                snapshot,
+                store_index=store_index,
+                file_index=file_index,
+                changed_file=changed_file,
+            )
+
+        def opposite_presence(observation: Any) -> Any:
+            if observation.present:
+                return replace(
+                    observation,
+                    present=False,
+                    device=None,
+                    inode=None,
+                    uid=None,
+                    mode=None,
+                    link_count=None,
+                    size=None,
+                    mtime_ns=None,
+                    ctime_ns=None,
+                    sha256=None,
+                )
+            return replace(
+                observation,
+                present=True,
+                device=0,
+                inode=0,
+                uid=os.getuid(),
+                mode=0o600,
+                link_count=1,
+                size=1,
+                mtime_ns=0,
+                ctime_ns=0,
+                sha256="sha256:" + ("0" * 64),
+            )
+
+        for file_index in (0, 1):
+            observation = after.stores[0].files[file_index]
+            if observation.present:
+                exact_fields = (
+                    "device",
+                    "inode",
+                    "uid",
+                    "mode",
+                    "link_count",
+                    "size",
+                    "mtime_ns",
+                    "ctime_ns",
+                )
+                for field_name in exact_fields:
+                    original_value = getattr(observation, field_name)
+                    assert type(original_value) is int
+                    hostile = substituted_snapshot(
+                        after,
+                        store_index=0,
+                        file_index=file_index,
+                        field_name=field_name,
+                        field_value=original_value + 1,
+                    )
+                    assert same_bindings(after, hostile)
+                    assert not same_boundary(after, hostile)
+                hostile_digest = substituted_snapshot(
+                    after,
+                    store_index=0,
+                    file_index=file_index,
+                    field_name="sha256",
+                    field_value="sha256:" + ("0" * 64),
+                )
+                assert not same_boundary(after, hostile_digest)
+            hostile_presence = snapshot_with_observation(
+                after,
+                store_index=0,
+                file_index=file_index,
+                changed_file=opposite_presence(observation),
+            )
+            assert not same_boundary(after, hostile_presence)
+
+        shm = after.stores[0].files[2]
+        assert shm.present
+        for field_name in (
+            "device",
+            "inode",
+            "uid",
+            "mode",
+            "link_count",
+            "size",
+        ):
+            original_value = getattr(shm, field_name)
+            assert type(original_value) is int
+            hostile = substituted_snapshot(
+                after,
+                store_index=0,
+                file_index=2,
+                field_name=field_name,
+                field_value=original_value + 1,
+            )
+            assert same_bindings(after, hostile)
+            assert not same_boundary(after, hostile)
+        hostile_shm_presence = snapshot_with_observation(
+            after,
+            store_index=0,
+            file_index=2,
+            changed_file=opposite_presence(shm),
+        )
+        hostile_shm_digest = substituted_snapshot(
+            after,
+            store_index=0,
+            file_index=2,
+            field_name="sha256",
+            field_value="sha256:" + ("0" * 64),
+        )
+        assert not same_boundary(after, hostile_shm_presence)
+        assert not same_boundary(after, hostile_shm_digest)
+        assert type(shm.mtime_ns) is int and type(shm.ctime_ns) is int
+        volatile_shm = substituted_snapshot(
+            after,
+            store_index=0,
+            file_index=2,
+            field_name="mtime_ns",
+            field_value=shm.mtime_ns + 1,
+        )
+        assert same_boundary(after, volatile_shm)
+        assert not same_exact(after, volatile_shm)
+
+        cached_entry = inspect.getclosurevars(prime_function).nonlocals["cached_entry"]
+        assert cached_entry is not None
+        assert same_exact(cached_entry.epoch.snapshot, after)
+        epoch_raw = cached_entry.epoch.raw
+        assert type(epoch_raw) is bytes and not epoch_raw.endswith(b"\n")
+        epoch_document = json.loads(epoch_raw.decode("ascii"))
+        assert tuple(epoch_document) == ("domain", "entries", "roles")
+        assert epoch_document["domain"] == "TASK064-REPORT-LIVE-EPOCH-V2"
+        assert epoch_document["roles"] == [
+            [name, ordinal]
+            for name, ordinal in zip(
+                (
+                    "bootstrap",
+                    "backup_source",
+                    "backup",
+                    "restore",
+                    "concurrent_source",
+                    "concurrent_backup",
+                    "generation_source",
+                    "generation_destination",
+                ),
+                (0, 1, 0, 2, 1, 0, 0, 3),
+                strict=True,
+            )
+        ]
+        assert len(epoch_document["entries"]) == 4
+
+        positive_cache_state = harness._observe_task064_report_validation_for_test()
+        assert positive_cache_state[0] == "READY"
+        assert positive_cache_state[1]
+        positive_cache_cells = {
+            name: prime_cells[name].cell_contents
+            for name in (
+                "cached_entry",
+                "cached_owner",
+                "active_attempt",
+                "active_registration",
+            )
+        }
+        assert positive_cache_cells["cached_entry"] is cached_entry
+        assert harness._teardown_task064_report_validation_at_fixture_exit(tmp_path)
+        assert harness._observe_task064_report_validation_for_test() == (
+            "EMPTY",
+            False,
+            None,
+            None,
+        )
+
+        def assert_prime_rejects_second_capture(
+            mutate_second_snapshot: Callable[[Any], Any],
+        ) -> None:
+            capture_calls = 0
+            replayed_writer_calls = 0
+
+            def substituted_capture(value: harness.GeneratedEvidenceAggregate) -> Any:
+                nonlocal capture_calls
+                snapshot = real_capture(value)
+                capture_calls += 1
+                if capture_calls == 2:
+                    return mutate_second_snapshot(snapshot)
+                return snapshot
+
+            def replay_validated_preparation(*_args: Any, **_kwargs: Any) -> Any:
+                nonlocal replayed_writer_calls
+                replayed_writer_calls += 1
+                return prepared_report
+
+            capture_cell.cell_contents = substituted_capture
+            writer_cell.cell_contents = replay_validated_preparation
+            try:
+                with pytest.raises(harness.HarnessFailure) as rejected_prime:
+                    harness.prime_evidence_report_validation(
+                        tmp_path,
+                        receipt=evidence_receipt,
+                        report=complete_report,
+                    )
+            finally:
+                capture_cell.cell_contents = real_capture
+                writer_cell.cell_contents = real_writer
+            assert capture_calls == 2
+            assert replayed_writer_calls == 1
+            assert rejected_prime.value.code is harness.HarnessFailureCode.UNAVAILABLE
+            assert harness._observe_task064_report_validation_for_test() == (
+                "EMPTY",
+                False,
+                None,
+                None,
+            )
+            assert evidence_ledger.receipt is evidence_receipt
+            assert not receipt_is_consumed()
+            assert not report_path.exists()
+            assert not tuple(tmp_path.glob(".task064-evidence-*.tmp"))
+
+        def incremented_observation_field(
+            snapshot: Any,
+            *,
+            file_index: int,
+            field_name: str,
+        ) -> Any:
+            original_value = getattr(snapshot.stores[0].files[file_index], field_name)
+            assert type(original_value) is int
+            return substituted_snapshot(
+                snapshot,
+                store_index=0,
+                file_index=file_index,
+                field_name=field_name,
+                field_value=original_value + 1,
+            )
+
+        def changed_observation_digest(snapshot: Any, *, file_index: int) -> Any:
+            original_digest = snapshot.stores[0].files[file_index].sha256
+            assert type(original_digest) is str
+            replacement_digit = "1" if original_digest[-1] != "1" else "0"
+            return substituted_snapshot(
+                snapshot,
+                store_index=0,
+                file_index=file_index,
+                field_name="sha256",
+                field_value=f"{original_digest[:-1]}{replacement_digit}",
+            )
+
+        def changed_observation_presence(snapshot: Any, *, file_index: int) -> Any:
+            observation = snapshot.stores[0].files[file_index]
+            return snapshot_with_observation(
+                snapshot,
+                store_index=0,
+                file_index=file_index,
+                changed_file=opposite_presence(observation),
+            )
+
+        for file_index in (0, 1):
+            observation = after.stores[0].files[file_index]
+            if observation.present:
+                for field_name in (
+                    "device",
+                    "inode",
+                    "uid",
+                    "mode",
+                    "link_count",
+                    "size",
+                    "mtime_ns",
+                    "ctime_ns",
+                ):
+
+                    def mutate_exact_field(
+                        snapshot: Any,
+                        _file_index: int = file_index,
+                        _field_name: str = field_name,
+                    ) -> Any:
+                        return incremented_observation_field(
+                            snapshot,
+                            file_index=_file_index,
+                            field_name=_field_name,
+                        )
+
+                    assert_prime_rejects_second_capture(mutate_exact_field)
+
+                def mutate_digest(
+                    snapshot: Any,
+                    _file_index: int = file_index,
+                ) -> Any:
+                    return changed_observation_digest(snapshot, file_index=_file_index)
+
+                assert_prime_rejects_second_capture(mutate_digest)
+
+            def mutate_presence(
+                snapshot: Any,
+                _file_index: int = file_index,
+            ) -> Any:
+                return changed_observation_presence(snapshot, file_index=_file_index)
+
+            assert_prime_rejects_second_capture(mutate_presence)
+
+        for field_name in (
+            "device",
+            "inode",
+            "uid",
+            "mode",
+            "link_count",
+            "size",
+        ):
+
+            def mutate_shm_protected_field(
+                snapshot: Any,
+                _field_name: str = field_name,
+            ) -> Any:
+                return incremented_observation_field(
+                    snapshot,
+                    file_index=2,
+                    field_name=_field_name,
+                )
+
+            assert_prime_rejects_second_capture(mutate_shm_protected_field)
+
+        assert_prime_rejects_second_capture(
+            lambda snapshot: changed_observation_digest(snapshot, file_index=2)
+        )
+        assert_prime_rejects_second_capture(
+            lambda snapshot: changed_observation_presence(snapshot, file_index=2)
+        )
+
+        real_fstat = os.fstat
+        matching_shm_fstat_calls = 0
+
+        class _TimestampUnstableStat:
+            def __init__(self, value: os.stat_result) -> None:
+                self._value = value
+
+            def __getattr__(self, name: str) -> object:
+                if name == "st_mtime_ns":
+                    return self._value.st_mtime_ns + 1
+                return getattr(self._value, name)
+
+        def unstable_shm_fstat(descriptor: int) -> os.stat_result:
+            nonlocal matching_shm_fstat_calls
+            observed = real_fstat(descriptor)
+            try:
+                descriptor_target = os.readlink(f"/proc/self/fd/{descriptor}")
+            except OSError:
+                return observed
+            if descriptor_target.endswith("store.sqlite3-shm"):
+                matching_shm_fstat_calls += 1
+            if matching_shm_fstat_calls == 2:
+                return cast(os.stat_result, _TimestampUnstableStat(observed))
+            return observed
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(os, "fstat", unstable_shm_fstat)
+            with pytest.raises(harness.HarnessFailure) as unstable_prime:
+                harness.prime_evidence_report_validation(
+                    tmp_path,
+                    receipt=evidence_receipt,
+                    report=complete_report,
+                )
+        assert matching_shm_fstat_calls == 2
+        assert unstable_prime.value.code is harness.HarnessFailureCode.UNAVAILABLE
+        assert harness._observe_task064_report_validation_for_test() == (
+            "EMPTY",
+            False,
+            None,
+            None,
+        )
+        assert evidence_ledger.receipt is evidence_receipt
+        assert not receipt_is_consumed()
+        assert not report_path.exists()
+        assert not tuple(tmp_path.glob(".task064-evidence-*.tmp"))
+
+        for name, value in positive_cache_cells.items():
+            prime_cells[name].cell_contents = value
+        prime_cells["cache_state"].cell_contents = "READY"
+        assert harness._observe_task064_report_validation_for_test() == positive_cache_state
+        assert evidence_ledger.receipt is evidence_receipt
+        assert not receipt_is_consumed()
+
+    if cache_probe_scenario is not None:
+        if cache_probe_scenario == "reentrant-publishing":
+            harness.prime_evidence_report_validation(
+                tmp_path,
+                receipt=evidence_receipt,
+                report=complete_report,
+            )
+            assert harness._observe_task064_report_validation_for_test()[0] == "READY"
+        real_listdir = os.listdir
+        reentrant_triggered = False
+        reentrant_codes: list[harness.HarnessFailureCode] = []
+
+        def reenter_report_cache(path: Any) -> list[str]:
+            nonlocal reentrant_triggered
+            if not reentrant_triggered:
+                reentrant_triggered = True
+                try:
+                    if cache_probe_scenario == "reentrant-validating":
+                        harness.prime_evidence_report_validation(
+                            tmp_path,
+                            receipt=evidence_receipt,
+                            report=complete_report,
+                        )
+                    else:
+                        harness.write_evidence_report(
+                            tmp_path,
+                            receipt=evidence_receipt,
+                            report=complete_report,
+                        )
+                except harness.HarnessFailure as error:
+                    reentrant_codes.append(error.code)
+            return real_listdir(path)
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(os, "listdir", reenter_report_cache)
+            with pytest.raises(harness.HarnessFailure) as outer_reentrant:
+                if cache_probe_scenario == "reentrant-validating":
+                    harness.prime_evidence_report_validation(
+                        tmp_path,
+                        receipt=evidence_receipt,
+                        report=complete_report,
+                    )
+                else:
+                    harness.write_evidence_report(
+                        tmp_path,
+                        receipt=evidence_receipt,
+                        report=complete_report,
+                    )
+        assert reentrant_triggered
+        assert reentrant_codes == [harness.HarnessFailureCode.UNAVAILABLE]
+        assert outer_reentrant.value.code is harness.HarnessFailureCode.UNAVAILABLE
+        assert harness._observe_task064_report_validation_for_test() == (
+            "EMPTY",
+            False,
+            None,
+            None,
+        )
+        assert id(evidence_ledger.receipt) == id(evidence_receipt)
+        assert not receipt_is_consumed()
+        assert not report_path.exists()
+        assert not tuple(tmp_path.glob(".task064-evidence-*.tmp"))
+        marker, marker_bytes_written = _write_task064_report_cache_marker(cache_probe_scenario)
+        assert marker == f"TASK064_REPORT_CACHE_REENTRANT_OK:{cache_probe_scenario}\n".encode(
+            "ascii"
+        )
+        assert marker_bytes_written == len(marker)
+        return
+    if proof_mode is None:
+        prime_with_generation6_timestamp_evidence()
+        clock_regression_state = harness._observe_task064_report_validation_for_test()
+        assert clock_regression_state[0] == "READY"
+        assert clock_regression_state[1]
+        assert type(clock_regression_state[2]) is int
+        assert type(clock_regression_state[3]) is int
+        assert clock_regression_state[2] > 0
+        cache_clock = cast(
+            Callable[[int | None], int],
+            inspect.getclosurevars(
+                harness._force_task064_report_validation_expiry_for_test
+            ).nonlocals["clock_value"],
+        )
+        clock_closure = cache_clock.__closure__
+        assert clock_closure is not None
+        clock_cells = dict(zip(cache_clock.__code__.co_freevars, clock_closure, strict=True))
+        captured_monotonic_cell = clock_cells["real_monotonic_ns"]
+        captured_monotonic = captured_monotonic_cell.cell_contents
+        assert callable(captured_monotonic)
+        regressed_value = clock_regression_state[2] - 1
+        captured_monotonic_cell.cell_contents = lambda: regressed_value
+        try:
+            with pytest.raises(harness.HarnessFailure) as regressed_writer:
+                harness.write_evidence_report(
+                    tmp_path,
+                    receipt=evidence_receipt,
+                    report=complete_report,
+                )
+        finally:
+            captured_monotonic_cell.cell_contents = captured_monotonic
+        assert regressed_writer.value.code is harness.HarnessFailureCode.UNAVAILABLE
+        assert harness._observe_task064_report_validation_for_test() == (
+            "EMPTY",
+            False,
+            None,
+            None,
+        )
+        assert id(evidence_ledger.receipt) == id(evidence_receipt)
+        assert not receipt_is_consumed()
+        assert not report_path.exists()
+        assert not tuple(tmp_path.glob(".task064-evidence-*.tmp"))
+    if proof_mode == "unprimed-success":
+        published_report = harness.write_evidence_report(
+            tmp_path,
+            receipt=evidence_receipt,
+            report=complete_report,
+        )
+        published_bytes = published_report.read_bytes()
+        assert harness._observe_task064_report_validation_for_test() == (
+            "EMPTY",
+            False,
+            None,
+            None,
+        )
+        task064_report_proof_recorder(
+            publication_status="PUBLISHED",
+            output_bytes=len(published_bytes),
+            output_sha256=hashlib.sha256(published_bytes).hexdigest(),
+            cache_state_at_assertion="EMPTY",
+            receipt_consumed=evidence_ledger.consumed,
+            final_file_present=report_path.is_file(),
+            stage_residue_count=len(tuple(tmp_path.glob(".task064-evidence-*.tmp"))),
+            teardown=teardown_report_validation,
+            observe=harness._observe_task064_report_validation_for_test,
+        )
+        return
+    if proof_mode in {"expired-entry", "ready-teardown"}:
+        harness.prime_evidence_report_validation(
+            tmp_path,
+            receipt=evidence_receipt,
+            report=complete_report,
+        )
+        state_after_prime = harness._observe_task064_report_validation_for_test()
+        assert state_after_prime[0] == "READY"
+        assert state_after_prime[1]
+        assert type(state_after_prime[2]) is int
+        assert type(state_after_prime[3]) is int
+        if proof_mode == "expired-entry":
+            harness._force_task064_report_validation_expiry_for_test()
+            with pytest.raises(harness.HarnessFailure) as expired_report:
+                harness.write_evidence_report(
+                    tmp_path,
+                    receipt=evidence_receipt,
+                    report=complete_report,
+                )
+            assert expired_report.value.code is harness.HarnessFailureCode.CORRUPT
+            asserted_cache_state = "EMPTY"
+            assert harness._observe_task064_report_validation_for_test() == (
+                "EMPTY",
+                False,
+                None,
+                None,
+            )
+        else:
+            asserted_cache_state = "READY"
+        task064_report_proof_recorder(
+            publication_status="NONE",
+            output_bytes=None,
+            output_sha256=None,
+            cache_state_at_assertion=asserted_cache_state,
+            receipt_consumed=evidence_ledger.consumed,
+            final_file_present=report_path.is_file(),
+            stage_residue_count=len(tuple(tmp_path.glob(".task064-evidence-*.tmp"))),
+            teardown=teardown_report_validation,
+            observe=harness._observe_task064_report_validation_for_test,
+        )
+        return
     forged_receipt = replace(evidence_receipt)
     evidence_ledger.receipt = forged_receipt
     fake_validator_calls = 0
@@ -14771,8 +15600,8 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
                 "connection_profiles",
                 original_connection_profiles,
             )
-        assert evidence_ledger.receipt is evidence_receipt
-        assert not evidence_ledger.consumed
+        assert id(evidence_ledger.receipt) == id(evidence_receipt)
+        assert not receipt_is_consumed()
         assert not report_path.exists()
         assert not tuple(tmp_path.glob(".task064-evidence-*.tmp"))
     assert hostile_report_value.items_calls == 0
@@ -15512,6 +16341,635 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
                 readback_eof_observed = True
         return payload
 
+    if proof_mode == "primed-full":
+        prime_with_generation6_timestamp_evidence()
+        primed_state = harness._observe_task064_report_validation_for_test()
+        assert primed_state[0] == "READY"
+        assert primed_state[1]
+        assert type(primed_state[2]) is int
+        assert type(primed_state[3]) is int
+        assert primed_state[2] + 120_000_000_000 == primed_state[3]
+        assert evidence_ledger.receipt is evidence_receipt
+        assert not evidence_ledger.consumed
+        assert not report_path.exists()
+        assert_no_report_staging_file()
+
+        generation6_writer = cast(FunctionType, harness.write_evidence_report)
+        generation6_writer_closure = generation6_writer.__closure__
+        assert generation6_writer_closure is not None
+        generation6_cells = dict(
+            zip(
+                generation6_writer.__code__.co_freevars,
+                generation6_writer_closure,
+                strict=True,
+            )
+        )
+        generation6_capture_cell = generation6_cells["capture_file_snapshot"]
+        generation6_real_capture = cast(
+            Callable[[harness.GeneratedEvidenceAggregate], Any],
+            generation6_capture_cell.cell_contents,
+        )
+        generation6_entry = generation6_cells["cached_entry"].cell_contents
+        generation6_owner = generation6_cells["cached_owner"].cell_contents
+        generation6_registration = generation6_cells["active_registration"].cell_contents
+        assert generation6_entry is not None
+        assert generation6_owner is not None
+        assert generation6_registration is not None
+
+        for primed_link_failure_mode in ("before-link", "after-link"):
+            primed_link_calls = 0
+
+            def fail_primed_link(
+                *args: Any,
+                _mode: str = primed_link_failure_mode,
+                **kwargs: Any,
+            ) -> None:
+                nonlocal primed_link_calls
+                primed_link_calls += 1
+                if _mode == "after-link":
+                    real_link(*args, **kwargs)
+                raise OSError(errno.EIO, f"injected primed {_mode} failure")
+
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(os, "link", fail_primed_link)
+                with pytest.raises(harness.HarnessFailure) as primed_link_failure:
+                    harness.write_evidence_report(
+                        tmp_path,
+                        receipt=evidence_receipt,
+                        report=complete_report,
+                    )
+            assert primed_link_calls == 1
+            assert primed_link_failure.value.code is harness.HarnessFailureCode.UNAVAILABLE
+            assert harness._observe_task064_report_validation_for_test() == primed_state
+            assert generation6_cells["cached_entry"].cell_contents is generation6_entry
+            assert generation6_cells["cached_owner"].cell_contents is generation6_owner
+            assert evidence_ledger.receipt is evidence_receipt
+            assert not receipt_is_consumed()
+            assert not report_path.exists()
+            assert_no_report_staging_file()
+
+        def drift_retained_shm_timestamp(snapshot: Any) -> Any:
+            store = snapshot.stores[0]
+            shm = store.files[2]
+            assert shm.present and type(shm.mtime_ns) is int
+            changed_store = replace(
+                store,
+                files=(
+                    store.files[0],
+                    store.files[1],
+                    replace(shm, mtime_ns=shm.mtime_ns + 1),
+                ),
+            )
+            return replace(
+                snapshot,
+                stores=(changed_store, *snapshot.stores[1:]),
+            )
+
+        def install_generation6_entry() -> None:
+            generation6_cells["cached_entry"].cell_contents = generation6_entry
+            generation6_cells["cached_owner"].cell_contents = generation6_owner
+            generation6_cells["active_registration"].cell_contents = generation6_registration
+            generation6_cells["active_attempt"].cell_contents = None
+            generation6_cells["cache_state"].cell_contents = "READY"
+
+        real_stat = os.stat
+        intervening_foreign_snapshot_observed = False
+        ordering_capture_calls = 0
+
+        def arm_source_drift_during_foreign_snapshot(
+            *args: Any,
+            **kwargs: Any,
+        ) -> os.stat_result:
+            nonlocal intervening_foreign_snapshot_observed
+            if args and args[0] == "task064-evidence.json" and kwargs.get("dir_fd") is not None:
+                intervening_foreign_snapshot_observed = True
+            return real_stat(*args, **kwargs)
+
+        def capture_with_intervening_source_drift(
+            value: harness.GeneratedEvidenceAggregate,
+        ) -> Any:
+            nonlocal ordering_capture_calls
+            ordering_capture_calls += 1
+            snapshot = generation6_real_capture(value)
+            if intervening_foreign_snapshot_observed:
+                return drift_retained_shm_timestamp(snapshot)
+            return snapshot
+
+        generation6_capture_cell.cell_contents = capture_with_intervening_source_drift
+        try:
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(os, "stat", arm_source_drift_during_foreign_snapshot)
+                with pytest.raises(harness.HarnessFailure) as ordered_source_recheck:
+                    harness.write_evidence_report(
+                        tmp_path,
+                        receipt=evidence_receipt,
+                        report=complete_report,
+                    )
+        finally:
+            generation6_capture_cell.cell_contents = generation6_real_capture
+        assert intervening_foreign_snapshot_observed
+        assert ordering_capture_calls >= 2
+        assert ordered_source_recheck.value.code is harness.HarnessFailureCode.UNAVAILABLE
+        assert harness._observe_task064_report_validation_for_test() == (
+            "EMPTY",
+            False,
+            None,
+            None,
+        )
+        assert evidence_ledger.receipt is evidence_receipt
+        assert not receipt_is_consumed()
+        assert not report_path.exists()
+        assert_no_report_staging_file()
+        install_generation6_entry()
+        assert harness._observe_task064_report_validation_for_test() == primed_state
+
+        for drift_capture_ordinal in (1, 2):
+            capture_calls = 0
+
+            def capture_with_retained_timestamp_drift(
+                value: harness.GeneratedEvidenceAggregate,
+                *,
+                _target_ordinal: int = drift_capture_ordinal,
+            ) -> Any:
+                nonlocal capture_calls
+                capture_calls += 1
+                snapshot = generation6_real_capture(value)
+                if capture_calls == _target_ordinal:
+                    return drift_retained_shm_timestamp(snapshot)
+                return snapshot
+
+            generation6_capture_cell.cell_contents = capture_with_retained_timestamp_drift
+            try:
+                with pytest.raises(harness.HarnessFailure) as retained_timestamp_drift:
+                    harness.write_evidence_report(
+                        tmp_path,
+                        receipt=evidence_receipt,
+                        report=complete_report,
+                    )
+            finally:
+                generation6_capture_cell.cell_contents = generation6_real_capture
+            assert retained_timestamp_drift.value.code is harness.HarnessFailureCode.UNAVAILABLE
+            assert capture_calls >= drift_capture_ordinal
+            assert harness._observe_task064_report_validation_for_test() == (
+                "EMPTY",
+                False,
+                None,
+                None,
+            )
+            assert not receipt_is_consumed()
+            assert not report_path.exists()
+            assert_no_report_staging_file()
+            install_generation6_entry()
+            assert harness._observe_task064_report_validation_for_test() == primed_state
+
+        with pytest.raises(harness.HarnessFailure) as duplicate_prime:
+            harness.prime_evidence_report_validation(
+                tmp_path,
+                receipt=evidence_receipt,
+                report=complete_report,
+            )
+        assert duplicate_prime.value.code is harness.HarnessFailureCode.CORRUPT
+        assert harness._observe_task064_report_validation_for_test() == primed_state
+
+        copied_root = tmp_path.parent / tmp_path.name
+        copied_receipt = replace(evidence_receipt)
+        copied_report = replace(complete_report)
+        assert copied_root == tmp_path and copied_root is not tmp_path
+        for unrelated_root, unrelated_receipt, unrelated_report in (
+            (copied_root, evidence_receipt, complete_report),
+            (tmp_path, copied_receipt, complete_report),
+            (tmp_path, evidence_receipt, copied_report),
+        ):
+            with pytest.raises(harness.HarnessFailure) as unrelated_prime:
+                harness.prime_evidence_report_validation(
+                    unrelated_root,
+                    receipt=unrelated_receipt,
+                    report=unrelated_report,
+                )
+            assert unrelated_prime.value.code is harness.HarnessFailureCode.CORRUPT
+            with pytest.raises(harness.HarnessFailure) as unrelated_writer:
+                harness.write_evidence_report(
+                    unrelated_root,
+                    receipt=unrelated_receipt,
+                    report=unrelated_report,
+                )
+            assert unrelated_writer.value.code is harness.HarnessFailureCode.CORRUPT
+            assert harness._observe_task064_report_validation_for_test() == primed_state
+
+        context_writer_error: harness.HarnessFailure | None = None
+
+        def write_from_empty_context() -> None:
+            nonlocal context_writer_error
+            try:
+                harness.write_evidence_report(
+                    tmp_path,
+                    receipt=evidence_receipt,
+                    report=complete_report,
+                )
+            except harness.HarnessFailure as error:
+                context_writer_error = error
+
+        contextvars.Context().run(write_from_empty_context)
+        assert context_writer_error is not None
+        assert context_writer_error.code is harness.HarnessFailureCode.CORRUPT
+        assert harness._observe_task064_report_validation_for_test() == primed_state
+
+        thread_results: list[harness.HarnessFailureCode | BaseException] = []
+
+        def write_from_foreign_thread() -> None:
+            try:
+                harness.write_evidence_report(
+                    tmp_path,
+                    receipt=evidence_receipt,
+                    report=complete_report,
+                )
+            except harness.HarnessFailure as error:
+                thread_results.append(error.code)
+            except BaseException as error:
+                thread_results.append(error)
+
+        foreign_thread = threading.Thread(
+            target=write_from_foreign_thread,
+            name="task064-report-cache-foreign-thread",
+        )
+        foreign_thread.start()
+        foreign_thread.join(timeout=10)
+        assert not foreign_thread.is_alive()
+        assert thread_results == [harness.HarnessFailureCode.CORRUPT]
+        assert harness._observe_task064_report_validation_for_test() == primed_state
+
+        forked_child = os.fork()
+        if forked_child == 0:
+            try:
+                child_state = harness._observe_task064_report_validation_for_test()
+                os._exit(0 if child_state == ("EMPTY", False, None, None) else 1)
+            except BaseException:
+                os._exit(2)
+        waited_child, child_status = os.waitpid(forked_child, 0)
+        assert waited_child == forked_child
+        assert os.WIFEXITED(child_status)
+        assert os.WEXITSTATUS(child_status) == 0
+        assert harness._observe_task064_report_validation_for_test() == primed_state
+
+        writer_nonlocals = inspect.getclosurevars(harness.write_evidence_report).nonlocals
+        cached_validation_entry = writer_nonlocals["cached_entry"]
+        entry_bindings_are_live = cast(
+            Callable[[Any], bool],
+            writer_nonlocals["entry_bindings_are_live"],
+        )
+        assert cached_validation_entry is not None
+        assert cached_validation_entry.context_run is None
+        assert entry_bindings_are_live(cached_validation_entry)
+        hostile_context_token = harness._ACTIVE_EVIDENCE_RUN.set(cached_validation_entry.run)
+        try:
+            assert not entry_bindings_are_live(cached_validation_entry)
+        finally:
+            harness._ACTIVE_EVIDENCE_RUN.reset(hostile_context_token)
+        assert harness._ACTIVE_EVIDENCE_RUN.get() is None
+        assert entry_bindings_are_live(cached_validation_entry)
+        capture_file_snapshot = cast(
+            Callable[[harness.GeneratedEvidenceAggregate], Any],
+            writer_nonlocals["capture_file_snapshot"],
+        )
+        same_snapshot_bindings = cast(
+            Callable[[Any, Any], bool],
+            writer_nonlocals["same_snapshot_bindings"],
+        )
+        same_file_snapshot = cast(
+            Callable[[Any, Any], bool],
+            writer_nonlocals["same_file_snapshot"],
+        )
+        same_validation_boundary = cast(
+            Callable[[Any, Any], bool],
+            inspect.getclosurevars(harness.prime_evidence_report_validation).nonlocals[
+                "same_validation_boundary"
+            ],
+        )
+        fresh_valid_snapshot = capture_file_snapshot(evidence)
+        assert same_snapshot_bindings(
+            cached_validation_entry.epoch.snapshot,
+            fresh_valid_snapshot,
+        )
+        assert same_file_snapshot(
+            cached_validation_entry.epoch.snapshot,
+            fresh_valid_snapshot,
+        )
+        assert same_validation_boundary(
+            cached_validation_entry.epoch.snapshot,
+            fresh_valid_snapshot,
+        )
+        original_snapshot_store = fresh_valid_snapshot.stores[0]
+        inner_path_substituted_registration = replace(
+            original_snapshot_store.registration,
+            pytest_root=Path(str(original_snapshot_store.registration.pytest_root)),
+            generation_root=Path(str(original_snapshot_store.registration.generation_root)),
+            database_path=Path(str(original_snapshot_store.registration.database_path)),
+        )
+        inner_path_substituted_store = replace(
+            original_snapshot_store,
+            registration=inner_path_substituted_registration,
+        )
+        inner_path_substituted_snapshot = replace(
+            fresh_valid_snapshot,
+            stores=(inner_path_substituted_store, *fresh_valid_snapshot.stores[1:]),
+        )
+        assert inner_path_substituted_registration == original_snapshot_store.registration
+        assert (
+            inner_path_substituted_registration.pytest_registration
+            is original_snapshot_store.registration.pytest_registration
+        )
+        assert (
+            inner_path_substituted_registration.pytest_root
+            is not original_snapshot_store.pytest_root
+        )
+        assert inner_path_substituted_store == original_snapshot_store
+        assert inner_path_substituted_snapshot == fresh_valid_snapshot
+
+        plain_substituted_registration = replace(original_snapshot_store.registration)
+        plain_substituted_store = replace(
+            original_snapshot_store,
+            registration=plain_substituted_registration,
+        )
+        plain_substituted_snapshot = replace(
+            fresh_valid_snapshot,
+            stores=(plain_substituted_store, *fresh_valid_snapshot.stores[1:]),
+        )
+        assert plain_substituted_registration == original_snapshot_store.registration
+        assert plain_substituted_registration is not original_snapshot_store.registration
+        assert (
+            plain_substituted_registration.pytest_registration
+            is original_snapshot_store.registration.pytest_registration
+        )
+        assert plain_substituted_store == original_snapshot_store
+        assert plain_substituted_snapshot == fresh_valid_snapshot
+        plain_substituted_entry = replace(
+            cached_validation_entry,
+            epoch=replace(
+                cached_validation_entry.epoch,
+                snapshot=plain_substituted_snapshot,
+            ),
+        )
+        assert same_snapshot_bindings(
+            cached_validation_entry.epoch.snapshot,
+            plain_substituted_snapshot,
+        )
+        assert same_file_snapshot(
+            cached_validation_entry.epoch.snapshot,
+            plain_substituted_snapshot,
+        )
+        assert same_validation_boundary(
+            cached_validation_entry.epoch.snapshot,
+            plain_substituted_snapshot,
+        )
+        assert entry_bindings_are_live(plain_substituted_entry)
+
+        root_registration_substituted_registration = replace(
+            original_snapshot_store.registration,
+            pytest_registration=replace(
+                original_snapshot_store.registration.pytest_registration,
+            ),
+        )
+        root_registration_substituted_store = replace(
+            original_snapshot_store,
+            registration=root_registration_substituted_registration,
+        )
+        root_registration_substituted_snapshot = replace(
+            fresh_valid_snapshot,
+            stores=(
+                root_registration_substituted_store,
+                *fresh_valid_snapshot.stores[1:],
+            ),
+        )
+        assert root_registration_substituted_registration == (original_snapshot_store.registration)
+        assert (
+            root_registration_substituted_registration.pytest_registration
+            is not original_snapshot_store.registration.pytest_registration
+        )
+        assert root_registration_substituted_store == original_snapshot_store
+        assert root_registration_substituted_snapshot == fresh_valid_snapshot
+
+        identity_substituted_entries = tuple(
+            replace(
+                cached_validation_entry,
+                epoch=replace(
+                    cached_validation_entry.epoch,
+                    snapshot=hostile_snapshot,
+                ),
+            )
+            for hostile_snapshot in (
+                inner_path_substituted_snapshot,
+                root_registration_substituted_snapshot,
+            )
+        )
+        for hostile_snapshot, hostile_entry in zip(
+            (
+                inner_path_substituted_snapshot,
+                root_registration_substituted_snapshot,
+            ),
+            identity_substituted_entries,
+            strict=True,
+        ):
+            assert not same_snapshot_bindings(
+                cached_validation_entry.epoch.snapshot,
+                hostile_snapshot,
+            )
+            assert not same_file_snapshot(
+                cached_validation_entry.epoch.snapshot,
+                hostile_snapshot,
+            )
+            assert not same_validation_boundary(
+                cached_validation_entry.epoch.snapshot,
+                hostile_snapshot,
+            )
+            assert entry_bindings_are_live(hostile_entry)
+        assert tuple(ordinal for _, ordinal in cached_validation_entry.epoch.snapshot.roles) == (
+            0,
+            1,
+            0,
+            2,
+            1,
+            0,
+            0,
+            3,
+        )
+        assert len(cached_validation_entry.epoch.snapshot.stores) == 4
+        assert (
+            len({id(store.token) for store in cached_validation_entry.epoch.snapshot.stores}) == 4
+        )
+        assert (
+            cached_validation_entry.issued_ns + 120_000_000_000
+            == cached_validation_entry.expires_ns
+        )
+        source_fingerprints = cast(
+            tuple[tuple[str, str], ...],
+            cached_validation_entry.source_fingerprints,
+        )
+        assert tuple(item[0] for item in source_fingerprints) == (
+            "tests/support/continuous_public_trade_stream_sqlite_harness.py",
+            "tests/integration/test_task_064_continuous_public_trade_stream_sqlite_evidence.py",
+            "tests/unit/test_task_064_continuous_public_trade_stream_sqlite_schema.py",
+            "docs/decisions/0032-continuous-public-trade-stream-sqlite-schema-evidence-harness.md",
+        )
+        alternate_digest = "0" * 64 if source_fingerprints[0][1] != "0" * 64 else "f" * 64
+        altered_sources = (
+            (source_fingerprints[0][0], alternate_digest),
+            *source_fingerprints[1:],
+        )
+        invalid_entry_copies = (
+            replace(cached_validation_entry, source_fingerprints=altered_sources),
+            replace(cached_validation_entry, live_validation_sha256="0" * 64),
+            replace(cached_validation_entry, report_core_sha256="0" * 64),
+            replace(cached_validation_entry, raw_sha256="0" * 64),
+            replace(
+                cached_validation_entry,
+                epoch=replace(cached_validation_entry.epoch, sha256="0" * 64),
+            ),
+            replace(cached_validation_entry, receipt=copied_receipt),
+            replace(cached_validation_entry, report=copied_report),
+            replace(
+                cached_validation_entry,
+                expires_ns=cached_validation_entry.expires_ns + 1,
+            ),
+            replace(cached_validation_entry, expires_ns=cast(Any, True)),
+            replace(
+                cached_validation_entry,
+                issued_ns=cached_validation_entry.issued_ns + 1,
+                expires_ns=cached_validation_entry.expires_ns + 1,
+            ),
+            replace(
+                cached_validation_entry,
+                context_run=cached_validation_entry.run,
+            ),
+        )
+        assert all(not entry_bindings_are_live(item) for item in invalid_entry_copies)
+        public_writer = cast(FunctionType, harness.write_evidence_report)
+        public_writer_closure = public_writer.__closure__
+        assert public_writer_closure is not None
+        cache_cells = dict(
+            zip(
+                public_writer.__code__.co_freevars,
+                public_writer_closure,
+                strict=True,
+            )
+        )
+        original_cached_owner = writer_nonlocals["cached_owner"]
+        original_active_registration = writer_nonlocals["active_registration"]
+        assert original_cached_owner is not None
+        assert type(original_cached_owner) is tuple
+        assert len(original_cached_owner) == 10
+        assert original_cached_owner[9] is None
+        assert original_active_registration is not None
+
+        def install_hostile_entry(entry: Any) -> None:
+            cache_cells["cached_entry"].cell_contents = entry
+            cache_cells["cached_owner"].cell_contents = original_cached_owner
+            cache_cells["active_registration"].cell_contents = original_active_registration
+            cache_cells["active_attempt"].cell_contents = None
+            cache_cells["cache_state"].cell_contents = "READY"
+
+        for identity_substituted_entry in identity_substituted_entries:
+            install_hostile_entry(identity_substituted_entry)
+            with pytest.raises(harness.HarnessFailure) as rejected_substituted_identity:
+                harness.write_evidence_report(
+                    tmp_path,
+                    receipt=evidence_receipt,
+                    report=complete_report,
+                )
+            assert rejected_substituted_identity.value.code is harness.HarnessFailureCode.CORRUPT
+            assert harness._observe_task064_report_validation_for_test() == (
+                "EMPTY",
+                False,
+                None,
+                None,
+            )
+            assert id(evidence_ledger.receipt) == id(evidence_receipt)
+            assert not receipt_is_consumed()
+            assert not report_path.exists()
+            assert_no_report_staging_file()
+
+        hostile_entry_scenarios = (
+            (invalid_entry_copies[0], evidence_receipt, complete_report),
+            (invalid_entry_copies[1], evidence_receipt, complete_report),
+            (invalid_entry_copies[2], evidence_receipt, complete_report),
+            (invalid_entry_copies[3], evidence_receipt, complete_report),
+            (invalid_entry_copies[4], evidence_receipt, complete_report),
+            (invalid_entry_copies[5], copied_receipt, complete_report),
+            (invalid_entry_copies[6], evidence_receipt, copied_report),
+            (invalid_entry_copies[7], evidence_receipt, complete_report),
+            (invalid_entry_copies[8], evidence_receipt, complete_report),
+            (invalid_entry_copies[9], evidence_receipt, complete_report),
+            (invalid_entry_copies[10], evidence_receipt, complete_report),
+        )
+        for hostile_entry, hostile_receipt, scenario_report_value in hostile_entry_scenarios:
+            for public_operation in ("writer", "prime"):
+                install_hostile_entry(hostile_entry)
+                with pytest.raises(harness.HarnessFailure) as rejected_hostile_entry:
+                    if public_operation == "writer":
+                        harness.write_evidence_report(
+                            tmp_path,
+                            receipt=hostile_receipt,
+                            report=scenario_report_value,
+                        )
+                    else:
+                        harness.prime_evidence_report_validation(
+                            tmp_path,
+                            receipt=hostile_receipt,
+                            report=scenario_report_value,
+                        )
+                assert rejected_hostile_entry.value.code is harness.HarnessFailureCode.CORRUPT
+                assert harness._observe_task064_report_validation_for_test() == (
+                    "EMPTY",
+                    False,
+                    None,
+                    None,
+                )
+                assert id(evidence_ledger.receipt) == id(evidence_receipt)
+                assert not receipt_is_consumed()
+                assert not report_path.exists()
+                assert_no_report_staging_file()
+        install_hostile_entry(cached_validation_entry)
+        assert harness._observe_task064_report_validation_for_test() == primed_state
+
+        primed_collision_bytes = b"primed-preexisting-report-sentinel\n"
+        report_path.write_bytes(primed_collision_bytes)
+        primed_collision_before = report_path.lstat()
+        primed_collision_identity = (
+            primed_collision_before.st_dev,
+            primed_collision_before.st_ino,
+            primed_collision_before.st_uid,
+            primed_collision_before.st_mode,
+            primed_collision_before.st_nlink,
+            primed_collision_before.st_size,
+            primed_collision_before.st_mtime_ns,
+            primed_collision_before.st_ctime_ns,
+        )
+        try:
+            with pytest.raises(harness.HarnessFailure) as primed_collision:
+                harness.write_evidence_report(
+                    tmp_path,
+                    receipt=evidence_receipt,
+                    report=complete_report,
+                )
+            assert primed_collision.value.code is harness.HarnessFailureCode.UNAVAILABLE
+            primed_collision_after = report_path.lstat()
+            assert (
+                primed_collision_after.st_dev,
+                primed_collision_after.st_ino,
+                primed_collision_after.st_uid,
+                primed_collision_after.st_mode,
+                primed_collision_after.st_nlink,
+                primed_collision_after.st_size,
+                primed_collision_after.st_mtime_ns,
+                primed_collision_after.st_ctime_ns,
+            ) == primed_collision_identity
+            assert report_path.read_bytes() == primed_collision_bytes
+            assert harness._observe_task064_report_validation_for_test() == primed_state
+            assert evidence_ledger.receipt is evidence_receipt
+            assert not evidence_ledger.consumed
+            assert_no_report_staging_file()
+        finally:
+            report_path.unlink()
+
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(os, "close", close_after_ledger_mutation)
         patch.setattr(os, "open", observe_report_readback_open)
@@ -15537,6 +16995,24 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
     assert evidence_ledger.receipt is evidence_receipt
     assert receipt_is_consumed()
     assert report == report_path
+    assert type(report) is type(tmp_path)
+
+    def writer_success_guard_accepts(value: object) -> bool:
+        return type(value) is type(tmp_path)
+
+    assert writer_success_guard_accepts(report)
+    try:
+        equal_foreign_path_type = type(
+            "_Task064EqualForeignReportPath",
+            (type(report),),
+            {"__slots__": ()},
+        )
+        equal_foreign_path = equal_foreign_path_type(report)
+    except (NotImplementedError, TypeError):
+        pass
+    else:
+        assert equal_foreign_path == report
+        assert not writer_success_guard_accepts(equal_foreign_path)
     assert stat_mode(report) == 0o600
     assert report.stat().st_nlink == 1
     assert_no_report_staging_file()
@@ -15609,6 +17085,31 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
         completed.returncode == 0 and elapsed_seconds < 840
         for completed, elapsed_seconds in close_probe_results.values()
     )
+    if proof_mode is None:
+        cache_scenarios = ("reentrant-validating", "reentrant-publishing")
+        for cache_scenario in cache_scenarios:
+            completed_cache_probe, elapsed_cache_probe = _run_task064_pytest_child(
+                tmp_path,
+                protocol="exec_isolation",
+                issuer_node_id=request.node.nodeid,
+                target_node_id=request.node.nodeid,
+                mode=request.node.nodeid,
+                pycache_label=f"task064-report-cache-{cache_scenario}-pycache",
+                timeout_seconds=840,
+                extra_environment={
+                    _TASK064_REPORT_CACHE_SCENARIO_ENVIRONMENT: cache_scenario,
+                },
+            )
+            combined_cache_output = completed_cache_probe.stdout + completed_cache_probe.stderr
+            expected_marker = f"TASK064_REPORT_CACHE_REENTRANT_OK:{cache_scenario}"
+            sibling_marker = (
+                "TASK064_REPORT_CACHE_REENTRANT_OK:"
+                + cache_scenarios[1 - cache_scenarios.index(cache_scenario)]
+            )
+            assert completed_cache_probe.returncode == 0
+            assert combined_cache_output.count(expected_marker) == 1
+            assert sibling_marker not in combined_cache_output
+            assert elapsed_cache_probe < 840
     assert report.read_bytes() == canonical_report_artifact
     with pytest.raises(harness.HarnessFailure) as consumed_receipt:
         harness.write_evidence_report(
@@ -15629,3 +17130,22 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
     assert reopened_receipt.value.code is harness.HarnessFailureCode.CORRUPT
     evidence_ledger.consumed = True
     assert report.read_text(encoding="utf-8") == report_text
+    if proof_mode == "primed-full":
+        assert harness._observe_task064_report_validation_for_test() == (
+            "EMPTY",
+            False,
+            None,
+            None,
+        )
+        final_report_bytes = report.read_bytes()
+        task064_report_proof_recorder(
+            publication_status="PUBLISHED",
+            output_bytes=len(final_report_bytes),
+            output_sha256=hashlib.sha256(final_report_bytes).hexdigest(),
+            cache_state_at_assertion="EMPTY",
+            receipt_consumed=evidence_ledger.consumed,
+            final_file_present=report_path.is_file(),
+            stage_residue_count=len(tuple(tmp_path.glob(".task064-evidence-*.tmp"))),
+            teardown=teardown_report_validation,
+            observe=harness._observe_task064_report_validation_for_test,
+        )

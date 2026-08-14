@@ -33,7 +33,7 @@ import tracemalloc
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, suppress
 from contextvars import Context, ContextVar, Token
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, fields, is_dataclass, replace
 from datetime import UTC, datetime
 from enum import Enum, StrEnum
 from functools import partial, wraps
@@ -111,8 +111,8 @@ from wealth.ports.continuous_public_trade_stream_store import (
 )
 
 TASK_ID: Final = "TASK-064"
-TASK_CONTRACT_GENERATION: Final = 3
-TASK_CONTRACT_DIGEST: Final = "86e3650608f2f1c96a9aa272b2b9cd597bc3d5ac188a39937afb974536d11ccb"
+TASK_CONTRACT_GENERATION: Final = 6
+TASK_CONTRACT_DIGEST: Final = "ec89a1df740805cc9b43e6f2530e940c0bf9b66e8f25ed878d3207d091c4bcb8"
 ACCEPTED_PYTHON_VERSION: Final = "3.13.14"
 ACCEPTED_SQLITE_VERSION: Final = "3.53.1"
 ACCEPTED_THREADSAFETY: Final = 3
@@ -3786,6 +3786,7 @@ def _build_pytest_root_authority() -> tuple[
         ],
         None,
     ],
+    Callable[[Callable[[_ActivePytestRoot], bool]], None],
     Callable[[], None],
 ]:
     """Pre-issue exact fixture roots from two sealed stdlib-only fixture call sites."""
@@ -3815,7 +3816,7 @@ def _build_pytest_root_authority() -> tuple[
             "_bind_task064_harness_module",
             "e4bba9b8f370dc1c66fcf977d36438dc870ade6792cd281e1f4ff5ed0fbfc330",
             34,
-            "583e018c14936e4787fbc61e46e1077cab32df12b5b3998e61435738d9ebb039",
+            "48054366736122943217ce343f77fc7aaa70f99c401eedbc2fa059ae4fb5e800",
         ),
     )
     real_getpid = os.getpid
@@ -3928,6 +3929,7 @@ def _build_pytest_root_authority() -> tuple[
     fault_hits: frozenset[str] = frozenset()
     run_closer: Callable[[_EvidenceRun], bool] | None = None
     run_closed: Callable[[_EvidenceRun], bool] | None = None
+    report_cache_teardown: Callable[[_ActivePytestRoot], bool] | None = None
     unit_module_globals_identity: int | None = None
     integration_module_globals_identity: int | None = None
     active_node_lifecycle: tuple[int, str] | None = None
@@ -4784,8 +4786,14 @@ def _build_pytest_root_authority() -> tuple[
         record = cleanup_record_for_identity(identity)
         if record is None or record["path"] is not pytest_root:
             raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
-        record["state"] = "REVOKING"
         errors: list[BaseException] = []
+        try:
+            if report_cache_teardown is None or not report_cache_teardown(identity):
+                raise RuntimeError("report validation cache teardown failed")
+        except BaseException as error:
+            errors.append(error)
+            latch_uncertainty()
+        record["state"] = "REVOKING"
         try:
             flag = cast(mmap.mmap, record["revocation_flag"])
             if consume_fault("revocation_flag_write"):
@@ -4865,6 +4873,14 @@ def _build_pytest_root_authority() -> tuple[
             raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
         run_closer = closer
         run_closed = closed_observer
+
+    def bind_report_cache_teardown(
+        teardown: Callable[[_ActivePytestRoot], bool],
+    ) -> None:
+        nonlocal report_cache_teardown
+        if report_cache_teardown is not None or not callable(teardown):
+            raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        report_cache_teardown = teardown
 
     def issue_identity(
         pytest_root: Path,
@@ -5323,6 +5339,7 @@ def _build_pytest_root_authority() -> tuple[
         poison_channels,
         uncertainty_latched,
         bind_run_closer,
+        bind_report_cache_teardown,
         latch_uncertainty,
     )
 
@@ -5342,6 +5359,7 @@ def _build_pytest_root_authority() -> tuple[
     _pytest_root_poison_channels,
     _pytest_root_authority_uncertain,
     _bind_pytest_root_run_closer,
+    _bind_pytest_root_report_cache_teardown,
     _latch_pytest_root_authority_uncertainty,
 ) = _build_pytest_root_authority()
 del _build_pytest_root_authority
@@ -21546,7 +21564,6 @@ del _build_task064_report_artifact_validation
 del _build_task064_published_report_artifact_authority
 del _bind_task064_report_artifact_validation
 del _task064_report_artifact_validator
-del _task064_report_source_fingerprints
 del _resolve_task064_published_report_artifact
 
 
@@ -21943,9 +21960,707 @@ def _validate_verification_summary_shape(summary: VerificationSummary) -> None:
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
 
 
+_TASK064_REPORT_VALIDATION_GENERATION: Final = 6
+_TASK064_REPORT_VALIDATION_CONTRACT_SHA256: Final = (
+    "ec89a1df740805cc9b43e6f2530e940c0bf9b66e8f25ed878d3207d091c4bcb8"
+)
+_TASK064_REPORT_VALIDATION_LIFETIME_NS: Final = 120_000_000_000
+_TASK064_REPORT_ROLE_NAMES: Final = (
+    "bootstrap",
+    "backup_source",
+    "backup",
+    "restore",
+    "concurrent_source",
+    "concurrent_backup",
+    "generation_source",
+    "generation_destination",
+)
+_TASK064_REPORT_ROLE_ORDINALS: Final = (0, 1, 0, 2, 1, 0, 0, 3)
+_TASK064_REPORT_FILE_NAMES: Final = (
+    _DATABASE_BASENAME,
+    f"{_DATABASE_BASENAME}-wal",
+    f"{_DATABASE_BASENAME}-shm",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _ReportFileObservation:
+    name: str
+    present: bool
+    device: int | None
+    inode: int | None
+    uid: int | None
+    mode: int | None
+    link_count: int | None
+    size: int | None
+    mtime_ns: int | None
+    ctime_ns: int | None
+    sha256: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _ReportStoreFileSnapshot:
+    token: StoreToken
+    registration: _RegisteredIdentity
+    pytest_root: Path
+    generation_root: Path
+    database_path: Path
+    generation_id: str
+    files: tuple[_ReportFileObservation, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _ReportFileSnapshot:
+    roles: tuple[tuple[str, int], ...]
+    stores: tuple[_ReportStoreFileSnapshot, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _ReportLiveEpoch:
+    snapshot: _ReportFileSnapshot
+    observations: tuple[
+        tuple[
+            int,
+            VerificationSummary,
+            tuple[tuple[str, int, str, str], ...],
+            CurrentSlice | None,
+        ],
+        ...,
+    ]
+    raw: bytes
+    sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ReportValidationEntry:
+    pytest_root: Path
+    registration: _ActivePytestRoot
+    run: _EvidenceRun
+    ledger: _EvidenceLedger
+    receipt: _EvidenceReceipt
+    evidence: GeneratedEvidenceAggregate
+    report: EvidenceReport
+    process_id: int
+    thread_id: int
+    node_id: str
+    context_run: _EvidenceRun | None
+    contract_generation: int
+    contract_sha256: str
+    schema_fingerprint: str
+    sqlite_source_id: str
+    source_fingerprints: tuple[tuple[str, str], ...]
+    evidence_digest: str
+    report_core_sha256: str
+    live_validation_sha256: str
+    raw: bytes
+    raw_length: int
+    raw_sha256: str
+    epoch: _ReportLiveEpoch
+    issued_ns: int
+    expires_ns: int
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedEvidenceReport:
+    ledger: _EvidenceLedger
+    schema_fingerprint: str
+    gates: tuple[tuple[str, EvidenceDisposition, str | None], ...]
+    live_observations: tuple[
+        tuple[
+            int,
+            VerificationSummary,
+            tuple[tuple[str, int, str, str], ...],
+            CurrentSlice | None,
+        ],
+        ...,
+    ]
+    raw: bytes
+
+
+def _valid_task064_report_file_observation(
+    observation: _ReportFileObservation,
+    expected_name: str,
+) -> bool:
+    if (
+        type(observation) is not _ReportFileObservation
+        or expected_name not in _TASK064_REPORT_FILE_NAMES
+        or observation.name != expected_name
+        or type(observation.present) is not bool
+    ):
+        return False
+    nullable_values = (
+        observation.device,
+        observation.inode,
+        observation.uid,
+        observation.mode,
+        observation.link_count,
+        observation.size,
+        observation.mtime_ns,
+        observation.ctime_ns,
+        observation.sha256,
+    )
+    if not observation.present:
+        return all(value is None for value in nullable_values)
+    integer_values = nullable_values[:-1]
+    maximum = MAX_TEST_DATABASE_BYTES if expected_name == _DATABASE_BASENAME else MAX_TEST_WAL_BYTES
+    return bool(
+        all(type(value) is int and value >= 0 for value in integer_values)
+        and observation.mode == 0o600
+        and observation.link_count == 1
+        and type(observation.size) is int
+        and 0 <= observation.size <= maximum
+        and (expected_name != _DATABASE_BASENAME or observation.size > 0)
+        and type(observation.sha256) is str
+        and len(observation.sha256) == 71
+        and observation.sha256.startswith("sha256:")
+        and all(character in "0123456789abcdef" for character in observation.sha256[7:])
+    )
+
+
+def _task064_report_role_tokens(
+    evidence: GeneratedEvidenceAggregate,
+) -> tuple[tuple[tuple[str, int], ...], tuple[StoreToken, ...]]:
+    if type(evidence) is not GeneratedEvidenceAggregate:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    bootstrap = evidence.bootstrap_path_ownership
+    backup = evidence.backup_restore
+    generation_copy = evidence.generation_copy
+    if (
+        type(bootstrap) is not BootstrapPathEvidence
+        or type(backup) is not BackupRestoreEvidence
+        or type(backup.concurrent_write) is not ConcurrentBackupEvidence
+        or type(generation_copy) is not GenerationCopyEvidence
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    role_tokens = (
+        bootstrap.token,
+        backup.source_token,
+        backup.backup_token,
+        backup.restore_token,
+        backup.concurrent_write.source_token,
+        backup.concurrent_write.backup_token,
+        generation_copy.source_token,
+        generation_copy.destination_token,
+    )
+    if any(type(token) is not StoreToken for token in role_tokens):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    unique: list[StoreToken] = []
+    ordinals: list[int] = []
+    for token in role_tokens:
+        ordinal = next(
+            (index for index, candidate in enumerate(unique) if candidate is token),
+            None,
+        )
+        if ordinal is None:
+            ordinal = len(unique)
+            unique.append(token)
+        ordinals.append(ordinal)
+    if tuple(ordinals) != _TASK064_REPORT_ROLE_ORDINALS or len(unique) != 4:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    return (
+        tuple(zip(_TASK064_REPORT_ROLE_NAMES, ordinals, strict=True)),
+        tuple(unique),
+    )
+
+
+def _capture_task064_report_file_snapshot(
+    evidence: GeneratedEvidenceAggregate,
+) -> _ReportFileSnapshot:
+    roles, tokens = _task064_report_role_tokens(evidence)
+    stores: list[_ReportStoreFileSnapshot] = []
+    for token in tokens:
+        try:
+            identity = _require_token(token)
+        except HarnessFailure as error:
+            if error.code in {
+                HarnessFailureCode.CORRUPT,
+                HarnessFailureCode.INVALID_TOKEN,
+            }:
+                raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        try:
+            acquisition = _begin_operation_path_acquisition(identity)
+        except HarnessFailure as error:
+            if error.code in {
+                HarnessFailureCode.CORRUPT,
+                HarnessFailureCode.INVALID_TOKEN,
+            }:
+                raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        snapshot: _OperationPathSnapshot | None = None
+        pinned: list[_PinnedFile] = []
+        try:
+            _, generation_descriptor = _open_owned_generation(
+                identity,
+                acquisition=acquisition,
+            )
+            names = tuple(sorted(os.listdir(generation_descriptor)))
+            if (
+                _DATABASE_BASENAME not in names
+                or set(names) - set(_TASK064_REPORT_FILE_NAMES)
+                or len(names) != len(set(names))
+            ):
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            observations: list[_ReportFileObservation] = []
+            for name in _TASK064_REPORT_FILE_NAMES:
+                if name not in names:
+                    observations.append(
+                        _ReportFileObservation(
+                            name=name,
+                            present=False,
+                            device=None,
+                            inode=None,
+                            uid=None,
+                            mode=None,
+                            link_count=None,
+                            size=None,
+                            mtime_ns=None,
+                            ctime_ns=None,
+                            sha256=None,
+                        )
+                    )
+                    continue
+                descriptor = _open_and_adopt_operation_path_descriptor(
+                    acquisition,
+                    "file",
+                    name,
+                    False,
+                )
+                before = os.fstat(descriptor)
+                path_before = os.stat(
+                    name,
+                    dir_fd=generation_descriptor,
+                    follow_symlinks=False,
+                )
+                maximum = (
+                    MAX_TEST_DATABASE_BYTES if name == _DATABASE_BASENAME else MAX_TEST_WAL_BYTES
+                )
+                stable_fields = (
+                    "st_dev",
+                    "st_ino",
+                    "st_uid",
+                    "st_mode",
+                    "st_nlink",
+                    "st_size",
+                    "st_mtime_ns",
+                    "st_ctime_ns",
+                )
+                if (
+                    not stat.S_ISREG(before.st_mode)
+                    or before.st_uid != identity.uid
+                    or stat.S_IMODE(before.st_mode) != 0o600
+                    or before.st_nlink != 1
+                    or type(before.st_size) is not int
+                    or not 0 <= before.st_size <= maximum
+                    or (
+                        name == _DATABASE_BASENAME
+                        and (
+                            before.st_size == 0
+                            or before.st_dev != identity.device
+                            or before.st_ino != identity.inode
+                        )
+                    )
+                    or any(
+                        getattr(before, field) != getattr(path_before, field)
+                        for field in stable_fields
+                    )
+                ):
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                digest = hashlib.sha256()
+                total = 0
+                while total < before.st_size:
+                    block = os.read(
+                        descriptor,
+                        min(65_536, before.st_size - total),
+                    )
+                    if not block:
+                        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                    total += len(block)
+                    if total > maximum:
+                        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                    digest.update(block)
+                if os.read(descriptor, 1) != b"":
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                after = os.fstat(descriptor)
+                path_after = os.stat(
+                    name,
+                    dir_fd=generation_descriptor,
+                    follow_symlinks=False,
+                )
+                if total != before.st_size or any(
+                    getattr(before, field) != getattr(after, field)
+                    or getattr(before, field) != getattr(path_after, field)
+                    for field in stable_fields
+                ):
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                pinned.append(
+                    _PinnedFile(
+                        name=name,
+                        descriptor=descriptor,
+                        device=before.st_dev,
+                        inode=before.st_ino,
+                        uid=before.st_uid,
+                        mode=stat.S_IMODE(before.st_mode),
+                        link_count=before.st_nlink,
+                    )
+                )
+                observations.append(
+                    _ReportFileObservation(
+                        name=name,
+                        present=True,
+                        device=before.st_dev,
+                        inode=before.st_ino,
+                        uid=before.st_uid,
+                        mode=stat.S_IMODE(before.st_mode),
+                        link_count=before.st_nlink,
+                        size=before.st_size,
+                        mtime_ns=before.st_mtime_ns,
+                        ctime_ns=before.st_ctime_ns,
+                        sha256=f"sha256:{digest.hexdigest()}",
+                    )
+                )
+            if tuple(sorted(os.listdir(generation_descriptor))) != names:
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            confirmed_identity = _require_token(token)
+            if (
+                confirmed_identity != identity
+                or confirmed_identity.pytest_registration is not identity.pytest_registration
+                or confirmed_identity.pytest_root is not identity.pytest_root
+                or confirmed_identity.generation_root is not identity.generation_root
+                or confirmed_identity.database_path is not identity.database_path
+            ):
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            snapshot = _complete_operation_path_acquisition(
+                acquisition,
+                tuple(pinned),
+            )
+        except BaseException as error:
+            try:
+                _fail_operation_path_acquisition(acquisition)
+            except HarnessFailure:
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+            if isinstance(error, HarnessFailure):
+                if error.code in {
+                    HarnessFailureCode.CORRUPT,
+                    HarnessFailureCode.INVALID_TOKEN,
+                }:
+                    raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+            if isinstance(error, (MemoryError, OSError)):
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+            raise
+        try:
+            _close_operation_path_snapshot(snapshot)
+        except HarnessFailure:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        try:
+            generation_id = _generation_evidence_id(token)
+        except HarnessFailure as error:
+            if error.code in {
+                HarnessFailureCode.CORRUPT,
+                HarnessFailureCode.INVALID_TOKEN,
+            }:
+                raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        stores.append(
+            _ReportStoreFileSnapshot(
+                token=token,
+                registration=identity,
+                pytest_root=identity.pytest_root,
+                generation_root=identity.generation_root,
+                database_path=identity.database_path,
+                generation_id=generation_id,
+                files=tuple(observations),
+            )
+        )
+    return _ReportFileSnapshot(roles=roles, stores=tuple(stores))
+
+
+def _same_task064_report_file_snapshot(
+    expected: _ReportFileSnapshot,
+    observed: _ReportFileSnapshot,
+    _valid_file: Callable[[_ReportFileObservation, str], bool] = (
+        _valid_task064_report_file_observation
+    ),
+) -> bool:
+    return bool(
+        type(expected) is _ReportFileSnapshot
+        and type(observed) is _ReportFileSnapshot
+        and expected.roles == observed.roles
+        and len(expected.stores) == len(observed.stores) == 4
+        and all(
+            left.token is right.token
+            and left.registration.pytest_registration is right.registration.pytest_registration
+            and left.registration.pytest_root is left.pytest_root
+            and right.registration.pytest_root is right.pytest_root
+            and left.registration.generation_root is left.generation_root
+            and right.registration.generation_root is right.generation_root
+            and left.registration.database_path is left.database_path
+            and right.registration.database_path is right.database_path
+            and left.pytest_root is right.pytest_root
+            and left.generation_root is right.generation_root
+            and left.database_path is right.database_path
+            and left.generation_id == right.generation_id
+            and left.files == right.files
+            and len(left.files) == len(right.files) == 3
+            and all(
+                _valid_file(left_file, expected_name) and _valid_file(right_file, expected_name)
+                for left_file, right_file, expected_name in zip(
+                    left.files,
+                    right.files,
+                    _TASK064_REPORT_FILE_NAMES,
+                    strict=True,
+                )
+            )
+            for left, right in zip(expected.stores, observed.stores, strict=True)
+        )
+    )
+
+
+def _same_task064_report_validation_boundary(
+    before: _ReportFileSnapshot,
+    after: _ReportFileSnapshot,
+    _valid_file: Callable[[_ReportFileObservation, str], bool] = (
+        _valid_task064_report_file_observation
+    ),
+) -> bool:
+    """Allow only live SQLite SHM timestamp volatility across validation."""
+
+    bindings_match = bool(
+        type(before) is _ReportFileSnapshot
+        and type(after) is _ReportFileSnapshot
+        and before.roles == after.roles
+        and len(before.stores) == len(after.stores) == 4
+        and all(
+            left.token is right.token
+            and left.registration.pytest_registration is right.registration.pytest_registration
+            and left.registration.pytest_root is left.pytest_root
+            and right.registration.pytest_root is right.pytest_root
+            and left.registration.generation_root is left.generation_root
+            and right.registration.generation_root is right.generation_root
+            and left.registration.database_path is left.database_path
+            and right.registration.database_path is right.database_path
+            and left.pytest_root is right.pytest_root
+            and left.generation_root is right.generation_root
+            and left.database_path is right.database_path
+            and left.generation_id == right.generation_id
+            for left, right in zip(before.stores, after.stores, strict=True)
+        )
+    )
+    if not bindings_match:
+        return False
+    for left_store, right_store in zip(before.stores, after.stores, strict=True):
+        if (
+            len(left_store.files) != 3
+            or len(right_store.files) != 3
+            or tuple(item.name for item in left_store.files) != _TASK064_REPORT_FILE_NAMES
+            or tuple(item.name for item in right_store.files) != _TASK064_REPORT_FILE_NAMES
+        ):
+            return False
+        for ordinal, (left, right) in enumerate(
+            zip(left_store.files, right_store.files, strict=True)
+        ):
+            if (
+                type(left) is not _ReportFileObservation
+                or type(right) is not _ReportFileObservation
+                or not _valid_file(left, _TASK064_REPORT_FILE_NAMES[ordinal])
+                or not _valid_file(right, _TASK064_REPORT_FILE_NAMES[ordinal])
+            ):
+                return False
+            if ordinal < 2:
+                if left != right:
+                    return False
+                continue
+            if not left.present or not right.present:
+                if left != right:
+                    return False
+                continue
+            if (
+                left.name != right.name
+                or left.present is not True
+                or right.present is not True
+                or left.device != right.device
+                or left.inode != right.inode
+                or left.uid != right.uid
+                or left.mode != right.mode
+                or left.link_count != right.link_count
+                or left.size != right.size
+                or left.sha256 != right.sha256
+            ):
+                return False
+    return True
+
+
+def _same_task064_report_snapshot_bindings(
+    expected: _ReportFileSnapshot,
+    observed: _ReportFileSnapshot,
+) -> bool:
+    return bool(
+        type(expected) is _ReportFileSnapshot
+        and type(observed) is _ReportFileSnapshot
+        and expected.roles == observed.roles
+        and len(expected.stores) == len(observed.stores) == 4
+        and all(
+            left.token is right.token
+            and left.registration.pytest_registration is right.registration.pytest_registration
+            and left.registration.pytest_root is left.pytest_root
+            and right.registration.pytest_root is right.pytest_root
+            and left.registration.generation_root is left.generation_root
+            and right.registration.generation_root is right.generation_root
+            and left.registration.database_path is left.database_path
+            and right.registration.database_path is right.database_path
+            and left.pytest_root is right.pytest_root
+            and left.generation_root is right.generation_root
+            and left.database_path is right.database_path
+            and left.generation_id == right.generation_id
+            for left, right in zip(expected.stores, observed.stores, strict=True)
+        )
+    )
+
+
+def _build_task064_report_live_epoch(
+    snapshot: _ReportFileSnapshot,
+    observations: tuple[
+        tuple[
+            int,
+            VerificationSummary,
+            tuple[tuple[str, int, str, str], ...],
+            CurrentSlice | None,
+        ],
+        ...,
+    ],
+    _valid_file: Callable[[_ReportFileObservation, str], bool] = (
+        _valid_task064_report_file_observation
+    ),
+) -> _ReportLiveEpoch:
+    if (
+        type(snapshot) is not _ReportFileSnapshot
+        or type(observations) is not tuple
+        or len(snapshot.stores) != 4
+        or snapshot.roles
+        != tuple(zip(_TASK064_REPORT_ROLE_NAMES, _TASK064_REPORT_ROLE_ORDINALS, strict=True))
+        or len(observations) != 4
+        or tuple(item[0] for item in observations) != (0, 1, 2, 3)
+        or observations[0][3] is None
+        or any(item[3] is not None for item in observations[1:])
+        or any(
+            len(store.files) != 3
+            or any(
+                not _valid_file(file_observation, expected_name)
+                for file_observation, expected_name in zip(
+                    store.files,
+                    _TASK064_REPORT_FILE_NAMES,
+                    strict=True,
+                )
+            )
+            for store in snapshot.stores
+        )
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    entries: list[dict[str, object]] = []
+    for ordinal, (store, observation) in enumerate(zip(snapshot.stores, observations, strict=True)):
+        observed_ordinal, summary, tails, _ = observation
+        if observed_ordinal != ordinal:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        registration = store.registration
+        root_registration = registration.pytest_registration
+        entries.append(
+            {
+                "ordinal": ordinal,
+                "generation_id": store.generation_id,
+                "registration": {
+                    "pytest_root": [
+                        registration.pytest_root_device,
+                        registration.pytest_root_inode,
+                        registration.pytest_root_uid,
+                        registration.pytest_root_mode,
+                        root_registration.process_id,
+                        root_registration.node_id,
+                    ],
+                    "generation": [
+                        registration.generation_device,
+                        registration.generation_inode,
+                        registration.generation_uid,
+                        registration.generation_mode,
+                    ],
+                    "database": [
+                        registration.device,
+                        registration.inode,
+                        registration.uid,
+                        registration.mode,
+                        registration.link_count,
+                    ],
+                },
+                "summary_sha256": _evidence_payload_digest(summary),
+                "tails_sha256": _evidence_payload_digest(tails),
+                "files": [
+                    {
+                        "name": file.name,
+                        "present": file.present,
+                        "device": file.device,
+                        "inode": file.inode,
+                        "uid": file.uid,
+                        "mode": file.mode,
+                        "link_count": file.link_count,
+                        "size": file.size,
+                        "mtime_ns": file.mtime_ns,
+                        "ctime_ns": file.ctime_ns,
+                        "sha256": file.sha256,
+                    }
+                    for file in store.files
+                ],
+            }
+        )
+    payload = {
+        "domain": "TASK064-REPORT-LIVE-EPOCH-V2",
+        "roles": [list(role) for role in snapshot.roles],
+        "entries": entries,
+    }
+    try:
+        raw = json.dumps(
+            payload,
+            allow_nan=False,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+    except MemoryError:
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+    except (TypeError, ValueError, UnicodeError):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+    return _ReportLiveEpoch(
+        snapshot=snapshot,
+        observations=observations,
+        raw=raw,
+        sha256=hashlib.sha256(raw).hexdigest(),
+    )
+
+
+def _report_core_digest(report: EvidenceReport, evidence_digest: str) -> str:
+    if type(report) is not EvidenceReport or type(evidence_digest) is not str:
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    report_fields = fields(EvidenceReport)
+    if len(report_fields) != 41 or report_fields[-1].name != "evidence":
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    values = tuple(getattr(report, field.name) for field in report_fields[:-1])
+    return _evidence_payload_digest(("TASK064-REPORT-CORE-V1", values, evidence_digest))
+
+
 def _derived_report_gates(
     root: Path,
     report: EvidenceReport,
+    *,
+    validate_live: bool = True,
+    preserve_live_unavailable: bool = False,
+    live_observations: list[
+        tuple[
+            int,
+            VerificationSummary,
+            tuple[tuple[str, int, str, str], ...],
+            CurrentSlice | None,
+        ]
+    ]
+    | None = None,
 ) -> tuple[tuple[str, EvidenceDisposition, str | None], ...]:
     if type(report) is not EvidenceReport:
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
@@ -21955,17 +22670,63 @@ def _derived_report_gates(
     bootstrap = evidence.bootstrap_path_ownership
     if type(bootstrap) is not BootstrapPathEvidence:
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
-    try:
-        registered = _require_token(bootstrap.token)
-        observed_summary = verify_store(bootstrap.token)
-    except HarnessFailure:
+    if (
+        type(validate_live) is not bool
+        or type(preserve_live_unavailable) is not bool
+        or (not validate_live and live_observations is not None)
+        or (preserve_live_unavailable and not validate_live)
+        or (preserve_live_unavailable and live_observations is None)
+        or (not preserve_live_unavailable and live_observations is not None)
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    observed_live_summaries: list[tuple[StoreToken, VerificationSummary]] = []
+    observed_live_tails: list[tuple[StoreToken, tuple[tuple[str, int, str, str], ...]]] = []
+
+    def remap_live_failure(error: HarnessFailure) -> Never:
+        if preserve_live_unavailable and error.code is HarnessFailureCode.UNAVAILABLE:
+            raise error
         raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+
+    def verify_live_store_once(token: StoreToken) -> VerificationSummary:
+        if not preserve_live_unavailable:
+            return verify_store(token)
+        for observed_token, observed_value in observed_live_summaries:
+            if token is observed_token:
+                return observed_value
+        observed_value = verify_store(token)
+        observed_live_summaries.append((token, observed_value))
+        return observed_value
+
+    def live_tails_once(
+        token: StoreToken,
+    ) -> tuple[tuple[str, int, str, str], ...]:
+        if not preserve_live_unavailable:
+            return _tail_manifest(token)
+        for observed_token, observed_value in observed_live_tails:
+            if token is observed_token:
+                return observed_value
+        observed_value = _tail_manifest(token)
+        observed_live_tails.append((token, observed_value))
+        return observed_value
+
+    registered: _RegisteredIdentity | None = None
+    observed_summary: VerificationSummary | None = None
+    if validate_live:
+        try:
+            registered = _require_token(bootstrap.token)
+            observed_summary = verify_live_store_once(bootstrap.token)
+        except HarnessFailure as error:
+            remap_live_failure(error)
     summary = evidence.schema_identity
     _validate_verification_summary_shape(summary)
     profile = summary.profile
     if (
-        registered.pytest_root != root
-        or observed_summary != summary
+        (
+            validate_live
+            and (
+                registered is None or registered.pytest_root != root or observed_summary != summary
+            )
+        )
         or report.schema_fingerprint != summary.schema_fingerprint
         or report.python_version != profile.python_version
         or report.sqlite_version != profile.sqlite_version
@@ -22028,24 +22789,26 @@ def _derived_report_gates(
     if current.record.stream_id != creation.record.stream_id:
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     _validated_report_query_rows(projection.query_evidence)
-    record = creation.record
-    try:
-        observed_projection = load_current(
-            bootstrap.token,
-            stream_id=record.stream_id,
-            natural_key=natural_identity_key(
-                source=record.source,
-                venue=record.venue,
-                instrument=record.instrument,
-                provider_symbol=record.provider_symbol,
-                instrument_type=record.instrument_type.value,
-                request_variant=record.request_variant,
-            ),
-        )
-    except HarnessFailure:
-        raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
-    if observed_projection != projection:
-        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    observed_projection: CurrentSlice | None = None
+    if validate_live:
+        record = creation.record
+        try:
+            observed_projection = load_current(
+                bootstrap.token,
+                stream_id=record.stream_id,
+                natural_key=natural_identity_key(
+                    source=record.source,
+                    venue=record.venue,
+                    instrument=record.instrument,
+                    provider_symbol=record.provider_symbol,
+                    instrument_type=record.instrument_type.value,
+                    request_variant=record.request_variant,
+                ),
+            )
+        except HarnessFailure as error:
+            remap_live_failure(error)
+        if observed_projection != projection:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
     _validate_rejection_evidence(
         evidence.schema_constraints_corruption,
         (
@@ -22159,51 +22922,64 @@ def _derived_report_gates(
         concurrent.backup_summary,
     ):
         _validate_verification_summary_shape(candidate_summary)
-    try:
-        backup_source_registration = _require_token(backup.source_token)
-        _require_token(backup.backup_token)
-        _require_token(backup.restore_token)
-        observed_backup_source_summary = verify_store(backup.source_token)
-        observed_backup_summary = verify_store(backup.backup_token)
-        observed_restore_summary = verify_store(backup.restore_token)
-        observed_backup_files = _closed_file_manifest(backup.backup_token)
-        observed_restore_files = _closed_file_manifest(backup.restore_token)
-        observed_backup_tails = _tail_manifest(backup.backup_token)
-        observed_restore_tails = _tail_manifest(backup.restore_token)
-        _validate_live_backup_manifest(
-            backup.backup_manifest,
-            source_token=backup.source_token,
-            destination_token=backup.backup_token,
-            source_summary=concurrent.source_before,
-            destination_summary=backup.backup_summary,
-            destination_files=observed_backup_files,
-            destination_tails=observed_backup_tails,
-            require_exact_source_snapshot=False,
-        )
-        _validate_live_backup_manifest(
-            backup.restore_manifest,
-            source_token=backup.backup_token,
-            destination_token=backup.restore_token,
-            source_summary=backup.backup_summary,
-            destination_summary=backup.restore_summary,
-            destination_files=observed_restore_files,
-            destination_tails=observed_restore_tails,
-            require_exact_source_snapshot=True,
-        )
-    except HarnessFailure:
-        raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+    backup_source_registration: _RegisteredIdentity | None = None
+    observed_backup_source_summary: VerificationSummary | None = None
+    observed_backup_summary: VerificationSummary | None = None
+    observed_restore_summary: VerificationSummary | None = None
+    if validate_live:
+        try:
+            backup_source_registration = _require_token(backup.source_token)
+            _require_token(backup.backup_token)
+            _require_token(backup.restore_token)
+            observed_backup_source_summary = verify_live_store_once(backup.source_token)
+            observed_backup_summary = verify_live_store_once(backup.backup_token)
+            observed_restore_summary = verify_live_store_once(backup.restore_token)
+            observed_backup_files = _closed_file_manifest(backup.backup_token)
+            observed_restore_files = _closed_file_manifest(backup.restore_token)
+            observed_backup_tails = live_tails_once(backup.backup_token)
+            observed_restore_tails = live_tails_once(backup.restore_token)
+            _validate_live_backup_manifest(
+                backup.backup_manifest,
+                source_token=backup.source_token,
+                destination_token=backup.backup_token,
+                source_summary=concurrent.source_before,
+                destination_summary=backup.backup_summary,
+                destination_files=observed_backup_files,
+                destination_tails=observed_backup_tails,
+                require_exact_source_snapshot=False,
+            )
+            _validate_live_backup_manifest(
+                backup.restore_manifest,
+                source_token=backup.backup_token,
+                destination_token=backup.restore_token,
+                source_summary=backup.backup_summary,
+                destination_summary=backup.restore_summary,
+                destination_files=observed_restore_files,
+                destination_tails=observed_restore_tails,
+                require_exact_source_snapshot=True,
+            )
+        except HarnessFailure as error:
+            remap_live_failure(error)
     if (
         backup.backup_token is not bootstrap.token
-        or backup_source_registration.pytest_registration is not registered.pytest_registration
+        or (
+            validate_live
+            and (
+                backup_source_registration is None
+                or registered is None
+                or backup_source_registration.pytest_registration
+                is not registered.pytest_registration
+                or backup.source_summary != observed_backup_source_summary
+                or backup.backup_summary != observed_backup_summary
+                or backup.restore_summary != observed_restore_summary
+            )
+        )
         or backup.backup_manifest != report.backup_manifest
         or concurrent.source_token is not backup.source_token
         or concurrent.backup_token is not backup.backup_token
         or concurrent.backup_manifest != backup.backup_manifest
         or concurrent.backup_summary != backup.backup_summary
-        or backup.source_summary != observed_backup_source_summary
         or backup.source_summary != concurrent.source_after
-        or backup.backup_summary != observed_backup_summary
-        or backup.restore_summary != observed_restore_summary
         or backup.backup_summary != summary
         or backup.backup_manifest.destination_streams != backup.backup_summary.stream_count
         or backup.backup_manifest.destination_history_rows != backup.backup_summary.history_count
@@ -22222,30 +22998,42 @@ def _derived_report_gates(
         or backup.restore_summary.profile != summary.profile
     ):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
-    try:
-        concurrent_source_registration = _require_token(concurrent.source_token)
-        _require_token(concurrent.backup_token)
-        observed_concurrent_source = verify_store(concurrent.source_token)
-        observed_concurrent_backup = verify_store(concurrent.backup_token)
-        observed_concurrent_files = _closed_file_manifest(concurrent.backup_token)
-        observed_concurrent_tails = _tail_manifest(concurrent.backup_token)
-        _validate_live_backup_manifest(
-            concurrent.backup_manifest,
-            source_token=concurrent.source_token,
-            destination_token=concurrent.backup_token,
-            source_summary=concurrent.source_before,
-            destination_summary=concurrent.backup_summary,
-            destination_files=observed_concurrent_files,
-            destination_tails=observed_concurrent_tails,
-            require_exact_source_snapshot=False,
-        )
-    except HarnessFailure:
-        raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+    concurrent_source_registration: _RegisteredIdentity | None = None
+    observed_concurrent_source: VerificationSummary | None = None
+    observed_concurrent_backup: VerificationSummary | None = None
+    if validate_live:
+        try:
+            concurrent_source_registration = _require_token(concurrent.source_token)
+            _require_token(concurrent.backup_token)
+            observed_concurrent_source = verify_live_store_once(concurrent.source_token)
+            observed_concurrent_backup = verify_live_store_once(concurrent.backup_token)
+            observed_concurrent_files = _closed_file_manifest(concurrent.backup_token)
+            observed_concurrent_tails = live_tails_once(concurrent.backup_token)
+            _validate_live_backup_manifest(
+                concurrent.backup_manifest,
+                source_token=concurrent.source_token,
+                destination_token=concurrent.backup_token,
+                source_summary=concurrent.source_before,
+                destination_summary=concurrent.backup_summary,
+                destination_files=observed_concurrent_files,
+                destination_tails=observed_concurrent_tails,
+                require_exact_source_snapshot=False,
+            )
+        except HarnessFailure as error:
+            remap_live_failure(error)
     if (
-        concurrent_source_registration.pytest_registration is not registered.pytest_registration
+        (
+            validate_live
+            and (
+                concurrent_source_registration is None
+                or registered is None
+                or concurrent_source_registration.pytest_registration
+                is not registered.pytest_registration
+                or concurrent.source_after != observed_concurrent_source
+                or concurrent.backup_summary != observed_concurrent_backup
+            )
+        )
         or concurrent.source_token is concurrent.backup_token
-        or concurrent.source_after != observed_concurrent_source
-        or concurrent.backup_summary != observed_concurrent_backup
         or concurrent.source_before.profile != summary.profile
         or concurrent.source_after.profile != summary.profile
         or concurrent.backup_summary.profile != summary.profile
@@ -22299,32 +23087,46 @@ def _derived_report_gates(
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     _validate_verification_summary_shape(generation_copy.source_summary)
     _validate_verification_summary_shape(generation_copy.destination_summary)
-    try:
-        _require_token(generation_copy.source_token)
-        _require_token(generation_copy.destination_token)
-        observed_copy_source_summary = verify_store(generation_copy.source_token)
-        observed_copy_destination_summary = verify_store(generation_copy.destination_token)
-        observed_copy_source_id = _generation_evidence_id(generation_copy.source_token)
-        observed_copy_destination_id = _generation_evidence_id(
-            generation_copy.destination_token,
-        )
-        observed_copy_source_tails = _tail_manifest(generation_copy.source_token)
-        observed_copy_destination_tails = _tail_manifest(
-            generation_copy.destination_token,
-        )
-    except HarnessFailure:
-        raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+    observed_copy_source_summary: VerificationSummary | None = None
+    observed_copy_destination_summary: VerificationSummary | None = None
+    observed_copy_source_id: str | None = None
+    observed_copy_destination_id: str | None = None
+    observed_copy_source_tails: tuple[tuple[str, int, str, str], ...] | None = None
+    observed_copy_destination_tails: tuple[tuple[str, int, str, str], ...] | None = None
+    if validate_live:
+        try:
+            _require_token(generation_copy.source_token)
+            _require_token(generation_copy.destination_token)
+            observed_copy_source_summary = verify_live_store_once(generation_copy.source_token)
+            observed_copy_destination_summary = verify_live_store_once(
+                generation_copy.destination_token
+            )
+            observed_copy_source_id = _generation_evidence_id(generation_copy.source_token)
+            observed_copy_destination_id = _generation_evidence_id(
+                generation_copy.destination_token,
+            )
+            observed_copy_source_tails = live_tails_once(generation_copy.source_token)
+            observed_copy_destination_tails = live_tails_once(
+                generation_copy.destination_token,
+            )
+        except HarnessFailure as error:
+            remap_live_failure(error)
     if (
         generation_copy.source_token is not bootstrap.token
         or generation_copy.source_generation_id == generation_copy.destination_generation_id
         or generation_copy.source_generation_id != report.backup_manifest.destination_generation_id
         or generation_copy.source_tails != report.backup_manifest.per_stream_tails
-        or generation_copy.source_generation_id != observed_copy_source_id
-        or generation_copy.destination_generation_id != observed_copy_destination_id
-        or generation_copy.source_summary != observed_copy_source_summary
-        or generation_copy.destination_summary != observed_copy_destination_summary
-        or generation_copy.source_tails != observed_copy_source_tails
-        or generation_copy.destination_tails != observed_copy_destination_tails
+        or (
+            validate_live
+            and (
+                generation_copy.source_generation_id != observed_copy_source_id
+                or generation_copy.destination_generation_id != observed_copy_destination_id
+                or generation_copy.source_summary != observed_copy_source_summary
+                or generation_copy.destination_summary != observed_copy_destination_summary
+                or generation_copy.source_tails != observed_copy_source_tails
+                or generation_copy.destination_tails != observed_copy_destination_tails
+            )
+        )
         or generation_copy.source_summary != summary
         or type(generation_copy.destination_summary) is not VerificationSummary
         or generation_copy.destination_summary.profile != summary.profile
@@ -22352,6 +23154,29 @@ def _derived_report_gates(
     ):
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     _validated_report_query_rows(workload.query_evidence)
+    if validate_live and preserve_live_unavailable:
+        _, ordinal_tokens = _task064_report_role_tokens(evidence)
+        try:
+            exact_observations = tuple(
+                (
+                    ordinal,
+                    verify_live_store_once(token),
+                    live_tails_once(token),
+                    observed_projection if ordinal == 0 else None,
+                )
+                for ordinal, token in enumerate(ordinal_tokens)
+            )
+        except HarnessFailure as error:
+            remap_live_failure(error)
+        if (
+            len(observed_live_summaries) != 4
+            or len(observed_live_tails) != 4
+            or observed_projection is None
+            or (live_observations is not None and live_observations)
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        if live_observations is not None:
+            live_observations.extend(exact_observations)
     return tuple(
         (name, EvidenceDisposition.PASS, None) for name in GENERATED_EVIDENCE_GATES
     ) + tuple(
@@ -22548,6 +23373,8 @@ def _publish_evidence_report_bytes_unbound(
     raw: bytes,
     *,
     validate_before_link: Callable[[], bool],
+    validate_live_source_before_link: Callable[[], bool],
+    finalize_live_source: Callable[[bool], None],
     prepare_consumption: Callable[
         [],
         tuple[Callable[[], bool], Callable[[], bool], Callable[[], bool]],
@@ -22579,9 +23406,102 @@ def _publish_evidence_report_bytes_unbound(
     stage_created = False
     publication_attempted = False
     published = False
+    publication_readback_started = False
     publication_readback_verified = False
     cleanup_uncertain = False
     stage_details: os.stat_result | None = None
+    foreign_final_before: tuple[tuple[int, int, int, int, int, int, int, int], bytes] | None = None
+
+    def snapshot_foreign_final(
+        directory_descriptor: int,
+    ) -> tuple[tuple[int, int, int, int, int, int, int, int], bytes] | None:
+        descriptor = -1
+        try:
+            try:
+                path_before = os.stat(
+                    report_name,
+                    dir_fd=directory_descriptor,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                return None
+            if (
+                not stat.S_ISREG(path_before.st_mode)
+                or path_before.st_uid != os.getuid()
+                or path_before.st_nlink != 1
+                or type(path_before.st_size) is not int
+                or not 0 <= path_before.st_size <= 4 * 1024 * 1024
+            ):
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            descriptor = os.open(
+                report_name,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
+                dir_fd=directory_descriptor,
+            )
+            before = os.fstat(descriptor)
+            stable_fields = (
+                "st_dev",
+                "st_ino",
+                "st_uid",
+                "st_mode",
+                "st_nlink",
+                "st_size",
+                "st_mtime_ns",
+                "st_ctime_ns",
+            )
+            if any(
+                getattr(before, field) != getattr(path_before, field) for field in stable_fields
+            ):
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            observed = bytearray()
+            while len(observed) < before.st_size:
+                try:
+                    chunk = os.read(descriptor, before.st_size - len(observed))
+                except InterruptedError:
+                    continue
+                if not chunk:
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                observed.extend(chunk)
+            while True:
+                try:
+                    trailing = os.read(descriptor, 1)
+                    break
+                except InterruptedError:
+                    continue
+            after = os.fstat(descriptor)
+            path_after = os.stat(
+                report_name,
+                dir_fd=directory_descriptor,
+                follow_symlinks=False,
+            )
+            if trailing != b"" or any(
+                getattr(before, field) != getattr(after, field)
+                or getattr(before, field) != getattr(path_after, field)
+                for field in stable_fields
+            ):
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            identity = (
+                before.st_dev,
+                before.st_ino,
+                before.st_uid,
+                before.st_mode,
+                before.st_nlink,
+                before.st_size,
+                before.st_mtime_ns,
+                before.st_ctime_ns,
+            )
+            exact_descriptor = descriptor
+            descriptor = -1
+            os.close(exact_descriptor)
+            return identity, bytes(observed)
+        except BaseException as error:
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from error
+            raise
+
     try:
         directory_flags = (
             os.O_RDONLY
@@ -22630,8 +23550,6 @@ def _publish_evidence_report_bytes_unbound(
             cleanup_uncertain = True
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
 
-        if not validate_before_link():
-            raise HarnessFailure(HarnessFailureCode.CORRUPT)
         final_root_details = os.fstat(root_descriptor)
         if (
             final_root_details.st_dev != root_details.st_dev
@@ -22640,6 +23558,11 @@ def _publish_evidence_report_bytes_unbound(
             or stat.S_IMODE(final_root_details.st_mode) != stat.S_IMODE(root_details.st_mode)
         ):
             raise HarnessFailure(HarnessFailureCode.INVALID_BOOTSTRAP_ROOT)
+        foreign_final_before = snapshot_foreign_final(root_descriptor)
+        if not validate_before_link():
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        if not validate_live_source_before_link():
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
         publication_attempted = True
         os.link(
             stage_name,
@@ -22649,9 +23572,12 @@ def _publish_evidence_report_bytes_unbound(
             follow_symlinks=False,
         )
         published = True
+        if foreign_final_before is not None:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
         os.unlink(stage_name, dir_fd=root_descriptor)
         stage_created = False
         os.fsync(root_descriptor)
+        publication_readback_started = True
         final_path_details = os.stat(
             report_name,
             dir_fd=root_descriptor,
@@ -22716,9 +23642,13 @@ def _publish_evidence_report_bytes_unbound(
         if not commit_consumption() or not consumption_terminal():
             cleanup_uncertain = True
             raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        finalize_live_source(False)
         return path
     except BaseException as error:
         cleanup_ok = not cleanup_uncertain
+        collision_unchanged = False
+        owned_final_removed = False
+        final_name_proven = False
         if readback_descriptor >= 0:
             descriptor = readback_descriptor
             readback_descriptor = -1
@@ -22747,8 +23677,20 @@ def _publish_evidence_report_bytes_unbound(
                 if same_staged_inode:
                     os.unlink(report_name, dir_fd=root_descriptor)
                     published = False
+                    owned_final_removed = True
                 elif isinstance(error, FileExistsError) and not published:
-                    pass
+                    try:
+                        observed_foreign = snapshot_foreign_final(root_descriptor)
+                    except BaseException:
+                        observed_foreign = None
+                    collision_unchanged = bool(
+                        foreign_final_before is not None
+                        and observed_foreign == foreign_final_before
+                        and stage_details is not None
+                        and observed_foreign[0][0:2] != (stage_details.st_dev, stage_details.st_ino)
+                    )
+                    if not collision_unchanged:
+                        cleanup_ok = False
                 else:
                     cleanup_ok = False
             except FileNotFoundError:
@@ -22786,6 +23728,38 @@ def _publish_evidence_report_bytes_unbound(
         if root_descriptor >= 0 and not publication_readback_verified:
             try:
                 os.fsync(root_descriptor)
+                try:
+                    os.stat(
+                        stage_name,
+                        dir_fd=root_descriptor,
+                        follow_symlinks=False,
+                    )
+                except FileNotFoundError:
+                    pass
+                else:
+                    cleanup_ok = False
+                if collision_unchanged:
+                    try:
+                        final_after_sync = snapshot_foreign_final(root_descriptor)
+                    except BaseException:
+                        final_after_sync = None
+                    final_name_proven = bool(
+                        foreign_final_before is not None
+                        and final_after_sync == foreign_final_before
+                    )
+                    if not final_name_proven:
+                        cleanup_ok = False
+                else:
+                    try:
+                        os.stat(
+                            report_name,
+                            dir_fd=root_descriptor,
+                            follow_symlinks=False,
+                        )
+                    except FileNotFoundError:
+                        final_name_proven = True
+                    else:
+                        cleanup_ok = False
             except OSError:
                 cleanup_ok = False
         if root_descriptor >= 0:
@@ -22803,6 +23777,23 @@ def _publish_evidence_report_bytes_unbound(
             cleanup_ok = False
         if not cleanup_ok:
             mark_cleanup_uncertain()
+        retryable = bool(
+            cleanup_ok
+            and final_name_proven
+            and not publication_readback_started
+            and not publication_readback_verified
+            and (
+                not publication_attempted
+                or collision_unchanged
+                or (
+                    publication_attempted
+                    and not isinstance(error, FileExistsError)
+                    and foreign_final_before is None
+                    and (not published or owned_final_removed)
+                )
+            )
+        )
+        finalize_live_source(retryable)
         if publication_readback_verified or not cleanup_ok:
             terminalized = terminalize_consumption()
             if not terminalized and not consumption_terminal():
@@ -22833,14 +23824,28 @@ def _write_evidence_report_unbound(
     cleanup_uncertain_observed: Callable[[], bool],
     root_lookup: Callable[[Path], _ActivePytestRoot | None],
     serialize_report: Callable[[Mapping[str, object]], bytes],
+    schema_fingerprint_provider: Callable[[], str],
     register_published_artifact: Callable[..., None],
     pytest_root: Path,
     *,
     receipt: _EvidenceReceipt,
     report: EvidenceReport,
-) -> Path:
+    validate_live: bool,
+    preserve_live_unavailable: bool,
+    publish: bool,
+    validate_prepared_report: Callable[[_EvidenceLedger, bytes], bool],
+    validate_live_source_before_link: Callable[[], bool],
+    finalize_live_source: Callable[[bool], None],
+) -> Path | _PreparedEvidenceReport:
     """Write canonical generated evidence beneath one validated pytest root only."""
 
+    if (
+        type(validate_live) is not bool
+        or type(preserve_live_unavailable) is not bool
+        or type(publish) is not bool
+        or (preserve_live_unavailable and not validate_live)
+    ):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
     if cleanup_uncertain_observed():
         raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
     if type(report) is not EvidenceReport:
@@ -22852,6 +23857,7 @@ def _write_evidence_report_unbound(
         report.evidence,
         False,
     )
+    observed_schema_fingerprint = schema_fingerprint_provider()
     if (
         type(report) is not EvidenceReport
         or report.report_version != 1
@@ -22860,7 +23866,7 @@ def _write_evidence_report_unbound(
         or report.contract_generation != TASK_CONTRACT_GENERATION
         or type(report.contract_generation) is not int
         or report.contract_digest != TASK_CONTRACT_DIGEST
-        or report.schema_fingerprint != load_schema_fingerprint()
+        or report.schema_fingerprint != observed_schema_fingerprint
         or report.application_id != APPLICATION_ID
         or type(report.application_id) is not int
         or report.user_version != USER_VERSION
@@ -22903,7 +23909,21 @@ def _write_evidence_report_unbound(
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
     _validated_evidence_timestamp(report.evidence_recorded_at_utc)
     _validate_report_backup_manifest(report)
-    gates = _derived_report_gates(root, report)
+    observed_live: list[
+        tuple[
+            int,
+            VerificationSummary,
+            tuple[tuple[str, int, str, str], ...],
+            CurrentSlice | None,
+        ]
+    ] = []
+    gates = _derived_report_gates(
+        root,
+        report,
+        validate_live=validate_live,
+        preserve_live_unavailable=preserve_live_unavailable,
+        live_observations=observed_live if preserve_live_unavailable else None,
+    )
     query_rows = _validated_report_query_rows(report.query_evidence)
     if (
         any(
@@ -23031,6 +24051,16 @@ def _write_evidence_report_unbound(
     )
     if exact_receipt_ledger is not receipt_ledger:
         raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if not validate_prepared_report(receipt_ledger, raw):
+        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+    if not publish:
+        return _PreparedEvidenceReport(
+            ledger=receipt_ledger,
+            schema_fingerprint=observed_schema_fingerprint,
+            gates=gates,
+            live_observations=tuple(observed_live),
+            raw=raw,
+        )
 
     def validate_before_link() -> bool:
         return (
@@ -23057,6 +24087,8 @@ def _write_evidence_report_unbound(
         pytest_root,
         raw,
         validate_before_link=validate_before_link,
+        validate_live_source_before_link=validate_live_source_before_link,
+        finalize_live_source=finalize_live_source,
         prepare_consumption=prepare_consumption,
     )
     try:
@@ -23093,16 +24125,364 @@ def _build_evidence_report_writer(
         tuple[Callable[[], bool], Callable[[], bool], Callable[[], bool]],
     ],
     register_published_artifact: Callable[..., None],
-) -> tuple[Callable[..., Path], Callable[..., Path]]:
+    report_source_fingerprints: Callable[[], tuple[tuple[str, str], ...]],
+) -> tuple[
+    Callable[..., Path],
+    Callable[..., Path],
+    Callable[..., None],
+    Callable[[], tuple[str, bool, int | None, int | None]],
+    Callable[[], None],
+    Callable[[Path], bool],
+    Callable[[_ActivePytestRoot], bool],
+]:
     """Capture receipt validation and consumption behind the public writer."""
 
     validation_implementation = _validate_evidence_receipt_unbound
     writer_implementation = _write_evidence_report_unbound
     publisher_implementation = _publish_evidence_report_bytes_unbound
+    capture_file_snapshot = _capture_task064_report_file_snapshot
+    same_file_snapshot = _same_task064_report_file_snapshot
+    same_validation_boundary = _same_task064_report_validation_boundary
+    same_snapshot_bindings = _same_task064_report_snapshot_bindings
+    build_live_epoch = _build_task064_report_live_epoch
+    report_core_digest = _report_core_digest
     mark_cleanup_uncertain = _mark_process_cleanup_uncertain
     cleanup_uncertain_observed = _has_process_cleanup_uncertainty
     root_lookup = _lookup_active_pytest_root
+    root_identity_is_valid = _validate_pytest_root_identity
+    root_session_owns = _pytest_root_session_owns
+    generation3_schema_fingerprint_provider = load_schema_fingerprint
     json_serializer = json.dumps
+    digest_constructor = hashlib.sha256
+    evidence_digest = _evidence_payload_digest
+    schema_descriptor_path = SCHEMA_DESCRIPTOR_PATH
+    schema_fingerprint_path = SCHEMA_FINGERPRINT_PATH
+    path_read_bytes = Path.read_bytes
+    schema_document_parser = _parse_schema_descriptor_document
+    descriptor_serializer = canonical_descriptor_bytes
+    schema_fingerprint_from_descriptor = _schema_fingerprint_from_canonical_bytes
+    active_evidence_run = _ACTIVE_EVIDENCE_RUN
+    real_getpid = os.getpid
+    real_get_ident = get_ident
+    real_monotonic_ns = time.monotonic_ns
+    register_at_fork = getattr(os, "register_at_fork", None)
+    lock_constructor = threading.Lock
+    replace_value = replace
+    maximum_contract_integer = MAX_CONTRACT_INTEGER
+    validation_lifetime_ns = _TASK064_REPORT_VALIDATION_LIFETIME_NS
+    cache_lock = lock_constructor()
+    entry_gate = lock_constructor()
+    cache_lock_owner: tuple[int, int] | None = None
+    cache_state = "EMPTY"
+    cached_entry: _ReportValidationEntry | None = None
+    cached_owner: (
+        tuple[
+            Path,
+            _ActivePytestRoot,
+            _EvidenceRun,
+            _EvidenceLedger,
+            _EvidenceReceipt,
+            GeneratedEvidenceAggregate,
+            EvidenceReport,
+            int,
+            int,
+            _EvidenceRun | None,
+        ]
+        | None
+    ) = None
+    attempt_serial = 0
+    active_attempt: int | None = None
+    active_registration: _ActivePytestRoot | None = None
+    invalidation_generation = 0
+    last_clock_ns: int | None = None
+    source_fingerprints = report_source_fingerprints()
+
+    def clear_cache() -> None:
+        nonlocal cache_state
+        nonlocal cached_entry
+        nonlocal cached_owner
+        nonlocal active_attempt
+        nonlocal active_registration
+        cache_state = "EMPTY"
+        cached_entry = None
+        cached_owner = None
+        active_attempt = None
+        active_registration = None
+
+    def invalidate_active_cache_attempt() -> None:
+        nonlocal invalidation_generation
+        invalidation_generation += 1
+        clear_cache()
+
+    def clock_value(prior: int | None = None) -> int:
+        nonlocal last_clock_ns
+        try:
+            observed = real_monotonic_ns()
+        except BaseException:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        if (
+            type(observed) is not int
+            or observed < 0
+            or (prior is not None and observed < prior)
+            or (last_clock_ns is not None and observed < last_clock_ns)
+        ):
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        last_clock_ns = observed
+        return observed
+
+    @contextmanager
+    def cache_entry_scope() -> Iterator[tuple[int, str, _ReportValidationEntry | None]]:
+        nonlocal cache_lock_owner
+        starting_invalidation_generation = 0
+        starting_cache_state = "EMPTY"
+        starting_cached_entry: _ReportValidationEntry | None = None
+        caller = (real_getpid(), real_get_ident())
+        entry_gate.acquire()
+        if cache_lock_owner == caller:
+            try:
+                mark_cleanup_uncertain()
+                invalidate_active_cache_attempt()
+            finally:
+                entry_gate.release()
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        acquired = cache_lock.acquire(blocking=False)
+        if not acquired and cache_state in {"VALIDATING", "PUBLISHING"}:
+            try:
+                mark_cleanup_uncertain()
+                invalidate_active_cache_attempt()
+            finally:
+                entry_gate.release()
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        if acquired:
+            cache_lock_owner = caller
+        entry_gate.release()
+        if not acquired:
+            cache_lock.acquire()
+            entry_gate.acquire()
+            if cache_lock_owner is not None:
+                mark_cleanup_uncertain()
+                invalidate_active_cache_attempt()
+            cache_lock_owner = caller
+            entry_gate.release()
+        starting_invalidation_generation = invalidation_generation
+        starting_cache_state = cache_state
+        starting_cached_entry = cached_entry
+        try:
+            yield (
+                starting_invalidation_generation,
+                starting_cache_state,
+                starting_cached_entry,
+            )
+        finally:
+            entry_gate.acquire()
+            invalidated = invalidation_generation != starting_invalidation_generation
+            if invalidated:
+                clear_cache()
+            cache_lock_owner = None
+            cache_lock.release()
+            entry_gate.release()
+            if invalidated:
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+
+    def call_selects_entry_owner(
+        entry: _ReportValidationEntry,
+        pytest_root: Path,
+        receipt: _EvidenceReceipt,
+        report: EvidenceReport,
+    ) -> bool:
+        return bool(
+            type(entry) is _ReportValidationEntry
+            and type(receipt) is _EvidenceReceipt
+            and type(report) is EvidenceReport
+            and entry.pytest_root is pytest_root
+            and entry.receipt is receipt
+            and entry.report is report
+        )
+
+    def call_context_matches_entry(entry: _ReportValidationEntry) -> bool:
+        return bool(
+            type(entry) is _ReportValidationEntry
+            and entry.process_id == real_getpid()
+            and entry.thread_id == real_get_ident()
+            and entry.context_run is None
+            and active_evidence_run.get() is entry.context_run
+            and root_session_owns(entry.registration, False)
+        )
+
+    def cached_schema_fingerprint() -> str:
+        try:
+            fingerprint_raw = path_read_bytes(schema_fingerprint_path)
+            descriptor_raw = path_read_bytes(schema_descriptor_path)
+        except OSError:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        if (
+            not fingerprint_raw.endswith(b"\n")
+            or fingerprint_raw.endswith(b"\n\n")
+            or not descriptor_raw.endswith(b"\n")
+            or descriptor_raw.endswith(b"\n\n")
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        try:
+            fingerprint = fingerprint_raw[:-1].decode("ascii")
+            descriptor = schema_document_parser(descriptor_raw[:-1])
+            canonical_descriptor = descriptor_serializer(descriptor)
+            computed_fingerprint = schema_fingerprint_from_descriptor(
+                canonical_descriptor,
+            )
+        except HarnessFailure:
+            raise
+        except (UnicodeError, TypeError, ValueError, AttributeError):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+        except BaseException:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        if canonical_descriptor != descriptor_raw[:-1] or fingerprint != computed_fingerprint:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        return fingerprint
+
+    def validate_entry_bindings(entry: _ReportValidationEntry) -> None:
+        if type(entry) is not _ReportValidationEntry:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        owner = cached_owner
+        if (
+            owner is None
+            or type(owner) is not tuple
+            or len(owner) != 10
+            or owner[0] is not entry.pytest_root
+            or owner[1] is not entry.registration
+            or owner[2] is not entry.run
+            or owner[3] is not entry.ledger
+            or owner[4] is not entry.receipt
+            or owner[5] is not entry.evidence
+            or owner[6] is not entry.report
+            or owner[9] is not entry.context_run
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        original_issued_ns = owner[7]
+        original_expires_ns = owner[8]
+        if (
+            type(original_issued_ns) is not int
+            or type(original_expires_ns) is not int
+            or original_issued_ns < 0
+            or original_issued_ns > maximum_contract_integer - validation_lifetime_ns
+            or original_expires_ns != original_issued_ns + validation_lifetime_ns
+            or type(entry.issued_ns) is not int
+            or type(entry.expires_ns) is not int
+            or entry.issued_ns != original_issued_ns
+            or not original_issued_ns <= entry.expires_ns <= original_expires_ns
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        try:
+            root_registration = root_lookup(entry.pytest_root)
+            root_identity_live = root_identity_is_valid(entry.registration)
+            root_session_live = root_session_owns(entry.registration, False)
+        except BaseException:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        if root_registration is None or not root_identity_live or not root_session_live:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        if root_registration is not entry.registration:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        if not (
+            entry.contract_generation == _TASK064_REPORT_VALIDATION_GENERATION
+            and entry.contract_sha256 == _TASK064_REPORT_VALIDATION_CONTRACT_SHA256
+            and entry.process_id == real_getpid()
+            and entry.thread_id == real_get_ident()
+            and entry.registration.path_object is entry.pytest_root
+            and entry.registration.node_id == entry.node_id
+            and entry.run is entry.receipt.run
+            and entry.run._pytest_registration is entry.registration
+            and entry.ledger is entry.registration.evidence_ledger
+            and entry.ledger.run is entry.run
+            and entry.ledger.receipt is entry.receipt
+            and not entry.ledger.recording
+            and not entry.ledger.closed
+            and not entry.ledger.consumed
+            and entry.receipt.evidence is entry.evidence
+            and entry.receipt.evidence_digest == entry.evidence_digest
+            and entry.report.evidence is entry.evidence
+            and active_evidence_run.get() is entry.context_run
+            and entry.context_run is None
+            and entry.sqlite_source_id == ACCEPTED_SQLITE_SOURCE_ID
+            and entry.schema_fingerprint == entry.report.schema_fingerprint
+            and type(entry.raw) is bytes
+            and entry.raw_length == len(entry.raw)
+            and entry.raw_length > 0
+            and type(entry.epoch) is _ReportLiveEpoch
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        try:
+            current_schema_fingerprint = cached_schema_fingerprint()
+        except HarnessFailure:
+            raise
+        if entry.schema_fingerprint != current_schema_fingerprint:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        try:
+            current_source_fingerprints = report_source_fingerprints()
+        except BaseException:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        if entry.source_fingerprints != source_fingerprints:
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+        if current_source_fingerprints != source_fingerprints:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        try:
+            current_report_core = report_core_digest(
+                entry.report,
+                entry.evidence_digest,
+            )
+            current_evidence_digest = evidence_digest(entry.evidence)
+            current_raw_sha256 = digest_constructor(entry.raw).hexdigest()
+            current_epoch_sha256 = digest_constructor(entry.epoch.raw).hexdigest()
+            current_live_validation_sha256 = evidence_digest(
+                (
+                    "TASK064-REPORT-LIVE-VALIDATION-V1",
+                    entry.epoch.observations,
+                )
+            )
+            rebuilt_epoch = build_live_epoch(
+                entry.epoch.snapshot,
+                entry.epoch.observations,
+            )
+        except HarnessFailure:
+            raise
+        except (TypeError, ValueError, AttributeError):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+        except BaseException:
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        if (
+            current_report_core != entry.report_core_sha256
+            or current_evidence_digest != entry.evidence_digest
+            or current_raw_sha256 != entry.raw_sha256
+            or current_epoch_sha256 != entry.epoch.sha256
+            or current_live_validation_sha256 != entry.live_validation_sha256
+            or rebuilt_epoch.raw != entry.epoch.raw
+        ):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT)
+
+    def entry_bindings_are_live(entry: _ReportValidationEntry) -> bool:
+        try:
+            validate_entry_bindings(entry)
+        except BaseException:
+            return False
+        return True
+
+    def fail_reentrant_entry() -> Never:
+        mark_cleanup_uncertain()
+        invalidate_active_cache_attempt()
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+
+    def raise_sanitized(error: BaseException) -> Never:
+        if isinstance(error, HarnessFailure):
+            if error.code in {
+                HarnessFailureCode.CORRUPT,
+                HarnessFailureCode.INVALID_TOKEN,
+                HarnessFailureCode.UNSUPPORTED_VERSION,
+                HarnessFailureCode.BOUNDS_EXCEEDED,
+                HarnessFailureCode.UNPROVEN,
+            }:
+                raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+        if isinstance(error, (TypeError, ValueError, AttributeError)):
+            raise HarnessFailure(HarnessFailureCode.CORRUPT) from None
+        raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
 
     def serialize_report(document: Mapping[str, object]) -> bytes:
         try:
@@ -23140,19 +24520,553 @@ def _build_evidence_report_writer(
         receipt: _EvidenceReceipt,
         report: EvidenceReport,
     ) -> Path:
-        return writer_implementation(
-            validate_receipt,
-            prepare_receipt_consumption,
-            publisher_implementation,
-            mark_cleanup_uncertain,
-            cleanup_uncertain_observed,
-            root_lookup,
-            serialize_report,
-            register_published_artifact,
-            pytest_root,
-            receipt=receipt,
-            report=report,
-        )
+        nonlocal cache_state
+        nonlocal active_attempt
+        nonlocal active_registration
+        nonlocal attempt_serial
+        with cache_entry_scope() as (
+            scope_invalidation_generation,
+            state_at_entry,
+            entry_at_entry,
+        ):
+            if invalidation_generation != scope_invalidation_generation:
+                clear_cache()
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            if cache_state != state_at_entry or cached_entry is not entry_at_entry:
+                clear_cache()
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            if state_at_entry in {"VALIDATING", "PUBLISHING"}:
+                fail_reentrant_entry()
+
+            def accept_prepared(
+                _ledger: _EvidenceLedger,
+                _raw: bytes,
+            ) -> bool:
+                return True
+
+            def accept_live_source() -> bool:
+                return True
+
+            def finish_unprimed(_retryable: bool) -> None:
+                return None
+
+            if state_at_entry == "EMPTY":
+                if (
+                    entry_at_entry is not None
+                    or cached_owner is not None
+                    or active_registration is not None
+                ):
+                    mark_cleanup_uncertain()
+                    clear_cache()
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                result = writer_implementation(
+                    validate_receipt,
+                    prepare_receipt_consumption,
+                    publisher_implementation,
+                    mark_cleanup_uncertain,
+                    cleanup_uncertain_observed,
+                    root_lookup,
+                    serialize_report,
+                    generation3_schema_fingerprint_provider,
+                    register_published_artifact,
+                    pytest_root,
+                    receipt=receipt,
+                    report=report,
+                    validate_live=True,
+                    preserve_live_unavailable=False,
+                    publish=True,
+                    validate_prepared_report=accept_prepared,
+                    validate_live_source_before_link=accept_live_source,
+                    finalize_live_source=finish_unprimed,
+                )
+                if type(result) is not type(pytest_root):
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                return result
+            if state_at_entry != "READY" or type(entry_at_entry) is not _ReportValidationEntry:
+                mark_cleanup_uncertain()
+                clear_cache()
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            entry = entry_at_entry
+            if not call_selects_entry_owner(entry, pytest_root, receipt, report):
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            if not call_context_matches_entry(entry):
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            try:
+                now = clock_value(entry.issued_ns)
+            except HarnessFailure:
+                clear_cache()
+                raise
+            if now >= entry.expires_ns:
+                clear_cache()
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            try:
+                validate_entry_bindings(entry)
+            except BaseException as error:
+                clear_cache()
+                raise_sanitized(error)
+            attempt_serial += 1
+            attempt = attempt_serial
+            active_attempt = attempt
+            active_registration = entry.registration
+            cache_state = "PUBLISHING"
+            if invalidation_generation != scope_invalidation_generation:
+                clear_cache()
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            try:
+                writer_snapshot = capture_file_snapshot(entry.evidence)
+                writer_epoch = build_live_epoch(
+                    writer_snapshot,
+                    entry.epoch.observations,
+                )
+            except BaseException as error:
+                clear_cache()
+                raise_sanitized(error)
+            if cache_state != "PUBLISHING" or active_attempt != attempt:
+                clear_cache()
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            if not same_snapshot_bindings(entry.epoch.snapshot, writer_snapshot):
+                clear_cache()
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            if not same_file_snapshot(entry.epoch.snapshot, writer_snapshot):
+                clear_cache()
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            if writer_epoch.raw != entry.epoch.raw:
+                clear_cache()
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+
+            def validate_cached_prepared(
+                ledger: _EvidenceLedger,
+                raw: bytes,
+            ) -> bool:
+                return bool(
+                    cache_state == "PUBLISHING"
+                    and active_attempt == attempt
+                    and cached_entry is entry
+                    and ledger is entry.ledger
+                    and raw == entry.raw
+                    and len(raw) == entry.raw_length
+                    and digest_constructor(raw).hexdigest() == entry.raw_sha256
+                )
+
+            def validate_cached_live_source() -> bool:
+                if (
+                    cache_state != "PUBLISHING"
+                    or active_attempt != attempt
+                    or cached_entry is not entry
+                ):
+                    clear_cache()
+                    return False
+                try:
+                    validate_entry_bindings(entry)
+                except BaseException as error:
+                    clear_cache()
+                    raise_sanitized(error)
+                try:
+                    current_snapshot = capture_file_snapshot(entry.evidence)
+                    current_epoch = build_live_epoch(
+                        current_snapshot,
+                        entry.epoch.observations,
+                    )
+                    current_clock = clock_value(entry.issued_ns)
+                except BaseException as error:
+                    clear_cache()
+                    raise_sanitized(error)
+                if current_clock >= entry.expires_ns:
+                    clear_cache()
+                    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+                if not same_snapshot_bindings(entry.epoch.snapshot, current_snapshot):
+                    clear_cache()
+                    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+                if not same_file_snapshot(entry.epoch.snapshot, current_snapshot):
+                    clear_cache()
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                if current_epoch.raw != entry.epoch.raw:
+                    clear_cache()
+                    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+                return True
+
+            publication_finalized = False
+
+            def finalize_cached_live_source(retryable: bool) -> None:
+                nonlocal publication_finalized
+                nonlocal cache_state
+                nonlocal active_attempt
+                if publication_finalized:
+                    return
+                publication_finalized = True
+                if (
+                    not retryable
+                    or cleanup_uncertain_observed()
+                    or cache_state != "PUBLISHING"
+                    or active_attempt != attempt
+                    or cached_entry is not entry
+                    or not entry_bindings_are_live(entry)
+                ):
+                    clear_cache()
+                    return
+                try:
+                    current_clock = clock_value(entry.issued_ns)
+                    current_snapshot = capture_file_snapshot(entry.evidence)
+                    current_epoch = build_live_epoch(
+                        current_snapshot,
+                        entry.epoch.observations,
+                    )
+                except BaseException:
+                    clear_cache()
+                    return
+                if (
+                    current_clock >= entry.expires_ns
+                    or not same_file_snapshot(entry.epoch.snapshot, current_snapshot)
+                    or current_epoch.raw != entry.epoch.raw
+                ):
+                    clear_cache()
+                    return
+                cache_state = "READY"
+                active_attempt = None
+
+            try:
+                result = writer_implementation(
+                    validate_receipt,
+                    prepare_receipt_consumption,
+                    publisher_implementation,
+                    mark_cleanup_uncertain,
+                    cleanup_uncertain_observed,
+                    root_lookup,
+                    serialize_report,
+                    cached_schema_fingerprint,
+                    register_published_artifact,
+                    pytest_root,
+                    receipt=receipt,
+                    report=report,
+                    validate_live=False,
+                    preserve_live_unavailable=False,
+                    publish=True,
+                    validate_prepared_report=validate_cached_prepared,
+                    validate_live_source_before_link=validate_cached_live_source,
+                    finalize_live_source=finalize_cached_live_source,
+                )
+            except BaseException as error:
+                if not publication_finalized:
+                    clear_cache()
+                if cache_state == "PUBLISHING" or active_attempt == attempt:
+                    clear_cache()
+                if invalidation_generation != scope_invalidation_generation:
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+                raise_sanitized(error)
+            if not publication_finalized:
+                mark_cleanup_uncertain()
+                clear_cache()
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            if type(result) is not type(pytest_root) or cache_state != "EMPTY":
+                mark_cleanup_uncertain()
+                clear_cache()
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            return result
+
+    def prime(
+        pytest_root: Path,
+        *,
+        receipt: _EvidenceReceipt,
+        report: EvidenceReport,
+    ) -> None:
+        nonlocal cache_state
+        nonlocal cached_entry
+        nonlocal cached_owner
+        nonlocal attempt_serial
+        nonlocal active_attempt
+        nonlocal active_registration
+        with cache_entry_scope() as (
+            scope_invalidation_generation,
+            state_at_entry,
+            entry_at_entry,
+        ):
+            if invalidation_generation != scope_invalidation_generation:
+                clear_cache()
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            if cache_state != state_at_entry or cached_entry is not entry_at_entry:
+                clear_cache()
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            if state_at_entry in {"VALIDATING", "PUBLISHING"}:
+                fail_reentrant_entry()
+            if state_at_entry == "READY":
+                entry = entry_at_entry
+                if type(entry) is _ReportValidationEntry and call_selects_entry_owner(
+                    entry,
+                    pytest_root,
+                    receipt,
+                    report,
+                ):
+                    if not call_context_matches_entry(entry):
+                        raise HarnessFailure(HarnessFailureCode.CORRUPT)
+                    try:
+                        now = clock_value(entry.issued_ns)
+                    except HarnessFailure:
+                        clear_cache()
+                        raise
+                    if now >= entry.expires_ns:
+                        clear_cache()
+                    else:
+                        try:
+                            validate_entry_bindings(entry)
+                        except BaseException as error:
+                            clear_cache()
+                            raise_sanitized(error)
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            if state_at_entry != "EMPTY" or entry_at_entry is not None:
+                mark_cleanup_uncertain()
+                clear_cache()
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            attempt_serial += 1
+            attempt = attempt_serial
+            active_attempt = attempt
+            cache_state = "VALIDATING"
+            if invalidation_generation != scope_invalidation_generation:
+                clear_cache()
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+
+            def accept_prepared(
+                _ledger: _EvidenceLedger,
+                _raw: bytes,
+            ) -> bool:
+                return cache_state == "VALIDATING" and active_attempt == attempt
+
+            def unused_live_source() -> bool:
+                return False
+
+            def unused_finalizer(_retryable: bool) -> None:
+                return None
+
+            try:
+                if cleanup_uncertain_observed():
+                    clear_cache()
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                registration = root_lookup(pytest_root)
+                if registration is None or registration.path_object is not pytest_root:
+                    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+                active_registration = registration
+                context_run = active_evidence_run.get()
+                if context_run is not None:
+                    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+                before = capture_file_snapshot(report.evidence)
+                prepared = writer_implementation(
+                    validate_receipt,
+                    prepare_receipt_consumption,
+                    publisher_implementation,
+                    mark_cleanup_uncertain,
+                    cleanup_uncertain_observed,
+                    root_lookup,
+                    serialize_report,
+                    cached_schema_fingerprint,
+                    register_published_artifact,
+                    pytest_root,
+                    receipt=receipt,
+                    report=report,
+                    validate_live=True,
+                    preserve_live_unavailable=True,
+                    publish=False,
+                    validate_prepared_report=accept_prepared,
+                    validate_live_source_before_link=unused_live_source,
+                    finalize_live_source=unused_finalizer,
+                )
+                if type(prepared) is not _PreparedEvidenceReport:
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                after = capture_file_snapshot(report.evidence)
+                if cache_state != "VALIDATING" or active_attempt != attempt:
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                if not same_snapshot_bindings(before, after):
+                    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+                if not same_validation_boundary(before, after):
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                observations = prepared.live_observations
+                epoch = build_live_epoch(after, observations)
+                live_validation_sha256 = evidence_digest(
+                    (
+                        "TASK064-REPORT-LIVE-VALIDATION-V1",
+                        observations,
+                    )
+                )
+                if (
+                    receipt.run._pytest_registration is not registration
+                    or active_evidence_run.get() is not context_run
+                    or prepared.ledger is not registration.evidence_ledger
+                ):
+                    raise HarnessFailure(HarnessFailureCode.CORRUPT)
+                issued_ns = clock_value()
+                if issued_ns > maximum_contract_integer - validation_lifetime_ns:
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                expires_ns = issued_ns + validation_lifetime_ns
+                raw = prepared.raw
+                entry = _ReportValidationEntry(
+                    pytest_root=pytest_root,
+                    registration=registration,
+                    run=receipt.run,
+                    ledger=prepared.ledger,
+                    receipt=receipt,
+                    evidence=receipt.evidence,
+                    report=report,
+                    process_id=real_getpid(),
+                    thread_id=real_get_ident(),
+                    node_id=registration.node_id,
+                    context_run=context_run,
+                    contract_generation=_TASK064_REPORT_VALIDATION_GENERATION,
+                    contract_sha256=_TASK064_REPORT_VALIDATION_CONTRACT_SHA256,
+                    schema_fingerprint=prepared.schema_fingerprint,
+                    sqlite_source_id=ACCEPTED_SQLITE_SOURCE_ID,
+                    source_fingerprints=source_fingerprints,
+                    evidence_digest=receipt.evidence_digest,
+                    report_core_sha256=report_core_digest(
+                        report,
+                        receipt.evidence_digest,
+                    ),
+                    live_validation_sha256=live_validation_sha256,
+                    raw=raw,
+                    raw_length=len(raw),
+                    raw_sha256=digest_constructor(raw).hexdigest(),
+                    epoch=epoch,
+                    issued_ns=issued_ns,
+                    expires_ns=expires_ns,
+                )
+                if cache_state != "VALIDATING" or active_attempt != attempt:
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+                cached_owner = (
+                    pytest_root,
+                    registration,
+                    receipt.run,
+                    prepared.ledger,
+                    receipt,
+                    receipt.evidence,
+                    report,
+                    issued_ns,
+                    expires_ns,
+                    context_run,
+                )
+                validate_entry_bindings(entry)
+                cached_entry = entry
+                cache_state = "READY"
+                active_attempt = None
+            except BaseException as error:
+                if active_attempt == attempt or cache_state == "VALIDATING":
+                    clear_cache()
+                if invalidation_generation != scope_invalidation_generation:
+                    raise HarnessFailure(HarnessFailureCode.UNAVAILABLE) from None
+                raise_sanitized(error)
+            return None
+
+    def observe() -> tuple[str, bool, int | None, int | None]:
+        caller = (real_getpid(), real_get_ident())
+        entry_gate.acquire()
+        if cache_lock_owner == caller:
+            try:
+                mark_cleanup_uncertain()
+                invalidate_active_cache_attempt()
+            finally:
+                entry_gate.release()
+            raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+        entry_gate.release()
+        with cache_lock:
+            entry = cached_entry
+            return (
+                cache_state,
+                type(entry) is _ReportValidationEntry,
+                entry.issued_ns if type(entry) is _ReportValidationEntry else None,
+                entry.expires_ns if type(entry) is _ReportValidationEntry else None,
+            )
+
+    def force_expiry() -> None:
+        nonlocal cached_entry
+        with cache_entry_scope() as (
+            scope_invalidation_generation,
+            state_at_entry,
+            entry_at_entry,
+        ):
+            if (
+                invalidation_generation != scope_invalidation_generation
+                or cache_state != state_at_entry
+                or cached_entry is not entry_at_entry
+            ):
+                clear_cache()
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+            entry = entry_at_entry
+            if (
+                state_at_entry != "READY"
+                or type(entry) is not _ReportValidationEntry
+                or entry.process_id != real_getpid()
+                or entry.thread_id != real_get_ident()
+                or active_evidence_run.get() is not entry.context_run
+            ):
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            try:
+                validate_entry_bindings(entry)
+            except BaseException as error:
+                clear_cache()
+                raise_sanitized(error)
+            try:
+                observed = clock_value(entry.issued_ns)
+            except HarnessFailure:
+                clear_cache()
+                raise
+            if observed >= entry.expires_ns:
+                clear_cache()
+                raise HarnessFailure(HarnessFailureCode.CORRUPT)
+            cached_entry = replace_value(entry, expires_ns=observed)
+            if invalidation_generation != scope_invalidation_generation:
+                clear_cache()
+                raise HarnessFailure(HarnessFailureCode.UNAVAILABLE)
+
+    def root_cache_teardown(identity: _ActivePytestRoot) -> bool:
+        nonlocal invalidation_generation
+        entry_gate.acquire()
+        acquired = cache_lock.acquire(blocking=False)
+        try:
+            entry = cached_entry
+            owner = (
+                entry.registration if type(entry) is _ReportValidationEntry else active_registration
+            )
+            if cache_state == "EMPTY" and entry is None and active_registration is None:
+                return True
+            if (
+                not acquired
+                and owner is None
+                and cache_state in {"VALIDATING", "PUBLISHING"}
+                and active_attempt is not None
+            ):
+                invalidation_generation += 1
+                clear_cache()
+                return True
+            if owner is not identity:
+                return True
+            if not acquired:
+                invalidation_generation += 1
+            clear_cache()
+            return bool(
+                cache_state == "EMPTY" and cached_entry is None and active_registration is None
+            )
+        finally:
+            if acquired:
+                cache_lock.release()
+            entry_gate.release()
+
+    def fixture_cache_teardown(pytest_root: Path) -> bool:
+        identity = root_lookup(pytest_root)
+        if identity is None or identity.path_object is not pytest_root:
+            return False
+        return root_cache_teardown(identity)
+
+    def clear_after_fork() -> None:
+        nonlocal cache_lock
+        nonlocal cache_lock_owner
+        nonlocal entry_gate
+        nonlocal invalidation_generation
+        nonlocal last_clock_ns
+        cache_lock = lock_constructor()
+        entry_gate = lock_constructor()
+        cache_lock_owner = None
+        invalidation_generation = 0
+        last_clock_ns = None
+        clear_cache()
+
+    if register_at_fork is not None:
+        register_at_fork(after_in_child=clear_after_fork)
 
     def report_close_probe_writer(
         pytest_root: Path,
@@ -23170,6 +25084,12 @@ def _build_evidence_report_writer(
         ]:
             return prepare_report_permit_consumption(permit)
 
+        def validate_live_source_before_link() -> bool:
+            return True
+
+        def finalize_live_source(_retryable: bool) -> None:
+            return None
+
         return publisher_implementation(
             mark_cleanup_uncertain,
             cleanup_uncertain_observed,
@@ -23177,32 +25097,61 @@ def _build_evidence_report_writer(
             pytest_root,
             artifact,
             validate_before_link=validate_before_link,
+            validate_live_source_before_link=validate_live_source_before_link,
+            finalize_live_source=finalize_live_source,
             prepare_consumption=prepare_consumption,
         )
 
-    return writer, report_close_probe_writer
+    return (
+        writer,
+        report_close_probe_writer,
+        prime,
+        observe,
+        force_expiry,
+        fixture_cache_teardown,
+        root_cache_teardown,
+    )
 
 
 (
     write_evidence_report,
     _publish_task064_report_close_probe,
+    prime_evidence_report_validation,
+    _observe_task064_report_validation_for_test,
+    _force_task064_report_validation_expiry_for_test,
+    _teardown_task064_report_validation_at_fixture_exit,
+    _task064_report_validation_root_teardown,
 ) = _build_evidence_report_writer(
     _validate_issued_evidence_receipt,
     _prepare_issued_evidence_receipt_consumption,
     _validate_task064_report_publication_permit,
     _prepare_task064_report_publication_permit_consumption,
     _register_task064_published_report_artifact,
+    _task064_report_source_fingerprints,
 )
+_bind_pytest_root_report_cache_teardown(
+    _task064_report_validation_root_teardown,
+)
+del _bind_pytest_root_report_cache_teardown
+del _task064_report_validation_root_teardown
 for _closed_report_writer_authority_name in (
     "_build_evidence_report_writer",
+    "_valid_task064_report_file_observation",
     "_validate_evidence_receipt_unbound",
     "_write_evidence_report_unbound",
     "_publish_evidence_report_bytes_unbound",
+    "_capture_task064_report_file_snapshot",
+    "_same_task064_report_file_snapshot",
+    "_same_task064_report_validation_boundary",
+    "_same_task064_report_snapshot_bindings",
+    "_build_task064_report_live_epoch",
+    "_report_core_digest",
     "_validate_issued_evidence_receipt",
     "_prepare_issued_evidence_receipt_consumption",
     "_validate_task064_report_publication_permit",
     "_prepare_task064_report_publication_permit_consumption",
     "_register_task064_published_report_artifact",
+    "_task064_report_source_fingerprints",
 ):
     globals().pop(_closed_report_writer_authority_name, None)
 globals().pop("_closed_report_writer_authority_name", None)
