@@ -15348,10 +15348,18 @@ def test_finite_typical_workload_measurements_and_sanitized_report(
         assert not report_path.exists()
         assert not tuple(tmp_path.glob(".task064-evidence-*.tmp"))
 
-        for name, value in positive_cache_cells.items():
-            prime_cells[name].cell_contents = value
-        prime_cells["cache_state"].cell_contents = "READY"
-        assert harness._observe_task064_report_validation_for_test() == positive_cache_state
+        harness.prime_evidence_report_validation(
+            tmp_path,
+            receipt=evidence_receipt,
+            report=complete_report,
+        )
+        refreshed_cache_state = harness._observe_task064_report_validation_for_test()
+        assert refreshed_cache_state[0] == "READY"
+        assert refreshed_cache_state[1]
+        assert type(refreshed_cache_state[2]) is int
+        assert type(refreshed_cache_state[3]) is int
+        assert refreshed_cache_state[2] + 120_000_000_000 == refreshed_cache_state[3]
+        assert prime_cells["cached_entry"].cell_contents is not cached_entry
         assert evidence_ledger.receipt is evidence_receipt
         assert not receipt_is_consumed()
 
