@@ -214,6 +214,98 @@ def test_stored_raw_bytes_are_revalidated_when_reloaded(tmp_path: Path) -> None:
     assert error.value.code is SQLiteMarketStorageErrorCode.CORRUPT_RECORD
 
 
+@pytest.mark.parametrize("close", ["102", "103"])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("source", "other.public-rest"),
+        ("venue", "OTHER"),
+        ("instrument", "ETH-USDT"),
+    ],
+)
+def test_candle_identity_mismatch_blocks_duplicate_and_conflict_admission(
+    tmp_path: Path,
+    close: str,
+    field: str,
+    value: str,
+) -> None:
+    database_path = tmp_path / "market-data.sqlite3"
+    store = SQLiteCandleStore(database_path)
+    original = build_batch()
+    incoming = build_batch(
+        raw_id=6,
+        candle_id=7,
+        body=b'[["new","provider","capture"]]',
+        close=close,
+    )
+    store.append_batch(original)
+    mismatched = original.records[0].model_copy(update={field: value})
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "UPDATE canonical_candles SET record_json = ? WHERE record_id = ?",
+            (mismatched.model_dump_json(), str(original.records[0].record_id)),
+        )
+
+    with pytest.raises(SQLiteMarketStorageError) as error:
+        store.append_batch(incoming)
+
+    assert error.value.code is SQLiteMarketStorageErrorCode.CORRUPT_RECORD
+    assert store.raw_payload(incoming.raw_payload.record_id) is None
+    assert store.raw_payload_ids_for_candle(original.records[0].record_id) == (
+        original.raw_payload.record_id,
+    )
+    assert store.conflicts_for_stream(stream()) == ()
+
+
+def test_standalone_candle_append_rejects_mismatched_retained_identity(tmp_path: Path) -> None:
+    database_path = tmp_path / "market-data.sqlite3"
+    store = SQLiteCandleStore(database_path)
+    original = build_batch()
+    store.append_batch(original)
+    mismatched = original.records[0].model_copy(update={"instrument": "ETH-USDT"})
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "UPDATE canonical_candles SET record_json = ? WHERE record_id = ?",
+            (mismatched.model_dump_json(), str(original.records[0].record_id)),
+        )
+
+    with pytest.raises(SQLiteMarketStorageError) as error:
+        store.append(original.records[0])
+
+    assert error.value.code is SQLiteMarketStorageErrorCode.CORRUPT_RECORD
+
+
+@pytest.mark.parametrize("target", ["record_id", "open_time"])
+def test_candle_stream_read_rejects_mismatched_retained_projections(
+    tmp_path: Path,
+    target: str,
+) -> None:
+    database_path = tmp_path / "market-data.sqlite3"
+    store = SQLiteCandleStore(database_path)
+    original = build_batch()
+    store.append_batch(original)
+    with sqlite3.connect(database_path) as connection:
+        if target == "record_id":
+            mismatched = original.records[0].model_copy(update={"record_id": UUID(int=99)})
+            connection.execute(
+                "UPDATE canonical_candles SET record_json = ? WHERE record_id = ?",
+                (mismatched.model_dump_json(), str(original.records[0].record_id)),
+            )
+        else:
+            connection.execute(
+                "UPDATE canonical_candles SET open_time = ? WHERE record_id = ?",
+                (
+                    (OPEN_TIME + timedelta(minutes=1)).isoformat(),
+                    str(original.records[0].record_id),
+                ),
+            )
+
+    with pytest.raises(SQLiteMarketStorageError) as error:
+        store.records_for_stream(stream())
+
+    assert error.value.code is SQLiteMarketStorageErrorCode.CORRUPT_RECORD
+
+
 def test_unknown_schema_version_is_rejected_without_migration(tmp_path: Path) -> None:
     database_path = tmp_path / "future.sqlite3"
     with sqlite3.connect(database_path) as connection:

@@ -460,7 +460,12 @@ def test_manifest_mutations_fail_closed(tmp_path: Path, case: str) -> None:
         outside_target = tmp_path / "outside.json"
         outside_target.write_bytes(exact_body)
         fixture_path.unlink()
-        fixture_path.symlink_to(outside_target)
+        try:
+            fixture_path.symlink_to(outside_target)
+        except OSError as error:
+            if getattr(error, "winerror", None) != 1314:
+                raise
+            pytest.skip("Windows requires symlink privilege; this case remains active in Linux CI")
     elif case == "oversized-fixture":
         oversized_payload = cast(
             list[list[object]], json.loads((root / EXPECTED_PATHS[0]).read_bytes())

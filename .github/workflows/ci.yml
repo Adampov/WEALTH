@@ -14,8 +14,16 @@ concurrency:
 
 jobs:
   quality:
-    name: Quality and security
-    runs-on: ubuntu-latest
+    name: ${{ matrix.check-name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            check-name: Quality and security
+          - os: windows-latest
+            check-name: Quality and security (Windows)
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
 
     steps:

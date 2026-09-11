@@ -1,6 +1,7 @@
 """Bounded public-trade range ingestion with adaptive window splitting."""
 
 from collections import deque
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -398,14 +399,17 @@ class AdaptivePublicTradeRangeIngestor:
                 f"trade range exceeds configured maximum {self.range_policy.max_range_duration}"
             )
 
-        pending = deque(self._initial_windows(request))
+        initial_windows = self._initial_windows(request)
+        pending: deque[PublicTradeWindowRequest] = deque()
         traces: list[PublicTradeWindowTrace] = []
         source_request_count = 0
         ingested_record_count = 0
         batch_ingestor = OrderFlowBatchIngestor(store=self.store, auditor=self.auditor)
 
-        while pending:
-            window = pending.popleft()
+        while True:
+            window = pending.popleft() if pending else next(initial_windows, None)
+            if window is None:
+                break
             if source_request_count >= self.range_policy.max_source_requests:
                 return self._result(
                     request=request,
@@ -454,7 +458,8 @@ class AdaptivePublicTradeRangeIngestor:
                         pending.appendleft(children[1])
                         pending.appendleft(children[0])
                         self._pace_if_more_requests_are_allowed(
-                            pending=pending,
+                            has_pending_windows=bool(pending)
+                            or window.window_end_exclusive < request.window_end_exclusive,
                             source_request_count=source_request_count,
                         )
                         break
@@ -553,7 +558,8 @@ class AdaptivePublicTradeRangeIngestor:
                     )
                 ingested_record_count += len(batch.records)
                 self._pace_if_more_requests_are_allowed(
-                    pending=pending,
+                    has_pending_windows=bool(pending)
+                    or window.window_end_exclusive < request.window_end_exclusive,
                     source_request_count=source_request_count,
                 )
                 break
@@ -568,17 +574,17 @@ class AdaptivePublicTradeRangeIngestor:
     def _initial_windows(
         self,
         request: PublicTradeWindowRequest,
-    ) -> tuple[PublicTradeWindowRequest, ...]:
-        windows: list[PublicTradeWindowRequest] = []
+    ) -> Iterator[PublicTradeWindowRequest]:
+        """Plan only the next initial window, regardless of the requested range size."""
+
         window_start = request.window_start
         while window_start < request.window_end_exclusive:
-            window_end = min(
-                window_start + self.range_policy.initial_window_duration,
-                request.window_end_exclusive,
+            window_end = window_start + min(
+                self.range_policy.initial_window_duration,
+                request.window_end_exclusive - window_start,
             )
-            windows.append(_window_like(request, window_start, window_end))
+            yield _window_like(request, window_start, window_end)
             window_start = window_end
-        return tuple(windows)
 
     def _split(
         self,
@@ -600,10 +606,10 @@ class AdaptivePublicTradeRangeIngestor:
     def _pace_if_more_requests_are_allowed(
         self,
         *,
-        pending: deque[PublicTradeWindowRequest],
+        has_pending_windows: bool,
         source_request_count: int,
     ) -> None:
-        if pending and source_request_count < self.range_policy.max_source_requests:
+        if has_pending_windows and source_request_count < self.range_policy.max_source_requests:
             self.sleeper.sleep(self.range_policy.inter_request_delay_seconds)
 
     @staticmethod
