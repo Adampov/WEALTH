@@ -69,7 +69,8 @@
     "continuous_public_trade_stream_persistence_contract",
     "continuous_public_trade_stream_persistence_codec_contracts",
     "continuous_public_trade_stream_store_port_contracts",
-    "continuous_public_trade_stream_physical_store_architecture"
+    "continuous_public_trade_stream_physical_store_architecture",
+    "continuous_public_trade_stream_sqlite_schema_evidence_harness"
   ],
   "active_integrations": [
     "github_actions_ci"
@@ -161,11 +162,16 @@
       "decision_id": "ADR-0031",
       "summary": "Select the design-only continuous public-trade physical stream-store architecture and preimplementation evidence gates.",
       "artifact": "docs/decisions/0031-continuous-public-trade-stream-physical-store-architecture.md"
+    },
+    {
+      "decision_id": "ADR-0032",
+      "summary": "Freeze the test-only continuous public-trade SQLite schema and generated-data evidence harness.",
+      "artifact": "docs/decisions/0032-continuous-public-trade-stream-sqlite-schema-evidence-harness.md"
     }
   ],
   "next_action": {
     "task_id": "TASK-064",
     "action": "phase2.continuous_public_trade_stream_sqlite_schema_evidence_harness"
   },
-  "last_updated_utc": "2026-07-28T21:41:54Z"
+  "last_updated_utc": "2026-07-29T15:41:52Z"
 }

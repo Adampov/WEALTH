@@ -546,10 +546,13 @@ def test_symbolic_link_source_is_rejected_when_supported(tmp_path: Path) -> None
     except OSError:
         pytest.skip("symbolic-link creation is not available in this Windows environment")
 
-    with pytest.raises(SQLitePreflightError) as captured:
-        fingerprint_synthetic_sqlite_fixture(_request(link_path, SQLiteStoreFamily.MARKET))
+    try:
+        with pytest.raises(SQLitePreflightError) as captured:
+            fingerprint_synthetic_sqlite_fixture(_request(link_path, SQLiteStoreFamily.MARKET))
 
-    assert captured.value.code is SQLitePreflightErrorCode.SYMLINK_SOURCE
+        assert captured.value.code is SQLitePreflightErrorCode.SYMLINK_SOURCE
+    finally:
+        link_path.unlink(missing_ok=True)
 
 
 def test_hard_link_source_is_rejected_when_supported(tmp_path: Path) -> None:
@@ -561,10 +564,13 @@ def test_hard_link_source_is_rejected_when_supported(tmp_path: Path) -> None:
     except OSError:
         pytest.skip("hard-link creation is not available in this environment")
 
-    with pytest.raises(SQLitePreflightError) as captured:
-        fingerprint_synthetic_sqlite_fixture(_request(hard_link_path, SQLiteStoreFamily.MARKET))
+    try:
+        with pytest.raises(SQLitePreflightError) as captured:
+            fingerprint_synthetic_sqlite_fixture(_request(hard_link_path, SQLiteStoreFamily.MARKET))
 
-    assert captured.value.code is SQLitePreflightErrorCode.ALIASED_SOURCE
+        assert captured.value.code is SQLitePreflightErrorCode.ALIASED_SOURCE
+    finally:
+        hard_link_path.unlink(missing_ok=True)
 
 
 def test_immutable_connection_denies_every_write_attach_and_temp_escape(tmp_path: Path) -> None:

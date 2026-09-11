@@ -1,6 +1,9 @@
 """Tests for the canonical machine-readable project-state contract."""
 
+import ast
+import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any, cast
 
@@ -11,6 +14,13 @@ from wealth.domain.project_state import ProjectState, load_project_state
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_STATE_PATH = REPOSITORY_ROOT / "PROJECT_STATE.json"
+CI_WORKFLOW_PATH = REPOSITORY_ROOT / ".github" / "workflows" / "ci.yml"
+TASK064_UNIT_SCHEMA_TEST_PATH = (
+    REPOSITORY_ROOT
+    / "tests"
+    / "unit"
+    / "test_task_064_continuous_public_trade_stream_sqlite_schema.py"
+)
 ROOT_README_PATH = REPOSITORY_ROOT / "README.md"
 RISK_REGISTER_PATH = REPOSITORY_ROOT / "RISK_REGISTER.md"
 BACKLOG_PATH = REPOSITORY_ROOT / "BACKLOG.md"
@@ -34,6 +44,12 @@ ADR_0031_PATH = (
     / "docs"
     / "decisions"
     / "0031-continuous-public-trade-stream-physical-store-architecture.md"
+)
+ADR_0032_PATH = (
+    REPOSITORY_ROOT
+    / "docs"
+    / "decisions"
+    / "0032-continuous-public-trade-stream-sqlite-schema-evidence-harness.md"
 )
 
 
@@ -128,6 +144,9 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert "continuous_public_trade_stream_persistence_codec_contracts" in state.active_components
     assert "continuous_public_trade_stream_store_port_contracts" in state.active_components
     assert "continuous_public_trade_stream_physical_store_architecture" in (state.active_components)
+    assert "continuous_public_trade_stream_sqlite_schema_evidence_harness" in (
+        state.active_components
+    )
     assert len(state.open_tasks) == 2
     task_037, task_064 = state.open_tasks
     assert task_037.task_id == "TASK-037"
@@ -152,6 +171,7 @@ def test_repository_project_state_is_valid_and_names_one_next_action() -> None:
     assert any(decision.decision_id == "ADR-0029" for decision in state.recent_decisions)
     assert any(decision.decision_id == "ADR-0030" for decision in state.recent_decisions)
     assert any(decision.decision_id == "ADR-0031" for decision in state.recent_decisions)
+    assert any(decision.decision_id == "ADR-0032" for decision in state.recent_decisions)
 
 
 def test_project_state_references_existing_governance_artifacts() -> None:
@@ -165,6 +185,7 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     adr_0029 = ADR_0029_PATH.read_text(encoding="utf-8")
     adr_0030 = ADR_0030_PATH.read_text(encoding="utf-8")
     adr_0031 = ADR_0031_PATH.read_text(encoding="utf-8")
+    adr_0032 = ADR_0032_PATH.read_text(encoding="utf-8")
 
     for decision in state.recent_decisions:
         assert (REPOSITORY_ROOT / decision.artifact).is_file()
@@ -297,22 +318,44 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     adr_0029_prose = collapse_whitespace(adr_0029)
     adr_0030_prose = collapse_whitespace(adr_0030)
     adr_0031_prose = collapse_whitespace(adr_0031)
+    adr_0032_prose = collapse_whitespace(adr_0032)
     assert next_action_section.count("### TASK-") == 1
     assert f"### {state.next_action.task_id} " in next_action_section
     assert f"`{state.next_action.action}`" in next_action_section
     assert "- **Status:** READY" in next_action_section
     assert "- **Risk tier:** RISK 1" in next_action_section
     assert "- **Human approval:** NOT REQUIRED" in next_action_section
-    assert "- **Contract generation:** 2" in next_action_section
-    assert "`FROZEN`" in next_action_section
+    assert (
+        "- **Contract generation:** 6 | STATUS=FROZEN | "
+        "SHA256=ec89a1df740805cc9b43e6f2530e940c0bf9b66e8f25ed878d3207d091c4bcb8"
+        in next_action_section
+    )
+    assert "Generation 5, normalized SHA-256" in next_action_prose
+    assert "`ba258296d4ffde716dc6ec02bbf606ca3f08cb48258dfca8061ca597f9e649e2`" in (
+        next_action_section
+    )
+    assert "`b079966273ef43d726ecc7aa64693189e7234a94397e965e334fe215eac60aa4`" in (
+        next_action_section
+    )
+    assert "`86e3650608f2f1c96a9aa272b2b9cd597bc3d5ac188a39937afb974536d11ccb`" in (
+        next_action_section
+    )
+    assert "exact candidate `9ff70a8aa34e5bf154679957c913bb21e93a3d5e`" in next_action_prose
     assert (
         "`2ba9d4d70bde04c5225649d1c3e4f70e86b5085c46a370ffcfbe716887bef836`" in next_action_section
     )
-    assert "`SUPERSEDED` before any writable activation" in next_action_prose
-    assert "Generation-1 read-only research and review outputs are retained as evidence only" in (
+    assert (
+        "`5c48f313870bc729b3e8fcc66777df086c3bd9cde4e3818703aed285ad3570dc`" in next_action_section
+    )
+    assert "was `SUPERSEDED` before writable activation" in next_action_prose
+    assert "`SUPERSEDED` during writable activation, before any result commit" in next_action_prose
+    assert "is `SUPERSEDED` before integration or acceptance" in next_action_prose
+    assert "No generation-5 result commit is an integration source" in next_action_prose
+    assert "Generation 6 starts only from that generation-3 candidate" in next_action_prose
+    assert "all 2,298 tests passed" in next_action_prose
+    assert "Earlier outputs are evidence only and cannot count as generation-6 acceptance" in (
         next_action_prose
     )
-    assert "revalidated and rebound to generation 2" in next_action_prose
     assert "`phase2.continuous_public_trade_stream_sqlite_schema_evidence_harness`" in (
         task_064_section
     )
@@ -1297,6 +1340,7 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "0029-continuous-public-trade-stream-persistence-contract.md" in decision_index
     assert "0030-continuous-public-trade-stream-store-port-contract.md" in decision_index
     assert "0031-continuous-public-trade-stream-physical-store-architecture.md" in decision_index
+    assert "0032-continuous-public-trade-stream-sqlite-schema-evidence-harness.md" in decision_index
     assert "## Continuous Public-Trade Persistence Records and Codecs (Unused)" in (
         root_readme_prose
     )
@@ -1526,6 +1570,48 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "predecessor witness is deliberate bounded-read redundancy" in adr_0031_prose
     assert "This ADR intentionally contains no executable DDL" in adr_0031_prose
     assert "TASK-037" in adr_0031_prose
+    assert "# ADR 0032: Continuous Public-Trade Stream SQLite Schema and Evidence Harness" in (
+        adr_0032
+    )
+    assert "- **Status:** Accepted" in adr_0032
+    assert "generation 3 with normalized SHA-256" in adr_0032_prose
+    assert "86e3650608f2f1c96a9aa272b2b9cd597bc3d5ac188a39937afb974536d11ccb" in (adr_0032)
+    assert "`0x57505431`" in adr_0032
+    assert "sha256:0410c1f08390a411c73427b3d07c542f3d1828def7c6adebab51cd57375355b3" in adr_0032
+    assert "Python `3.13.14`, SQLite `3.53.1`" in adr_0032_prose
+    assert "ordinary rowid tables, as selected by ADR 0031" in adr_0032_prose
+    assert "at most five history rows" in adr_0032_prose
+    assert "at most three current history rows per candidate" in adr_0032_prose
+    assert "`maximum_contract_shape`" in adr_0032
+    assert "all twelve must be `PASS` with no reason" in adr_0032_prose
+    assert "all seven must be `NOT_APPLICABLE`" in adr_0032_prose
+    assert "ordered exact observed reader and writer" in adr_0032_prose
+    assert "complete cross-validated backup manifest" in adr_0032_prose
+    assert "hostile same-UID TOCTOU" in adr_0032_prose
+    assert "exact owner merge authorization naming that pull request and its current head SHA" in (
+        adr_0032_prose
+    )
+    assert "## Continuous Public-Trade SQLite Schema and Evidence Harness (Test Only)" in (
+        root_readme
+    )
+    assert "Only the test bootstrap can create a generation" in root_readme_prose
+    assert "A plain path grants no authority" in root_readme_prose
+    assert "complete source/destination generation" in root_readme_prose
+    assert "TASK-064 remains `READY` and the canonical next action" in root_readme_prose
+    assert "exact owner authorization naming the PR and current head SHA" in root_readme_prose
+    assert "## Continuous Public-Trade SQLite Schema and Evidence Harness (Test Only)" in (
+        market_data_contract
+    )
+    assert "Current load uses at most three history rows" in market_data_prose
+    assert "Generated evidence binds ordered exact reader/writer control profiles" in (
+        market_data_prose
+    )
+    assert "complete backup manifest" in market_data_prose
+    assert "ADR-0032 now freezes the TASK-064 candidate" in roadmap_prose
+    assert "they are not yet `REVIEW_READY` or `COMPLETE`" in roadmap_prose
+    assert "## TASK-064 Test-only Schema and Evidence-Harness Treatment" in risk_register
+    assert "changes no risk state" in risk_register_prose
+    assert "All five risks retain their existing state" in risk_register_prose
     assert "Automatic 301, 302, 303, 307, and 308 redirects are rejected" in risk_register
     assert "process-global opener is untouched" in risk_register
     assert "original initial target must be an absolute credential-free HTTPS URL" in risk_register
@@ -1732,6 +1818,472 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     assert "TASK-063 remains the canonical design-only next action" not in roadmap_prose
     assert "grants no physical implementation authority" in roadmap_prose
     assert "The canonical next action is TASK-037" not in roadmap
+
+    workflow = CI_WORKFLOW_PATH.read_text(encoding="utf-8")
+    unit_schema_source = TASK064_UNIT_SCHEMA_TEST_PATH.read_text(encoding="utf-8")
+    contract_digest = "ec89a1df740805cc9b43e6f2530e940c0bf9b66e8f25ed878d3207d091c4bcb8"
+    generation_line = f"- **Contract generation:** 6 | STATUS=FROZEN | SHA256={contract_digest}"
+
+    assert backlog.count(generation_line) == 1
+    assert (
+        "- **Generation-6 amendment:** `FROZEN`; normalized TASK-064 contract SHA-256 "
+        f"`{contract_digest}`." in adr_0032
+    )
+    normalized_backlog = backlog.replace("\r\n", "\n").replace("\r", "\n")
+    section_start = normalized_backlog.index("### TASK-064")
+    section_end = normalized_backlog.index("\n### ", section_start + 1) + 1
+    contract_section = normalized_backlog[section_start:section_end]
+    generation_pattern = re.compile(
+        r"^- \*\*Contract generation:\*\* 6 \| "
+        r"STATUS=(DRAFT|FROZEN) \| SHA256=(PENDING|[0-9a-f]{64})$",
+        re.MULTILINE,
+    )
+    assert len(generation_pattern.findall(contract_section)) == 1
+    normalized_contract = generation_pattern.sub(
+        "- **Contract generation:** 6 | STATUS=<STATUS> | SHA256=<SHA256>",
+        contract_section,
+    )
+    normalized_contract = (
+        "\n".join(line.rstrip(" \t") for line in normalized_contract.split("\n")).strip("\n") + "\n"
+    )
+    normalized_contract_bytes = normalized_contract.encode("utf-8")
+    assert len(normalized_contract_bytes) == 93_449
+    assert hashlib.sha256(normalized_contract_bytes).hexdigest() == contract_digest
+
+    assert "`TASK064-REPORT-LIVE-EPOCH-V2`" in next_action_section
+    assert "only that SHM object's `mtime_ns` and `ctime_ns` may differ" in next_action_prose
+    assert "complete retained post-validation file snapshot" in next_action_prose
+    assert "`120_000_000_000` monotonic nanoseconds" in next_action_prose
+    assert "`O_RDWR|O_TMPFILE|O_CLOEXEC`" in next_action_section
+    assert "Normal exit status `191` is globally reserved as observer-fatal" in next_action_prose
+    assert "Every raw child is tracked and reaped" in next_action_prose
+    assert "The frozen full-node manifest is exactly 2,298 unique" in next_action_prose
+    assert "296,078 bytes" in next_action_prose
+    assert "`96a15ecb6af6469f6da82bace28350163b99d48b8226d867830f7aec5816b483`" in (
+        next_action_section
+    )
+    for shard_row in (
+        "| `report` | 1 | 302 | "
+        "`f0530be0d219c64bbd1b9eb4df635dd138a345e8685172d188d02e177e488a3e` | 146 |",
+        "| `remainder-0` | 600 | 76,664 | "
+        "`9946638e834ffa44c0cd1e511c348b1f8226fc078ef79eb9e4100e770de80044` | "
+        "75,290 |",
+        "| `remainder-1` | 563 | 72,767 | "
+        "`e6814eb76767d9462ed9bfa82c85d8e7daebd7265027883290ca88842365dfd0` | "
+        "71,471 |",
+        "| `remainder-2` | 588 | 75,756 | "
+        "`8d86911d7a7cfc4f32022d68be1eaa3d6b459d5a968a462deea188df2369ed5b` | "
+        "74,394 |",
+        "| `remainder-3` | 546 | 71,332 | "
+        "`69e69516345c674cadf552202b80c392f8297b74b46328278b098b462e25b4ca` | "
+        "70,049 |",
+    ):
+        assert shard_row in next_action_section
+
+    assert "on:\n  pull_request:\n  push:\n  workflow_dispatch:\n" in workflow
+    assert (
+        workflow.count(
+            "TASK064_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}"
+        )
+        == 1
+    )
+    jobs_section = workflow.split("\njobs:\n", maxsplit=1)[1]
+    expected_job_ids = (
+        "quality_gates",
+        "report",
+        "remainder_0",
+        "remainder_1",
+        "remainder_2",
+        "remainder_3",
+        "quality",
+    )
+    assert tuple(re.findall(r"(?m)^  ([a-z][a-z0-9_]*):\n", jobs_section)) == expected_job_ids
+
+    def job_block(job_id: str) -> str:
+        match = re.search(
+            rf"(?ms)^  {re.escape(job_id)}:\n.*?(?=^  [a-z][a-z0-9_]*:\n|\Z)",
+            jobs_section,
+        )
+        assert match is not None
+        return match.group(0)
+
+    checkout_action = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+    setup_uv_action = "astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b"
+    for job_id in expected_job_ids:
+        block = job_block(job_id)
+        assert block.count("runs-on: ubuntu-latest") == 1
+        assert block.count("timeout-minutes: 15") == 1
+        assert block.count(checkout_action) == 1
+        assert block.count("fetch-depth: 0") == 1
+        assert block.count("persist-credentials: false") == 1
+        assert block.count(setup_uv_action) == 1
+        assert block.count('version: "0.11.31"') == 1
+        assert block.count("run: uv python install") == 1
+        assert block.count("run: uv sync --locked --all-groups") == 1
+
+    quality_gates = job_block("quality_gates")
+    for command in (
+        "uv lock --check",
+        "uv run ruff format --check .",
+        "uv run ruff check .",
+        "uv run mypy",
+        "uv --preview-features audit-command audit --locked",
+        "uv run wealth-health",
+    ):
+        assert f"run: {command}" in quality_gates
+    assert "uv run pytest" not in quality_gates
+    r_proof_marker = "      - name: Verify frozen R source proof\n"
+    assert quality_gates.count(r_proof_marker) == 1
+    r_proof_step = quality_gates.split(r_proof_marker, maxsplit=1)[1]
+    assert r_proof_step.startswith(
+        "        shell: bash\n        run: |\n          uv run python - <<'PY'\n"
+    )
+    assert r_proof_step.rstrip().endswith("          PY")
+    assert "      - name:" not in r_proof_step
+    assert "\n        if:" not in r_proof_step
+    for required_source_check in (
+        'with Path("tests/ci_shard_runner.py").open("rb") as source_file:',
+        "raw = source_file.read(2_000_001)",
+        "if len(raw) > 2_000_000:",
+        'source = raw.decode("utf-8", errors="strict")',
+        "if sys.version_info[:3] != (3, 13, 14):",
+        '("ContractError", ast.ClassDef)',
+        '("_require", ast.FunctionDef)',
+        '("_generation6_r_authority_source_gates", ast.FunctionDef)',
+        "if len(matches) != 1 or type(matches[0]) is not kind:",
+        "subset = ast.Module(body=selected, type_ignores=[])",
+        "original_require(condition, message)",
+        'namespace["_generation6_r_authority_source_gates"](source)',
+        "if proof_ids != set(range(85)) or proof_calls != 412:",
+        '"schema": "TASK064-R-STATIC-CI-V1"',
+        '"source_sha256": hashlib.sha256(raw).hexdigest()',
+        '"scope": "static_source_only_not_R_runtime_acceptance"',
+    ):
+        assert required_source_check in r_proof_step
+    assert "import tests.ci_shard_runner" not in r_proof_step
+    assert "importlib" not in r_proof_step
+
+    proof_step_lines = r_proof_step.rstrip().splitlines()
+    assert all(not line or line.startswith("          ") for line in proof_step_lines[3:-1])
+    proof_source = "\n".join(line[10:] for line in proof_step_lines[3:-1]) + "\n"
+
+    def assert_proof_accounting(source: str) -> None:
+        module = ast.parse(source)
+        assert not any(isinstance(node, (ast.Try, ast.TryStar)) for node in ast.walk(module))
+        context_managers = [
+            node for node in ast.walk(module) if isinstance(node, (ast.With, ast.AsyncWith))
+        ]
+        assert len(context_managers) == 1 and type(context_managers[0]) is ast.With
+        source_read = context_managers[0]
+        assert source_read in module.body and len(source_read.items) == 1
+        expected_read = cast(
+            ast.With,
+            ast.parse('with Path("tests/ci_shard_runner.py").open("rb") as source_file: pass').body[
+                0
+            ],
+        )
+        assert ast.dump(source_read.items[0]) == ast.dump(expected_read.items[0])
+        wrappers = [
+            node
+            for node in module.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            and node.name == "counted_require"
+        ]
+        assert len(wrappers) == 1 and type(wrappers[0]) is ast.FunctionDef
+        wrapper = wrappers[0]
+        assert not wrapper.decorator_list and not wrapper.type_params and wrapper.returns is None
+        expected_wrapper = cast(
+            ast.FunctionDef, ast.parse("def f(condition, message): pass").body[0]
+        )
+        assert ast.dump(wrapper.args) == ast.dump(expected_wrapper.args)
+        assert not any(isinstance(node, (ast.With, ast.AsyncWith)) for node in ast.walk(wrapper))
+
+        initializers = [
+            node
+            for node in module.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "expected_messages"
+                for target in node.targets
+            )
+        ]
+        expected_initializer = ast.parse(
+            'expected_messages = {f"R proof {index} differs": index for index in range(85)}'
+        ).body[0]
+        assert len(initializers) == 1
+        assert ast.dump(initializers[0]) == ast.dump(expected_initializer)
+        compile_calls = [
+            node
+            for node in ast.walk(module)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "compile"
+        ]
+        expected_compile = ast.parse(
+            'compile(subset, "<TASK064-R-STATIC-CI-V1>", "exec", '
+            "flags=__future__.annotations.compiler_flag, dont_inherit=True)",
+            mode="eval",
+        ).body
+        assert len(compile_calls) == 1
+        assert ast.dump(compile_calls[0]) == ast.dump(expected_compile)
+        assert any(
+            isinstance(node, ast.Import)
+            and [(alias.name, alias.asname) for alias in node.names] == [("__future__", None)]
+            for node in module.body
+        )
+        exec_calls = [
+            node
+            for node in ast.walk(module)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "exec"
+        ]
+        assert len(exec_calls) == 1
+        assert len(exec_calls[0].args) == 2 and not exec_calls[0].keywords
+        assert exec_calls[0].args[0] is compile_calls[0]
+        assert ast.dump(exec_calls[0].args[1]) == ast.dump(ast.Name(id="namespace", ctx=ast.Load()))
+
+        helper_calls: list[tuple[object, str]] = []
+        false_error = AssertionError("controlled original requirement rejected condition")
+        sentinel = RuntimeError("controlled original requirement sentinel")
+        helper_error: BaseException | None = None
+
+        def original_require(condition: object, message: str) -> None:
+            helper_calls.append((condition, message))
+            if helper_error is not None:
+                raise helper_error
+            if not condition:
+                raise false_error
+
+        proof_ids: set[int] = set()
+        namespace: dict[str, Any] = {
+            "original_require": original_require,
+            "expected_messages": {f"R proof {index} differs": index for index in range(85)},
+            "proof_ids": proof_ids,
+            "proof_calls": 0,
+        }
+        subset = ast.Module(body=[wrapper], type_ignores=[])
+        exec(
+            compile(subset, "<TASK064-R-CI-ACCOUNTING-REGRESSION>", "exec", dont_inherit=True),
+            namespace,
+        )
+        counted_require = namespace["counted_require"]
+        for ordinal, proof_id in enumerate((0, 84, 0), start=1):
+            message = f"R proof {proof_id} differs"
+            assert counted_require(True, message) is None
+            assert len(helper_calls) == ordinal
+            assert helper_calls[-1] == (True, message)
+            assert namespace["proof_calls"] == ordinal
+            assert namespace["proof_ids"] is proof_ids
+            assert proof_ids == ({0} if ordinal == 1 else {0, 84})
+
+        for condition, message, injected_error in (
+            (False, "R proof 0 differs", None),
+            (True, "R proof 84 differs", sentinel),
+            (True, "R proof 85 differs", None),
+        ):
+            helper_error = injected_error
+            calls_before = len(helper_calls)
+            count_before = namespace["proof_calls"]
+            ids_before = proof_ids.copy()
+            caught: BaseException | None = None
+            try:
+                counted_require(condition, message)
+            except BaseException as error:
+                caught = error
+            if not condition:
+                assert caught is false_error
+            elif injected_error is not None:
+                assert caught is injected_error
+            else:
+                assert (
+                    type(caught) is RuntimeError and str(caught) == "R static proof message differs"
+                )
+            assert helper_calls[calls_before:] == [(condition, message)]
+            assert namespace["proof_calls"] == count_before
+            assert namespace["proof_ids"] is proof_ids and proof_ids == ids_before
+
+    assert_proof_accounting(proof_source)
+    accounting_mutations = (
+        ("    original_require(condition, message)\n", "    pass\n"),
+        (
+            "    original_require(condition, message)\n",
+            "    proof_calls += 1\n    original_require(condition, message)\n    proof_calls -= 1\n",
+        ),
+        (
+            "    original_require(condition, message)\n",
+            "    if not condition:\n        proof_ids.clear()\n    original_require(condition, message)\n",
+        ),
+        (
+            '        raise RuntimeError("R static proof message differs")',
+            "        return",
+        ),
+        ("    proof_calls += 1\n", "    proof_calls = len(proof_ids)\n"),
+        ("dont_inherit=True", "dont_inherit=False"),
+        (
+            "    original_require(condition, message)\n",
+            "    try:\n        original_require(condition, message)\n    except BaseException:\n        return\n",
+        ),
+        (
+            "def counted_require(condition, message):",
+            "@unexpected_decorator\ndef counted_require(condition, message):",
+        ),
+        (
+            "def counted_require(condition, message):",
+            "def counted_require(condition, message=unexpected_default()):",
+        ),
+        ("index for index in range(85)}", "index for index in range(84)}"),
+        (
+            'namespace["_generation6_r_authority_source_gates"](source)',
+            'with unexpected_suppressor():\n    namespace["_generation6_r_authority_source_gates"](source)',
+        ),
+    )
+    for original, replacement in accounting_mutations:
+        assert proof_source.count(original) == 1
+        with pytest.raises(AssertionError):
+            assert_proof_accounting(proof_source.replace(original, replacement, 1))
+
+    expected_shards = {
+        "report": "report",
+        "remainder_0": "remainder-0",
+        "remainder_1": "remainder-1",
+        "remainder_2": "remainder-2",
+        "remainder_3": "remainder-3",
+    }
+    expected_outputs = (
+        "      task064_packet_b64: ${{ steps.shard.outputs.task064_packet_b64 }}\n"
+        "      task064_packet_sha256: "
+        "${{ steps.shard.outputs.task064_packet_sha256 }}"
+    )
+    for job_id, shard_id in expected_shards.items():
+        block = job_block(job_id)
+        assert block.count("id: shard") == 1
+        assert block.count("--shard") == 1
+        assert f"run: uv run python tests/ci_shard_runner.py --shard {shard_id}" in block
+        outputs = block.split("    outputs:\n", maxsplit=1)[1].split("\n\n    steps:", maxsplit=1)[
+            0
+        ]
+        assert outputs == expected_outputs
+
+    quality = job_block("quality")
+    assert "name: Quality and security" in quality
+    assert "if: always()" in quality
+    expected_needs = (
+        "      - quality_gates\n"
+        "      - report\n"
+        "      - remainder_0\n"
+        "      - remainder_1\n"
+        "      - remainder_2\n"
+        "      - remainder_3"
+    )
+    assert (
+        quality.split("    needs:\n", maxsplit=1)[1].split("\n    runs-on:", maxsplit=1)[0]
+        == expected_needs
+    )
+    assert "run: uv run python tests/ci_shard_runner.py --aggregate-static" in quality
+
+    aggregate_env = {
+        "TASK064_AGG_QUALITY_GATES_RESULT": "${{ needs.quality_gates.result }}",
+        "TASK064_AGG_REPORT_RESULT": "${{ needs.report.result }}",
+        "TASK064_AGG_REMAINDER_0_RESULT": "${{ needs.remainder_0.result }}",
+        "TASK064_AGG_REMAINDER_1_RESULT": "${{ needs.remainder_1.result }}",
+        "TASK064_AGG_REMAINDER_2_RESULT": "${{ needs.remainder_2.result }}",
+        "TASK064_AGG_REMAINDER_3_RESULT": "${{ needs.remainder_3.result }}",
+        "TASK064_AGG_REPORT_PACKET_B64": "${{ needs.report.outputs.task064_packet_b64 }}",
+        "TASK064_AGG_REPORT_PACKET_SHA256": "${{ needs.report.outputs.task064_packet_sha256 }}",
+        "TASK064_AGG_REMAINDER_0_PACKET_B64": (
+            "${{ needs.remainder_0.outputs.task064_packet_b64 }}"
+        ),
+        "TASK064_AGG_REMAINDER_0_PACKET_SHA256": (
+            "${{ needs.remainder_0.outputs.task064_packet_sha256 }}"
+        ),
+        "TASK064_AGG_REMAINDER_1_PACKET_B64": (
+            "${{ needs.remainder_1.outputs.task064_packet_b64 }}"
+        ),
+        "TASK064_AGG_REMAINDER_1_PACKET_SHA256": (
+            "${{ needs.remainder_1.outputs.task064_packet_sha256 }}"
+        ),
+        "TASK064_AGG_REMAINDER_2_PACKET_B64": (
+            "${{ needs.remainder_2.outputs.task064_packet_b64 }}"
+        ),
+        "TASK064_AGG_REMAINDER_2_PACKET_SHA256": (
+            "${{ needs.remainder_2.outputs.task064_packet_sha256 }}"
+        ),
+        "TASK064_AGG_REMAINDER_3_PACKET_B64": (
+            "${{ needs.remainder_3.outputs.task064_packet_b64 }}"
+        ),
+        "TASK064_AGG_REMAINDER_3_PACKET_SHA256": (
+            "${{ needs.remainder_3.outputs.task064_packet_sha256 }}"
+        ),
+    }
+    observed_aggregate_names = set(re.findall(r"(?m)^\s+(TASK064_AGG_[A-Z0-9_]+):", quality))
+    assert observed_aggregate_names == set(aggregate_env)
+    for name, expression in aggregate_env.items():
+        assert quality.count(f"{name}: {expression}") == 1
+
+    assert workflow.count("timeout-minutes: 15") == len(expected_job_ids)
+    assert workflow.count("uv run python tests/ci_shard_runner.py --shard ") == 5
+    assert workflow.count("uv run python tests/ci_shard_runner.py --aggregate-static") == 1
+    assert "continue-on-error" not in workflow
+    assert "strategy:" not in workflow
+    assert "matrix:" not in workflow
+    assert "|| true" not in workflow
+    assert "upload-artifact" not in workflow
+    assert "download-artifact" not in workflow
+    assert "--report-proof" not in workflow
+    assert "xdist" not in workflow
+    assert "execnet" not in workflow
+    assert "$TASK064_AGG_" not in workflow
+    assert "${TASK064_AGG_" not in workflow
+    assert "GITHUB_OUTPUT:" not in workflow
+    assert "GITHUB_ENV:" not in workflow
+    assert "GITHUB_PATH:" not in workflow
+    assert "GITHUB_STEP_SUMMARY:" not in workflow
+
+    assert unit_schema_source.count("_TASK064_CAPTURED_OS_EXIT = os._exit") == 1
+    assert unit_schema_source.count("def _guard_task064_reserved_observer_exit(") == 1
+    assert unit_schema_source.count("_TASK064_CAPTURED_OS_EXIT(191)") == 1
+    assert unit_schema_source.count("== 191") == 1
+    assert unit_schema_source.count("191") == 2
+    assert unit_schema_source.count("os.fork()") == 2
+    assert unit_schema_source.count("os.waitpid(child_pid, 0)") == 2
+    assert unit_schema_source.count("os.read(read_descriptor, 1)") == 2
+    assert unit_schema_source.count('os._exit(0 if payload == b"P" else 70)') == 2
+    assert unit_schema_source.count("parent_error: BaseException | None = None") == 2
+    assert unit_schema_source.count('payload = b""') == 2
+    assert unit_schema_source.count("if parent_error is not None:") == 2
+    assert unit_schema_source.count('assert payload == b"P"') == 2
+    assert (
+        len(
+            re.findall(
+                r"if parent_error is None:\n\s+try:\n\s+payload = "
+                r"os\.read\(read_descriptor, 1\)",
+                unit_schema_source,
+            )
+        )
+        == 2
+    )
+    assert (
+        len(
+            re.findall(
+                r"_, (child_status|status) = os\.waitpid\(child_pid, 0\)\n"
+                r"\s+_guard_task064_reserved_observer_exit\(\1\)",
+                unit_schema_source,
+            )
+        )
+        == 2
+    )
+    assert (
+        len(
+            re.findall(
+                r"_guard_task064_reserved_observer_exit\((?:child_status|status)\)\n"
+                r"\s+if parent_error is not None:\n\s+raise parent_error\n"
+                r'\s+assert payload == b"P"',
+                unit_schema_source,
+            )
+        )
+        == 2
+    )
 
 
 def test_project_state_forbids_unknown_fields() -> None:

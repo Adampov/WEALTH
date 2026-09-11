@@ -558,6 +558,43 @@ next action and may add only an isolated executable test schema and generated-da
 harness; it cannot add a production adapter, runtime, operator path/data access, or operational
 claim. TASK-037 remains blocked and authorization remains denied.
 
+## Continuous Public-Trade SQLite Schema and Evidence Harness (Test Only)
+
+[ADR-0032](docs/decisions/0032-continuous-public-trade-stream-sqlite-schema-evidence-harness.md)
+freezes the isolated version-one executable test schema: application ID `0x57505431`, page size
+4,096, and descriptor fingerprint
+`sha256:0410c1f08390a411c73427b3d07c542f3d1828def7c6adebab51cd57375355b3`.
+Only the test bootstrap can create a generation. Fixture-scoped process-local registration binds
+the exact TASK-064 pytest node, original root object, process, resolved identity, ownership, mode,
+and nonce; descriptor-relative creation and pinned generation checks cover cooperating same-UID
+children. A plain path grants no authority. Hostile same-UID TOCTOU and target/VFS isolation remain
+separate production blockers. Production source does not import the harness.
+
+The schema keeps authoritative TASK-061 records, envelopes, witnesses, digests, and roots as
+BLOBs; only the TASK-064-approved integer projections are scalar. Explicit `BEGIN IMMEDIATE`
+create/CAS transactions, deferred tail guards, strict immutable rows, reversible identity keys,
+closed result-code mapping, and exact TASK-062-shaped results prove the logical boundary without
+creating a production adapter. Current loads, duplicate checks, identity conflicts, and audit
+pages have explicit finite row budgets.
+
+Generated evidence covers the ordered exact reader/writer connection-control profiles, hostile
+retained state, process kill and true-during-commit seams, real overlapping one-winner/BUSY writers
+plus separate duplicate/conflict classification, fresh-process READONLY/FULL/I/O paths, and
+mapping-only fail-closed `SQLITE_LOCKED*` handling. Bounded query plans, online backup/restore with
+complete source/destination generation, runtime, page, checkpoint, fixed-UTC, count, file/digest,
+and tail manifest bindings, same-format generation copy, and frozen record/workload thresholds
+remain generated evidence only. Target filesystem, hostile same-UID path races, power-loss,
+production runtime/path/VFS, capacity, latency, checkpoint, backup destination, retention,
+RPO/RTO, monitoring, recovery, and incompatible-generation migration remain explicitly outside
+this task.
+
+TASK-064 remains `READY` and the canonical next action until one immutable candidate has passed
+complete local gates, exact-head independent Engineering/Security/QA review, draft-PR CI, exact
+owner authorization naming the PR and current head SHA, merge, required target-branch CI, and a
+separate completion-governance transition. No candidate or generated report can self-authorize
+merge or make an operational durability/readiness claim. TASK-037 remains blocked and
+authorization remains denied.
+
 Operators and monitoring tools can read the separate candle collector-service state through a
 dedicated JSON command:
 
