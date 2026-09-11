@@ -1,0 +1,2 @@
+# Keep text fixtures, source hashes, and formatting identical on every platform.
+* text=auto eol=lf

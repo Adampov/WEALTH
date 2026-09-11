@@ -8,6 +8,7 @@ import pytest
 
 from wealth.adapters.binance_order_flow import BinancePublicAggregateTradeSource
 from wealth.adapters.order_flow import InMemoryOrderFlowStore
+from wealth.application import order_flow_range
 from wealth.application.order_flow_range import (
     AdaptivePublicTradeRangeIngestor,
     PublicTradeRangePolicy,
@@ -322,6 +323,92 @@ def test_request_limit_blocks_a_retry_before_sleeping_or_exceeding_budget() -> N
     assert failure is not None
     assert failure.retry_stop_reason is PublicTradeRetryStopReason.REQUEST_LIMIT_REACHED
     assert sleeper.delays == []
+
+
+def test_large_range_plans_only_windows_needed_by_request_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A seven-day millisecond range must not allocate 604,800,000 windows."""
+
+    original_window_like = order_flow_range._window_like
+    constructed = 0
+
+    def bounded_window_like(
+        original: PublicTradeWindowRequest,
+        start: datetime,
+        end: datetime,
+    ) -> PublicTradeWindowRequest:
+        nonlocal constructed
+        constructed += 1
+        # Fail before allocation on an eager implementation, without risking OOM.
+        assert constructed <= 2
+        return original_window_like(original, start, end)
+
+    monkeypatch.setattr(order_flow_range, "_window_like", bounded_window_like)
+    http = ScenarioHttpClient(response([]))
+    sleeper = RecordingSleeper()
+    result = AdaptivePublicTradeRangeIngestor(
+        source=BinancePublicAggregateTradeSource(http=http, clock=FixedClock()),
+        store=InMemoryOrderFlowStore(),
+        sleeper=sleeper,
+        range_policy=PublicTradeRangePolicy(
+            initial_window_duration=timedelta(milliseconds=1),
+            max_range_duration=timedelta(days=7),
+            max_source_requests=1,
+        ),
+    ).ingest(request(604_800_000))
+
+    assert constructed == 2
+    assert len(http.calls) == result.source_request_count == 1
+    assert result.stop_reason is PublicTradeRangeStopReason.REQUEST_LIMIT_REACHED
+    assert result.next_window_start == WINDOW_START + timedelta(milliseconds=1)
+    assert result.pending_window is not None
+    assert result.pending_window.window_start == result.next_window_start
+    assert result.pending_window.window_end_exclusive == WINDOW_START + timedelta(milliseconds=2)
+    assert sleeper.delays == []
+
+
+def test_split_at_request_budget_preserves_exact_pending_child() -> None:
+    sleeper = RecordingSleeper()
+    result = range_ingestor(
+        http=ScenarioHttpClient(cap_response()),
+        store=InMemoryOrderFlowStore(),
+        sleeper=sleeper,
+        initial_window_ms=4,
+        max_source_requests=1,
+    ).ingest(request(8))
+
+    assert result.stop_reason is PublicTradeRangeStopReason.REQUEST_LIMIT_REACHED
+    assert result.source_request_count == 1
+    assert result.next_window_start == WINDOW_START
+    assert result.pending_window == request(2)
+    assert sleeper.delays == []
+
+
+def test_initial_window_planning_near_datetime_max_does_not_overflow() -> None:
+    window_end = datetime.max.replace(tzinfo=UTC, microsecond=999_000)
+    near_max = PublicTradeWindowRequest(
+        instrument="BTC-USDT",
+        provider_symbol="BTCUSDT",
+        instrument_type=InstrumentType.SPOT,
+        window_start=window_end - timedelta(milliseconds=3),
+        window_end_exclusive=window_end,
+    )
+    ingestor = range_ingestor(
+        http=ScenarioHttpClient(),
+        store=InMemoryOrderFlowStore(),
+        sleeper=RecordingSleeper(),
+        initial_window_ms=2,
+    )
+
+    windows = tuple(ingestor._initial_windows(near_max))
+
+    assert len(windows) == 2
+    assert windows[0].window_start == near_max.window_start
+    assert windows[0].duration == timedelta(milliseconds=2)
+    assert windows[1].window_start == windows[0].window_end_exclusive
+    assert windows[1].duration == timedelta(milliseconds=1)
+    assert windows[1].window_end_exclusive == window_end
 
 
 def test_record_limit_preserves_fetched_evidence_but_does_not_store_second_window() -> None:

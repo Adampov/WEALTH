@@ -101,7 +101,8 @@ class SQLiteCandleStore:
             with closing(self._connect()) as connection:
                 rows = connection.execute(
                     """
-                    SELECT record_json
+                    SELECT record_id, source, venue, instrument, instrument_type,
+                           timeframe, open_time, record_json
                     FROM canonical_candles
                     WHERE source = ?
                       AND venue = ?
@@ -118,7 +119,7 @@ class SQLiteCandleStore:
                         stream.timeframe.value,
                     ),
                 ).fetchall()
-            records = tuple(self._candle_from_json(str(row["record_json"])) for row in rows)
+            records = tuple(self._validated_candle_row(row) for row in rows)
             if any(not stream.contains(record) for record in records):
                 raise SQLiteMarketStorageError(
                     SQLiteMarketStorageErrorCode.CORRUPT_RECORD,
@@ -375,7 +376,8 @@ class SQLiteCandleStore:
     ) -> CandleWriteResult:
         row = connection.execute(
             """
-            SELECT record_id, record_json
+            SELECT record_id, source, venue, instrument, instrument_type,
+                   timeframe, open_time, record_json
             FROM canonical_candles
             WHERE source = ?
               AND venue = ?
@@ -423,7 +425,7 @@ class SQLiteCandleStore:
                 incoming_record_id=candle.record_id,
             )
 
-        existing = SQLiteCandleStore._candle_from_json(str(row["record_json"]))
+        existing = SQLiteCandleStore._validated_candle_row(row)
         if existing.market_values == candle.market_values:
             if raw_payload_id is not None:
                 SQLiteCandleStore._link_raw_payload(
@@ -519,6 +521,34 @@ class SQLiteCandleStore:
                 SQLiteMarketStorageErrorCode.CORRUPT_RECORD,
                 "stored canonical candle violates its contract",
             ) from error
+
+    @staticmethod
+    def _validated_candle_row(row: sqlite3.Row) -> CanonicalCandle:
+        candle = SQLiteCandleStore._candle_from_json(str(row["record_json"]))
+        stored_identity = (
+            row["record_id"],
+            row["source"],
+            row["venue"],
+            row["instrument"],
+            row["instrument_type"],
+            row["timeframe"],
+            row["open_time"],
+        )
+        canonical_identity = (
+            str(candle.record_id),
+            candle.source,
+            candle.venue,
+            candle.instrument,
+            candle.instrument_type.value,
+            candle.timeframe.value,
+            candle.open_time.isoformat(),
+        )
+        if stored_identity != canonical_identity:
+            raise SQLiteMarketStorageError(
+                SQLiteMarketStorageErrorCode.CORRUPT_RECORD,
+                "stored candle identity does not match canonical content",
+            )
+        return candle
 
     @staticmethod
     def _storage_failure(detail: str) -> SQLiteMarketStorageError:
