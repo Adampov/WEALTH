@@ -1990,7 +1990,7 @@ def test_project_state_references_existing_governance_artifacts() -> None:
             and node.name == "counted_require"
         ]
         assert len(wrappers) == 1 and type(wrappers[0]) is ast.FunctionDef
-        wrapper = cast(ast.FunctionDef, wrappers[0])
+        wrapper = wrappers[0]
         assert not wrapper.decorator_list and not wrapper.type_params and wrapper.returns is None
         expected_wrapper = cast(
             ast.FunctionDef, ast.parse("def f(condition, message): pass").body[0]
