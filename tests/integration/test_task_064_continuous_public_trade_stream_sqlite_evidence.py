@@ -8181,6 +8181,185 @@ def test_path_token_and_permission_guards_fail_closed(tmp_path: Path) -> None:
             harness.verify_store(replaced)
         assert swapped.value.code is harness.HarnessFailureCode.UNAVAILABLE
 
+    # Predicate-only R21 coverage; the runner and its authority classes remain uninitialized.
+    runner_path = Path(__file__).resolve().parents[1] / "ci_shard_runner.py"
+    with runner_path.open("rb") as runner_file:
+        runner_raw = runner_file.read(2_000_001)
+    assert len(runner_raw) <= 2_000_000
+    runner_source = runner_raw.decode("utf-8", errors="strict")
+    runner_module = ast.parse(runner_source, filename=str(runner_path))
+    future_nodes = [
+        node
+        for node in runner_module.body
+        if isinstance(node, ast.ImportFrom) and node.module == "__future__"
+    ]
+    assert len(future_nodes) == 1
+    assert ast.dump(future_nodes[0]) == ast.dump(
+        ast.parse("from __future__ import annotations").body[0]
+    )
+    selected: list[ast.stmt] = [future_nodes[0]]
+    for name, kind in (
+        ("ContractError", ast.ClassDef),
+        ("_require", ast.FunctionDef),
+        ("_generation6_r_namespace_filesystem_component", ast.FunctionDef),
+    ):
+        matches = [
+            node
+            for node in runner_module.body
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == name
+        ]
+        assert len(matches) == 1 and type(matches[0]) is kind
+        assert not matches[0].decorator_list and not matches[0].type_params
+        if isinstance(matches[0], ast.FunctionDef):
+            assert not matches[0].args.defaults and not any(matches[0].args.kw_defaults)
+        selected.append(matches[0])
+    encoder_name = "_GENERATION6_R_NAMESPACE_REAL_OS_FSENCODE"
+    encoder_bindings = [
+        node
+        for node in runner_module.body
+        if isinstance(node, ast.AnnAssign)
+        and isinstance(node.target, ast.Name)
+        and node.target.id == encoder_name
+    ]
+    assert len(encoder_bindings) == 1
+    assert ast.dump(encoder_bindings[0]) == ast.dump(
+        ast.parse(f"{encoder_name}: Final = os.fsencode").body[0]
+    )
+    real_encoder = os.fsencode
+    component_namespace: dict[str, Any] = {
+        "__name__": "task064_r21_component_predicate",
+        encoder_name: real_encoder,
+    }
+    component_subset = ast.Module(body=selected, type_ignores=[])
+    exec(
+        compile(component_subset, "<TASK064-R21-COMPONENT>", "exec", flags=0, dont_inherit=True),
+        component_namespace,
+    )
+    del runner_module, runner_source, runner_raw
+    component = cast(
+        Callable[[object], tuple[str, int]],
+        component_namespace["_generation6_r_namespace_filesystem_component"],
+    )
+    component_error = cast(type[Exception], component_namespace["ContractError"])
+    encoder_calls: list[str] = []
+
+    def observed_encoder(value: str) -> bytes:
+        encoder_calls.append(value)
+        return real_encoder(value)
+
+    class ComponentString(str):
+        pass
+
+    class ComponentBytes(bytes):
+        pass
+
+    try:
+        component_namespace[encoder_name] = observed_encoder
+        for value, expected_length in (
+            ("a", 1),
+            ("a" * 255, 255),
+            ("é" * 127, 254),
+            ("é" * 127 + "a", 255),
+            ("😀" * 63 + "abc", 255),
+            ("\\", 1),
+            (":", 1),
+            (" ", 1),
+        ):
+            encoder_calls.clear()
+            result = component(value)
+            assert type(result) is tuple and len(result) == 2
+            assert result[0] is value and type(result[0]) is str
+            assert type(result[1]) is int and result[1] == expected_length
+            assert result[1] == len(real_encoder(value))
+            assert encoder_calls == [value] and encoder_calls[0] is value
+
+        for value in ("a" * 256, "é" * 128, "😀" * 64):
+            encoder_calls.clear()
+            with pytest.raises(
+                component_error, match=r"^R namespace inventory component bytes differ$"
+            ):
+                component(value)
+            assert encoder_calls == [value]
+
+        def forbidden_encoder(value: str) -> bytes:
+            encoder_calls.append(value)
+            raise AssertionError("invalid component reached the encoder")
+
+        component_namespace[encoder_name] = forbidden_encoder
+        for invalid_type in (
+            None,
+            True,
+            1,
+            b"a",
+            bytearray(b"a"),
+            ["a"],
+            {"a": 1},
+            Path("a"),
+            object(),
+            ComponentString("a"),
+        ):
+            encoder_calls.clear()
+            with pytest.raises(
+                component_error, match=r"^R namespace inventory component type differs$"
+            ):
+                component(invalid_type)
+            assert not encoder_calls
+        for invalid_name in ("", ".", "..", "\x00", "a\x00b", "/", "a/b"):
+            encoder_calls.clear()
+            with pytest.raises(component_error, match=r"^R namespace inventory component differs$"):
+                component(invalid_name)
+            assert not encoder_calls
+
+        encoding_error = UnicodeError("controlled component encoder failure")
+
+        def failing_encoder(value: str) -> bytes:
+            encoder_calls.append(value)
+            raise encoding_error
+
+        component_namespace[encoder_name] = failing_encoder
+        encoder_calls.clear()
+        with pytest.raises(
+            component_error, match=r"^R namespace inventory component encoding differs$"
+        ) as failed_encoding:
+            component("a")
+        assert failed_encoding.value.__cause__ is encoding_error
+        assert encoder_calls == ["a"]
+
+        encoded_result: object = None
+
+        def substituted_encoder(value: str) -> object:
+            encoder_calls.append(value)
+            return encoded_result
+
+        component_namespace[encoder_name] = substituted_encoder
+        for invalid_encoding in (
+            b"",
+            b"a" * 256,
+            "a",
+            bytearray(b"a"),
+            ["a"],
+            ("a",),
+            ComponentBytes(b"a"),
+        ):
+            encoded_result = invalid_encoding
+            encoder_calls.clear()
+            with pytest.raises(
+                component_error, match=r"^R namespace inventory component bytes differ$"
+            ):
+                component("a")
+            assert encoder_calls == ["a"]
+        encoded_result = None
+        encoder_calls.clear()
+        with pytest.raises(TypeError) as unsized_encoding:
+            component("a")
+        assert type(unsized_encoding.value) is TypeError
+        assert unsized_encoding.value.__cause__ is None
+        assert encoder_calls == ["a"]
+    finally:
+        component_namespace[encoder_name] = real_encoder
+    assert component_namespace[encoder_name] is os.fsencode is real_encoder
+
 
 def test_rejection_capture_does_not_accept_caller_callbacks(tmp_path: Path) -> None:
     def caller_callback() -> object:

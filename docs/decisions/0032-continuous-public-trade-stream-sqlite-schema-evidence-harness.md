@@ -1123,6 +1123,19 @@ evidence, and independent implementation reviews remain outstanding. This alloca
 authority to change the contract, source gates, case registry, immutable fixtures, node manifest,
 financial controls, or production boundaries.
 
+The existing `test_path_token_and_permission_guards_fail_closed` node adds predicate-only R21
+coverage after its unchanged original assertions. A bounded, strictly decoded runner read selects
+only the original annotations directive, `ContractError`, `_require`, and filesystem-component
+function, verifies the captured `os.fsencode` assignment, and compiles that tiny subset without
+runner initialization. It releases the full source/AST before checking exact string identity,
+encoded-byte limits, invalid types/names before encoding, legal Linux backslash/colon/space names,
+and isolated encoder failures. Sized invalid encoder results retain `ContractError`; an injected
+`None` retains the actual earlier `len(None)` `TypeError`, not a sanitized-error claim. Encoder
+substitutions exist only in the isolated namespace and are restored. The added predicate slice
+performs no filesystem mutation; the existing node's original filesystem work is unchanged.
+This is not R21 cleanup, journal/permit/teardown execution, or full protocol acceptance, and it
+does not change runner bytes, source seals, workflow, frozen fixtures, or node/parameter IDs.
+
 #### R static-proof representation repair and reproducer v1
 
 This section and its V1 recipe describe only the historical representation checkpoint
