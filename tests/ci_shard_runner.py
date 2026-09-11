@@ -21937,15 +21937,15 @@ def _generation6_r_authority_source_gates(source: str) -> None:
   r(L(F)==55540 and H.sha256(F).hexdigest()=='02bef27f5faf762307d5a2aa3d04c05b745514d270c829badd1601090b85bede')
   X=[[128+c for c in s.encode()]for s in ss]
   for i,O0 in enumerate(a):
-   cc=[]
-   for y in sorted({p for t in X for p in zip(t,t[1:])}): # noqa
-    n=0
-    for t in X:
-     j=0
-     while j+1<L(t):
-      if(t[j],t[j+1])==y:n+=1;j+=2 # noqa
-      else:j+=1 # noqa
-    cc.append((n,y))
+   pair_counts:dict[tuple[int,int],int]={}
+   for t in X:
+    last_end:dict[tuple[int,int],int]={}
+    for j,left_token in enumerate(t[:-1]):
+     y=(left_token,t[j+1])
+     if j>=last_end.get(y,0):
+      pair_counts[y]=pair_counts.get(y,0)+1
+      last_end[y]=j+2
+   cc=[(n,y)for y,n in sorted(pair_counts.items())]
    n,y=min(cc,key=lambda z:(-z[0],z[1]))
    r(n>=3 and y==O0)
    for j,t in enumerate(X):
@@ -22319,7 +22319,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  prove(82,K(t.end_lineno)is int)
  et=t.lineno
  eJ=cast(int,t.end_lineno)
- bg='610ffa82a2b84c424c977990dcea237c18b7f7b667d8179995fe28028fd02ddb'
+ bg='9037825c0446d28a33248f3c060fde98a11669f80e309b8dfe7885a38b30b677'
  aq='\n'.join(source.splitlines()[et-1:eJ])+'\n'
  prove(83,aq.count(bg)==1)
  aq=aq.replace(bg,'0'*64)
@@ -22327,7 +22327,7 @@ def _generation6_r_authority_source_gates(source: str) -> None:
  dR=eO+aq.encode('utf-8')
  eN=H.sha256(dR).hexdigest()
  dK=U.body.index(t)
- prove(84,et==21810 and eJ==22330 and(U.body[dK+1]is bf(d[79]))and(L(dR)==62038)and(eN==bg))
+ prove(84,et==21810 and eJ==22330 and(U.body[dK+1]is bf(d[79]))and(L(dR)==62141)and(eN==bg))
 # fmt: on
 
 

@@ -1125,6 +1125,9 @@ financial controls, or production boundaries.
 
 #### R static-proof representation repair and reproducer v1
 
+This section and its V1 recipe describe only the historical representation checkpoint
+`504f3577a5a60e364943627372fff60e7e4f8289`. They do not reproduce later runner revisions.
+
 An isolated execution of the unchanged static proof from candidate
 `c729685d6535704c428debf176482c03cbcc8e09` failed at proof 72 on Python `3.13.14`.
 The verifier derived both its schema vocabulary and index from the protected bundle, yielding
@@ -1363,6 +1366,203 @@ print(json.dumps({
     "candidate_bytes": len(first), "candidate_sha256": sha(first),
     "seals": first_seals, "deterministic_twice": True,
     "runner_executed": False, "static_gate_executed": False, "files_written": False,
+}, sort_keys=True))
+```
+
+#### R canonical BPE count optimization and reproducer v1
+
+The representation checkpoint's canonical BPE verifier rescans every word separately for every
+distinct adjacent pair. The bounded optimization replaces only that nine-line counting kernel:
+one pass over each word records a separate `last_end` for each pair. A pair beginning before its
+own last accepted occurrence ends is skipped; other pairs are independent. Resetting `last_end`
+for every word preserves the prohibition on cross-word matches. Inductively, each pair therefore
+selects exactly the same left-to-right, non-overlapping occurrences as its original rescan.
+
+The count list retains sorted pair order. Its canonical minimum key, minimum count of three,
+comparison with the expected pair, all 128 rounds, and every replacement step remain byte-exact.
+The encoded R16 payload, semantic pins, protected bundle, 85 proof IDs and source line positions
+are unchanged. Only the kernel and the derived gate length/self-digest change. This adds 103
+bytes: the candidate is 1,857,741 bytes with SHA-256
+`d4548e3f20746597aa2693c3da4c1b2a8538e6e6af435225846f3364401c850e`, leaving 11,186 bytes
+below the unchanged source cap. The gate preimage is 62,141 bytes with self-digest
+`9037825c0446d28a33248f3c060fde98a11669f80e309b8dfe7885a38b30b677`.
+
+The independent preimplementation design probe compared 26,688 synthetic cases, 274,594
+expected-pair acceptance decisions, and complete synthetic merge chains. That design evidence
+does not certify an unseen patch or establish a measured speedup. Exact-candidate review,
+isolated full static-proof positive and negative runs, before/after timings, and existing project
+gates remain required. No R runtime, dispatcher or mutation permission is activated.
+
+`TASK064-R-BPE-COUNT-REPRODUCER-V1` below accepts only the exact runner blob from the historical
+`504f3577a5a60e364943627372fff60e7e4f8289` checkpoint on standard input, using exact Python
+`3.13.14` and a byte-preserving input channel. It reproduces the baseline self-seal and builds the
+candidate twice in memory. Reversing its three permitted edit sites must recover every baseline
+byte, so it cannot silently rewrite a payload, semantic expectation or other predicate. The recipe
+executes only the two exact nine-line pure counting kernels in a restricted namespace, not the
+runner, decoder, static gate or application. Its bounded synthetic checks include sorted counts,
+canonical decisions, full merge chains, empty inputs, word boundaries and malformed token cases.
+It writes no files and emits only JSON metadata. Source changes still require a prospective lease
+and `apply_patch`; this recipe is neither a runner mode nor a new CI dependency. Rollback is the
+exact historical checkpoint, with no database, fixture or runtime-state migration.
+
+```python
+import hashlib
+import itertools
+import json
+import sys
+import textwrap
+
+VERSION = "TASK064-R-BPE-COUNT-REPRODUCER-V1"
+BASE_SHA = "66818d4278ab43899ef82b019333805943ef6d440eac259ba8334a49294b7d66"
+RESULT_SHA = "d4548e3f20746597aa2693c3da4c1b2a8538e6e6af435225846f3364401c850e"
+OLD_SELF = "610ffa82a2b84c424c977990dcea237c18b7f7b667d8179995fe28028fd02ddb"
+DOMAIN = b"TASK-064\0GEN6\0R-CAP3-A2I-R16\0gate-v1\0"
+NEW = [
+    "   pair_counts:dict[tuple[int,int],int]={}",
+    "   for t in X:",
+    "    last_end:dict[tuple[int,int],int]={}",
+    "    for j,left_token in enumerate(t[:-1]):",
+    "     y=(left_token,t[j+1])",
+    "     if j>=last_end.get(y,0):",
+    "      pair_counts[y]=pair_counts.get(y,0)+1",
+    "      last_end[y]=j+2",
+    "   cc=[(n,y)for y,n in sorted(pair_counts.items())]",
+]
+
+
+def require(condition, message):
+    if not condition:
+        raise RuntimeError(message)
+
+
+def sha(value):
+    return hashlib.sha256(value).hexdigest()
+
+
+def encode(lines):
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def replace_once(line, old, new):
+    require(line.count(old) == 1, "replacement site differs")
+    return line.replace(old, new)
+
+
+def seal(lines):
+    lines = lines.copy()
+    lines[22321] = replace_once(lines[22321], OLD_SELF, "0" * 64)
+    size = len(DOMAIN + encode(lines[21809:22330]))
+    require(len(str(size)) == 5, "gate length field width differs")
+    lines[22329] = replace_once(lines[22329], "L(dR)==62038", "L(dR)==" + str(size))
+    preimage = DOMAIN + encode(lines[21809:22330])
+    require(len(preimage) == size, "gate length did not stabilize")
+    digest = sha(preimage)
+    lines[22321] = replace_once(lines[22321], "0" * 64, digest)
+    return encode(lines), size, digest
+
+
+def build(baseline):
+    require(len(baseline) == 1857638 and sha(baseline) == BASE_SHA,
+            "only the exact baseline is accepted")
+    original = baseline.decode("utf-8").splitlines()
+    require(len(original) == 34878 and encode(original) == baseline,
+            "baseline line representation differs")
+    require(seal(original) == (baseline, 62038, OLD_SELF), "baseline seal differs")
+    work = original.copy()
+    work[21939:21948] = NEW
+    candidate, size, digest = seal(work)
+    require(len(candidate) == 1857741 and sha(candidate) == RESULT_SHA,
+            "candidate identity differs")
+    require(len(candidate) <= 1868927 and 2000000 - len(candidate) >= 131072,
+            "unchanged source caps exceeded")
+    restored = candidate.decode("utf-8").splitlines()
+    require(len(restored) == len(original), "source line count differs")
+    restored[21939:21948] = original[21939:21948]
+    restored[22321] = replace_once(restored[22321], digest, OLD_SELF)
+    restored[22329] = replace_once(restored[22329], "L(dR)==" + str(size), "L(dR)==62038")
+    require(encode(restored) == baseline, "a non-kernel predicate or payload changed")
+    return candidate, size, digest, original[21939:21948]
+
+
+def isolated_counter(lines):
+    # Only the hash-pinned baseline block or the fixed NEW block reaches this function.
+    body = textwrap.indent(textwrap.dedent("\n".join(lines)), " ")
+    namespace = {"__builtins__": {
+        "dict": dict, "tuple": tuple, "int": int, "sorted": sorted,
+        "zip": zip, "enumerate": enumerate,
+    }, "L": len}
+    exec(compile("def count(X):\n" + body + "\n return cc\n",
+                 "<exact-nine-line-count-kernel>", "exec"), namespace)
+    return namespace["count"]
+
+
+def observed(counter, words):
+    try:
+        counts = counter(words)
+        winner = min(counts, key=lambda pair: (-pair[0], pair[1]))
+        return "ok", counts, winner
+    except (TypeError, ValueError) as error:
+        return "error", type(error).__name__
+
+
+def equivalence(old_lines):
+    old, new = isolated_counter(old_lines), isolated_counter(NEW)
+    cases = rounds = decisions = 0
+    small = [list(word) for n in range(5) for word in itertools.product(range(2), repeat=n)]
+    single = ([list(word)] for n in range(9)
+              for word in itertools.product(range(3), repeat=n))
+    multiple = ([left, [], right] for left in small for right in small)
+    boundaries = ([], [[]], [[0] * 511], [[0] * 512],
+                  [[0] * 511, [0]], [[0, 1] * 256], [[0, 0], [0, 0]],
+                  None, [None], [[0, []]], [[0, "x", 0]])
+    for words in itertools.chain(single, multiple, boundaries):
+        cases += 1
+        left, right = observed(old, words), observed(new, words)
+        require(left == right, "counts, canonical choice or error behavior differs")
+        if left[0] == "error":
+            continue
+        work = [word.copy() for word in words]
+        for step in range(128):
+            before, after = observed(old, work), observed(new, work)
+            require(before == after, "synthetic merge-chain counts differ")
+            if before[0] == "error":
+                break
+            rounds += 1
+            n, pair = before[2]
+            for expected in itertools.product(range(3), repeat=2):
+                decisions += 1
+                require((n >= 3 and pair == expected) ==
+                        (after[2][0] >= 3 and after[2][1] == expected),
+                        "expected-pair acceptance differs")
+            if n < 3:
+                break
+            for index, word in enumerate(work):
+                output, position = [], 0
+                while position < len(word):
+                    if position + 1 < len(word) and tuple(word[position:position + 2]) == pair:
+                        output.append(256 + step)
+                        position += 2
+                    else:
+                        output.append(word[position])
+                        position += 1
+                work[index] = output
+        else:
+            raise RuntimeError("synthetic chain exceeded the round bound")
+    return {"cases": cases, "chain_rounds": rounds, "acceptance_comparisons": decisions}
+
+
+require(sys.version_info[:3] == (3, 13, 14), "exact Python 3.13.14 required")
+baseline = sys.stdin.buffer.read(2000001)
+first = build(baseline)
+second = build(baseline)
+require(first == second, "deterministic regeneration differs")
+report = equivalence(first[3])
+print(json.dumps({
+    "recipe": VERSION, "baseline_sha256": BASE_SHA, "candidate_sha256": sha(first[0]),
+    "candidate_bytes": len(first[0]), "gate_bytes": first[1], "gate_sha256": first[2],
+    "deterministic_twice": True, "kernel_equivalence": report,
+    "isolated_kernels_executed": True, "runner_executed": False,
+    "static_gate_executed": False, "files_written": False,
 }, sort_keys=True))
 ```
 
