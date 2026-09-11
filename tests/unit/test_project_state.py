@@ -1,5 +1,6 @@
 """Tests for the canonical machine-readable project-state contract."""
 
+import ast
 import hashlib
 import json
 import re
@@ -1961,6 +1962,186 @@ def test_project_state_references_existing_governance_artifacts() -> None:
         assert required_source_check in r_proof_step
     assert "import tests.ci_shard_runner" not in r_proof_step
     assert "importlib" not in r_proof_step
+
+    proof_step_lines = r_proof_step.rstrip().splitlines()
+    assert all(not line or line.startswith("          ") for line in proof_step_lines[3:-1])
+    proof_source = "\n".join(line[10:] for line in proof_step_lines[3:-1]) + "\n"
+
+    def assert_proof_accounting(source: str) -> None:
+        module = ast.parse(source)
+        assert not any(isinstance(node, (ast.Try, ast.TryStar)) for node in ast.walk(module))
+        context_managers = [
+            node for node in ast.walk(module) if isinstance(node, (ast.With, ast.AsyncWith))
+        ]
+        assert len(context_managers) == 1 and type(context_managers[0]) is ast.With
+        source_read = context_managers[0]
+        assert source_read in module.body and len(source_read.items) == 1
+        expected_read = cast(
+            ast.With,
+            ast.parse('with Path("tests/ci_shard_runner.py").open("rb") as source_file: pass').body[
+                0
+            ],
+        )
+        assert ast.dump(source_read.items[0]) == ast.dump(expected_read.items[0])
+        wrappers = [
+            node
+            for node in module.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            and node.name == "counted_require"
+        ]
+        assert len(wrappers) == 1 and type(wrappers[0]) is ast.FunctionDef
+        wrapper = cast(ast.FunctionDef, wrappers[0])
+        assert not wrapper.decorator_list and not wrapper.type_params and wrapper.returns is None
+        expected_wrapper = cast(
+            ast.FunctionDef, ast.parse("def f(condition, message): pass").body[0]
+        )
+        assert ast.dump(wrapper.args) == ast.dump(expected_wrapper.args)
+        assert not any(isinstance(node, (ast.With, ast.AsyncWith)) for node in ast.walk(wrapper))
+
+        initializers = [
+            node
+            for node in module.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "expected_messages"
+                for target in node.targets
+            )
+        ]
+        expected_initializer = ast.parse(
+            'expected_messages = {f"R proof {index} differs": index for index in range(85)}'
+        ).body[0]
+        assert len(initializers) == 1
+        assert ast.dump(initializers[0]) == ast.dump(expected_initializer)
+        compile_calls = [
+            node
+            for node in ast.walk(module)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "compile"
+        ]
+        expected_compile = ast.parse(
+            'compile(subset, "<TASK064-R-STATIC-CI-V1>", "exec", '
+            "flags=__future__.annotations.compiler_flag, dont_inherit=True)",
+            mode="eval",
+        ).body
+        assert len(compile_calls) == 1
+        assert ast.dump(compile_calls[0]) == ast.dump(expected_compile)
+        assert any(
+            isinstance(node, ast.Import)
+            and [(alias.name, alias.asname) for alias in node.names] == [("__future__", None)]
+            for node in module.body
+        )
+        exec_calls = [
+            node
+            for node in ast.walk(module)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "exec"
+        ]
+        assert len(exec_calls) == 1
+        assert len(exec_calls[0].args) == 2 and not exec_calls[0].keywords
+        assert exec_calls[0].args[0] is compile_calls[0]
+        assert ast.dump(exec_calls[0].args[1]) == ast.dump(ast.Name(id="namespace", ctx=ast.Load()))
+
+        helper_calls: list[tuple[object, str]] = []
+        false_error = AssertionError("controlled original requirement rejected condition")
+        sentinel = RuntimeError("controlled original requirement sentinel")
+        helper_error: BaseException | None = None
+
+        def original_require(condition: object, message: str) -> None:
+            helper_calls.append((condition, message))
+            if helper_error is not None:
+                raise helper_error
+            if not condition:
+                raise false_error
+
+        proof_ids: set[int] = set()
+        namespace: dict[str, Any] = {
+            "original_require": original_require,
+            "expected_messages": {f"R proof {index} differs": index for index in range(85)},
+            "proof_ids": proof_ids,
+            "proof_calls": 0,
+        }
+        subset = ast.Module(body=[wrapper], type_ignores=[])
+        exec(
+            compile(subset, "<TASK064-R-CI-ACCOUNTING-REGRESSION>", "exec", dont_inherit=True),
+            namespace,
+        )
+        counted_require = namespace["counted_require"]
+        for ordinal, proof_id in enumerate((0, 84, 0), start=1):
+            message = f"R proof {proof_id} differs"
+            assert counted_require(True, message) is None
+            assert len(helper_calls) == ordinal
+            assert helper_calls[-1] == (True, message)
+            assert namespace["proof_calls"] == ordinal
+            assert namespace["proof_ids"] is proof_ids
+            assert proof_ids == ({0} if ordinal == 1 else {0, 84})
+
+        for condition, message, injected_error in (
+            (False, "R proof 0 differs", None),
+            (True, "R proof 84 differs", sentinel),
+            (True, "R proof 85 differs", None),
+        ):
+            helper_error = injected_error
+            calls_before = len(helper_calls)
+            count_before = namespace["proof_calls"]
+            ids_before = proof_ids.copy()
+            caught: BaseException | None = None
+            try:
+                counted_require(condition, message)
+            except BaseException as error:
+                caught = error
+            if not condition:
+                assert caught is false_error
+            elif injected_error is not None:
+                assert caught is injected_error
+            else:
+                assert (
+                    type(caught) is RuntimeError and str(caught) == "R static proof message differs"
+                )
+            assert helper_calls[calls_before:] == [(condition, message)]
+            assert namespace["proof_calls"] == count_before
+            assert namespace["proof_ids"] is proof_ids and proof_ids == ids_before
+
+    assert_proof_accounting(proof_source)
+    accounting_mutations = (
+        ("    original_require(condition, message)\n", "    pass\n"),
+        (
+            "    original_require(condition, message)\n",
+            "    proof_calls += 1\n    original_require(condition, message)\n    proof_calls -= 1\n",
+        ),
+        (
+            "    original_require(condition, message)\n",
+            "    if not condition:\n        proof_ids.clear()\n    original_require(condition, message)\n",
+        ),
+        (
+            '        raise RuntimeError("R static proof message differs")',
+            "        return",
+        ),
+        ("    proof_calls += 1\n", "    proof_calls = len(proof_ids)\n"),
+        ("dont_inherit=True", "dont_inherit=False"),
+        (
+            "    original_require(condition, message)\n",
+            "    try:\n        original_require(condition, message)\n    except BaseException:\n        return\n",
+        ),
+        (
+            "def counted_require(condition, message):",
+            "@unexpected_decorator\ndef counted_require(condition, message):",
+        ),
+        (
+            "def counted_require(condition, message):",
+            "def counted_require(condition, message=unexpected_default()):",
+        ),
+        ("index for index in range(85)}", "index for index in range(84)}"),
+        (
+            'namespace["_generation6_r_authority_source_gates"](source)',
+            'with unexpected_suppressor():\n    namespace["_generation6_r_authority_source_gates"](source)',
+        ),
+    )
+    for original, replacement in accounting_mutations:
+        assert proof_source.count(original) == 1
+        with pytest.raises(AssertionError):
+            assert_proof_accounting(proof_source.replace(original, replacement, 1))
 
     expected_shards = {
         "report": "report",

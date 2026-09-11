@@ -1624,6 +1624,18 @@ real Linux CI remain required acceptance evidence. Local Windows static validati
 or R-runtime acceptance, and no overall TASK-064 completion is claimed. Any later removal or
 weakening of this additional gate requires its own approved scope; this recipe grants none.
 
+The existing project-state workflow test additionally parses the exact quoted Python heredoc,
+checks its explicit future-annotations compiler flags and absence of exception suppression, and
+compiles only its unique undecorated, default-free `counted_require` function. The actual expected-
+message initializer is checked before deriving the controlled mapping. Known proof IDs 0 and 84
+and a repeated ID prove per-call counting with deduplicated IDs; seeded nonempty state remains
+unchanged after a rejected condition, an exact helper-thrown sentinel, or an unknown message.
+In-memory wrapper mutations must fail those assertions. This is a narrow permanent regression in
+an existing node, not execution of the CI program, runner, R gate, protocol driver or Linux runtime.
+The rejecting helper is a controlled stub: the original helper remains trusted, and this test
+makes no independent-rejection claim for a silently accepting or malicious helper. No workflow,
+runner, source seal, fixture, contract, node ID or parameter ID changes accompany the regression.
+
 ```python
 import hashlib
 import json
