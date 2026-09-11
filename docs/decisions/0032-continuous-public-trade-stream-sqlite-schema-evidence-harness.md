@@ -1055,6 +1055,74 @@ content-opening cleanup, or recursive pathname cleanup exists, and no uncertain 
 as PASS. Post-authentication same-UID interposition is outside these cooperating-process failure-
 injection proofs.
 
+#### R-AUTH-MAP: private-root cleanup traceability
+
+This documentation-only allocation maps the existing R-family inventory to the frozen
+generation-6 obligations; it adds no requirement, runtime wiring, fixture, gate, or execution
+evidence. Its source baseline is candidate `735e3db150aaa87f739b12c71674532b241ec365`, under
+the unchanged TASK-064 contract digest
+`ec89a1df740805cc9b43e6f2530e940c0bf9b66e8f25ed878d3207d091c4bcb8`. The controlling basis is
+acceptance gate 18's [private-root authentication/classification and traversal bounds](https://github.com/Adampov/WEALTH/blob/735e3db150aaa87f739b12c71674532b241ec365/BACKLOG.md#L547-L578),
+[one-attempt descriptor close rule](https://github.com/Adampov/WEALTH/blob/735e3db150aaa87f739b12c71674532b241ec365/BACKLOG.md#L679-L685),
+and [independent private-root negatives](https://github.com/Adampov/WEALTH/blob/735e3db150aaa87f739b12c71674532b241ec365/BACKLOG.md#L968-L977),
+also stated in this ADR's native-CI-split section above.
+
+R01-R12 retain the meanings of the existing
+[`_GENERATION6_R_REJECTIONS` registry](https://github.com/Adampov/WEALTH/blob/735e3db150aaa87f739b12c71674532b241ec365/tests/ci_shard_runner.py#L7042-L7065).
+R13-R24 are a documentation allocation of the remaining obligations, not previously implemented
+case meanings: their source status remains `UNWIRED`. All R execution remains blocked:
+[`_selftest_r_case`](https://github.com/Adampov/WEALTH/blob/735e3db150aaa87f739b12c71674532b241ec365/tests/ci_shard_runner.py#L22334-L22337)
+raises the integration-blocked error and R is absent from the case-body dispatch. Every row below
+is **not executed by this mapping step**. A registry entry, inert namespace-journal scaffold, or
+green ordinary test run is not evidence that its R driver ran.
+
+For every row the required cleanup result is `FAIL` with `residue_count > 0`, including conservative
+uncertainty accounting, and no PASS publication. The journal column describes the operation and
+observation that a future isolated driver must account for, not a new API or a claim that the
+current scaffolds implement teardown. Each detected replacement, non-removable entry, or unvisited
+remainder is preserved at the failed-cleanup boundary; a missing name is not falsely reported as
+an observed surviving entry. Every independently owned handle still receives its one permitted
+detach/poison/close attempt. No row permits stale-fd inspection, close retry, content-opening
+classification, pathname-recursive removal, or a post-authentication hostile-race claim.
+
+| ID | Existing obligation and controlled mutation | Journal operation or observation | Required failure/residue observation |
+|---|---|---|---|
+| R01 | Retained parent replacement before authentication. | Record retained parent identity and the substituted named parent before the subject cleanup. | Preserve the replacement and remaining private-root state; no search for the displaced original. |
+| R02 | Private-root replacement before authentication. | Record the original root descriptor/name binding and the replacement under the retained parent. | Do not remove the replacement root or traverse it as the original. |
+| R03 | Known child replacement before authentication. | Record the retained child binding and substituted relative name. | Preserve the observed replacement child and its contents. |
+| R04 | Unexpected root entry. | Record the entry absent from the authenticated root inventory and the failed inventory check. | Preserve the unexpected entry; do not report an empty root. |
+| R05 | Descriptor-close ambiguity followed by immediate numeric-fd reuse. | Record the detached/poisoned owner, its sole close attempt, and separately owned reused descriptor. | Block PASS and preserve uncertainty; neither inspect nor close the reused number through the old owner. |
+| R06 | Symlink entry. | Record descriptor-relative no-follow classification. | Preserve the link and target; never follow the link. |
+| R07 | Socket entry. | Record no-follow type/identity classification without a content open. | Preserve the socket entry as non-removable residue. |
+| R08 | FIFO entry. | Record no-follow classification and absence of a payload open. | Preserve the FIFO; classification must not block on its contents. |
+| R09 | Hard-linked regular entry. | Record regular type and link count greater than one. | Preserve all observed links; the entry is not removable. |
+| R10 | Regular entry with set-UID, set-GID, or sticky bit. | Record the special-mode classification. | Preserve the entry; ordinary permission bits alone remain allowed in `0o000..0o777`. |
+| R11 | Foreign mount/bind identity. | Record disagreement between the retained root mount and entry handle/relative-name mount. | Preserve the entry even when device/inode values otherwise appear acceptable. |
+| R12 | Unknown entry type. | Record the unclassifiable type without opening its contents. | Preserve the entry; unknown type grants no traversal/removal authority. |
+| R13 | Block-device and character-device entry observations, independently. | Record no-follow device classification and absence of payload opens. | Preserve each device entry; no device content is opened. |
+| R14 | Wrong ownership or descriptor/name ownership/mode disagreement, independently. | Record the exact retained, handle, and relative-name metadata comparison. | Preserve the disagreeing entry/directory; do not weaken same-UID or exact-binding checks. |
+| R15 | Missing name, unopenable entry, or handle/name identity disagreement, independently. | Record the failed no-follow stat/open/authentication boundary and any handles already acquired. | Preserve all remaining or substituted state; do not search by another name or infer successful cleanup from absence. |
+| R16 | Unknown or unavailable mount identity. | Record failure to establish the exact retained Linux mount identity. | Preserve the unproven entry; no device/inode-only fallback. |
+| R17 | Depth would exceed `64`, with root depth zero. | Record the next depth before its charged traversal operation. | Stop destructive work at the bound; preserve deeper/unvisited state. |
+| R18 | Yielded-entry count would exceed `100_000`. | Record the next entry count and pre-operation budget rejection. | Stop destructive work; preserve the unvisited remainder. |
+| R19 | Cumulative encoded component bytes would exceed `16_777_216`. | Record cumulative `os.fsencode(name)` bytes before the next charge. | Stop destructive work; preserve remaining state without ignoring name bytes. |
+| R20 | Cleanup-operation count would exceed `500_000`. | Account separately for scan acquisition, yielded entry, no-follow stat, open, unlink, and rmdir attempts. | Reject the over-budget operation before acting; no later destructive work. |
+| R21 | Invalid component or encoded name longer than `255` bytes, independently. | Record rejection of empty/dot/dot-dot, NUL/separator, invalid encoding, or oversized component before use. | No rejected component reaches a relative filesystem operation; remaining state is nonzero residue. |
+| R22 | Absolute traversal deadline reached or exceeded. | Record the captured-clock comparison to the original `60_000_000_000` ns deadline. | Stop destructive work without refreshing the deadline; preserve remaining state. |
+| R23 | Captured clock raises, returns an invalid value, or regresses, independently. | Record clock failure or a value below the prior accepted exact nonnegative integer. | Stop destructive work; no fallback clock or successful cleanup inference. |
+| R24 | An entry remains after attempted cleanup, including a failed authenticated unlink/rmdir. | Record the attempted relative removal and subsequent nonempty/unproven inventory at the root-removal gate. | Do not remove the root without authenticated empty inventory; preserve the remainder and fail. |
+
+Rows grouping alternatives require independent observations for those alternatives; the 24 IDs do
+not replace the frozen obligations with a smaller set of checks. Failure observations precede any
+separately authorized fixture teardown or rollback, which cannot turn the subject's failure into
+PASS or erase its residue evidence. Such teardown must itself prove ownership and its final
+disposition; zero fixture residue is not established by this table. GitHub command-file
+publication and fresh-descriptor rollback remain the separate C-family obligations, not R cases.
+The future driver, source-headroom work, reproducible static-gate builder, exact-candidate runtime
+evidence, and independent implementation reviews remain outstanding. This allocation grants no
+authority to change the contract, source gates, case registry, immutable fixtures, node manifest,
+financial controls, or production boundaries.
+
 ## Security and Authority Boundary
 
 All records are synthetic. No test may open a pre-existing or non-harness-owned database. The
