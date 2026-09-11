@@ -58,6 +58,75 @@ jobs:
       - name: Run foundation health slice
         run: uv run wealth-health
 
+      - name: Verify frozen R source proof
+        shell: bash
+        run: |
+          uv run python - <<'PY'
+          import __future__
+          import ast
+          import base64
+          import hashlib
+          import json
+          import math
+          import struct
+          import sys
+          from pathlib import Path
+          from typing import cast
+
+          if sys.version_info[:3] != (3, 13, 14):
+              raise RuntimeError("exact Python 3.13.14 required")
+          with Path("tests/ci_shard_runner.py").open("rb") as source_file:
+              raw = source_file.read(2_000_001)
+          if len(raw) > 2_000_000:
+              raise RuntimeError("R static source exceeds its byte cap")
+          source = raw.decode("utf-8", errors="strict")
+          module = ast.parse(source, filename="tests/ci_shard_runner.py")
+          required = (
+              ("ContractError", ast.ClassDef),
+              ("_require", ast.FunctionDef),
+              ("_generation6_r_authority_source_gates", ast.FunctionDef),
+          )
+          selected = []
+          for name, kind in required:
+              matches = [node for node in module.body if
+                         isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+                         and node.name == name]
+              if len(matches) != 1 or type(matches[0]) is not kind:
+                  raise RuntimeError("R static definition inventory differs")
+              selected.append(matches[0])
+          namespace = {
+              "__name__": "task064_r_static_ci",
+              "ast": ast, "base64": base64, "cast": cast, "hashlib": hashlib,
+              "json": json, "math": math, "struct": struct, "sys": sys,
+          }
+          subset = ast.Module(body=selected, type_ignores=[])
+          exec(compile(subset, "<TASK064-R-STATIC-CI-V1>", "exec",
+                       flags=__future__.annotations.compiler_flag, dont_inherit=True), namespace)
+          original_require = namespace["_require"]
+          expected_messages = {f"R proof {index} differs": index for index in range(85)}
+          proof_ids = set()
+          proof_calls = 0
+
+          def counted_require(condition, message):
+              global proof_calls
+              original_require(condition, message)
+              if message not in expected_messages:
+                  raise RuntimeError("R static proof message differs")
+              proof_ids.add(expected_messages[message])
+              proof_calls += 1
+
+          namespace["_require"] = counted_require
+          namespace["_generation6_r_authority_source_gates"](source)
+          if proof_ids != set(range(85)) or proof_calls != 412:
+              raise RuntimeError("R static proof count differs")
+          print(json.dumps({
+              "schema": "TASK064-R-STATIC-CI-V1",
+              "source_sha256": hashlib.sha256(raw).hexdigest(),
+              "proof_ids": len(proof_ids), "proof_calls": proof_calls,
+              "scope": "static_source_only_not_R_runtime_acceptance",
+          }, sort_keys=True))
+          PY
+
   report:
     name: TASK-064 report shard
     runs-on: ubuntu-latest

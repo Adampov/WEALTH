@@ -1931,6 +1931,36 @@ def test_project_state_references_existing_governance_artifacts() -> None:
     ):
         assert f"run: {command}" in quality_gates
     assert "uv run pytest" not in quality_gates
+    r_proof_marker = "      - name: Verify frozen R source proof\n"
+    assert quality_gates.count(r_proof_marker) == 1
+    r_proof_step = quality_gates.split(r_proof_marker, maxsplit=1)[1]
+    assert r_proof_step.startswith(
+        "        shell: bash\n        run: |\n          uv run python - <<'PY'\n"
+    )
+    assert r_proof_step.rstrip().endswith("          PY")
+    assert "      - name:" not in r_proof_step
+    assert "\n        if:" not in r_proof_step
+    for required_source_check in (
+        'with Path("tests/ci_shard_runner.py").open("rb") as source_file:',
+        "raw = source_file.read(2_000_001)",
+        "if len(raw) > 2_000_000:",
+        'source = raw.decode("utf-8", errors="strict")',
+        "if sys.version_info[:3] != (3, 13, 14):",
+        '("ContractError", ast.ClassDef)',
+        '("_require", ast.FunctionDef)',
+        '("_generation6_r_authority_source_gates", ast.FunctionDef)',
+        "if len(matches) != 1 or type(matches[0]) is not kind:",
+        "subset = ast.Module(body=selected, type_ignores=[])",
+        "original_require(condition, message)",
+        'namespace["_generation6_r_authority_source_gates"](source)',
+        "if proof_ids != set(range(85)) or proof_calls != 412:",
+        '"schema": "TASK064-R-STATIC-CI-V1"',
+        '"source_sha256": hashlib.sha256(raw).hexdigest()',
+        '"scope": "static_source_only_not_R_runtime_acceptance"',
+    ):
+        assert required_source_check in r_proof_step
+    assert "import tests.ci_shard_runner" not in r_proof_step
+    assert "importlib" not in r_proof_step
 
     expected_shards = {
         "report": "report",

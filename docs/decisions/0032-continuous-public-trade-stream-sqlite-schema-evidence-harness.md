@@ -1371,6 +1371,9 @@ print(json.dumps({
 
 #### R canonical BPE count optimization and reproducer v1
 
+This section and its V1 recipe describe only the historical BPE checkpoint
+`eaa63f6916cf6a49c545515b6e537a0b7ebe232f`. They do not reproduce later runner revisions.
+
 The representation checkpoint's canonical BPE verifier rescans every word separately for every
 distinct adjacent pair. The bounded optimization replaces only that nine-line counting kernel:
 one pass over each word records a separate `last_end` for each pair. A pair beginning before its
@@ -1565,6 +1568,222 @@ print(json.dumps({
     "static_gate_executed": False, "files_written": False,
 }, sort_keys=True))
 ```
+
+#### External frozen-R source validation and reproducible workflow metadata
+
+The passing base for this change is `eaa63f6916cf6a49c545515b6e537a0b7ebe232f`.
+The separate aggregate-hook candidate `e64e746d58edc15c78a90d929250b3fc2b137370` failed
+proof 32: its in-runner call targeted the static gate itself, one of the six forbidden names.
+That candidate is excluded, not an integration source. No alias, indirect call or predicate
+exception replaces it. Proof 32 and every other static-gate byte remain unchanged.
+
+BACKLOG constraints 18–19 preserve the exact runner modes, seven jobs, existing quality commands
+and limits; they do not make the non-test quality_gates step list exclusive. The one added,
+unconditional `Verify frozen R source proof` step runs at the end of that existing job with an
+explicit Bash shell and one Python heredoc command. This is additive non-production validation,
+classified RISK 1 and still subject to independent QA. It adds no job, node, parameter, runner
+mode, dependency, production import or R runtime authority. Every existing workflow control,
+shard/aggregate command, fixed environment binding and 15-minute job limit remains unchanged.
+
+The command reads at most 2,000,001 runner bytes and rejects a result above 2,000,000 bytes;
+requires exact Python 3.13.14 and strict UTF-8; and uniquely selects only the original ContractError,
+_require and _generation6_r_authority_source_gates definitions from the module AST. It compiles
+that subset with the original future-annotations behavior without importing or initializing the
+runner. The original _require executes before successful proof accounting; all 85 IDs and exactly
+412 successful calls are required. Exceptions propagate to a nonzero command result. One JSON
+record binds schema TASK064-R-STATIC-CI-V1, the actual source SHA-256, the proof counts and scope
+static_source_only_not_R_runtime_acceptance. No runner digest is embedded in the workflow:
+the source is measured at execution, avoiding a source/workflow hash cycle.
+
+The selected definitions are trusted, independently reviewed checkout code. AST extraction is not
+a sandbox. In particular, _require lies outside the sealed R region; this wrapper does not defend
+against arbitrary mutation of that trusted error helper. Bounded regular-checkout validation is
+not a hostile-filesystem, descriptor-runtime, cleanup, R01–R24 execution or production-acceptance
+claim. The R dispatcher, mutation permit and runtime integration remain blocked.
+
+The X02 workflow identity fields are derived metadata, not relaxed predicates. The workflow is
+11,374 bytes with SHA-256
+`c1f74c1adcfe9d1810c4c072d5c81ccb2c1f7cc8dac37ce0b30ca75d1a90d5fa`; its unchanged
+`TASK064_AGG_REPORT_PACKET_B64` scalar is now at line 325. Only those three corresponding
+runner literals change. Every other runner byte remains exact, including the approved scalar,
+X02's source equality/re-read and default-expression rejection, proof 32, the entire packed
+payload, all source/semantic/self seals and protected spans. The runner becomes 1,857,742 bytes,
+SHA-256 `7910b818670014f91eefe420d05ce8b1c8e781c3a9a3b4d143f8f212ce896c35`.
+
+TASK064-R-STATIC-CI-REPRODUCER-V1 below accepts only two concatenated baseline blobs from the
+passing base: first the exact 8,298-byte workflow, immediately followed by the exact
+1,857,741-byte runner, supplied on standard input through a byte-preserving channel. The embedded
+step is the exact reviewed 69-line addition. The recipe constructs the workflow and derives its
+three metadata fields twice in memory, verifies both result identities, then reverses the changes
+to prove all other bytes unchanged. It reads at most 2,000,001 bytes, executes no runner or CI
+program, writes no files and emits only JSON metadata. It is not an edit permission or a CI mode.
+
+Actual YAML-body execution and rejection propagation, unchanged full static positives/negatives,
+X02 positive/negative checks, narrow existing workflow assertions, independent exact-commit QA and
+real Linux CI remain required acceptance evidence. Local Windows static validation is not Linux
+or R-runtime acceptance, and no overall TASK-064 completion is claimed. Any later removal or
+weakening of this additional gate requires its own approved scope; this recipe grants none.
+
+```python
+import hashlib
+import json
+import sys
+
+VERSION = "TASK064-R-STATIC-CI-REPRODUCER-V1"
+BASE_WORKFLOW_SHA = "ee4b2c9cc3b2115b7b6ab2ddc3f45116690cff527844a57c7e940b6550f62621"
+BASE_RUNNER_SHA = "d4548e3f20746597aa2693c3da4c1b2a8538e6e6af435225846f3364401c850e"
+WORKFLOW_SHA = "c1f74c1adcfe9d1810c4c072d5c81ccb2c1f7cc8dac37ce0b30ca75d1a90d5fa"
+RUNNER_SHA = "7910b818670014f91eefe420d05ce8b1c8e781c3a9a3b4d143f8f212ce896c35"
+SCALAR = b"$" + b"{{ needs.report.outputs.task064_packet_b64 }}"
+STEP = b'''      - name: Verify frozen R source proof
+        shell: bash
+        run: |
+          uv run python - <<'PY'
+          import __future__
+          import ast
+          import base64
+          import hashlib
+          import json
+          import math
+          import struct
+          import sys
+          from pathlib import Path
+          from typing import cast
+
+          if sys.version_info[:3] != (3, 13, 14):
+              raise RuntimeError("exact Python 3.13.14 required")
+          with Path("tests/ci_shard_runner.py").open("rb") as source_file:
+              raw = source_file.read(2_000_001)
+          if len(raw) > 2_000_000:
+              raise RuntimeError("R static source exceeds its byte cap")
+          source = raw.decode("utf-8", errors="strict")
+          module = ast.parse(source, filename="tests/ci_shard_runner.py")
+          required = (
+              ("ContractError", ast.ClassDef),
+              ("_require", ast.FunctionDef),
+              ("_generation6_r_authority_source_gates", ast.FunctionDef),
+          )
+          selected = []
+          for name, kind in required:
+              matches = [node for node in module.body if
+                         isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+                         and node.name == name]
+              if len(matches) != 1 or type(matches[0]) is not kind:
+                  raise RuntimeError("R static definition inventory differs")
+              selected.append(matches[0])
+          namespace = {
+              "__name__": "task064_r_static_ci",
+              "ast": ast, "base64": base64, "cast": cast, "hashlib": hashlib,
+              "json": json, "math": math, "struct": struct, "sys": sys,
+          }
+          subset = ast.Module(body=selected, type_ignores=[])
+          exec(compile(subset, "<TASK064-R-STATIC-CI-V1>", "exec",
+                       flags=__future__.annotations.compiler_flag, dont_inherit=True), namespace)
+          original_require = namespace["_require"]
+          expected_messages = {f"R proof {index} differs": index for index in range(85)}
+          proof_ids = set()
+          proof_calls = 0
+
+          def counted_require(condition, message):
+              global proof_calls
+              original_require(condition, message)
+              if message not in expected_messages:
+                  raise RuntimeError("R static proof message differs")
+              proof_ids.add(expected_messages[message])
+              proof_calls += 1
+
+          namespace["_require"] = counted_require
+          namespace["_generation6_r_authority_source_gates"](source)
+          if proof_ids != set(range(85)) or proof_calls != 412:
+              raise RuntimeError("R static proof count differs")
+          print(json.dumps({
+              "schema": "TASK064-R-STATIC-CI-V1",
+              "source_sha256": hashlib.sha256(raw).hexdigest(),
+              "proof_ids": len(proof_ids), "proof_calls": proof_calls,
+              "scope": "static_source_only_not_R_runtime_acceptance",
+          }, sort_keys=True))
+          PY
+
+'''
+
+
+def require(condition, message):
+    if not condition:
+        raise RuntimeError(message)
+
+
+def sha(value):
+    return hashlib.sha256(value).hexdigest()
+
+
+def replace_once(value, old, new):
+    require(value.count(old) == 1, "replacement site differs")
+    return value.replace(old, new)
+
+
+def target_line(workflow):
+    key = b"          TASK064_AGG_REPORT_PACKET_B64: "
+    require(workflow.count(b"TASK064_AGG_REPORT_PACKET_B64:") == 1,
+            "workflow scalar cardinality differs")
+    matches = [(index + 1, line) for index, line in enumerate(workflow.splitlines())
+               if line.startswith(key)]
+    require(len(matches) == 1 and matches[0][1] == key + SCALAR,
+            "approved workflow scalar differs")
+    return matches[0][0]
+
+
+def build(baseline_workflow, baseline_runner):
+    require(len(baseline_workflow) == 8298 and sha(baseline_workflow) == BASE_WORKFLOW_SHA,
+            "only the exact baseline workflow is accepted")
+    require(len(baseline_runner) == 1857741 and sha(baseline_runner) == BASE_RUNNER_SHA,
+            "only the exact baseline runner is accepted")
+    require(target_line(baseline_workflow) == 256, "baseline scalar location differs")
+    require(len(STEP) == 3076 and len(STEP.splitlines()) == 69, "step inventory differs")
+    workflow = replace_once(baseline_workflow, b"  report:\n", STEP + b"  report:\n")
+    require(workflow.isascii() and b"\r" not in workflow and workflow.endswith(b"\n"),
+            "workflow encoding differs")
+    require(len(workflow) == 11374 and sha(workflow) == WORKFLOW_SHA,
+            "candidate workflow identity differs")
+    location = target_line(workflow)
+    require(location == 325, "candidate scalar location differs")
+    substitutions = (
+        (b"_GENERATION6_APPROVED_WORKFLOW_BYTES: Final = 8_298\n",
+         f"_GENERATION6_APPROVED_WORKFLOW_BYTES: Final = {len(workflow):_}\n".encode()),
+        (BASE_WORKFLOW_SHA.encode(), sha(workflow).encode()),
+        (b"_GENERATION6_WORKFLOW_TARGET_LINE: Final = 256\n",
+         f"_GENERATION6_WORKFLOW_TARGET_LINE: Final = {location}\n".encode()),
+    )
+    runner = baseline_runner
+    for old, new in substitutions:
+        runner = replace_once(runner, old, new)
+    require(len(runner) == 1857742 and sha(runner) == RUNNER_SHA,
+            "candidate runner identity differs")
+    require(len(runner) <= 1868927 and 2000000 - len(runner) >= 131072,
+            "unchanged runner caps exceeded")
+    restored = runner
+    for old, new in reversed(substitutions):
+        restored = replace_once(restored, new, old)
+    require(restored == baseline_runner, "an unrelated runner byte changed")
+    require(replace_once(workflow, STEP, b"") == baseline_workflow,
+            "an unrelated workflow byte changed")
+    return workflow, runner, location
+
+
+require(sys.version_info[:3] == (3, 13, 14), "exact Python 3.13.14 required")
+raw = sys.stdin.buffer.read(2000001)
+require(len(raw) == 1866039, "exact concatenated baseline sizes required")
+baseline_workflow, baseline_runner = raw[:8298], raw[8298:]
+first = build(baseline_workflow, baseline_runner)
+second = build(baseline_workflow, baseline_runner)
+require(first == second, "deterministic reproduction differs")
+print(json.dumps({
+    "recipe": VERSION, "workflow_bytes": len(first[0]), "workflow_sha256": sha(first[0]),
+    "runner_bytes": len(first[1]), "runner_sha256": sha(first[1]), "target_line": first[2],
+    "deterministic_twice": True, "runner_executed": False,
+    "ci_program_executed": False, "files_written": False,
+}, sort_keys=True))
+```
+
 
 ## Security and Authority Boundary
 

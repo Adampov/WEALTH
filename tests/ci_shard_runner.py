@@ -8824,12 +8824,12 @@ def _generation6_x_distinct_value(value: object) -> object:
     raise ContractError("X aggregate fixture shared value type differs")
 
 
-_GENERATION6_APPROVED_WORKFLOW_BYTES: Final = 8_298
+_GENERATION6_APPROVED_WORKFLOW_BYTES: Final = 11_374
 _GENERATION6_APPROVED_WORKFLOW_SHA256: Final = (
-    "ee4b2c9cc3b2115b7b6ab2ddc3f45116690cff527844a57c7e940b6550f62621"
+    "c1f74c1adcfe9d1810c4c072d5c81ccb2c1f7cc8dac37ce0b30ca75d1a90d5fa"
 )
 _GENERATION6_APPROVED_WORKFLOW_SCALAR: Final = "${{ needs.report.outputs.task064_packet_b64 }}"
-_GENERATION6_WORKFLOW_TARGET_LINE: Final = 256
+_GENERATION6_WORKFLOW_TARGET_LINE: Final = 325
 
 
 def _generation6_x_workflow_scalar(payload: bytes) -> str:
