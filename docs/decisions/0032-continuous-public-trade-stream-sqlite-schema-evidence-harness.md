@@ -1123,6 +1123,249 @@ evidence, and independent implementation reviews remain outstanding. This alloca
 authority to change the contract, source gates, case registry, immutable fixtures, node manifest,
 financial controls, or production boundaries.
 
+#### R static-proof representation repair and reproducer v1
+
+An isolated execution of the unchanged static proof from candidate
+`c729685d6535704c428debf176482c03cbcc8e09` failed at proof 72 on Python `3.13.14`.
+The verifier derived both its schema vocabulary and index from the protected bundle, yielding
+65 entries in each, while requiring 81 vocabulary entries and 65 index entries. This was a
+baseline failure, not a passing R execution or a regression caused by the lexical reduction.
+
+Read-only reconstruction established the representation already bound by every existing pin:
+the complete module supplies the 81-row schema vocabulary, and the protected bundle uses 65
+of those rows while retaining their full-vocabulary ordinals. The canonical schema remains
+2,228 bytes with SHA-256
+`b192323986722d01062910c32551258a8a1c5aaad42807dbe818a0a3edcb3494`; the protected semantic
+projection remains 3,907,008 bytes with SHA-256
+`7f55c9e0dc93dff90a01c0c57028bd384e88afc48bf24489341591b1a4d4425b`.
+All 166 packed root counts are AST-node counts, not serialized-byte lengths; all 166 root hashes
+match that same schema-indexed projection. Correcting these three representation expressions
+restores comparison to the existing expectations; it does not regenerate or relax them.
+
+The separate line-15748 lexical reduction removes only 5,846 inter-token spaces, with unchanged
+tokens, line count, and attributes-excluded AST. The representation repair adds 52 source bytes.
+Together they produce a 1,857,638-byte runner, leaving 11,289 bytes below the unchanged
+1,868,927-byte source cap and 142,362 bytes below the unchanged 2,000,000-byte read cap. Its exact
+SHA-256 is `66818d4278ab43899ef82b019333805943ef6d440eac259ba8334a49294b7d66`.
+The protected raw-source preimage is 883,015 bytes with SHA-256
+`49a4889cc3da0975616181c0bd0fa228108c873098c2e12da93be107197f669e`; the gate preimage is
+62,038 bytes and its self-digest is
+`610ffa82a2b84c424c977990dcea237c18b7f7b667d8179995fe28028fd02ddb`.
+
+`TASK064-R-REPRESENTATION-REPRODUCER-V1` below is an out-of-band, read-only recipe, not a
+runner mode, import hook, pytest node, CI dependency, or general-purpose reblessing tool. Run
+the fenced Python program using exact Python `3.13.14`, supplying the exact baseline runner
+blob from the commit above on standard input through a byte-preserving channel. It accepts no
+other input, derives the candidate twice in memory, and emits only JSON metadata. It neither
+writes source nor imports or executes the runner or static gate. Source edits require their
+own prospective lease and `apply_patch`; a recipe result alone is not acceptance evidence.
+
+The recipe preserves the entire packed R16 payload, all semantic expectations, 85 proof IDs,
+and source line positions. Baseline reproduction checks raw seals, not a false claim that the
+broken baseline gate passed. The only regenerated values are the protected raw-source length
+and digest, gate preimage length, and zero-normalized gate self-digest. These fixed-width fields
+create no hash fixed-point: the self-digest is replaced with 64 ASCII zeroes before hashing.
+The BPE algorithm is unchanged. Isolated full-gate execution, meaningful stale-seal and semantic
+mutation negatives, independent exact-candidate review, and the existing completion gates remain
+required; this repair does not activate the R dispatcher or mutation permit.
+
+```python
+import ast
+import hashlib
+import io
+import json
+import math
+import sys
+import tokenize
+
+VERSION = "TASK064-R-REPRESENTATION-REPRODUCER-V1"
+BASE_SHA = "3a77da48fca732cfeacebd4765150d977e54b1c3625653f60195a2c1ae3ac4d6"
+LEXICAL_SHA = "3fc24cc7e0765e268d4595e221bc79e5e679ba3dc4612944ce9153c6c493a2ce"
+RESULT_SHA = "66818d4278ab43899ef82b019333805943ef6d440eac259ba8334a49294b7d66"
+OLD_BUNDLE = "8247f74859082fe680c99a059a2be81d235a40b0c434ce831fd0bb422e46db8a"
+OLD_SELF = "a4c005c0e41a8af028e53e6e4a4f7f93cb352e0b89cdddf0d782b8e592b24972"
+BUNDLE_DOMAIN = b"TASK-064\0GEN6\0R-A2i\0source-v1\0"
+GATE_DOMAIN = b"TASK-064\0GEN6\0R-CAP3-A2I-R16\0gate-v1\0"
+CONTRACT = "ec89a1df740805cc9b43e6f2530e940c0bf9b66e8f25ed878d3207d091c4bcb8"
+
+
+def require(condition, message):
+    if not condition:
+        raise RuntimeError(message)
+
+
+def sha(value):
+    return hashlib.sha256(value).hexdigest()
+
+
+def encode(lines):
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def replace_once(line, before, after):
+    require(line.count(before) == 1, "replacement site differs")
+    return line.replace(before, after)
+
+
+def token_signature(line):
+    return [(t.type, t.string) for t in tokenize.generate_tokens(
+        io.StringIO(line + "\n").readline
+    )]
+
+
+def derive_raw_seals(lines):
+    lines = lines.copy()
+    bundle = BUNDLE_DOMAIN + encode(lines[10612:21806])
+    lines[22227] = replace_once(
+        lines[22227], "L(dm)==888861", "L(dm)==" + str(len(bundle))
+    )
+    lines[22227] = replace_once(lines[22227], OLD_BUNDLE, sha(bundle))
+    lines[22321] = replace_once(lines[22321], OLD_SELF, "0" * 64)
+    preimage = GATE_DOMAIN + encode(lines[21809:22330])
+    require(len(str(len(preimage))) == 5, "gate length field width changed")
+    lines[22329] = replace_once(
+        lines[22329], "L(dR)==61986", "L(dR)==" + str(len(preimage))
+    )
+    normalized = GATE_DOMAIN + encode(lines[21809:22330])
+    require(len(normalized) == len(preimage), "gate length did not stabilize")
+    lines[22321] = replace_once(lines[22321], "0" * 64, sha(normalized))
+    return encode(lines), {
+        "bundle_bytes": len(bundle), "bundle_sha256": sha(bundle),
+        "gate_bytes": len(normalized), "gate_sha256": sha(normalized),
+    }
+
+
+def semantic_pins(source):
+    module = ast.parse(source)
+    roots = [n for n in module.body if 10613 <= n.lineno <= 21806]
+    nodes = [n for root in roots for n in ast.walk(root)]
+    schema = sorted({(type(n).__name__, tuple(n._fields)) for n in ast.walk(module)})
+    used = {(type(n).__name__, tuple(n._fields)) for n in nodes}
+    index = {key: ordinal for ordinal, key in enumerate(schema) if key in used}
+    require((len(roots), len(nodes), len(schema), len(index)) ==
+            (166, 192712, 81, 65), "semantic inventory differs")
+
+    def canonical(value):
+        return json.dumps(value, ensure_ascii=True, allow_nan=False,
+                          separators=(",", ":"), sort_keys=False).encode("ascii")
+
+    def project(value):
+        if isinstance(value, ast.AST):
+            return ["n", index[(type(value).__name__, tuple(value._fields))],
+                    [project(getattr(value, field)) for field in value._fields]]
+        if isinstance(value, list):
+            return ["l", [project(item) for item in value]]
+        if value is None:
+            return ["z"]
+        if value is Ellipsis:
+            return ["e"]
+        if type(value) is bool:
+            return ["b", 1 if value else 0]
+        if type(value) is int:
+            return ["i", str(value)]
+        if type(value) is str:
+            return ["s", value]
+        if type(value) is bytes:
+            return ["y", value.hex()]
+        if type(value) is float:
+            require(math.isfinite(value), "nonfinite scalar")
+            return ["f", value.hex()]
+        if type(value) is complex:
+            require(math.isfinite(value.real) and math.isfinite(value.imag),
+                    "nonfinite scalar")
+            return ["c", value.real.hex(), value.imag.hex()]
+        raise RuntimeError("unsupported scalar")
+
+    rows = [[name, list(fields)] for name, fields in schema]
+    schema_bytes = canonical(rows)
+    projection = canonical([
+        "TASK064-G6-R-CAP1-SEMANTIC-PROJECTION-V1",
+        ["contract", 6, CONTRACT],
+        ["python_ast", "3.13.14", "attributes-excluded", "schema-indexed-fields"],
+        ["schema", rows], ["bundle", 10613, 21806, len(roots), project(roots)],
+    ])
+    require(len(schema_bytes) == 2228 and sha(schema_bytes) ==
+            "b192323986722d01062910c32551258a8a1c5aaad42807dbe818a0a3edcb3494",
+            "frozen schema pin differs")
+    require(len(projection) == 3907008 and sha(projection) ==
+            "7f55c9e0dc93dff90a01c0c57028bd384e88afc48bf24489341591b1a4d4425b",
+            "frozen semantic projection differs")
+    gates = [n for n in module.body if isinstance(n, ast.FunctionDef) and
+             n.name == "_generation6_r_authority_source_gates"]
+    require(len(gates) == 1 and (gates[0].lineno, gates[0].end_lineno) ==
+            (21810, 22330), "gate span differs")
+    ids = [n.args[0].value for n in ast.walk(gates[0]) if isinstance(n, ast.Call)
+           and isinstance(n.func, ast.Name) and n.func.id == "prove" and n.args
+           and isinstance(n.args[0], ast.Constant) and type(n.args[0].value) is int]
+    require(len(ids) == 85 and set(ids) == set(range(85)), "proof inventory differs")
+    return sha(schema_bytes), sha(projection)
+
+
+def build(baseline):
+    require(len(baseline) == 1863432 and sha(baseline) == BASE_SHA,
+            "only the exact baseline is accepted")
+    original = baseline.decode("utf-8").splitlines()
+    require(len(original) == 34878 and encode(original) == baseline,
+            "baseline newline representation differs")
+    reproduced, old_seals = derive_raw_seals(original)
+    require(reproduced == baseline and old_seals["bundle_bytes"] == 888861 and
+            old_seals["gate_bytes"] == 61986, "baseline seals do not reproduce")
+    work = original.copy()
+    line = work[15747]
+    tokens = list(tokenize.generate_tokens(io.StringIO(line + "\n").readline))
+    gaps = []
+    for left, right in zip(tokens, tokens[1:]):
+        if left.end[0] == right.start[0] == 1:
+            start, end = left.end[1], right.start[1]
+            if start < end and line[start:end].isspace() and (
+                left.type == tokenize.OP or right.type == tokenize.OP
+            ):
+                gaps.append((start, end))
+    for start, end in reversed(gaps):
+        line = line[:start] + line[end:]
+    require(token_signature(line) == token_signature(work[15747]), "tokens differ")
+    require(len(work[15747]) - len(line) == 5846, "lexical reduction differs")
+    work[15747] = line
+    lexical = encode(work)
+    require(sha(lexical) == LEXICAL_SHA, "lexical candidate differs")
+    require(ast.dump(ast.parse(baseline), include_attributes=False) ==
+            ast.dump(ast.parse(lexical), include_attributes=False), "lexical AST differs")
+    work[22232] = replace_once(
+        work[22232], "for a in cU", "for a in a3(U)"
+    )
+    work[22233] = replace_once(
+        work[22233], "cI={fp:ag for ag,fp in enumerate(bO)}",
+        "cI={fp:bO.index(fp)for fp in{(K(a).__name__,T(a._fields))for a in cU}}"
+    )
+    work[22290] = replace_once(work[22290], "L(dH)", "sum(1 for _ in a3(a))")
+    candidate, seals = derive_raw_seals(work)
+    require(len(candidate) == 1857638 and sha(candidate) == RESULT_SHA,
+            "derived candidate differs")
+    require(len(candidate) <= 1868927 and 2000000 - len(candidate) >= 131072,
+            "unchanged source caps exceeded")
+    final = candidate.decode("utf-8").splitlines()
+    require(len(final) == len(original), "line count changed")
+    changed = {i + 1 for i, pair in enumerate(zip(original, final)) if pair[0] != pair[1]}
+    require(changed == {15748, 22228, 22233, 22234, 22291, 22322, 22330},
+            "unexpected source change")
+    require(final[21978] == original[21978], "packed R16 payload changed")
+    require(semantic_pins(baseline) == semantic_pins(candidate), "semantic pins changed")
+    return candidate, seals
+
+
+require(sys.version_info[:3] == (3, 13, 14), "exact Python 3.13.14 required")
+baseline = sys.stdin.buffer.read(2000001)
+first, first_seals = build(baseline)
+second, second_seals = build(baseline)
+require(first == second and first_seals == second_seals, "regeneration differs")
+print(json.dumps({
+    "recipe": VERSION, "baseline_sha256": BASE_SHA,
+    "candidate_bytes": len(first), "candidate_sha256": sha(first),
+    "seals": first_seals, "deterministic_twice": True,
+    "runner_executed": False, "static_gate_executed": False, "files_written": False,
+}, sort_keys=True))
+```
+
 ## Security and Authority Boundary
 
 All records are synthetic. No test may open a pre-existing or non-harness-owned database. The
