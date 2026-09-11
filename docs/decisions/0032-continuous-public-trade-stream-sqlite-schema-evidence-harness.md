@@ -1136,6 +1136,16 @@ performs no filesystem mutation; the existing node's original filesystem work is
 This is not R21 cleanup, journal/permit/teardown execution, or full protocol acceptance, and it
 does not change runner bytes, source seals, workflow, frozen fixtures, or node/parameter IDs.
 
+The initial predicate checkpoint `277028b7aab5415f6fd6e3a44257dfdba8a964f7` passed its
+isolated slice and quality job but failed all five shards during collection: the harness's
+import-time fixture policy still pinned the integration module's preceding raw-source digest.
+That failed checkpoint remains evidence. The bounded bootstrap correction updates only the
+integration row's final digest to the independently recomputed current file SHA-256; the exact
+comparison, module paths, fixture/binder code fingerprints, offsets, and every policy prefix
+remain unchanged. The original fixture/binder source prefix is byte-identical. Neither the old
+digest nor arbitrary modified source is accepted. This derived identity correction does not
+claim a Linux collection/full-suite pass before exact-candidate CI supplies that evidence.
+
 #### R static-proof representation repair and reproducer v1
 
 This section and its V1 recipe describe only the historical representation checkpoint

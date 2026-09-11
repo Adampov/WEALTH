@@ -3816,7 +3816,7 @@ def _build_pytest_root_authority() -> tuple[
             "_bind_task064_harness_module",
             "e4bba9b8f370dc1c66fcf977d36438dc870ade6792cd281e1f4ff5ed0fbfc330",
             34,
-            "af3a4f167e99474f886b30c1e2d7d83d624339c149333d231f58355d9c89536a",
+            "1588643fb25749d05d96804db62d0398d875e7ff09eff2dc0665d7b4219edd04",
         ),
     )
     real_getpid = os.getpid
