@@ -76,6 +76,10 @@ Do not modify an approved foundation document unless the active task explicitly 
   `docs/QUANT_ORG_OS.md`. A separately authorized independent task may proceed only when it cannot
   consume or change unmerged outputs.
 
+When the owner delegates continued work, use the bounded work-cycle, host-performance, and
+prompt-maintenance rules in sections 10.1-10.3 of `docs/QUANT_ORG_OS.md`. Continue authorized
+engineering without repeated routine confirmation, while preserving every existing approval gate.
+
 ## Task Contract
 
 Every implementation task should define:

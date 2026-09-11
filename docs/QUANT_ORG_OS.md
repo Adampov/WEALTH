@@ -544,6 +544,85 @@ Optimize context and token use:
 
 Efficiency never justifies skipping a required gate or weakening a safety boundary.
 
+### 10.1 Owner-Delegated Continuation
+
+When the owner asks for independent continuation, complete ordinary authorized engineering steps
+without repeatedly asking whether to continue. Use reasonable, recorded assumptions for reversible
+implementation details. This delegation does not change sections 3, 7, 11, or 12, confer merge or
+production authority, or supply missing restricted inputs.
+
+At each resumed work cycle:
+
+1. Reconcile current user instructions, repository truth, branch/commit identity, uncommitted work,
+   open review findings, and the last compact checkpoint. A checkpoint describes work in progress;
+   it does not replace `PROJECT_STATE.json` or create an accepted decision.
+2. Choose one bounded authorized result with a clear acceptance check and a useful stopping point.
+   Prefer finishing that result to creating more plans, review generations, or parallel tasks.
+3. Run the smallest informative checks first and complete all applicable required gates. Reuse
+   evidence only when its exact inputs and relevant environment remain unchanged. Do not rerun a
+   successful expensive suite just because another cycle started.
+4. Address new failures or review findings. If an action is blocked, preserve it and continue only
+   independent authorized work that does not consume the blocked or unmerged output. Repeating an
+   unchanged rejected artifact is not progress.
+5. Save one compact checkpoint with exact branch/commit, changed files, checks and exclusions,
+   remaining work, blocker evidence, and the next safe action. Use `Review-ready` only after its
+   section 11 criteria are met; otherwise record actual in-progress or blocked work. Outstanding
+   merge or approval never implies `Complete`.
+
+For scheduled continuation, use the application's recurring-task mechanism and update a matching
+automation rather than creating duplicates. Keep unchanged, non-actionable state quiet; notify on
+meaningful progress, completion, failure, or required owner action. Do not launch duplicate or
+overlapping continuation work while a previous run remains active. Disjoint writers still follow
+section 9 ownership, and heavy local batches follow section 10.2. Local scheduling still
+requires the computer and agent to remain available; do not claim work continues through sleep.
+
+### 10.2 Host Performance and Scoped Cleanup
+
+Measure before treating a slow computer as a cleanup problem. Sample available memory, CPU activity,
+free disk space, and task-owned processes before expensive work and when symptoms appear. Confirm
+pressure with a second bounded sample; cumulative CPU time alone is not current CPU utilization.
+Keep thresholds and cooldowns in the local run configuration, not in financial policy.
+
+- Limit local resource-heavy work to one process batch at a time on a constrained host. Under
+  sustained pressure, stop launching expensive work and continue lightweight work where possible.
+- Close a helper only after current process identity, executable, start time, task ownership, and
+  lack of ongoing useful work are established. Prefer graceful shutdown; do not terminate by name,
+  high memory use, or an absent parent alone. Preserve editors, browsers, sync clients, security
+  tools, system services, and unrelated processes.
+- Cleanup may target only explicitly identified, task-owned, reproducible caches or disposable
+  temporary files. Check exact resolved paths, age, active use, file identity, reparse points,
+  bounded file/byte counts, and any needed recovery records before mutation. Never sweep a home
+  directory, workspace, drive, repository history, evidence archive, credentials, or personal data.
+- For unattended cleanup filesystem mutation, require a reviewed, tested mechanism with a durable recovery
+  record written before mutation, no overwrite, verified readback, and a stop on uncertain outcome.
+  A process-local list printed only at exit is not crash-safe recovery. If these conditions are
+  absent, keep that cleanup path report-only and continue other safe work.
+- Measure after cleanup and report RAM, reclaimed disk bytes, and moved/quarantined bytes
+  separately. Moving files on the same volume does not free disk space; deleting a cache does not
+  prove a RAM improvement. Preserve recoverable files until disposal is separately in scope.
+
+Do not change security settings, disable protection, clear evidence, or keep repeating ineffective
+cleanup to make a performance check pass. If there is no safe useful target, record that fact and
+reduce concurrent work instead of inventing a destructive action.
+
+### 10.3 Evidence-Driven Prompt Maintenance
+
+At the end of each work cycle, review whether an instruction caused a demonstrated failure,
+contradiction, repeated unnecessary work, or missed acceptance condition. When prompt maintenance
+is authorized, change the smallest relevant instruction and remove duplication where possible;
+no new evidence is a valid reason to leave the prompt unchanged.
+
+Bind each material prompt change to its triggering observation, previous behavior, intended
+behavior, exact diff, and a representative scenario checked by an independent reviewer. Test that
+normal progress, resource pressure, an uncertain cleanup result, and an approval-required action
+still select the intended behavior. Preserve failed evidence and record the result once.
+
+Prompt edits cannot create approvals, downgrade risk, alter acceptance results, weaken required
+checks, or change financial, credential, production, or merge authority. Such changes follow their
+existing gates rather than being relabeled as self-improvement. Do not rewrite global skills or
+unrelated user settings. Keep local operating notes separate from shared repository policy, and
+publish shared prompt changes for review through the normal branch workflow.
+
 ## 11. Validation and Completion
 
 Validation depth rises with risk.
