@@ -12,9 +12,12 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  TASK064_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
 jobs:
-  quality:
-    name: Quality and security
+  quality_gates:
+    name: Quality gates
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -22,6 +25,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Install uv
@@ -48,11 +52,284 @@ jobs:
       - name: Type-check
         run: uv run mypy
 
-      - name: Test
-        run: uv run pytest
-
       - name: Audit dependencies
         run: uv --preview-features audit-command audit --locked
 
       - name: Run foundation health slice
         run: uv run wealth-health
+
+      - name: Verify frozen R source proof
+        shell: bash
+        run: |
+          uv run python - <<'PY'
+          import __future__
+          import ast
+          import base64
+          import hashlib
+          import json
+          import math
+          import struct
+          import sys
+          from pathlib import Path
+          from typing import cast
+
+          if sys.version_info[:3] != (3, 13, 14):
+              raise RuntimeError("exact Python 3.13.14 required")
+          with Path("tests/ci_shard_runner.py").open("rb") as source_file:
+              raw = source_file.read(2_000_001)
+          if len(raw) > 2_000_000:
+              raise RuntimeError("R static source exceeds its byte cap")
+          source = raw.decode("utf-8", errors="strict")
+          module = ast.parse(source, filename="tests/ci_shard_runner.py")
+          required = (
+              ("ContractError", ast.ClassDef),
+              ("_require", ast.FunctionDef),
+              ("_generation6_r_authority_source_gates", ast.FunctionDef),
+          )
+          selected = []
+          for name, kind in required:
+              matches = [node for node in module.body if
+                         isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+                         and node.name == name]
+              if len(matches) != 1 or type(matches[0]) is not kind:
+                  raise RuntimeError("R static definition inventory differs")
+              selected.append(matches[0])
+          namespace = {
+              "__name__": "task064_r_static_ci",
+              "ast": ast, "base64": base64, "cast": cast, "hashlib": hashlib,
+              "json": json, "math": math, "struct": struct, "sys": sys,
+          }
+          subset = ast.Module(body=selected, type_ignores=[])
+          exec(compile(subset, "<TASK064-R-STATIC-CI-V1>", "exec",
+                       flags=__future__.annotations.compiler_flag, dont_inherit=True), namespace)
+          original_require = namespace["_require"]
+          expected_messages = {f"R proof {index} differs": index for index in range(85)}
+          proof_ids = set()
+          proof_calls = 0
+
+          def counted_require(condition, message):
+              global proof_calls
+              original_require(condition, message)
+              if message not in expected_messages:
+                  raise RuntimeError("R static proof message differs")
+              proof_ids.add(expected_messages[message])
+              proof_calls += 1
+
+          namespace["_require"] = counted_require
+          namespace["_generation6_r_authority_source_gates"](source)
+          if proof_ids != set(range(85)) or proof_calls != 412:
+              raise RuntimeError("R static proof count differs")
+          print(json.dumps({
+              "schema": "TASK064-R-STATIC-CI-V1",
+              "source_sha256": hashlib.sha256(raw).hexdigest(),
+              "proof_ids": len(proof_ids), "proof_calls": proof_calls,
+              "scope": "static_source_only_not_R_runtime_acceptance",
+          }, sort_keys=True))
+          PY
+
+  report:
+    name: TASK-064 report shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      task064_packet_b64: ${{ steps.shard.outputs.task064_packet_b64 }}
+      task064_packet_sha256: ${{ steps.shard.outputs.task064_packet_sha256 }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.31"
+          enable-cache: true
+
+      - name: Install pinned Python
+        run: uv python install
+
+      - name: Install locked dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Run report shard
+        id: shard
+        run: uv run python tests/ci_shard_runner.py --shard report
+
+  remainder_0:
+    name: TASK-064 remainder-0 shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      task064_packet_b64: ${{ steps.shard.outputs.task064_packet_b64 }}
+      task064_packet_sha256: ${{ steps.shard.outputs.task064_packet_sha256 }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.31"
+          enable-cache: true
+
+      - name: Install pinned Python
+        run: uv python install
+
+      - name: Install locked dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Run remainder-0 shard
+        id: shard
+        run: uv run python tests/ci_shard_runner.py --shard remainder-0
+
+  remainder_1:
+    name: TASK-064 remainder-1 shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      task064_packet_b64: ${{ steps.shard.outputs.task064_packet_b64 }}
+      task064_packet_sha256: ${{ steps.shard.outputs.task064_packet_sha256 }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.31"
+          enable-cache: true
+
+      - name: Install pinned Python
+        run: uv python install
+
+      - name: Install locked dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Run remainder-1 shard
+        id: shard
+        run: uv run python tests/ci_shard_runner.py --shard remainder-1
+
+  remainder_2:
+    name: TASK-064 remainder-2 shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      task064_packet_b64: ${{ steps.shard.outputs.task064_packet_b64 }}
+      task064_packet_sha256: ${{ steps.shard.outputs.task064_packet_sha256 }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.31"
+          enable-cache: true
+
+      - name: Install pinned Python
+        run: uv python install
+
+      - name: Install locked dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Run remainder-2 shard
+        id: shard
+        run: uv run python tests/ci_shard_runner.py --shard remainder-2
+
+  remainder_3:
+    name: TASK-064 remainder-3 shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      task064_packet_b64: ${{ steps.shard.outputs.task064_packet_b64 }}
+      task064_packet_sha256: ${{ steps.shard.outputs.task064_packet_sha256 }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.31"
+          enable-cache: true
+
+      - name: Install pinned Python
+        run: uv python install
+
+      - name: Install locked dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Run remainder-3 shard
+        id: shard
+        run: uv run python tests/ci_shard_runner.py --shard remainder-3
+
+  quality:
+    name: Quality and security
+    if: always()
+    needs:
+      - quality_gates
+      - report
+      - remainder_0
+      - remainder_1
+      - remainder_2
+      - remainder_3
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.31"
+          enable-cache: true
+
+      - name: Install pinned Python
+        run: uv python install
+
+      - name: Install locked dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Aggregate static TASK-064 shards
+        env:
+          TASK064_AGG_QUALITY_GATES_RESULT: ${{ needs.quality_gates.result }}
+          TASK064_AGG_REPORT_RESULT: ${{ needs.report.result }}
+          TASK064_AGG_REMAINDER_0_RESULT: ${{ needs.remainder_0.result }}
+          TASK064_AGG_REMAINDER_1_RESULT: ${{ needs.remainder_1.result }}
+          TASK064_AGG_REMAINDER_2_RESULT: ${{ needs.remainder_2.result }}
+          TASK064_AGG_REMAINDER_3_RESULT: ${{ needs.remainder_3.result }}
+          TASK064_AGG_REPORT_PACKET_B64: ${{ needs.report.outputs.task064_packet_b64 }}
+          TASK064_AGG_REPORT_PACKET_SHA256: ${{ needs.report.outputs.task064_packet_sha256 }}
+          TASK064_AGG_REMAINDER_0_PACKET_B64: ${{ needs.remainder_0.outputs.task064_packet_b64 }}
+          TASK064_AGG_REMAINDER_0_PACKET_SHA256: ${{ needs.remainder_0.outputs.task064_packet_sha256 }}
+          TASK064_AGG_REMAINDER_1_PACKET_B64: ${{ needs.remainder_1.outputs.task064_packet_b64 }}
+          TASK064_AGG_REMAINDER_1_PACKET_SHA256: ${{ needs.remainder_1.outputs.task064_packet_sha256 }}
+          TASK064_AGG_REMAINDER_2_PACKET_B64: ${{ needs.remainder_2.outputs.task064_packet_b64 }}
+          TASK064_AGG_REMAINDER_2_PACKET_SHA256: ${{ needs.remainder_2.outputs.task064_packet_sha256 }}
+          TASK064_AGG_REMAINDER_3_PACKET_B64: ${{ needs.remainder_3.outputs.task064_packet_b64 }}
+          TASK064_AGG_REMAINDER_3_PACKET_SHA256: ${{ needs.remainder_3.outputs.task064_packet_sha256 }}
+        run: uv run python tests/ci_shard_runner.py --aggregate-static

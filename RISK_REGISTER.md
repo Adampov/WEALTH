@@ -56,6 +56,41 @@ harness. Target filesystem, power-loss, operational capacity/checkpoint, backup-
 retention, incompatible-migration, production-adapter, runtime, and readiness evidence remain
 separately governed. TASK-037 remains blocked and authorization remains denied.
 
+## TASK-064 Test-only Schema and Evidence-Harness Treatment
+
+ADR-0032 adds an executable schema and generated-data harness only under test support and changes
+no risk state. Fixture-scoped registration and descriptor-relative generation checks apply only
+to the exact TASK-064 pytest modules and cooperating same-UID children; hostile same-UID TOCTOU,
+target path/VFS isolation, and production ownership remain explicit independent blockers. Exact
+ordered reader/writer control profiles, real overlapping BUSY evidence, and complete
+source/destination backup-manifest bindings remain generated evidence, not target approval:
+
+- **RISK-001:** exact generated transaction, crash, bounded-read, backup/restore, and workload
+  evidence improves local design confidence but grants no provider access, automatic retry,
+  target-filesystem durability, capacity, recovery, continuous operation, or readiness.
+- **RISK-002:** exact retained canonical bytes and hostile corruption tests do not inspect live
+  provider payloads, detect schema drift, or grant hold/resume authority. TASK-057 fixtures,
+  parser limits, and the manual pause/review/resume boundary remain mandatory.
+- **RISK-003:** the frozen test seed, record/workload shapes, latency/memory/file thresholds, local
+  measured cursor bound, page ceiling, and WAL checkpoint case are not an operational request budget or capacity
+  envelope. Future collection still requires separately measured target capacity and the existing
+  pre-request budget gate.
+- **RISK-004:** atomicity applies only to generated rows in one dedicated stream database.
+  Child, market-evidence, lifecycle, health, fence, and budget databases remain separate and
+  non-atomic; the complete generated backup manifest grants no destination retention/RPO/RTO
+  authority, and target crash/power-loss, backup-boundary, restore-cadence, and recovery evidence
+  remain open.
+- **RISK-005:** full-range stream-start and causal-version integers round-trip, while cursor and
+  attachment-window epochs remain only in authoritative BLOBs. No operator timestamp data is
+  inspected or migrated, and TASK-037 authorization remains denied.
+
+TASK-064 remains `READY` and the canonical next action until the immutable candidate completes
+exact-head reviews and CI, receives exact PR/head merge authorization, merges, passes required
+target-branch CI, and receives a separate completion-governance transition. Generated evidence
+provides no production adapter, hostile same-UID resistance, target path/VFS/filesystem/runtime approval, retention/disposal,
+RPO/RTO, monitoring, recovery, incompatible-migration, or readiness claim. All five risks retain
+their existing state.
+
 ## Escalation
 
 - A new critical risk, suspected credential exposure, corrupt trusted evidence, or bypassed safety

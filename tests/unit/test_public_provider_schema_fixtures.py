@@ -493,8 +493,12 @@ def test_manifest_mutations_fail_closed(tmp_path: Path, case: str) -> None:
 
     if case not in {"missing-file", "extra-file", "nested-extra-file", "symlink-fixture"}:
         _write_manifest(root, payload)
-    with pytest.raises(ManifestError):
-        load_corpus(root)
+    try:
+        with pytest.raises(ManifestError):
+            load_corpus(root)
+    finally:
+        if case == "symlink-fixture":
+            (root / EXPECTED_PATHS[0]).unlink(missing_ok=True)
 
 
 @pytest.mark.parametrize("case", ["duplicate-key", "nan", "infinity"])

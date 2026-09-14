@@ -776,6 +776,46 @@ power-loss, operational capacity/checkpoint, backup-boundary, retention, and inc
 evidence remain separately governed before any production adapter. TASK-037 remains blocked and
 authorization remains denied.
 
+## Continuous Public-Trade SQLite Schema and Evidence Harness (Test Only)
+
+[ADR-0032](../decisions/0032-continuous-public-trade-stream-sqlite-schema-evidence-harness.md)
+freezes application ID `0x57505431`, physical generation one, 4,096-byte pages, and descriptor
+fingerprint
+`sha256:0410c1f08390a411c73427b3d07c542f3d1828def7c6adebab51cd57375355b3`.
+Its executable schema and support module are test-only. Fixture-scoped process-local registration
+binds the exact TASK-064 node, original root object, process, resolved identity, ownership, mode,
+and nonce. Creation is descriptor-relative and operation opens pin the generation while rejecting
+observed aliases and unexpected entries for cooperating same-UID children. A plain path grants no
+authority. Hostile same-UID TOCTOU and target/VFS isolation remain independent production
+blockers. Production source never imports the harness.
+
+Authoritative TASK-061 creation/transition records, envelopes, creation/current/predecessor
+witnesses, digests, and rolling roots remain exact BLOBs. The schema exposes only the integer
+projections permitted by the frozen TASK-064 contract. Deferred creation/tail bindings, immutable
+history, exact identity uniqueness, one explicit `BEGIN IMMEDIATE` transaction per create/CAS,
+and closed SQLite result mapping preserve the TASK-062 inserted/duplicate/conflict,
+identity-conflict, anchor-conflict, unsupported-version, corrupt, and unavailable distinctions.
+The exact test-only facade consumes and returns the frozen TASK-062 models; it is not a repository
+adapter.
+
+Current load uses at most three history rows for one selected stream; historical duplicate
+classification uses at most five, and a two-candidate identity conflict uses at most six history
+rows. Initial and continuation audit pages enforce exact cardinality, at most 100 new rows and one
+overlap, exact tail binding, and the public TASK-062 page validator. Generated evidence binds
+ordered exact reader/writer control profiles; real overlapping one-winner/BUSY processes and
+separate duplicate/conflict classifiers; mapping-only fail-closed `SQLITE_LOCKED*`; and a complete
+backup manifest with source/destination generation IDs, runtime/schema/page/checkpoint/finalization
+bindings, injected fixed-UTC time, counts, closed files/digests, and tails. Process-fault,
+same-format copy, record-size, workload, memory, cursor, and latency results remain
+test-environment evidence only.
+
+TASK-064 remains `READY` and the canonical next action through candidate review and merge. Exact
+owner authorization naming the draft PR and current immutable head SHA is still required before
+merge; required target-branch CI and a separate completion-governance transition are required
+afterward. Target path/VFS/filesystem, hostile same-UID races, power loss, production runtime, capacity/checkpoint,
+backup destination, retention, RPO/RTO, monitoring, recovery, incompatible migration, and
+readiness remain separately governed. TASK-037 remains blocked and authorization remains denied.
+
 ## Canonical Candle
 
 `CanonicalCandle` represents one final OHLCV interval. Every record includes:
