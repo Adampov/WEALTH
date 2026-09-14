@@ -8360,6 +8360,258 @@ def test_path_token_and_permission_guards_fail_closed(tmp_path: Path) -> None:
         component_namespace[encoder_name] = real_encoder
     assert component_namespace[encoder_name] is os.fsencode is real_encoder
 
+    # Claimed-kind metadata checks do not construct a journal or authorize filesystem work.
+    from dataclasses import dataclass
+    from enum import Enum
+
+    with runner_path.open("rb") as kind_source_file:
+        kind_raw = kind_source_file.read(2_000_001)
+    assert len(kind_raw) <= 2_000_000
+    kind_source = kind_raw.decode("utf-8", errors="strict")
+    kind_module = ast.parse(kind_source, filename=str(runner_path))
+    kind_futures = [
+        node
+        for node in kind_module.body
+        if isinstance(node, ast.ImportFrom) and node.module == "__future__"
+    ]
+    assert len(kind_futures) == 1
+    assert ast.dump(kind_futures[0]) == ast.dump(
+        ast.parse("from __future__ import annotations").body[0]
+    )
+    kind_selected: list[ast.stmt] = [kind_futures[0]]
+    for definition_name, definition_type in (
+        ("ContractError", ast.ClassDef),
+        ("_require", ast.FunctionDef),
+        ("_ascii", ast.FunctionDef),
+        ("DescriptorSnapshot", ast.ClassDef),
+        ("_Generation6RNamespaceNodeKind", ast.ClassDef),
+    ):
+        definitions = [
+            node
+            for node in kind_module.body
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == definition_name
+        ]
+        assert len(definitions) == 1 and type(definitions[0]) is definition_type
+        definition = definitions[0]
+        assert not definition.type_params
+        expected_decorators = (
+            [ast.parse("dataclass(frozen=True)", mode="eval").body]
+            if definition_name == "DescriptorSnapshot"
+            else []
+        )
+        assert [ast.dump(item) for item in definition.decorator_list] == [
+            ast.dump(item) for item in expected_decorators
+        ]
+        if isinstance(definition, ast.FunctionDef):
+            assert not definition.args.defaults and not any(definition.args.kw_defaults)
+        kind_selected.append(definition)
+    for binding_source in (
+        "SPECIAL_PERMISSION_BITS: Final = stat.S_ISUID | stat.S_ISGID | stat.S_ISVTX",
+        "_GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT: Final = stat.S_IFMT",
+    ):
+        expected_binding = ast.parse(binding_source).body[0]
+        assert isinstance(expected_binding, ast.AnnAssign)
+        assert isinstance(expected_binding.target, ast.Name)
+        bindings = [
+            node
+            for node in kind_module.body
+            if isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == expected_binding.target.id
+        ]
+        assert len(bindings) == 1
+        assert ast.dump(bindings[0]) == ast.dump(expected_binding)
+        kind_selected.append(bindings[0])
+    journals = [
+        node
+        for node in kind_module.body
+        if isinstance(node, ast.ClassDef) and node.name == "_Generation6RNamespaceJournal"
+    ]
+    assert len(journals) == 1
+    validators = [
+        node
+        for node in journals[0].body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "_validate_node_kind"
+    ]
+    assert len(validators) == 1 and type(validators[0]) is ast.FunctionDef
+    validator = validators[0]
+    assert not validator.decorator_list and not validator.type_params
+    assert not validator.args.defaults and not any(validator.args.kw_defaults)
+    assert not any(isinstance(node, ast.Name) and node.id == "self" for node in ast.walk(validator))
+    kind_selected.append(validator)
+    kind_namespace: dict[str, Any] = {
+        "__name__": __name__,
+        "dataclass": dataclass,
+        "Enum": Enum,
+        "stat": stat,
+        "cast": cast,
+    }
+    exec(
+        compile(
+            ast.Module(body=kind_selected, type_ignores=[]),
+            "<TASK064-NODE-KIND>",
+            "exec",
+            flags=0,
+            dont_inherit=True,
+        ),
+        kind_namespace,
+    )
+    del kind_module, kind_source, kind_raw, journals
+    validate_kind = cast(
+        Callable[[object, object, object, object, object], str | None],
+        kind_namespace["_validate_node_kind"],
+    )
+    kind_error = cast(type[Exception], kind_namespace["ContractError"])
+    snapshot_type = kind_namespace["DescriptorSnapshot"]
+    node_kind = kind_namespace["_Generation6RNamespaceNodeKind"]
+    regular = snapshot_type(11, 22, 1000, stat.S_IFREG | 0o600, 1, 0, 0, 0)
+    canonical_group = "r6-hardlink:7:11:22"
+    special_bits = stat.S_ISUID | stat.S_ISGID | stat.S_ISVTX
+    for file_mode, links, claimed_kind, group in (
+        (stat.S_IFREG, 1, node_kind.REGULAR, None),
+        (stat.S_IFREG | 0o777, 1, node_kind.REGULAR, None),
+        (stat.S_IFDIR | 0o700, 2, node_kind.DIRECTORY, None),
+        (stat.S_IFLNK | 0o777, 1, node_kind.SYMLINK, None),
+        (stat.S_IFSOCK | 0o600, 1, node_kind.SOCKET, None),
+        (stat.S_IFIFO | 0o600, 1, node_kind.FIFO, None),
+        (stat.S_IFREG | 0o600, 2, node_kind.HARDLINK, canonical_group),
+        (stat.S_IFREG | special_bits, 2, node_kind.HARDLINK, canonical_group),
+        (stat.S_IFCHR | 0o600, 1, node_kind.SPECIAL, None),
+        (stat.S_IFBLK | 0o600, 1, node_kind.SPECIAL, None),
+        (stat.S_IFDIR | special_bits, 2, node_kind.SPECIAL, None),
+        (stat.S_IFREG | special_bits, 1, node_kind.SPECIAL, None),
+    ):
+        result_group = validate_kind(
+            None, replace(regular, mode=file_mode, link_count=links), 7, claimed_kind, group
+        )
+        assert result_group is group
+    assert (
+        validate_kind(None, replace(regular, device=0, uid=0), 7, node_kind.REGULAR, None) is None
+    )
+    assert (
+        validate_kind(
+            None,
+            replace(regular, size=-1, mtime_ns=-2, ctime_ns=-3),
+            7,
+            node_kind.REGULAR,
+            None,
+        )
+        is None
+    )
+    for file_mode, links, claimed_kind, group in (
+        (stat.S_IFREG | 0o600, 2, node_kind.REGULAR, None),
+        (stat.S_IFREG | 0o600, 1, node_kind.HARDLINK, canonical_group),
+        (stat.S_IFLNK | 0o777, 1, node_kind.REGULAR, None),
+        (stat.S_IFREG | 0o600, 1, node_kind.DIRECTORY, None),
+        (stat.S_IFREG | 0o600, 1, node_kind.SPECIAL, None),
+        (stat.S_IFREG | special_bits, 2, node_kind.SPECIAL, None),
+    ):
+        with pytest.raises(
+            kind_error, match=r"^R namespace node kind does not match its snapshot$"
+        ):
+            validate_kind(
+                None, replace(regular, mode=file_mode, link_count=links), 7, claimed_kind, group
+            )
+    for file_mode, claimed_kind in (
+        (stat.S_IFREG | special_bits, node_kind.REGULAR),
+        (stat.S_IFDIR | special_bits, node_kind.DIRECTORY),
+    ):
+        with pytest.raises(
+            kind_error, match=r"^R namespace ordinary node has special permissions$"
+        ):
+            validate_kind(None, replace(regular, mode=file_mode), 7, claimed_kind, None)
+    for special_bit in (stat.S_ISUID, stat.S_ISGID, stat.S_ISVTX):
+        for file_type, claimed_kind, links in (
+            (stat.S_IFREG, node_kind.REGULAR, 1),
+            (stat.S_IFDIR, node_kind.DIRECTORY, 2),
+        ):
+            single_bit_snapshot = replace(regular, mode=file_type | special_bit, link_count=links)
+            assert validate_kind(None, single_bit_snapshot, 7, node_kind.SPECIAL, None) is None
+            with pytest.raises(
+                kind_error, match=r"^R namespace ordinary node has special permissions$"
+            ):
+                validate_kind(None, single_bit_snapshot, 7, claimed_kind, None)
+        assert (
+            validate_kind(
+                None,
+                replace(regular, mode=stat.S_IFREG | special_bit, link_count=2),
+                7,
+                node_kind.HARDLINK,
+                canonical_group,
+            )
+            is canonical_group
+        )
+    with pytest.raises(kind_error, match=r"^R namespace non-hardlink has a hardlink group$"):
+        validate_kind(None, regular, 7, node_kind.REGULAR, canonical_group)
+
+    class HardlinkGroupString(str):
+        pass
+
+    for bad_group, expected_message in (
+        ("r6-hardlink:8:11:22", "R namespace hardlink group differs"),
+        ("r6-hardlink:7:12:22", "R namespace hardlink group differs"),
+        ("r6-hardlink:7:11:23", "R namespace hardlink group differs"),
+        ("r6-hardlink:07:11:22", "R namespace hardlink group differs"),
+        (None, "R namespace hardlink group is not an exact string"),
+        (canonical_group.encode("ascii"), "R namespace hardlink group is not an exact string"),
+        (HardlinkGroupString(canonical_group), "R namespace hardlink group is not an exact string"),
+        (canonical_group + "é", "non-ASCII R namespace hardlink group"),
+        (canonical_group + "\x00", "invalid R namespace hardlink group"),
+        (canonical_group + "\r", "invalid R namespace hardlink group"),
+        (canonical_group + "\n", "invalid R namespace hardlink group"),
+    ):
+        with pytest.raises(kind_error) as invalid_group:
+            validate_kind(None, replace(regular, link_count=2), 7, node_kind.HARDLINK, bad_group)
+        assert str(invalid_group.value) == expected_message
+
+    mode_calls: list[int] = []
+
+    def forbidden_mode_reader(mode: int) -> int:
+        mode_calls.append(mode)
+        raise AssertionError("invalid node-kind input reached mode classification")
+
+    mode_binding = "_GENERATION6_R_NAMESPACE_CAPTURED_S_IFMT"
+    real_mode_reader = stat.S_IFMT
+    assert kind_namespace[mode_binding] is real_mode_reader
+    snapshot_subclass = type("NodeKindSnapshotSubclass", (snapshot_type,), {})
+
+    class NodeKindInteger(int):
+        pass
+
+    invalid_kind_inputs = [
+        (object(), 7, node_kind.REGULAR),
+        (snapshot_subclass(11, 22, 1000, regular.mode, 1, 0, 0, 0), 7, node_kind.REGULAR),
+        (regular, True, node_kind.REGULAR),
+        (regular, NodeKindInteger(7), node_kind.REGULAR),
+        (regular, 0, node_kind.REGULAR),
+        (regular, -1, node_kind.REGULAR),
+        (regular, 7, "REGULAR"),
+        (regular, 7, None),
+        *[
+            (replace(regular, **{field: value}), 7, node_kind.REGULAR)
+            for field, invalid_values in (
+                ("device", (True, -1, NodeKindInteger(1))),
+                ("inode", (True, 0, NodeKindInteger(1))),
+                ("uid", (True, -1, NodeKindInteger(1))),
+                ("mode", (True, -1, NodeKindInteger(1))),
+                ("link_count", (True, 0, NodeKindInteger(1))),
+            )
+            for value in invalid_values
+        ],
+    ]
+    try:
+        kind_namespace[mode_binding] = forbidden_mode_reader
+        for bad_snapshot, bad_mount, bad_kind in invalid_kind_inputs:
+            mode_calls.clear()
+            with pytest.raises(kind_error, match=r"^R namespace node-kind inputs differ$"):
+                validate_kind(None, bad_snapshot, bad_mount, bad_kind, None)
+            assert not mode_calls
+    finally:
+        kind_namespace[mode_binding] = real_mode_reader
+    assert kind_namespace[mode_binding] is stat.S_IFMT is real_mode_reader
+
 
 def test_rejection_capture_does_not_accept_caller_callbacks(tmp_path: Path) -> None:
     def caller_callback() -> object:

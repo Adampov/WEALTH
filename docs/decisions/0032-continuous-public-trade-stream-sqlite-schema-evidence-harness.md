@@ -1146,6 +1146,19 @@ remain unchanged. The original fixture/binder source prefix is byte-identical. N
 digest nor arbitrary modified source is accepted. This derived identity correction does not
 claim a Linux collection/full-suite pass before exact-candidate CI supplies that evidence.
 
+The same existing path-token node also checks the original `_validate_node_kind` predicate in
+an isolated namespace, using its original helper/type definitions, annotations directive and
+verified permission-mask/`stat.S_IFMT` bindings. Synthetic snapshots exercise claimed-kind and
+link-count disagreement, exact canonical hardlink-group identity, malformed groups and input
+types, and ordinary versus special permission bits. HARDLINK with special bits remains an
+accepted metadata classification, not permission to remove it; zero device/UID remain valid,
+and size/timestamp fields remain outside this predicate's checks. No journal, namespace authority,
+filesystem object or runner initializer is constructed by the added slice. The integration
+module's single raw-source bootstrap digest is mechanically updated with it; other fixture/binder
+pins, runner/source gates and all node IDs remain unchanged. These predicate checks do not claim
+filesystem authentication, R cleanup/teardown or full protocol acceptance; actual bootstrap and
+the unchanged ordinary shards still require fresh exact-candidate Linux CI evidence.
+
 #### R static-proof representation repair and reproducer v1
 
 This section and its V1 recipe describe only the historical representation checkpoint
