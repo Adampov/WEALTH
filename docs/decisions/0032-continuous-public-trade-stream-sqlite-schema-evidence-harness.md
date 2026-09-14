@@ -1159,6 +1159,18 @@ pins, runner/source gates and all node IDs remain unchanged. These predicate che
 filesystem authentication, R cleanup/teardown or full protocol acceptance; actual bootstrap and
 the unchanged ordinary shards still require fresh exact-candidate Linux CI evidence.
 
+The existing path-token node additionally extracts only the original annotations directive,
+`DescriptorSnapshot` and `_stable_directory_matches` into an isolated namespace with genuine
+`dataclass`/`stat` dependencies. Its synthetic comparisons distinguish device/inode/UID/full-mode
+changes from ignored size/timestamp changes, require a directory, and check link-count equality
+only when requested. Individual special-bit mismatches remain significant, while equal directory
+modes with zero, full ordinary or special permissions remain comparable. These are comparison
+semantics, not raw-input type validation, mount/permission policy, filesystem authentication or
+deletion authority. No runner initializer or namespace authority is constructed. The integration
+source digest is the only mechanically refreshed harness binding; all preceding assertions,
+node IDs and runner gates remain unchanged. Fresh exact-candidate Linux CI is still required;
+isolated comparison evidence does not establish complete namespace reauthentication.
+
 #### R static-proof representation repair and reproducer v1
 
 This section and its V1 recipe describe only the historical representation checkpoint

@@ -8612,6 +8612,156 @@ def test_path_token_and_permission_guards_fail_closed(tmp_path: Path) -> None:
         kind_namespace[mode_binding] = real_mode_reader
     assert kind_namespace[mode_binding] is stat.S_IFMT is real_mode_reader
 
+    # Stable metadata comparison is not raw-input validation or filesystem authority.
+    with runner_path.open("rb") as directory_stream:
+        directory_raw = directory_stream.read(2_000_001)
+    assert len(directory_raw) <= 2_000_000
+    directory_source = directory_raw.decode("utf-8", errors="strict")
+    directory_module = ast.parse(directory_source, filename=str(runner_path))
+    directory_futures = [
+        node
+        for node in directory_module.body
+        if isinstance(node, ast.ImportFrom) and node.module == "__future__"
+    ]
+    assert len(directory_futures) == 1
+    assert ast.dump(directory_futures[0]) == ast.dump(
+        ast.parse("from __future__ import annotations").body[0]
+    )
+    directory_selected: list[ast.stmt] = [directory_futures[0]]
+    for directory_name, directory_kind in (
+        ("DescriptorSnapshot", ast.ClassDef),
+        ("_stable_directory_matches", ast.FunctionDef),
+    ):
+        directory_matches = [
+            node
+            for node in directory_module.body
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == directory_name
+        ]
+        assert len(directory_matches) == 1 and type(directory_matches[0]) is directory_kind
+        directory_definition = directory_matches[0]
+        assert not directory_definition.type_params
+        if isinstance(directory_definition, ast.ClassDef):
+            assert not directory_definition.bases and not directory_definition.keywords
+            assert [ast.dump(item) for item in directory_definition.decorator_list] == [
+                ast.dump(ast.parse("dataclass(frozen=True)", mode="eval").body)
+            ]
+        else:
+            assert isinstance(directory_definition, ast.FunctionDef)
+            assert not directory_definition.decorator_list
+            directory_arguments = directory_definition.args
+            assert not directory_arguments.posonlyargs
+            assert [item.arg for item in directory_arguments.args] == ["current", "expected"]
+            assert directory_arguments.vararg is None and directory_arguments.kwarg is None
+            assert not directory_arguments.defaults
+            assert [item.arg for item in directory_arguments.kwonlyargs] == ["require_link_count"]
+            assert directory_arguments.kw_defaults == [None]
+        directory_selected.append(directory_definition)
+    directory_namespace: dict[str, Any] = {
+        "__name__": __name__,
+        "dataclass": dataclass,
+        "stat": stat,
+    }
+    exec(
+        compile(
+            ast.Module(body=directory_selected, type_ignores=[]),
+            "<TASK064-DIRECTORY-MATCH>",
+            "exec",
+            flags=0,
+            dont_inherit=True,
+        ),
+        directory_namespace,
+    )
+    del directory_module, directory_source, directory_raw
+    stable_directory_matches = cast(
+        Callable[..., bool], directory_namespace["_stable_directory_matches"]
+    )
+    directory_snapshot = directory_namespace["DescriptorSnapshot"](
+        device=11,
+        inode=22,
+        uid=1000,
+        mode=stat.S_IFDIR | 0o700,
+        link_count=2,
+        size=100,
+        mtime_ns=200,
+        ctime_ns=300,
+    )
+    for require_links in (False, True):
+        assert (
+            stable_directory_matches(
+                replace(directory_snapshot), directory_snapshot, require_link_count=require_links
+            )
+            is True
+        )
+        for directory_field, directory_value in (
+            ("device", 12),
+            ("inode", 23),
+            ("uid", 1001),
+            ("mode", stat.S_IFDIR | 0o750),
+        ):
+            assert (
+                stable_directory_matches(
+                    replace(directory_snapshot, **{directory_field: directory_value}),
+                    directory_snapshot,
+                    require_link_count=require_links,
+                )
+                is False
+            )
+        not_directory = replace(directory_snapshot, mode=stat.S_IFREG | 0o600)
+        assert (
+            stable_directory_matches(
+                not_directory, replace(not_directory), require_link_count=require_links
+            )
+            is False
+        )
+        assert stable_directory_matches(
+            replace(directory_snapshot, link_count=3),
+            directory_snapshot,
+            require_link_count=require_links,
+        ) is (not require_links)
+        for directory_field, directory_value in (
+            ("size", 101),
+            ("mtime_ns", 201),
+            ("ctime_ns", 301),
+        ):
+            assert (
+                stable_directory_matches(
+                    replace(directory_snapshot, **{directory_field: directory_value}),
+                    directory_snapshot,
+                    require_link_count=require_links,
+                )
+                is True
+            )
+        special_directory = replace(
+            directory_snapshot,
+            mode=directory_snapshot.mode | stat.S_ISUID | stat.S_ISGID | stat.S_ISVTX,
+        )
+        assert (
+            stable_directory_matches(
+                special_directory, replace(special_directory), require_link_count=require_links
+            )
+            is True
+        )
+        for special_bit in (stat.S_ISUID, stat.S_ISGID, stat.S_ISVTX):
+            assert (
+                stable_directory_matches(
+                    replace(directory_snapshot, mode=directory_snapshot.mode | special_bit),
+                    directory_snapshot,
+                    require_link_count=require_links,
+                )
+                is False
+            )
+        for permissions in (0o000, 0o777):
+            equal_mode_directory = replace(directory_snapshot, mode=stat.S_IFDIR | permissions)
+            assert (
+                stable_directory_matches(
+                    equal_mode_directory,
+                    replace(equal_mode_directory),
+                    require_link_count=require_links,
+                )
+                is True
+            )
+
 
 def test_rejection_capture_does_not_accept_caller_callbacks(tmp_path: Path) -> None:
     def caller_callback() -> object:
