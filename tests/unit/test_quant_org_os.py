@@ -29,6 +29,11 @@ def test_root_guidance_requires_the_durable_operating_prompt() -> None:
     assert "Never hardcode current phase, capability, approval, or risk state" in guidance
     assert guidance.index("1. `PROJECT_STATE.json`") < guidance.index("3. `docs/QUANT_ORG_OS.md`")
 
+    policy = (REPOSITORY_ROOT / "docs" / "POLICIES.md").read_text(encoding="utf-8")
+    assert "## Local Development Review Delegation" in policy
+    assert "`DEV-REVIEW-V1`" in policy
+    assert "`LOCAL_DEVELOPMENT_APPROVAL`" in policy
+
 
 def test_operating_prompt_preserves_current_fail_closed_truth() -> None:
     prompt = OPERATING_PROMPT_PATH.read_text(encoding="utf-8")
@@ -47,6 +52,20 @@ def test_operating_prompt_preserves_current_fail_closed_truth() -> None:
     assert "withdrawals are permanently outside the platform's authority" in prompt
     assert "a final Risk rejection cannot be overridden;" in prompt
     assert "wash trade" in prompt
+
+    policy = " ".join(
+        (REPOSITORY_ROOT / "docs" / "POLICIES.md").read_text(encoding="utf-8").split()
+    )
+    assert "Eligibility depends on actual effects" in policy
+    for exclusion in (
+        "production and operational permissions",
+        "paper/shadow execution authority",
+        "restricted inputs and TASK-037 authorization",
+        "credentials, secrets and private accounts",
+        "financial or runtime Risk/Execution/Audit authority",
+        "external notifications; deployment; and merge",
+    ):
+        assert exclusion in policy
 
 
 def test_operating_prompt_freezes_the_hybrid_multi_agent_boundary() -> None:
@@ -79,6 +98,17 @@ def test_operating_prompt_freezes_the_hybrid_multi_agent_boundary() -> None:
     assert "Free-form text may accompany evidence but" in prompt
     assert "cannot carry permissions, risk limits, quantities, order instructions" in prompt
 
+    policy = " ".join(
+        (REPOSITORY_ROOT / "docs" / "POLICIES.md").read_text(encoding="utf-8").split()
+    )
+    assert "at least two distinct named read-only reviewers" in policy
+    assert "one explicitly responsible for both Risk and Security" in policy
+    assert "another responsible for QA" in policy
+    assert "Neither reviewer may be an author" in policy
+    assert "or its integrator" in policy
+    assert "against the originating agent session/tool record" in policy
+    assert "never replace a reviewer merely to obtain approval" in policy
+
 
 def test_operating_prompt_closes_financial_and_governance_bypasses() -> None:
     prompt = OPERATING_PROMPT_PATH.read_text(encoding="utf-8")
@@ -100,6 +130,18 @@ def test_operating_prompt_closes_financial_and_governance_bypasses() -> None:
     assert "atomically increments the kill-switch generation" in normalized_prompt
     assert "approved pre-action audit sink" in normalized_prompt
 
+    policy = " ".join(
+        (REPOSITORY_ROOT / "docs" / "POLICIES.md").read_text(encoding="utf-8").split()
+    )
+    assert "Required-gate or approval-semantic changes remain at least RISK 3." in policy
+    assert "exact current owner approval for the bounded change" in policy
+    assert "An unmerged policy cannot unblock another task." in policy
+    assert "dissenting required reviews block advancement" in policy
+    assert "immutable base and candidate commit/tree" in policy
+    assert "Any scope, code, contract, policy or material evidence change invalidates" in policy
+    assert "Exact PR/head owner approval remains required for merge" in policy
+    assert "Textual policy tests do not implement such a service." in policy
+
 
 def test_operating_prompt_is_compact_english_and_directly_reusable() -> None:
     prompt_bytes = OPERATING_PROMPT_PATH.read_bytes()
@@ -110,3 +152,9 @@ def test_operating_prompt_is_compact_english_and_directly_reusable() -> None:
     assert "## 14. Quantitative Research Discipline" in prompt
     assert "Communicate with the project owner in English" in prompt
     assert "Never expose hidden chain-of-thought." in prompt
+
+    decision = (
+        REPOSITORY_ROOT / "docs" / "decisions" / "0033-local-development-review-delegation.md"
+    ).read_text(encoding="utf-8")
+    assert "repository adoption pending exact review and merge" in decision
+    assert "earlier development-agent findings do not become approvals retroactively" in decision

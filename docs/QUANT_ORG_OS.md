@@ -107,6 +107,10 @@ scope or canonical request digest, decision, issuance time, expiry or review tri
 identifier. Required independent approvers must be distinct from the change creator. Until an
 approved mechanism can validate those fields, the affected action remains denied.
 
+For isolated development review only, the prospectively adopted `DEV-REVIEW-V1` procedure in
+`docs/POLICIES.md` defines eligible reviewers and manual evidence/provenance validation. It is not
+a runtime, organizational-production, financial or human-approval substitute.
+
 Silence, an old approval, a blanket instruction, `continue`, an approval for another commit or
 scope, or ambiguous wording is not approval.
 
@@ -250,6 +254,10 @@ is classified normally but still receives independent QA review. The orchestrato
 classification but cannot independently approve or downgrade a required gate. When classification
 is uncertain, use the higher tier and fail closed on the affected action.
 
+The local-development reviewer delegation in `docs/POLICIES.md` changes reviewer eligibility only.
+It does not downgrade RISK 3, waive exact owner approval for a required-gate change, or remove any
+validation, monitoring, reconciliation or rollback obligation.
+
 ## 8. Master Orchestrator
 
 The root orchestrator coordinates:
@@ -274,6 +282,9 @@ claims before integration.
 No person or agent may both implement a material change and grant a required approval for that
 change. Required Risk, Security, QA, owner, or organizational approvals remain separate from root
 coordination and cannot be manufactured through agent consensus.
+
+The adopted development-only delegation permits named read-only agents to fill its scoped review
+roles; neither an author nor the root integrator may fill a required reviewer role for that change.
 
 The orchestrator must not:
 
@@ -490,8 +501,13 @@ An agent completion message never substitutes for these steps.
 An independent engineering reviewer must be a different person or agent, remain read-only for the
 reviewed change, and receive the raw task contract, diff, and evidence rather than a suggested
 verdict. The review records reviewer identity, exact commit and contract digest, findings, and
-decision. A second agent under the same root provides an independent engineering pass, but never
-substitutes for organizational Risk, Security, QA, or human approval required by policy.
+decision. A second agent under the same root normally provides an independent engineering pass,
+not organizational or human approval. Only an adopted `DEV-REVIEW-V1` delegation under
+`docs/POLICIES.md` permits at least two distinct named read-only agents, neither an author nor the
+integrator, to satisfy eligible local-development Risk/Security and QA review requirements. It
+never substitutes for organizational approval outside that scope or for required human approval.
+Missing, stale, unverifiable, abstaining or dissenting required decisions block integration. A draft
+delegation cannot approve itself or unblock dependent work.
 
 ### 9.8 Failure and Recovery
 
@@ -574,6 +590,9 @@ configuration, security gates, or validation infrastructure:
 - run the unchanged baseline checks on the candidate where technically possible;
 - do not use modified or newly added checks as the sole proof that their own weakening is safe; and
 - require independent QA and Security review for any gate removal or semantic weakening.
+
+For eligible local-development changes, reviewer eligibility and evidence follow the adopted
+delegation in `docs/POLICIES.md`; all validation and anti-self-approval requirements above remain.
 
 Use these lifecycle terms exactly:
 
